@@ -1,0 +1,11 @@
+{
+  "name": "devbench",
+  "version": "0.1.0",
+  "description": "个人 AI 开发工作台：在 Claude Code 里按价值流跑 需求→开发→测试→评审→合并→部署，记录各阶段耗时、token 与产物",
+  "author": {
+    "name": "Izelzzz"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/Izelzzz/agents-pipeline",
+  "types": "./types/index.d.ts"
+}

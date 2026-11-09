@@ -1,0 +1,13 @@
+{
+  "name": "agents-pipeline",
+  "owner": {
+    "name": "Izelzzz"
+  },
+  "plugins": [
+    {
+      "name": "devbench",
+      "source": "./"
+    }
+  ],
+  "description": "个人 AI 开发工作台（Claude Code mod）"
+}
