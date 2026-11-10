@@ -53,7 +53,7 @@ claude --plugin-dir /path/to/agents-pipeline
 | `/devbench reject <理由>` | 驳回：Spec 阶段会带着理由重写；合并前驳回会回到开发；部署前驳回则跳过部署 |
 | `/devbench retry` | 重试当前阶段（例如会话重启后子 agent 已经不在了） |
 | `/devbench skip <理由>` | 跳过当前等待中或失败的阶段（测试 / 评审 / 合并 / 部署），用于已在流水线之外完成的情况，例如已手动合并；也可在面板上按 `s` |
-| `/devbench abort` | 中止任务 |
+| `/devbench abort` | 中止任务，并停止当前阶段正在运行的子 agent（`retry` 运行中的阶段时也会先停掉旧的） |
 | `/devbench list` | 列出所有任务 |
 | `/devbench select <id>` | 面板切换到某个任务 |
 | `/devbench` | 打开面板 |
@@ -106,7 +106,7 @@ claude --plugin-dir /path/to/agents-pipeline
 - 流水线跑在 Claude Code 会话里：关掉会话，正在跑的子 agent 也会停。重新打开后用 `/devbench retry` 继续。
 - 子 agent 和主会话共用一份额度。Pro 订阅跑一个完整任务会消耗不少用量。
 - 合并完成后不会自动清理 worktree 和分支。
-- `/devbench abort` 和对运行中阶段的 `/devbench retry` 会停止该阶段正在运行的子 agent。
+- 中止只停子 agent：测试、合并、部署这类命令阶段一旦开始，会跑到结束。
 - mod API 目前是早期版本，后续 Claude Code 升级可能需要跟着调整。
 
 后续计划见仓库的 Issues。
