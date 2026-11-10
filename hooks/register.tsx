@@ -51,6 +51,7 @@ type Io = {
   run: Engine['process']['run']
   spawn: Engine['agent']['spawn']
   stopAgent: (id: string) => Promise<unknown>
+  fillPrompt: (text: string) => ReturnType<Engine['prompt']['fill']>
   toast: Engine['ui']['toast']
   notify: Engine['ui']['notify']
   status: Engine['ui']['status']
@@ -213,6 +214,12 @@ const stopAgent = async (io: Io, id: string): Promise<void> => {
   }
 }
 
+/** 驳回必须写理由，面板按钮没法输入，就把命令填进输入框让用户补上。 */
+const askRejectReason = async (io: Io): Promise<void> => {
+  const filled = await io.fillPrompt('/devbench reject ')
+  if (!filled.isFilled) io.toast('请输入 /devbench reject <理由> 驳回')
+}
+
 const perform = async (io: Io, task: Task, action: Action, config: Resolved): Promise<void> => {
   switch (action.kind) {
     case 'run':
@@ -316,6 +323,7 @@ const runStage = async (io: Io, taskId: string, stage: StageId, config: Resolved
         diffPath: artifact(task, '02-diff.patch'),
         worktree: task.git.worktree,
         testSummary: testRun.status === 'passed' ? `已通过（${(config.test ?? []).join(' ')}）` : testRun.note,
+        feedback: task.feedback,
       })
       return spawn(io, task, stage, AGENTS.reviewer, config.models.reviewer, task.git.worktree, prompt)
     }
@@ -487,7 +495,7 @@ const newTask = async (io: Io, request: string): Promise<string> => {
 const HELP = `用法：
 /devbench new <需求>      创建任务并开始流水线
 /devbench approve         批准当前等待的阶段
-/devbench reject <理由>   驳回（Spec 重写 / 合并前回到开发 / 跳过部署）
+/devbench reject <理由>   驳回，必须写理由（Spec 重写 / 合并前回到评审 / 跳过部署）
 /devbench retry           重试当前阶段
 /devbench skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
 /devbench abort           中止当前任务
@@ -515,7 +523,7 @@ const command = async (io: Io, args: string): Promise<string> => {
       if (task === undefined) return '没有任务。'
       const event: Event =
         sub === 'reject'
-          ? { kind: 'reject', reason: arg || '未说明理由' }
+          ? { kind: 'reject', reason: arg }
           : sub === 'skip'
             ? { kind: 'skip', reason: arg || '手动跳过' }
             : { kind: sub }
@@ -585,6 +593,7 @@ export const register: Register = on => {
       run: (argv, init) => $.process.run(argv, init),
       spawn: input => $.agent.spawn(input),
       stopAgent: id => $.tool.call({ tool: 'TaskStop', task_id: id }),
+      fillPrompt: text => $.prompt.fill({ text, mode: 'replace' }),
       toast: (text, options) => $.ui.toast(text, options),
       notify: (text, options) => $.ui.notify(text, options),
       status: text => $.ui.status(text),
@@ -749,7 +758,7 @@ export const register: Register = on => {
               </Button>
             )}
             {task.status === 'waiting' && (
-              <Button key="reject" hotkey="r" onPress={() => void (io && dispatch(io, task.id, { kind: 'reject', reason: '在面板中驳回' }))}>
+              <Button key="reject" hotkey="r" onPress={() => void (io && askRejectReason(io))}>
                 驳回
               </Button>
             )}

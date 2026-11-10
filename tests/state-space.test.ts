@@ -210,9 +210,6 @@ const VARIANTS: { name: string; config: MachineConfig }[] = [
   { name: '不允许返工', config: { maxRework: 0, hasTest: true, hasDeploy: true } },
 ]
 
-/** 当前代码已知违反的不变量（Phase B 修复后清空）。 */
-const FINDINGS = new Set(['空理由的驳回被拒绝', '合并前驳回回到评审并带上理由', '评审只在合并前被驳回时才拿到反馈'])
-
 const results = VARIANTS.map(v => ({ ...v, ...explore(v.config) }))
 
 for (const r of results) {
@@ -221,37 +218,7 @@ for (const r of results) {
   })
 
   test(`状态空间（${r.name}）：不变量全部成立`, () => {
-    const broken = Object.entries(r.violations)
-      .filter(([name]) => !FINDINGS.has(name))
-      .map(([name, path]) => ({ invariant: name, harm: HARM.get(name), counterexample: path.join(' → ') }))
+    const broken = Object.entries(r.violations).map(([name, path]) => ({ invariant: name, harm: HARM.get(name), counterexample: path.join(' → ') }))
     expect(broken).toEqual([])
   })
 }
-
-const findingIn = (variant: string, name: string) => results.find(r => r.name === variant)?.violations[name]
-
-test('findings: 空理由的驳回被接受，Spec 带着空理由重写', () => {
-  expect(findingIn('完整配置', '空理由的驳回被拒绝')).toEqual(['finished(spec, ok)', 'reject("")'])
-})
-
-test('findings: 合并前驳回回到开发而不是评审', () => {
-  expect(findingIn('完整配置', '合并前驳回回到评审并带上理由')).toEqual([
-    'finished(spec, ok)',
-    'approve',
-    'finished(dev, ok)',
-    'finished(test, ok)',
-    'finished(review, ok)',
-    `reject("${REASON}")`,
-  ])
-})
-
-test('findings: 无测试时，开发返工的反馈被带进评审', () => {
-  expect(findingIn('完整配置', '评审只在合并前被驳回时才拿到反馈')).toBe(undefined)
-  expect(findingIn('无测试', '评审只在合并前被驳回时才拿到反馈')).toEqual([
-    'finished(spec, ok)',
-    'approve',
-    'finished(dev, ok)',
-    'finished(review, fail)',
-    'finished(dev, ok)',
-  ])
-})

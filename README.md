@@ -50,7 +50,7 @@ claude --plugin-dir /path/to/agents-pipeline
 |---|---|
 | `/devbench new <需求>` | 创建任务：新建分支 `devbench/<id>` 和独立 worktree，开始写 Spec |
 | `/devbench approve` | 批准当前等待的阶段（也可以在面板上点按钮，或按 `a`） |
-| `/devbench reject <理由>` | 驳回：Spec 阶段会带着理由重写；合并前驳回会回到开发；部署前驳回则跳过部署 |
+| `/devbench reject <理由>` | 驳回，必须写理由：Spec 阶段会带着理由重写；合并前驳回会回到 Code Review，评审者逐条核实理由，成立才打回开发（不计返工次数）；部署前驳回则跳过部署。面板上按 `r` 会把 `/devbench reject ` 填进输入框，补上理由后回车 |
 | `/devbench retry` | 重试当前阶段（例如会话重启后子 agent 已经不在了） |
 | `/devbench skip <理由>` | 跳过当前等待中或失败的阶段（测试 / 评审 / 合并 / 部署），用于已在流水线之外完成的情况，例如已手动合并；也可在面板上按 `s` |
 | `/devbench abort` | 中止任务，并停止当前阶段正在运行的子 agent（`retry` 运行中的阶段时也会先停掉旧的） |

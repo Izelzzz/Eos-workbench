@@ -58,9 +58,9 @@ export type Task = {
   status: TaskStatus
   current: StageId
   stages: Record<StageId, StageRun>
-  /** 已返工次数（test / review 打回 dev，或合并前驳回）。 */
+  /** 已返工次数（test / review 打回 dev）。 */
   rework: number
-  /** 给下一次 dev / spec 运行的反馈（评审意见、测试输出、驳回理由）。 */
+  /** 给下一次 spec / dev / review 运行的反馈（驳回理由、测试输出、评审意见）。 */
   feedback?: string
   /** 一次通过：test、review 第一次运行就通过才为 true。 */
   firstPass: { test?: boolean; review?: boolean }

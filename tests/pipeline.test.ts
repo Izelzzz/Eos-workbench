@@ -5,6 +5,7 @@ import { compilePatterns, protectedMatch } from '../hooks/core/guard'
 import { flowMetrics } from '../hooks/core/metrics'
 import { STAGES, agentToStop, emptyRun, isFinalAgentStatus, reduce, startTask } from '../hooks/core/pipeline'
 import type { Action, Event, MachineConfig } from '../hooks/core/pipeline'
+import { reviewTask } from '../hooks/core/prompts'
 import { parseVerdict } from '../hooks/core/verdict'
 
 const FULL: MachineConfig = { maxRework: 2, hasTest: true, hasDeploy: true }
@@ -122,14 +123,16 @@ test('未配置测试与部署时跳过对应阶段', () => {
   expect(actions.at(-1)).toEqual({ kind: 'done' })
 })
 
-test('驳回：spec 重写、合并前回到开发、部署被跳过', () => {
+test('驳回：spec 重写、合并前回到评审、部署被跳过', () => {
   const spec = play([ok('spec'), { kind: 'reject', reason: '范围太大' }])
   expect(spec.actions.at(-1)).toEqual({ kind: 'run', stage: 'spec' })
   expect(spec.task.feedback).toContain('范围太大')
 
   const merge = play([ok('spec'), { kind: 'approve' }, ok('dev'), ok('test'), ok('review'), { kind: 'reject', reason: '命名不对' }])
-  expect(merge.actions.at(-1)).toEqual({ kind: 'run', stage: 'dev' })
-  expect(merge.task.rework).toBe(1)
+  expect(merge.actions.at(-1)).toEqual({ kind: 'run', stage: 'review' })
+  expect(merge.task.rework).toBe(0)
+  expect(merge.task.feedback).toContain('命名不对')
+  expect(merge.task.stages.merge.status).toBe('pending')
 
   const deploy = play([
     ok('spec'),
@@ -264,4 +267,34 @@ test('子 agent 已结束、仍在运行或阶段没有子 agent 时，不停止
   expect(stopOn(devRunning(), ok('dev'))).toBe(undefined)
   expect(stopOn(devRunning(), { kind: 'progress', stage: 'dev', durationMs: 1 })).toBe(undefined)
   expect(stopOn(play([ok('spec')]).task, { kind: 'abort' })).toBe(undefined)
+})
+
+test('合并前驳回：评审核实理由后，通过回到合并闸门，不通过带着评审意见回到开发', () => {
+  const rejected = play([...toMergeGate, { kind: 'reject', reason: '命名不对' }]).task
+  const passed = reduce(rejected, ok('review'), 99_000, FULL)
+  expect(passed.action).toEqual({ kind: 'wait', stage: 'merge' })
+  expect(passed.task.feedback).toBe(undefined)
+  expect(passed.task.firstPass.review).toBe(true)
+
+  const failed = reduce(rejected, bad('review', '命名确实不对'), 99_000, FULL)
+  expect(failed.action).toEqual({ kind: 'run', stage: 'dev' })
+  expect(failed.task.rework).toBe(1)
+  expect(failed.task.feedback).toContain('命名确实不对')
+})
+
+test('驳回必须写理由', () => {
+  for (const events of [[ok('spec')], toMergeGate]) {
+    const before = play(events).task
+    for (const reason of ['', '   ']) {
+      const after = reduce(before, { kind: 'reject', reason }, 99_000, FULL)
+      expect(after.task).toBe(before)
+      expect(after.action).toEqual({ kind: 'none', reason: '驳回需要填写理由' })
+    }
+  }
+})
+
+test('评审提示词：有人工驳回理由时要求逐条核实', () => {
+  const base = { specPath: 's', diffPath: 'd', worktree: 'w' }
+  expect(reviewTask(base)).not.toContain('人工驳回理由')
+  expect(reviewTask({ ...base, feedback: '合并前被驳回：命名不对' })).toContain('人工驳回理由（必须逐条核实）\n\n合并前被驳回：命名不对')
 })

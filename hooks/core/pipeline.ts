@@ -137,18 +137,42 @@ const advanceFrom = (task: Task, from: StageId, now: number, config: MachineConf
   return finish(current, now)
 }
 
-/** 回到开发阶段返工，带上反馈。 */
-const reworkDev = (task: Task, now: number, config: MachineConfig, feedback: string): Step => {
-  if (task.rework >= config.maxRework) {
-    // 保留反馈：人工 retry 时会带着它回到开发。
+/** 失败或驳回之后的去向：带着反馈回到某个阶段重跑，或跳过本阶段继续往后。 */
+export type Route =
+  | { kind: 'back'; to: StageId; rework: boolean; feedback: (detail: string) => string }
+  | { kind: 'skip' }
+
+/**
+ * 每个阶段失败（fail）或在闸门被驳回（reject）之后去哪。
+ * 没有 fail 的阶段失败即任务失败，等人工重试；没有 reject 的阶段不能驳回。
+ * rework 计入返工次数，受 maxRework 限制。
+ */
+export const TRANSITIONS: Partial<Record<StageId, { fail?: Route; reject?: Route }>> = {
+  spec: { reject: { kind: 'back', to: 'spec', rework: false, feedback: reason => `Spec 被驳回：${reason}` } },
+  test: { fail: { kind: 'back', to: 'dev', rework: true, feedback: note => `单元测试未通过：\n${note}` } },
+  review: { fail: { kind: 'back', to: 'dev', rework: true, feedback: note => `Code Review 未通过：\n${note}` } },
+  // 不算返工：评审者要先核实人工指出的问题，确认后才打回开发。
+  merge: { reject: { kind: 'back', to: 'review', rework: false, feedback: reason => `合并前被驳回：${reason}` } },
+  deploy: { reject: { kind: 'skip' } },
+}
+
+/** 回到 to 阶段重跑：它之后的阶段重新排队（未配置而跳过的保持跳过）。 */
+const goBack = (task: Task, to: StageId, feedback: string, rework: boolean, now: number, config: MachineConfig): Step => {
+  if (rework && task.rework >= config.maxRework) {
+    // 保留反馈：人工 retry 时会带着它回去。
     return fail({ ...task, feedback }, now, `已返工 ${task.rework} 次仍未通过，需要人工介入`)
   }
-  let reset: Task = { ...task, rework: task.rework + 1, feedback }
-  for (const id of ['test', 'review', 'merge'] as const) {
-    if (reset.stages[id].status !== 'skipped') reset = setStage(reset, id, { status: 'pending' })
+  let reset: Task = { ...task, rework: task.rework + (rework ? 1 : 0), feedback }
+  for (const def of STAGES.slice(STAGES.findIndex(s => s.id === to) + 1)) {
+    if (reset.stages[def.id].status !== 'skipped') reset = setStage(reset, def.id, { status: 'pending' })
   }
-  return begin(reset, 'dev', now)
+  return begin(reset, to, now)
 }
+
+const follow = (task: Task, from: StageId, route: Route, detail: string, now: number, config: MachineConfig): Step =>
+  route.kind === 'skip'
+    ? advanceFrom(setStage(task, from, { status: 'skipped' }), from, now, config)
+    : goBack(task, route.to, route.feedback(detail), route.rework, now, config)
 
 /** 新任务进入流水线。 */
 export const startTask = (task: Task, now: number): Step => begin(task, 'spec', now)
@@ -198,18 +222,17 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
         note: event.note,
         agentId: undefined,
       })
-      if (id === 'test' || id === 'review') {
-        const firstPass = run.attempts === 1 ? { ...done.firstPass, [id]: event.ok } : done.firstPass
-        const withPass = { ...done, firstPass }
-        if (!event.ok) {
-          const label = id === 'test' ? '单元测试未通过' : 'Code Review 未通过'
-          return reworkDev(withPass, now, config, `${label}：\n${event.note ?? ''}`)
-        }
-        return advanceFrom({ ...withPass, feedback: undefined }, id, now, config)
+      const settled =
+        (id === 'test' || id === 'review') && run.attempts === 1
+          ? { ...done, firstPass: { ...done.firstPass, [id]: event.ok } }
+          : done
+      if (!event.ok) {
+        const route = TRANSITIONS[id]?.fail
+        if (route !== undefined) return follow(settled, id, route, event.note ?? '', now, config)
+        return fail(settled, now, `${stageDef(id).label} 失败：${event.note ?? ''}`)
       }
-      if (!event.ok) return fail(done, now, `${stageDef(id).label} 失败：${event.note ?? ''}`)
-      if (stageDef(id).gate === 'after') return wait(done, id, now)
-      return advanceFrom(id === 'dev' ? done : { ...done, feedback: undefined }, id, now, config)
+      if (stageDef(id).gate === 'after') return wait(settled, id, now)
+      return advanceFrom({ ...settled, feedback: undefined }, id, now, config)
     }
 
     case 'approve': {
@@ -228,24 +251,26 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
 
     case 'reject': {
       if (task.status !== 'waiting') return { task, action: { kind: 'none', reason: '当前没有待批准的阶段' } }
+      const reason = event.reason.trim()
+      if (reason === '') return { task, action: { kind: 'none', reason: '驳回需要填写理由' } }
+      const route = TRANSITIONS[id]?.reject
+      if (route === undefined) return { task, action: { kind: 'none', reason: `${stageDef(id).label}不能驳回` } }
       const waited = run.waitingSince === undefined ? 0 : now - run.waitingSince
       const closed = setStage(stamped, id, {
         waitingSince: undefined,
         waitMs: run.waitMs + waited,
-        note: `驳回：${event.reason}`,
+        note: `驳回：${reason}`,
       })
-      if (id === 'spec') return begin({ ...closed, feedback: `Spec 被驳回：${event.reason}` }, 'spec', now)
-      if (id === 'merge') return reworkDev(closed, now, config, `合并前被驳回：${event.reason}`)
-      // 驳回部署：跳过部署，任务以已合并结束。
-      return finish(setStage(closed, id, { status: 'skipped' }), now)
+      return follow(closed, id, route, reason, now, config)
     }
 
     case 'retry': {
       if (task.status === 'done') return { task, action: { kind: 'none', reason: '任务已完成' } }
       const revived = { ...stamped, status: 'running' as const, endedAt: undefined }
-      // 返工用尽后的重试：重置计数，带着最后一轮反馈回到开发，而不是原地重跑测试 / 评审。
-      if (task.status === 'failed' && (id === 'test' || id === 'review') && run.status === 'failed') {
-        return reworkDev({ ...revived, rework: 0 }, now, config, task.feedback ?? '')
+      // 返工用尽后的重试：重置计数，带着最后一轮反馈回去，而不是原地重跑测试 / 评审。
+      const route = TRANSITIONS[id]?.fail
+      if (task.status === 'failed' && run.status === 'failed' && route?.kind === 'back' && route.rework) {
+        return goBack({ ...revived, rework: 0 }, route.to, task.feedback ?? '', true, now, config)
       }
       // 重试当前阶段：运行中的那次不再等待（例如会话重启后子 agent 已不在）。
       const reverted = setStage(revived, id, {
