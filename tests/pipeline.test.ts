@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Task } from '../types'
 import { compilePatterns, protectedMatch } from '../hooks/core/guard'
 import { flowMetrics } from '../hooks/core/metrics'
-import { STAGES, emptyRun, isFinalAgentStatus, reduce, startTask } from '../hooks/core/pipeline'
+import { STAGES, agentToStop, emptyRun, isFinalAgentStatus, reduce, startTask } from '../hooks/core/pipeline'
 import type { Action, Event, MachineConfig } from '../hooks/core/pipeline'
 import { parseVerdict } from '../hooks/core/verdict'
 
@@ -247,4 +247,21 @@ test('不能跳过 Spec、开发、运行中的阶段和已完成的任务', () 
   refused([ok('spec'), { kind: 'approve' }, bad('dev', '没有变更')])
   refused([...toMergeGate, { kind: 'approve' }])
   refused([...toMergeGate, { kind: 'approve' }, ok('merge'), { kind: 'approve' }, ok('deploy')])
+})
+
+const devRunning = (agentId = 'agent-1'): Task => {
+  const { task } = play([ok('spec'), { kind: 'approve' }])
+  return { ...task, stages: { ...task.stages, dev: { ...task.stages.dev, agentId } } }
+}
+const stopOn = (before: Task, event: Event) => agentToStop(before, reduce(before, event, 99_000, FULL).task, event)
+
+test('中止或重试运行中的阶段时，停止它的子 agent', () => {
+  expect(stopOn(devRunning(), { kind: 'abort' })).toBe('agent-1')
+  expect(stopOn(devRunning(), { kind: 'retry' })).toBe('agent-1')
+})
+
+test('子 agent 已结束、仍在运行或阶段没有子 agent 时，不停止任何东西', () => {
+  expect(stopOn(devRunning(), ok('dev'))).toBe(undefined)
+  expect(stopOn(devRunning(), { kind: 'progress', stage: 'dev', durationMs: 1 })).toBe(undefined)
+  expect(stopOn(play([ok('spec')]).task, { kind: 'abort' })).toBe(undefined)
 })
