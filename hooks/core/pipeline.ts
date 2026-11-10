@@ -276,3 +276,14 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
     }
   }
 }
+
+/**
+ * 这次事件之后需要停掉的子 agent：中止或重试时，运行中那次的子 agent 不再属于阶段，
+ * 不停掉它会在后台继续干活。finished / progress 不停：agent 已经结束或仍是阶段的 agent。
+ */
+export const agentToStop = (before: Task, after: Task, event: Event): string | undefined => {
+  if (event.kind !== 'abort' && event.kind !== 'retry') return undefined
+  const run = before.stages[before.current]
+  if (run.status !== 'running' || run.agentId === undefined) return undefined
+  return after.stages[before.current].agentId === run.agentId ? undefined : run.agentId
+}

@@ -16,6 +16,7 @@ import {
 } from './core/metrics'
 import {
   STAGES,
+  agentToStop,
   emptyRun,
   isFinalAgentStatus,
   isTerminal,
@@ -49,6 +50,7 @@ type Io = {
   list: Engine['fs']['list']
   run: Engine['process']['run']
   spawn: Engine['agent']['spawn']
+  stopAgent: (id: string) => Promise<unknown>
   toast: Engine['ui']['toast']
   notify: Engine['ui']['notify']
   status: Engine['ui']['status']
@@ -193,8 +195,22 @@ const dispatchNow = async (io: Io, taskId: string, event: Event): Promise<Action
   const config = await loadConfig(io)
   const { task: next, action } = reduce(task, event, await io.now(), config.machine)
   if (next !== task) await save(io, next)
+  const stale = agentToStop(task, next, event)
+  // 先停旧的再执行动作：重试会立刻 spawn 新的子 agent。
+  if (stale !== undefined) await stopAgent(io, stale)
   await perform(io, next, action, config)
   return action
+}
+
+const stopAgent = async (io: Io, id: string): Promise<void> => {
+  try {
+    const result = await io.stopAgent(id)
+    if (typeof result === 'object' && result !== null && 'isError' in result && result.isError === true) {
+      io.toast(`未能停止子 agent：${JSON.stringify(result).slice(0, 200)}`)
+    }
+  } catch (error) {
+    io.toast(`未能停止子 agent：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 const perform = async (io: Io, task: Task, action: Action, config: Resolved): Promise<void> => {
@@ -568,6 +584,7 @@ export const register: Register = on => {
       list: path => $.fs.list(path),
       run: (argv, init) => $.process.run(argv, init),
       spawn: input => $.agent.spawn(input),
+      stopAgent: id => $.tool.call({ tool: 'TaskStop', task_id: id }),
       toast: (text, options) => $.ui.toast(text, options),
       notify: (text, options) => $.ui.notify(text, options),
       status: text => $.ui.status(text),
