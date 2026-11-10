@@ -473,6 +473,7 @@ const HELP = `用法：
 /devbench approve         批准当前等待的阶段
 /devbench reject <理由>   驳回（Spec 重写 / 合并前回到开发 / 跳过部署）
 /devbench retry           重试当前阶段
+/devbench skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
 /devbench abort           中止当前任务
 /devbench list            列出任务
 /devbench select <id>     切换面板显示的任务
@@ -491,14 +492,20 @@ const command = async (io: Io, args: string): Promise<string> => {
     case 'approve':
     case 'reject':
     case 'retry':
+    case 'skip':
     case 'abort': {
-      const task = await findTask(io, sub === 'reject' ? undefined : rest[0])
+      const withReason = sub === 'reject' || sub === 'skip'
+      const task = await findTask(io, withReason ? undefined : rest[0])
       if (task === undefined) return '没有任务。'
       const event: Event =
-        sub === 'reject' ? { kind: 'reject', reason: arg || '未说明理由' } : { kind: sub }
+        sub === 'reject'
+          ? { kind: 'reject', reason: arg || '未说明理由' }
+          : sub === 'skip'
+            ? { kind: 'skip', reason: arg || '手动跳过' }
+            : { kind: sub }
       const action = await dispatch(io, task.id, event)
       if (action?.kind === 'none' && action.reason !== undefined) return `「${task.title}」：${action.reason}`
-      return `「${task.title}」：已${{ approve: '批准', reject: '驳回', retry: '重试', abort: '中止' }[sub]}`
+      return `「${task.title}」：已${{ approve: '批准', reject: '驳回', retry: '重试', skip: '跳过', abort: '中止' }[sub]}`
     }
     case 'list': {
       const list = await io.tasks()
@@ -574,7 +581,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'devbench',
       description: 'AI 开发工作台：需求→开发→测试→评审→合并→部署',
-      argumentHint: '[new <需求> | approve | reject <理由> | retry | abort | list]',
+      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list]',
     })
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
     if (top?.exitCode === 0 && top.stdout.trim() !== '') root = top.stdout.trim()
@@ -717,21 +724,28 @@ export const register: Register = on => {
           </Text>
           <Text dimColor wrap="truncate-start">产物目录：{join(task.dir, 'artifacts')}</Text>
         </Box>
-        {task.status === 'waiting' && (
+        {(task.status === 'waiting' || task.status === 'failed' || task.status === 'aborted') && (
           <Box flexDirection="row" gap={1}>
-            <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }))}>
-              批准{stageDef(task.current).label}
-            </Button>
-            <Button key="reject" hotkey="r" onPress={() => void (io && dispatch(io, task.id, { kind: 'reject', reason: '在面板中驳回' }))}>
-              驳回
-            </Button>
-          </Box>
-        )}
-        {(task.status === 'failed' || task.status === 'aborted') && (
-          <Box flexDirection="row" gap={1}>
-            <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }))}>
-              重试当前阶段
-            </Button>
+            {task.status === 'waiting' && (
+              <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }))}>
+                批准{stageDef(task.current).label}
+              </Button>
+            )}
+            {task.status === 'waiting' && (
+              <Button key="reject" hotkey="r" onPress={() => void (io && dispatch(io, task.id, { kind: 'reject', reason: '在面板中驳回' }))}>
+                驳回
+              </Button>
+            )}
+            {task.status !== 'waiting' && (
+              <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }))}>
+                重试当前阶段
+              </Button>
+            )}
+            {(task.status === 'waiting' || task.status === 'failed') && stageDef(task.current).skippable && (
+              <Button key="skip" hotkey="s" onPress={() => void (io && dispatch(io, task.id, { kind: 'skip', reason: '在面板中跳过' }))}>
+                跳过{stageDef(task.current).label}
+              </Button>
+            )}
           </Box>
         )}
         {others.length > 0 && (

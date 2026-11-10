@@ -6,15 +6,17 @@ export type StageDef = {
   label: string
   /** after：本阶段完成后等人工批准；before：开始前等人工批准。 */
   gate?: 'before' | 'after'
+  /** 可以手动跳过（例如已在流水线之外完成）。Spec 和开发的产物后续阶段要读，不能跳过。 */
+  skippable?: true
 }
 
 export const STAGES: readonly StageDef[] = [
   { id: 'spec', label: '需求 Spec', gate: 'after' },
   { id: 'dev', label: '代码开发' },
-  { id: 'test', label: '单元测试' },
-  { id: 'review', label: 'Code Review' },
-  { id: 'merge', label: '合并', gate: 'before' },
-  { id: 'deploy', label: '发布部署', gate: 'before' },
+  { id: 'test', label: '单元测试', skippable: true },
+  { id: 'review', label: 'Code Review', skippable: true },
+  { id: 'merge', label: '合并', gate: 'before', skippable: true },
+  { id: 'deploy', label: '发布部署', gate: 'before', skippable: true },
 ]
 
 export const stageDef = (id: StageId): StageDef =>
@@ -41,6 +43,7 @@ export type Event =
   | { kind: 'approve' }
   | { kind: 'reject'; reason: string }
   | { kind: 'retry' }
+  | { kind: 'skip'; reason: string }
   | { kind: 'abort' }
 
 export const zeroTokens = (): Tokens => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
@@ -152,7 +155,7 @@ export const startTask = (task: Task, now: number): Step => begin(task, 'spec', 
 
 /** 状态机：给定事件返回新任务与下一步动作。纯函数。 */
 export const reduce = (task: Task, event: Event, now: number, config: MachineConfig): Step => {
-  if (isTerminal(task) && event.kind !== 'retry') {
+  if (isTerminal(task) && event.kind !== 'retry' && !(event.kind === 'skip' && task.status === 'failed')) {
     return { task, action: { kind: 'none', reason: '任务已结束' } }
   }
   const id = task.current
@@ -251,6 +254,25 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
       })
       if (stageDef(id).gate === 'before' && run.status !== 'running') return wait(reverted, id, now)
       return begin(reverted, id, now)
+    }
+
+    case 'skip': {
+      // 运行中的阶段不能跳过：它的子 agent 或命令还会回来写结果。
+      if (task.status !== 'waiting' && task.status !== 'failed') {
+        return { task, action: { kind: 'none', reason: '只能跳过等待中或失败的阶段' } }
+      }
+      if (!stageDef(id).skippable) {
+        return { task, action: { kind: 'none', reason: `${stageDef(id).label}不能跳过，后续阶段依赖它的产物` } }
+      }
+      const waited = run.waitingSince === undefined ? 0 : now - run.waitingSince
+      const skipped = setStage({ ...stamped, status: 'running', endedAt: undefined, feedback: undefined }, id, {
+        status: 'skipped',
+        note: `跳过：${event.reason}`,
+        waitingSince: undefined,
+        waitMs: run.waitMs + waited,
+        agentId: undefined,
+      })
+      return advanceFrom(skipped, id, now, config)
     }
   }
 }
