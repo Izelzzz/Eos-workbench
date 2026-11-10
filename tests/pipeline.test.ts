@@ -263,6 +263,21 @@ test('中止或重试运行中的阶段时，停止它的子 agent', () => {
   expect(stopOn(devRunning(), { kind: 'retry' })).toBe('agent-1')
 })
 
+test('重试运行中的测试后，旧进程的结果不算到新的这次运行上', () => {
+  const running = play([ok('spec'), { kind: 'approve' }, ok('dev')]).task
+  const retried = reduce(running, { kind: 'retry' }, 10_000, FULL)
+  expect(retried.action).toEqual({ kind: 'run', stage: 'test' })
+
+  const stale = reduce(retried.task, { kind: 'finished', stage: 'test', ok: false, note: '旧进程：exit 1', durationMs: 500, seq: 1 } as Event, 11_000, FULL)
+  expect(stale.task).toBe(retried.task)
+  expect(stale.action.kind).toBe('none')
+
+  const fresh = reduce(stale.task, { kind: 'finished', stage: 'test', ok: true, durationMs: 500, seq: 2 } as Event, 12_000, FULL)
+  expect(fresh.action).toEqual({ kind: 'run', stage: 'review' })
+  expect(fresh.task.rework).toBe(0)
+  expect(fresh.task.stages.test.status).toBe('passed')
+})
+
 test('子 agent 已结束、仍在运行或阶段没有子 agent 时，不停止任何东西', () => {
   expect(stopOn(devRunning(), ok('dev'))).toBe(undefined)
   expect(stopOn(devRunning(), { kind: 'progress', stage: 'dev', durationMs: 1 })).toBe(undefined)
