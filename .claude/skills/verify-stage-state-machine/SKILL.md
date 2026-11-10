@@ -67,4 +67,4 @@ claude plugin test .
 | `hooks/core/pipeline.ts` | `reduce`、`startTask`、`abandonedRun`、`isCurrentRun`、`Event`、`TRANSITIONS`、`STAGES`、`advanceFrom`、`goBack`、`follow`、`begin`、`wait`、`finish`、`fail` |
 | `types/index.d.ts` | `Task`、`StageRun` 的状态字段（含 `seq`） |
 
-同步提交：`9a42209ed670e601889422b325ec1d3c36b60b78`。上面的文件在这个提交之后有改动，就要重新确认探索器仍然描述代码。只有确认之后（必要时更新了探索器并做过一次故意改坏），才把这里的提交号往前移。
+同步提交：`c1d85f0bbf569e9c94304d824af7f2ecd52fa658`。上面的文件在这个提交之后有改动，就要重新确认探索器仍然描述代码。只有确认之后（必要时更新了探索器并做过一次故意改坏），才把这里的提交号往前移。
