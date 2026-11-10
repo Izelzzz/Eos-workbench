@@ -2,7 +2,7 @@
 
 const BUILTIN: readonly RegExp[] = [
   // git 后可带全局选项（-C <dir>、-c k=v、--no-pager 等）
-  /\bgit(?:\s+-[Cc]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+(?:push|merge|rebase)\b/,
+  /\bgit(?:\s+-[Cc]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+(?:push|merge|rebase)(?![\w-])/,
   /\bgh\s+pr\s+merge\b/,
   /\bgh\s+release\s+create\b/,
   /\bnpm\s+publish\b/,

@@ -176,8 +176,17 @@ const git = (io: Io, args: string[], cwd = root, timeoutMs = 60_000) =>
 
 // ---------- 状态推进 ----------
 
-/** 把事件交给状态机，保存结果并执行下一步。 */
-const dispatch = async (io: Io, taskId: string, event: Event): Promise<Action | undefined> => {
+/** 每个任务一条串行队列：读-改-写之间有 await，并发事件（如连按两次批准）会互相覆盖。 */
+const queues = new Map<string, Promise<unknown>>()
+
+/** 把事件交给状态机，保存结果并执行下一步。同一任务的事件串行处理。 */
+const dispatch = (io: Io, taskId: string, event: Event): Promise<Action | undefined> => {
+  const run = (queues.get(taskId) ?? Promise.resolve()).then(() => dispatchNow(io, taskId, event))
+  queues.set(taskId, run.catch(() => undefined))
+  return run
+}
+
+const dispatchNow = async (io: Io, taskId: string, event: Event): Promise<Action | undefined> => {
   const task = (await io.tasks()).find(t => t.id === taskId)
   if (task === undefined) return undefined
   const config = await loadConfig(io)
@@ -574,7 +583,8 @@ export const register: Register = on => {
         name: 'planner',
         description: 'devbench 内部：把需求整理成 Spec',
         prompt: PLANNER_PROMPT,
-        tools: ['Read', 'Grep', 'Glob', 'Bash'],
+        // 只读：Spec 阶段在主仓库里运行，不给 Bash，避免改动主工作区。
+        tools: ['Read', 'Grep', 'Glob'],
         omitClaudeMd: true,
       }),
       $.agent.register({

@@ -106,6 +106,12 @@ test('返工次数用尽后任务失败，需要人工介入', () => {
   expect(task.status).toBe('failed')
   expect(actions.at(-1)?.kind).toBe('failed')
   expect(task.rework).toBe(2)
+  expect(task.feedback).toContain('单元测试未通过')
+
+  const retried = reduce(task, { kind: 'retry' }, 99_000, FULL)
+  expect(retried.action).toEqual({ kind: 'run', stage: 'dev' })
+  expect(retried.task.rework).toBe(1)
+  expect(retried.task.feedback).toContain('单元测试未通过')
 })
 
 test('未配置测试与部署时跳过对应阶段', () => {
@@ -170,7 +176,7 @@ test('受保护命令', () => {
   for (const cmd of ['git push origin main', 'git -C x merge foo', 'npx wrangler deploy', 'gh pr merge 3', 'make release']) {
     expect(protectedMatch(cmd, patterns)).not.toBe(undefined)
   }
-  for (const cmd of ['git status', 'git diff', 'npm test', 'echo pushed']) {
+  for (const cmd of ['git status', 'git diff', 'npm test', 'echo pushed', 'git merge-base HEAD main', 'git commit -m "merge fix"']) {
     expect(protectedMatch(cmd, patterns)).toBe(undefined)
   }
   expect(compilePatterns(['(']).length).toBe(compilePatterns().length)

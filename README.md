@@ -105,6 +105,7 @@ claude --plugin-dir /path/to/agents-pipeline
 - 流水线跑在 Claude Code 会话里：关掉会话，正在跑的子 agent 也会停。重新打开后用 `/devbench retry` 继续。
 - 子 agent 和主会话共用一份额度。Pro 订阅跑一个完整任务会消耗不少用量。
 - 合并完成后不会自动清理 worktree 和分支。
+- `/devbench abort` 只停止流水线推进，已经启动的子 agent 会跑完当前这一轮（结果会被丢弃）。
 - mod API 目前是早期版本，后续 Claude Code 升级可能需要跟着调整。
 
 后续计划见仓库的 Issues。

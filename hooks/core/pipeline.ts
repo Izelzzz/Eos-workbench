@@ -129,7 +129,8 @@ const advanceFrom = (task: Task, from: StageId, now: number, config: MachineConf
 /** 回到开发阶段返工，带上反馈。 */
 const reworkDev = (task: Task, now: number, config: MachineConfig, feedback: string): Step => {
   if (task.rework >= config.maxRework) {
-    return fail(task, now, `已返工 ${task.rework} 次仍未通过，需要人工介入`)
+    // 保留反馈：人工 retry 时会带着它回到开发。
+    return fail({ ...task, feedback }, now, `已返工 ${task.rework} 次仍未通过，需要人工介入`)
   }
   let reset: Task = { ...task, rework: task.rework + 1, feedback }
   for (const id of ['test', 'review', 'merge'] as const) {
@@ -219,6 +220,10 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
     case 'retry': {
       if (task.status === 'done') return { task, action: { kind: 'none', reason: '任务已完成' } }
       const revived = { ...stamped, status: 'running' as const, endedAt: undefined }
+      // 返工用尽后的重试：重置计数，带着最后一轮反馈回到开发，而不是原地重跑测试 / 评审。
+      if (task.status === 'failed' && (id === 'test' || id === 'review') && run.status === 'failed') {
+        return reworkDev({ ...revived, rework: 0 }, now, config, task.feedback ?? '')
+      }
       // 重试当前阶段：运行中的那次不再等待（例如会话重启后子 agent 已不在）。
       const reverted = setStage(revived, id, {
         status: 'pending',
