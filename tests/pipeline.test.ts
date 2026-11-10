@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Task } from '../types'
 import { compilePatterns, protectedMatch } from '../hooks/core/guard'
 import { flowMetrics } from '../hooks/core/metrics'
-import { STAGES, emptyRun, reduce, startTask } from '../hooks/core/pipeline'
+import { STAGES, emptyRun, isFinalAgentStatus, reduce, startTask } from '../hooks/core/pipeline'
 import type { Action, Event, MachineConfig } from '../hooks/core/pipeline'
 import { parseVerdict } from '../hooks/core/verdict'
 
@@ -180,4 +180,28 @@ test('受保护命令', () => {
     expect(protectedMatch(cmd, patterns)).toBe(undefined)
   }
   expect(compilePatterns(['(']).length).toBe(compilePatterns().length)
+})
+
+test('子 agent 中途的 turn 只累计用量，阶段继续运行，直到最终 turn 才完成', () => {
+  const { task } = play([ok('spec'), { kind: 'approve' }])
+  const tokens = { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 }
+  const mid = reduce(task, { kind: 'progress', stage: 'dev', durationMs: 300, tokens }, 5000, FULL)
+  expect(mid.action.kind).toBe('none')
+  expect(mid.task.current).toBe('dev')
+  expect(mid.task.stages.dev.status).toBe('running')
+  expect(mid.task.stages.dev.tokens.input).toBe(100)
+  expect(mid.task.stages.dev.durationMs).toBe(300)
+
+  const end = reduce(mid.task, ok('dev', 50), 6000, FULL)
+  expect(end.action).toEqual({ kind: 'run', stage: 'test' })
+  expect(end.task.stages.dev.tokens.input).toBe(150)
+  expect(end.task.stages.dev.durationMs).toBe(800)
+
+  const stale = reduce(end.task, { kind: 'progress', stage: 'dev', durationMs: 1, tokens }, 7000, FULL)
+  expect(stale.task).toBe(end.task)
+})
+
+test('只有终态的子 agent 才算结束', () => {
+  for (const status of ['completed', 'failed', 'killed', undefined]) expect(isFinalAgentStatus(status)).toBe(true)
+  for (const status of ['pending', 'running', 'waiting', 'idle']) expect(isFinalAgentStatus(status)).toBe(false)
 })
