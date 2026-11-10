@@ -17,6 +17,7 @@ import {
 import {
   STAGES,
   emptyRun,
+  isFinalAgentStatus,
   isTerminal,
   reduce,
   stageDef,
@@ -81,7 +82,7 @@ let root = ''
 /** 先于 agentId 落盘到达的 turn.complete，按 agentId 暂存。 */
 const early = new Map<string, Completion>()
 
-type Completion = { answer: string; ok: boolean; reason: string; durationMs: number; tokens?: Tokens; model?: string }
+type Completion = { answer: string; ok: boolean; reason: string; final: boolean; durationMs: number; tokens?: Tokens; model?: string }
 
 const join = (...parts: string[]): string => parts.join('/').replace(/\/+/g, '/')
 const taskFile = (t: Task): string => join(t.dir, 'task.json')
@@ -369,7 +370,8 @@ const spawn = async (
   const done = early.get(spawned.agentId)
   if (done !== undefined) {
     early.delete(spawned.agentId)
-    await onAgentDone(io, task.id, stage, done)
+    if (done.final) await onAgentDone(io, task.id, stage, done)
+    else await dispatch(io, task.id, { kind: 'progress', stage, durationMs: done.durationMs, tokens: done.tokens, model: done.model })
   }
 }
 
@@ -620,10 +622,12 @@ export const register: Register = on => {
     const bench = io
     if (agentId === undefined || bench === undefined) return result
     const usage = e.usage
+    const status = (await $.agent.list()).find(a => a.id === agentId)?.status
     const completion: Completion = {
       answer: e.answer,
       ok: e.reason === 'answer',
       reason: e.reason,
+      final: isFinalAgentStatus(status),
       durationMs: e.durationMs,
       tokens:
         usage === undefined
@@ -637,6 +641,14 @@ export const register: Register = on => {
       model: usage?.model,
     }
     const owner = (await read($, tasksAtom)).find(t => t.stages[t.current].agentId === agentId)
+    if (owner !== undefined && !completion.final) {
+      // 中途的 turn（例如在等后台命令）：只累计用量，等 agent 真正结束。
+      const { durationMs, tokens, model } = completion
+      bench.after(0, () => {
+        void dispatch(bench, owner.id, { kind: 'progress', stage: owner.current, durationMs, tokens, model })
+      })
+      return result
+    }
     if (owner === undefined) {
       // 可能是 spawn 刚返回、agentId 还没落盘；也可能与 devbench 无关。暂存一小段时间。
       early.set(agentId, completion)

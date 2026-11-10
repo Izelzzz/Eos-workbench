@@ -36,6 +36,7 @@ export type Action =
   | { kind: 'none'; reason?: string }
 
 export type Event =
+  | { kind: 'progress'; stage: StageId; durationMs: number; tokens?: Tokens; model?: string }
   | { kind: 'finished'; stage: StageId; ok: boolean; note?: string; durationMs: number; tokens?: Tokens; model?: string }
   | { kind: 'approve' }
   | { kind: 'reject'; reason: string }
@@ -63,6 +64,13 @@ export const emptyRun = (stage: StageId): StageRun => ({
   tokens: zeroTokens(),
   artifacts: [],
 })
+
+/**
+ * 子 agent 是否真正结束。留有后台任务的 agent 在 turn 结束时是 waiting，
+ * 之后还会被唤醒；列表里查不到也算结束，避免阶段永远挂起。
+ */
+export const isFinalAgentStatus = (status: string | undefined): boolean =>
+  status === undefined || status === 'completed' || status === 'failed' || status === 'killed'
 
 export const isTerminal = (t: Task): boolean =>
   t.status === 'done' || t.status === 'failed' || t.status === 'aborted'
@@ -161,6 +169,18 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
         }),
         action: { kind: 'none', reason: '已中止' },
       }
+
+    case 'progress': {
+      if (event.stage !== id || run.status !== 'running') return { task, action: { kind: 'none' } }
+      return {
+        task: setStage(stamped, id, {
+          durationMs: run.durationMs + event.durationMs,
+          tokens: addTokens(run.tokens, event.tokens),
+          model: event.model ?? run.model,
+        }),
+        action: { kind: 'none' },
+      }
+    }
 
     case 'finished': {
       if (event.stage !== id || run.status !== 'running') {
