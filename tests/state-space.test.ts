@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { StageId, Task } from '../types'
-import { STAGES, agentToStop, emptyRun, reduce, startTask } from '../hooks/core/pipeline'
+import { STAGES, abandonedRun, emptyRun, reduce, startTask } from '../hooks/core/pipeline'
 import type { Action, Event, MachineConfig } from '../hooks/core/pipeline'
 
 const AGENT_STAGES: readonly StageId[] = ['spec', 'dev', 'review']
@@ -25,25 +25,34 @@ const draft = (): Task => ({
   dir: '/d',
 })
 
-const alphabet = (task: Task): Event[] => [
-  { kind: 'finished', stage: task.current, ok: true, note: 'ok', durationMs: 1 },
-  { kind: 'finished', stage: task.current, ok: false, note: '失败输出', durationMs: 1 },
-  { kind: 'progress', stage: task.current, durationMs: 1 },
-  { kind: 'approve' },
-  { kind: 'reject', reason: REASON },
-  { kind: 'reject', reason: '' },
-  { kind: 'reject', reason: '   ' },
-  { kind: 'retry' },
-  { kind: 'skip', reason: '已手动完成' },
-  { kind: 'abort' },
-]
+/** finished / progress 各发一份给当前这次运行，一份带着上一次运行的 seq（旧进程或旧 agent 的迟到结果）。 */
+const alphabet = (task: Task): Event[] => {
+  const seq = task.stages[task.current].seq
+  return [
+    ...[seq, seq - 1].flatMap((s): Event[] => [
+      { kind: 'finished', stage: task.current, seq: s, ok: true, note: 'ok', durationMs: 1 },
+      { kind: 'finished', stage: task.current, seq: s, ok: false, note: '失败输出', durationMs: 1 },
+      { kind: 'progress', stage: task.current, seq: s, durationMs: 1 },
+    ]),
+    { kind: 'approve' },
+    { kind: 'reject', reason: REASON },
+    { kind: 'reject', reason: '' },
+    { kind: 'reject', reason: '   ' },
+    { kind: 'retry' },
+    { kind: 'skip', reason: '已手动完成' },
+    { kind: 'abort' },
+  ]
+}
+
+const isStale = (task: Task, e: Event): boolean =>
+  (e.kind === 'finished' || e.kind === 'progress') && e.seq !== task.stages[e.stage].seq
 
 const label = (e: Event): string => {
   switch (e.kind) {
     case 'finished':
-      return `finished(${e.stage}, ${e.ok ? 'ok' : 'fail'})`
+      return `finished(${e.stage}#${e.seq}, ${e.ok ? 'ok' : 'fail'})`
     case 'progress':
-      return `progress(${e.stage})`
+      return `progress(${e.stage}#${e.seq})`
     case 'reject':
     case 'skip':
       return `${e.kind}(${JSON.stringify(e.reason)})`
@@ -54,7 +63,10 @@ const label = (e: Event): string => {
 
 const feedbackShape = (f: string | undefined) => (f === undefined ? '-' : f.trim() === '' ? 'blank' : 'set')
 
-/** 抽象状态：只保留影响控制流的字段。attempts 封顶 2 是因为 reduce 只区分「第 1 次」与「之后」。 */
+/**
+ * 抽象状态：只保留影响控制流的字段。attempts 封顶 2 是因为 reduce 只区分「第 1 次」与「之后」。
+ * 不记 seq：reduce 只比较事件的 seq 与当前的是否相等，alphabet 按当前 seq 生成新旧两种。
+ */
 const keyOf = (t: Task): string =>
   [
     t.status,
@@ -67,7 +79,7 @@ const keyOf = (t: Task): string =>
     }),
   ].join('|')
 
-type Transition = { before: Task; event: Event; after: Task; action: Action; stopped: string | undefined }
+type Transition = { before: Task; event: Event; after: Task; action: Action; abandoned: ReturnType<typeof abandonedRun> }
 
 type Invariant = {
   name: string
@@ -92,14 +104,22 @@ const INVARIANTS: Invariant[] = [
     },
   },
   {
-    name: '不留孤儿子 agent',
-    harm: '阶段已经不再等这个子 agent，它却在后台继续改 worktree、消耗额度。',
-    holds: ({ before, event, after, stopped }) => {
-      const run = before.stages[before.current]
-      if (run.status !== 'running' || run.agentId === undefined) return true
-      if (after.stages[before.current].agentId === run.agentId) return true
-      return event.kind === 'finished' || stopped === run.agentId
+    name: '不留孤儿运行',
+    harm: '阶段已经不再等这次运行，它的子 agent 或命令却在后台继续改 worktree、合并或部署。',
+    holds: ({ before, event, after, abandoned }) => {
+      const id = before.current
+      const run = before.stages[id]
+      if (run.status !== 'running') return true
+      const same = after.current === id && after.stages[id].status === 'running' && after.stages[id].seq === run.seq
+      if (same) return abandoned === undefined
+      if (event.kind === 'finished') return true
+      return abandoned?.stage === id && abandoned.seq === run.seq && abandoned.agentId === run.agentId
     },
+  },
+  {
+    name: '过期的运行结果不改变任务',
+    harm: '旧进程或旧子 agent 迟到的结果被记到新的这次运行上，新结果丢失，任务带着旧输出返工。',
+    holds: ({ before, event, after, action }) => !isStale(before, event) || (after === before && action.kind === 'none'),
   },
   {
     name: 'progress 不改变阶段与状态',
@@ -178,11 +198,11 @@ const explore = (config: MachineConfig): Exploration => {
       let movable = before.status === 'done' || before.status === 'aborted'
       for (const event of alphabet(before)) {
         const step = reduce(before, event, ++now, config)
-        const stopped = agentToStop(before, step.task, event)
+        const abandoned = abandonedRun(before, step.task, event)
         const after = spawn(step.task, step.action)
         const here = [...path, label(event)]
         for (const inv of INVARIANTS) {
-          if (violations[inv.name] === undefined && !inv.holds({ before, event, after, action: step.action, stopped }, config)) {
+          if (violations[inv.name] === undefined && !inv.holds({ before, event, after, action: step.action, abandoned }, config)) {
             violations[inv.name] = here
           }
         }

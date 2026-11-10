@@ -28,6 +28,11 @@ export type StageRun = {
   status: StageStatus
   /** 运行次数（返工会让 dev / test / review 多次运行）。 */
   attempts: number
+  /**
+   * 这次运行的编号：每次开始运行加一，重试运行中的那次也加一（attempts 不加），从不回退。
+   * finished / progress 带着它认领运行，旧运行迟到的结果对不上编号，被忽略。
+   */
+  seq: number
   /** 当前这次运行开始的时间（ms）。 */
   startedAt?: number
   /** 最近一次结束的时间（ms）。 */

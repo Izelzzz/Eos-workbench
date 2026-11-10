@@ -37,9 +37,12 @@ export type Action =
   | { kind: 'failed'; reason: string }
   | { kind: 'none'; reason?: string }
 
+/** 某个阶段的某一次运行。 */
+export type RunRef = { stage: StageId; seq: number }
+
 export type Event =
-  | { kind: 'progress'; stage: StageId; durationMs: number; tokens?: Tokens; model?: string }
-  | { kind: 'finished'; stage: StageId; ok: boolean; note?: string; durationMs: number; tokens?: Tokens; model?: string }
+  | ({ kind: 'progress'; durationMs: number; tokens?: Tokens; model?: string } & RunRef)
+  | ({ kind: 'finished'; ok: boolean; note?: string; durationMs: number; tokens?: Tokens; model?: string } & RunRef)
   | { kind: 'approve' }
   | { kind: 'reject'; reason: string }
   | { kind: 'retry' }
@@ -62,6 +65,7 @@ export const emptyRun = (stage: StageId): StageRun => ({
   stage,
   status: 'pending',
   attempts: 0,
+  seq: 0,
   durationMs: 0,
   waitMs: 0,
   tokens: zeroTokens(),
@@ -92,6 +96,7 @@ const begin = (task: Task, id: StageId, now: number): Step => {
   const next = setStage({ ...task, status: 'running', current: id }, id, {
     status: 'running',
     attempts: run.attempts + 1,
+    seq: run.seq + 1,
     startedAt: now,
     waitingSince: undefined,
     waitMs: run.waitMs + waited,
@@ -174,6 +179,12 @@ const follow = (task: Task, from: StageId, route: Route, detail: string, now: nu
     ? advanceFrom(setStage(task, from, { status: 'skipped' }), from, now, config)
     : goBack(task, route.to, route.feedback(detail), route.rework, now, config)
 
+/** ref 是否就是任务当前运行中的那一次。 */
+export const isCurrentRun = (task: Task, ref: RunRef): boolean => {
+  const run = task.stages[ref.stage]
+  return ref.stage === task.current && run.status === 'running' && run.seq === ref.seq
+}
+
 /** 新任务进入流水线。 */
 export const startTask = (task: Task, now: number): Step => begin(task, 'spec', now)
 
@@ -198,7 +209,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
       }
 
     case 'progress': {
-      if (event.stage !== id || run.status !== 'running') return { task, action: { kind: 'none' } }
+      if (!isCurrentRun(task, event)) return { task, action: { kind: 'none' } }
       return {
         task: setStage(stamped, id, {
           durationMs: run.durationMs + event.durationMs,
@@ -210,9 +221,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
     }
 
     case 'finished': {
-      if (event.stage !== id || run.status !== 'running') {
-        return { task, action: { kind: 'none', reason: '不是当前运行中的阶段' } }
-      }
+      if (!isCurrentRun(task, event)) return { task, action: { kind: 'none', reason: '不是当前这次运行的结果' } }
       const done = setStage(stamped, id, {
         status: event.ok ? 'passed' : 'failed',
         endedAt: now,
@@ -303,12 +312,13 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
 }
 
 /**
- * 这次事件之后需要停掉的子 agent：中止或重试时，运行中那次的子 agent 不再属于阶段，
- * 不停掉它会在后台继续干活。finished / progress 不停：agent 已经结束或仍是阶段的 agent。
+ * 这次事件放弃的运行：中止或重试时，运行中那次不再属于阶段，引擎要停掉它的子 agent 或命令，
+ * 否则它会在后台继续改 worktree、合并或部署。finished / progress 不放弃：运行已结束或仍是阶段的运行。
  */
-export const agentToStop = (before: Task, after: Task, event: Event): string | undefined => {
+export const abandonedRun = (before: Task, after: Task, event: Event): (RunRef & { agentId?: string }) | undefined => {
   if (event.kind !== 'abort' && event.kind !== 'retry') return undefined
-  const run = before.stages[before.current]
-  if (run.status !== 'running' || run.agentId === undefined) return undefined
-  return after.stages[before.current].agentId === run.agentId ? undefined : run.agentId
+  const stage = before.current
+  const run = before.stages[stage]
+  if (run.status !== 'running' || isCurrentRun(after, { stage, seq: run.seq })) return undefined
+  return { stage, seq: run.seq, agentId: run.agentId }
 }
