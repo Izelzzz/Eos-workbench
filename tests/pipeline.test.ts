@@ -205,3 +205,46 @@ test('只有终态的子 agent 才算结束', () => {
   for (const status of ['completed', 'failed', 'killed', undefined]) expect(isFinalAgentStatus(status)).toBe(true)
   for (const status of ['pending', 'running', 'waiting', 'idle']) expect(isFinalAgentStatus(status)).toBe(false)
 })
+
+const toMergeGate: Event[] = [ok('spec'), { kind: 'approve' }, ok('dev'), ok('test'), ok('review')]
+const skip = (reason = '已在主会话手动合并'): Event => ({ kind: 'skip', reason })
+
+test('跳过失败的合并：标记为跳过并继续推进', () => {
+  const failedMerge = [...toMergeGate, { kind: 'approve' } as Event, bad('merge', '冲突')]
+  expect(play(failedMerge).task.status).toBe('failed')
+
+  const { task, actions } = play([...failedMerge, skip()])
+  expect(actions.at(-1)).toEqual({ kind: 'wait', stage: 'deploy' })
+  expect(task.status).toBe('waiting')
+  expect(task.endedAt).toBe(undefined)
+  expect(task.stages.merge.status).toBe('skipped')
+  expect(task.stages.merge.note).toContain('已在主会话手动合并')
+
+  const noDeploy = play([...failedMerge, skip()], { ...FULL, hasDeploy: false })
+  expect(noDeploy.actions.at(-1)).toEqual({ kind: 'done' })
+  expect(noDeploy.task.status).toBe('done')
+  expect(noDeploy.task.stages.merge.status).toBe('skipped')
+  expect(noDeploy.task.stages.deploy.status).toBe('skipped')
+})
+
+test('跳过等待中的合并：计入等待时间并继续推进', () => {
+  const { task, actions } = play([...toMergeGate, skip()])
+  expect(actions.at(-1)).toEqual({ kind: 'wait', stage: 'deploy' })
+  expect(task.stages.merge.status).toBe('skipped')
+  expect(task.stages.merge.waitMs).toBe(1000)
+  expect(task.stages.merge.waitingSince).toBe(undefined)
+})
+
+test('不能跳过 Spec、开发、运行中的阶段和已完成的任务', () => {
+  const refused = (events: Event[]) => {
+    const before = play(events).task
+    const after = reduce(before, skip(), 99_000, FULL)
+    expect(after.action.kind).toBe('none')
+    expect(after.action.kind === 'none' && after.action.reason).toBeTruthy()
+    expect(after.task).toBe(before)
+  }
+  refused([ok('spec')])
+  refused([ok('spec'), { kind: 'approve' }, bad('dev', '没有变更')])
+  refused([...toMergeGate, { kind: 'approve' }])
+  refused([...toMergeGate, { kind: 'approve' }, ok('merge'), { kind: 'approve' }, ok('deploy')])
+})
