@@ -1,5 +1,14 @@
 # 本仓库的工作约定
 
+## 写代码用 poteto mode
+
+本仓库的项目设置启用了 pstack 插件（`cursor/plugins` 的 `pstack@cursor-plugins`，见 `.claude/settings.json`）。
+
+- 任何写代码的任务（功能、修 bug、重构、评审修复）都按 poteto mode 执行：先完整读 `pstack:poteto-mode` 的 `SKILL.md`，再读它附带的 `docs/harness/claude-code.md`，按里面的映射把 Cursor 的名字换成 Claude Code 的（`Task` → `Agent`，其他 pstack skill 用 `Read` 读 SKILL.md 后照做）。
+- 按 SKILL.md 匹配 playbook，把 playbook 的步骤原样列成待办，再开始做。
+- 需要 Cursor 专属能力的步骤（Bugbot、Automations、cloud agent、`cursor-team-kit` 里的 `deslop` 等）按 harness 文档跳过，并在回复里写一行 `Skipped in Claude Code: <步骤>. <原因>.`。
+- 下面的自检流程是 poteto mode 之外的附加要求，两者都要做。
+
 ## 写完代码后必须自检
 
 每次改完代码、提交或开 PR 之前，按顺序完成：
