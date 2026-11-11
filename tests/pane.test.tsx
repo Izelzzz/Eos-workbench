@@ -50,7 +50,7 @@ const seed = (on: any, tasks: Task[]) => {
   on('clock.now', () => ({ value: 600_000 }))
   on('state.get', (_$: unknown, e: { key: string }) =>
     e.key === 'tasks'
-      ? { value: { value: { shape: 'tasks-1', value: tasks }, version: 1 } }
+      ? { value: { value: { shape: 'tasks-2', value: tasks }, version: 1 } }
       : { value: { value: null, version: 0 } },
   )
 }
@@ -63,6 +63,7 @@ test('面板显示阶段、指标与批准按钮', async ($, on) => {
     expect(await ui.find({ type: 'Text', text: /代码开发.*第 2 次/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /一次通过率 50%/ })).toBeDefined()
     expect(await ui.find({ key: 'approve' })).toBeDefined()
+    expect(await ui.find({ key: 'skip' })).toBeDefined()
     await ui.unmount()
   }
 })

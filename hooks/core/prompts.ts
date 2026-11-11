@@ -52,11 +52,16 @@ export const reviewTask = (p: {
   diffPath: string
   worktree: string
   testSummary?: string
+  feedback?: string
 }): string =>
   `请评审这次变更。
 
 - Spec：${p.specPath}
 - Diff：${p.diffPath}
 - 源码（worktree）：${p.worktree}
-${p.testSummary === undefined ? '' : `- 单元测试：${p.testSummary}\n`}
+${p.testSummary === undefined ? '' : `- 单元测试：${p.testSummary}\n`}${
+    p.feedback === undefined || p.feedback === ''
+      ? ''
+      : `\n## 人工驳回理由（必须逐条核实）\n\n${p.feedback}\n\n逐条确认是否成立；成立的按问题写进 issues。\n`
+  }
 按约定只输出 JSON 结论。`

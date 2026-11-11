@@ -16,6 +16,7 @@
 1. `claude plugin validate .` 通过
 2. 类型检查无错误（`tsc -p .`，需要 `.claude-plugin/types/` 已由引擎生成；否则用插件 API 声明文件单独配一个 tsconfig）
 3. `claude plugin test .` 全部通过；新增逻辑要补测试
+   - 改动状态机（`hooks/core/pipeline.ts`、`TRANSITIONS`、`Task` 类型）时，按 `.claude/skills/verify-stage-state-machine` 验证通过
 4. 用 `/engineering:code-review` 对本次改动做一次代码评审，修掉确认的问题后再提交；评审结论（发现了什么、改了什么、哪些留作 issue）写进 PR 描述
 
 ## 代码约定

@@ -16,13 +16,16 @@ import {
 } from './core/metrics'
 import {
   STAGES,
+  abandonedRun,
   emptyRun,
+  isCurrentRun,
+  isFinalAgentStatus,
   isTerminal,
   reduce,
   stageDef,
   startTask,
 } from './core/pipeline'
-import type { Action, Event, MachineConfig } from './core/pipeline'
+import type { Action, Event, MachineConfig, RunRef } from './core/pipeline'
 import {
   DEVELOPER_PROMPT,
   PLANNER_PROMPT,
@@ -47,7 +50,10 @@ type Io = {
   exists: Engine['fs']['exists']
   list: Engine['fs']['list']
   run: Engine['process']['run']
+  spawnProcess: Engine['process']['spawn']
   spawn: Engine['agent']['spawn']
+  stopAgent: (id: string) => Promise<unknown>
+  fillPrompt: (text: string) => ReturnType<Engine['prompt']['fill']>
   toast: Engine['ui']['toast']
   notify: Engine['ui']['notify']
   status: Engine['ui']['status']
@@ -64,7 +70,7 @@ const DATA_DIR = '.devbench'
 const LIMIT = 1_000_000
 
 const tasksAtom = atom({ plugin: 'devbench', key: 'tasks' } as const, [] as Task[], {
-  shape: 'tasks-1',
+  shape: 'tasks-2',
 })
 const selectedAtom = atom({ plugin: 'devbench', key: 'selected' } as const, null as string | null)
 
@@ -81,7 +87,12 @@ let root = ''
 /** 先于 agentId 落盘到达的 turn.complete，按 agentId 暂存。 */
 const early = new Map<string, Completion>()
 
-type Completion = { answer: string; ok: boolean; reason: string; durationMs: number; tokens?: Tokens; model?: string }
+/** 一次阶段运行里的命令（测试、合并、部署、开发前的依赖安装）。stopped 之后不再起新命令、不再回报结果。 */
+type CommandRun = RunRef & { stopped: boolean; kill?: () => void }
+/** 每个任务最近开始的那次阶段运行，中止或重试时由 stopRun 停掉它的命令；下一次运行开始时被替换。 */
+const commands = new Map<string, CommandRun>()
+
+type Completion = { answer: string; ok: boolean; reason: string; final: boolean; durationMs: number; tokens?: Tokens; model?: string }
 
 const join = (...parts: string[]): string => parts.join('/').replace(/\/+/g, '/')
 const taskFile = (t: Task): string => join(t.dir, 'task.json')
@@ -149,6 +160,14 @@ const save = async (io: Io, task: Task): Promise<void> => {
   await io.write(taskFile(task), JSON.stringify(task, null, 2))
 }
 
+/** 加 seq 之前写的 task.json：用 attempts 补上，否则运行中的那次再也认领不到结果。 */
+const withSeq = (task: Task): Task => ({
+  ...task,
+  stages: Object.fromEntries(
+    STAGES.map(s => [s.id, { ...task.stages[s.id], seq: task.stages[s.id].seq ?? task.stages[s.id].attempts }]),
+  ) as Task['stages'],
+})
+
 const loadTasks = async (io: Io): Promise<Task[]> => {
   const dir = join(root, DATA_DIR, 'tasks')
   if (!(await io.exists(dir))) return []
@@ -157,7 +176,7 @@ const loadTasks = async (io: Io): Promise<Task[]> => {
   for (const entry of entries) {
     if (entry.kind !== 'dir') continue
     const task = (await readJson(io, join(dir, entry.name, 'task.json'))) as Task | undefined
-    if (task?.id !== undefined) tasks.push(task)
+    if (task?.id !== undefined) tasks.push(withSeq(task))
   }
   return tasks.sort((a, b) => a.createdAt - b.createdAt)
 }
@@ -179,12 +198,15 @@ const git = (io: Io, args: string[], cwd = root, timeoutMs = 60_000) =>
 /** 每个任务一条串行队列：读-改-写之间有 await，并发事件（如连按两次批准）会互相覆盖。 */
 const queues = new Map<string, Promise<unknown>>()
 
-/** 把事件交给状态机，保存结果并执行下一步。同一任务的事件串行处理。 */
-const dispatch = (io: Io, taskId: string, event: Event): Promise<Action | undefined> => {
-  const run = (queues.get(taskId) ?? Promise.resolve()).then(() => dispatchNow(io, taskId, event))
+const serial = <T,>(taskId: string, fn: () => Promise<T>): Promise<T> => {
+  const run = (queues.get(taskId) ?? Promise.resolve()).then(fn)
   queues.set(taskId, run.catch(() => undefined))
   return run
 }
+
+/** 把事件交给状态机，保存结果并执行下一步。同一任务的事件串行处理。 */
+const dispatch = (io: Io, taskId: string, event: Event): Promise<Action | undefined> =>
+  serial(taskId, () => dispatchNow(io, taskId, event))
 
 const dispatchNow = async (io: Io, taskId: string, event: Event): Promise<Action | undefined> => {
   const task = (await io.tasks()).find(t => t.id === taskId)
@@ -192,20 +214,52 @@ const dispatchNow = async (io: Io, taskId: string, event: Event): Promise<Action
   const config = await loadConfig(io)
   const { task: next, action } = reduce(task, event, await io.now(), config.machine)
   if (next !== task) await save(io, next)
+  const abandoned = abandonedRun(task, next, event)
+  // 先停旧的再执行动作：重试会立刻开始新的一次运行。
+  if (abandoned !== undefined) await stopRun(io, taskId, abandoned)
   await perform(io, next, action, config)
   return action
 }
 
+const stopRun = async (io: Io, taskId: string, run: RunRef & { agentId?: string }): Promise<void> => {
+  const command = commands.get(taskId)
+  if (command?.stage === run.stage && command.seq === run.seq) {
+    command.stopped = true
+    command.kill?.()
+    commands.delete(taskId)
+  }
+  if (run.agentId !== undefined) await stopAgent(io, run.agentId)
+}
+
+const stopAgent = async (io: Io, id: string): Promise<void> => {
+  try {
+    const result = await io.stopAgent(id)
+    if (typeof result === 'object' && result !== null && 'isError' in result && result.isError === true) {
+      io.toast(`未能停止子 agent：${JSON.stringify(result).slice(0, 200)}`)
+    }
+  } catch (error) {
+    io.toast(`未能停止子 agent：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** 驳回必须写理由，面板按钮没法输入，就把命令填进输入框让用户补上。 */
+const askRejectReason = async (io: Io): Promise<void> => {
+  const filled = await io.fillPrompt('/devbench reject ')
+  if (!filled.isFilled) io.toast('请输入 /devbench reject <理由> 驳回')
+}
+
 const perform = async (io: Io, task: Task, action: Action, config: Resolved): Promise<void> => {
   switch (action.kind) {
-    case 'run':
+    case 'run': {
+      const ref = { stage: action.stage, seq: task.stages[action.stage].seq }
       // 放到定时器里跑，避免占用当前钩子的时间预算。
       io.after(0, () => {
-        void runStage(io, task.id, action.stage, config).catch(err =>
-          finished(io, task.id, action.stage, { ok: false, note: `执行出错：${String(err)}`, durationMs: 0 }),
+        void runStage(io, task.id, ref, config).catch(err =>
+          finished(io, task.id, ref, { ok: false, note: `执行出错：${String(err)}`, durationMs: 0 }),
         )
       })
       return
+    }
     case 'wait': {
       const text = `「${task.title}」等待批准：${stageDef(action.stage).label}`
       io.toast(text)
@@ -229,10 +283,49 @@ const perform = async (io: Io, task: Task, action: Action, config: Resolved): Pr
 const finished = async (
   io: Io,
   taskId: string,
-  stage: StageId,
+  run: RunRef,
   r: { ok: boolean; note?: string; durationMs: number; tokens?: Tokens; model?: string },
 ): Promise<void> => {
-  await dispatch(io, taskId, { kind: 'finished', stage, ...r })
+  await dispatch(io, taskId, { kind: 'finished', ...run, ...r })
+}
+
+type Ran = { exitCode: number; stdout: string; stderr: string }
+
+/** 两路输出各留前 LIMIT 个字符，和产物的截断一致。 */
+const keep = (acc: string, text: string): string => (acc.length >= LIMIT ? acc : acc + text)
+
+/**
+ * 在这次阶段运行里执行一条命令，可被 stopRun 停掉（离开 for await 就会杀掉子进程）。
+ * 运行被停掉时返回 undefined：这次运行已被放弃，调用方不写产物、不回报结果。
+ */
+const exec = async (io: Io, run: CommandRun, argv: string[], cwd: string, timeoutMs = 600_000): Promise<Ran | undefined> => {
+  if (run.stopped) return undefined
+  const child = io.spawnProcess({ argv, cwd })
+  const kill = () => void child.return({ code: null, signal: null })
+  let timedOut = false
+  const timer = io.after(timeoutMs, () => {
+    timedOut = true
+    kill()
+  })
+  run.kill = kill
+  let stdout = ''
+  let stderr = ''
+  try {
+    for await (const piece of child) {
+      if (piece.stream === 'stdout') stdout = keep(stdout, piece.text)
+      else stderr = keep(stderr, piece.text)
+    }
+  } catch (err) {
+    return run.stopped ? undefined : { exitCode: 1, stdout, stderr: `${stderr}${String(err)}` }
+  } finally {
+    timer.cancel()
+    run.kill = undefined
+  }
+  if (run.stopped) return undefined
+  if (timedOut) return { exitCode: 1, stdout, stderr: `${stderr}\n超过 ${timeoutMs / 1000} 秒未结束，已停止` }
+  const end = await child.result
+  if (run.stopped) return undefined
+  return { exitCode: end.code ?? 1, stdout, stderr: end.signal === null ? stderr : `${stderr}\n被信号 ${end.signal} 结束` }
 }
 
 const addArtifact = async (io: Io, task: Task, stage: StageId, name: string, text: string): Promise<Task> => {
@@ -246,46 +339,45 @@ const addArtifact = async (io: Io, task: Task, stage: StageId, name: string, tex
   return next
 }
 
-/** 执行某个阶段：agent 阶段只负责启动，结果由 turn.complete 回来；命令阶段同步完成。 */
-const runStage = async (io: Io, taskId: string, stage: StageId, config: Resolved): Promise<void> => {
+/** 执行某个阶段的这一次运行：agent 阶段只负责启动，结果由 turn.complete 回来；命令阶段在这里跑完。 */
+const runStage = async (io: Io, taskId: string, ref: RunRef, config: Resolved): Promise<void> => {
   let task = (await io.tasks()).find(t => t.id === taskId)
-  if (task === undefined || task.current !== stage || task.stages[stage].status !== 'running') return
+  if (task === undefined || !isCurrentRun(task, ref)) return
+  const stage = ref.stage
   const startedAt = await io.now()
   const elapsed = async () => (await io.now()) - startedAt
+  const run: CommandRun = { ...ref, stopped: false }
+  commands.set(taskId, run)
 
   switch (stage) {
     case 'spec':
-      return spawn(io, task, stage, AGENTS.planner, config.models.planner, root, specTask(task.request, task.feedback))
+      return spawn(io, task, ref, AGENTS.planner, config.models.planner, root, specTask(task.request, task.feedback))
 
     case 'dev': {
       if (task.stages.dev.attempts === 1 && config.setup !== null) {
         io.status(`devbench：安装依赖 ${config.setup.join(' ')}`)
-        const setup = await io.run(config.setup, { cwd: task.git.worktree, timeoutMs: 600_000 }).catch(
-          err => ({ exitCode: 1, stdout: '', stderr: String(err) }),
-        )
+        const setup = await exec(io, run, config.setup, task.git.worktree)
         io.status(undefined)
+        if (setup === undefined) return
         task = await addArtifact(io, task, 'dev', '02-setup.log', `$ ${config.setup.join(' ')}\n${setup.stdout}\n${setup.stderr}`)
         if (setup.exitCode !== 0) {
-          return finished(io, taskId, 'dev', { ok: false, note: `依赖安装失败：\n${tail(setup.stderr || setup.stdout)}`, durationMs: await elapsed() })
+          return finished(io, taskId, ref, { ok: false, note: `依赖安装失败：\n${tail(setup.stderr || setup.stdout)}`, durationMs: await elapsed() })
         }
       }
       const prompt = devTask({ specPath: artifact(task, '01-spec.md'), worktree: task.git.worktree, feedback: task.feedback })
-      return spawn(io, task, stage, AGENTS.developer, config.models.developer, task.git.worktree, prompt)
+      return spawn(io, task, ref, AGENTS.developer, config.models.developer, task.git.worktree, prompt)
     }
 
     case 'test': {
       const argv = config.test ?? []
       io.status(`devbench：运行测试 ${argv.join(' ')}`)
-      const result = await io.run(argv, { cwd: task.git.worktree, timeoutMs: 600_000 }).catch(err => ({
-        exitCode: 1,
-        stdout: '',
-        stderr: String(err),
-      }))
+      const result = await exec(io, run, argv, task.git.worktree)
       io.status(undefined)
+      if (result === undefined) return
       const log = `$ ${argv.join(' ')}\nexit ${result.exitCode}\n\n${result.stdout}\n${result.stderr}`
       await addArtifact(io, task, 'test', `03-test-${task.stages.test.attempts}.log`, log)
       const ok = result.exitCode === 0
-      return finished(io, taskId, 'test', {
+      return finished(io, taskId, ref, {
         ok,
         note: ok ? `exit 0` : `exit ${result.exitCode}\n${tail(`${result.stdout}\n${result.stderr}`)}`,
         durationMs: await elapsed(),
@@ -299,13 +391,16 @@ const runStage = async (io: Io, taskId: string, stage: StageId, config: Resolved
         diffPath: artifact(task, '02-diff.patch'),
         worktree: task.git.worktree,
         testSummary: testRun.status === 'passed' ? `已通过（${(config.test ?? []).join(' ')}）` : testRun.note,
+        feedback: task.feedback,
       })
-      return spawn(io, task, stage, AGENTS.reviewer, config.models.reviewer, task.git.worktree, prompt)
+      return spawn(io, task, ref, AGENTS.reviewer, config.models.reviewer, task.git.worktree, prompt)
     }
 
     case 'merge': {
-      const head = await git(io, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const dirty = await git(io, ['status', '--porcelain', '--untracked-files=no'])
+      const inRoot = (args: string[]) => exec(io, run, ['git', ...args], root, 60_000)
+      const head = await inRoot(['rev-parse', '--abbrev-ref', 'HEAD'])
+      const dirty = await inRoot(['status', '--porcelain', '--untracked-files=no'])
+      if (head === undefined || dirty === undefined) return
       const lines: string[] = []
       let ok = false
       let note = ''
@@ -314,28 +409,27 @@ const runStage = async (io: Io, taskId: string, stage: StageId, config: Resolved
       } else if (dirty.stdout.trim() !== '') {
         note = `主仓库有未提交的改动，请先处理再重试：\n${dirty.stdout}`
       } else {
-        const merged = await git(io, ['merge', '--no-ff', '--no-edit', '-m', `Merge ${task.git.branch}: ${task.title}`, task.git.branch])
+        const merged = await inRoot(['merge', '--no-ff', '--no-edit', '-m', `Merge ${task.git.branch}: ${task.title}`, task.git.branch])
+        if (merged === undefined) return
         lines.push(merged.stdout, merged.stderr)
         ok = merged.exitCode === 0
         if (!ok) {
-          await git(io, ['merge', '--abort'])
+          await inRoot(['merge', '--abort'])
           note = `合并失败（已 abort）：\n${tail(merged.stderr || merged.stdout)}`
         } else note = `已合并到 ${task.git.baseBranch}`
       }
+      if (run.stopped) return
       await addArtifact(io, task, 'merge', '05-merge.log', [note, ...lines].join('\n'))
-      return finished(io, taskId, 'merge', { ok, note, durationMs: await elapsed() })
+      return finished(io, taskId, ref, { ok, note, durationMs: await elapsed() })
     }
 
     case 'deploy': {
       const argv = config.deploy ?? []
-      const result = await io.run(argv, { cwd: root, timeoutMs: 600_000 }).catch(err => ({
-        exitCode: 1,
-        stdout: '',
-        stderr: String(err),
-      }))
+      const result = await exec(io, run, argv, root)
+      if (result === undefined) return
       await addArtifact(io, task, 'deploy', '06-deploy.log', `$ ${argv.join(' ')}\nexit ${result.exitCode}\n\n${result.stdout}\n${result.stderr}`)
       const ok = result.exitCode === 0
-      return finished(io, taskId, 'deploy', {
+      return finished(io, taskId, ref, {
         ok,
         note: ok ? '部署完成' : `exit ${result.exitCode}\n${tail(result.stderr || result.stdout)}`,
         durationMs: await elapsed(),
@@ -347,7 +441,7 @@ const runStage = async (io: Io, taskId: string, stage: StageId, config: Resolved
 const spawn = async (
   io: Io,
   task: Task,
-  stage: StageId,
+  ref: RunRef,
   subagentType: string,
   model: string,
   cwd: string,
@@ -356,35 +450,44 @@ const spawn = async (
   const spawned = await io.spawn({
     subagentType,
     prompt,
-    description: `devbench ${stageDef(stage).label}：${task.title}`.slice(0, 80),
+    description: `devbench ${stageDef(ref.stage).label}：${task.title}`.slice(0, 80),
     cwd,
     ...(model === 'inherit' ? {} : { model }),
   })
   if (spawned.deny !== undefined || spawned.agentId === undefined) {
-    return finished(io, task.id, stage, { ok: false, note: `子 agent 未能启动：${spawned.deny ?? '未知原因'}`, durationMs: 0 })
+    return finished(io, task.id, ref, { ok: false, note: `子 agent 未能启动：${spawned.deny ?? '未知原因'}`, durationMs: 0 })
   }
-  const latest = (await io.tasks()).find(t => t.id === task.id) ?? task
-  const run = latest.stages[stage]
-  await save(io, { ...latest, stages: { ...latest.stages, [stage]: { ...run, agentId: spawned.agentId, model: spawned.model } } })
-  const done = early.get(spawned.agentId)
+  const agentId = spawned.agentId
+  // 和事件同一条队列：spawn 期间这次运行可能已被中止或重试，那样 agentId 不能记到新的运行上。
+  const claimed = await serial(task.id, async () => {
+    const latest = (await io.tasks()).find(t => t.id === task.id)
+    if (latest === undefined || !isCurrentRun(latest, ref)) return false
+    const run = latest.stages[ref.stage]
+    await save(io, { ...latest, stages: { ...latest.stages, [ref.stage]: { ...run, agentId, model: spawned.model } } })
+    return true
+  })
+  if (!claimed) return stopAgent(io, agentId)
+  const done = early.get(agentId)
   if (done !== undefined) {
-    early.delete(spawned.agentId)
-    await onAgentDone(io, task.id, stage, done)
+    early.delete(agentId)
+    if (done.final) await onAgentDone(io, task.id, ref, done)
+    else await dispatch(io, task.id, { kind: 'progress', ...ref, durationMs: done.durationMs, tokens: done.tokens, model: done.model })
   }
 }
 
 /** 子 agent 结束：写产物、整理结论，交给状态机。 */
-const onAgentDone = async (io: Io, taskId: string, stage: StageId, c: Completion): Promise<void> => {
+const onAgentDone = async (io: Io, taskId: string, ref: RunRef, c: Completion): Promise<void> => {
   let task = (await io.tasks()).find(t => t.id === taskId)
   if (task === undefined) return
+  const stage = ref.stage
   const usage = { durationMs: c.durationMs, tokens: c.tokens, model: c.model }
-  if (!c.ok) return finished(io, taskId, stage, { ok: false, note: `子 agent 未正常结束（${c.reason}）`, ...usage })
+  if (!c.ok) return finished(io, taskId, ref, { ok: false, note: `子 agent 未正常结束（${c.reason}）`, ...usage })
 
   switch (stage) {
     case 'spec': {
       const ok = c.answer.trim() !== ''
       await addArtifact(io, task, 'spec', '01-spec.md', c.answer)
-      return finished(io, taskId, stage, { ok, note: ok ? undefined : 'Spec 为空', ...usage })
+      return finished(io, taskId, ref, { ok, note: ok ? undefined : 'Spec 为空', ...usage })
     }
     case 'dev': {
       const n = task.stages.dev.attempts
@@ -399,18 +502,18 @@ const onAgentDone = async (io: Io, taskId: string, stage: StageId, c: Completion
           commit = await git(io, ['-c', 'user.name=devbench', '-c', 'user.email=devbench@localhost', 'commit', '-m', message], cwd)
         }
         if (commit.exitCode !== 0) {
-          return finished(io, taskId, stage, { ok: false, note: `提交失败：${tail(commit.stderr)}`, ...usage })
+          return finished(io, taskId, ref, { ok: false, note: `提交失败：${tail(commit.stderr)}`, ...usage })
         }
       }
       const diff = await git(io, ['diff', `${task.git.baseSha}..HEAD`], cwd)
       task = await addArtifact(io, task, 'dev', '02-diff.patch', diff.stdout)
       const ok = diff.stdout.trim() !== ''
-      return finished(io, taskId, stage, { ok, note: ok ? undefined : '开发阶段没有产生任何代码变更', ...usage })
+      return finished(io, taskId, ref, { ok, note: ok ? undefined : '开发阶段没有产生任何代码变更', ...usage })
     }
     case 'review': {
       const verdict = parseVerdict(c.answer)
       await addArtifact(io, task, 'review', `04-review-${task.stages.review.attempts}.json`, JSON.stringify(verdict, null, 2))
-      return finished(io, taskId, stage, { ok: verdict.verdict === 'pass', note: verdictFeedback(verdict), ...usage })
+      return finished(io, taskId, ref, { ok: verdict.verdict === 'pass', note: verdictFeedback(verdict), ...usage })
     }
     default:
       return
@@ -469,8 +572,9 @@ const newTask = async (io: Io, request: string): Promise<string> => {
 const HELP = `用法：
 /devbench new <需求>      创建任务并开始流水线
 /devbench approve         批准当前等待的阶段
-/devbench reject <理由>   驳回（Spec 重写 / 合并前回到开发 / 跳过部署）
+/devbench reject <理由>   驳回，必须写理由（Spec 重写 / 合并前回到评审 / 跳过部署）
 /devbench retry           重试当前阶段
+/devbench skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
 /devbench abort           中止当前任务
 /devbench list            列出任务
 /devbench select <id>     切换面板显示的任务
@@ -489,14 +593,20 @@ const command = async (io: Io, args: string): Promise<string> => {
     case 'approve':
     case 'reject':
     case 'retry':
+    case 'skip':
     case 'abort': {
-      const task = await findTask(io, sub === 'reject' ? undefined : rest[0])
+      const withReason = sub === 'reject' || sub === 'skip'
+      const task = await findTask(io, withReason ? undefined : rest[0])
       if (task === undefined) return '没有任务。'
       const event: Event =
-        sub === 'reject' ? { kind: 'reject', reason: arg || '未说明理由' } : { kind: sub }
+        sub === 'reject'
+          ? { kind: 'reject', reason: arg }
+          : sub === 'skip'
+            ? { kind: 'skip', reason: arg || '手动跳过' }
+            : { kind: sub }
       const action = await dispatch(io, task.id, event)
       if (action?.kind === 'none' && action.reason !== undefined) return `「${task.title}」：${action.reason}`
-      return `「${task.title}」：已${{ approve: '批准', reject: '驳回', retry: '重试', abort: '中止' }[sub]}`
+      return `「${task.title}」：已${{ approve: '批准', reject: '驳回', retry: '重试', skip: '跳过', abort: '中止' }[sub]}`
     }
     case 'list': {
       const list = await io.tasks()
@@ -558,7 +668,10 @@ export const register: Register = on => {
       exists: path => $.fs.exists(path),
       list: path => $.fs.list(path),
       run: (argv, init) => $.process.run(argv, init),
+      spawnProcess: request => $.process.spawn(request),
       spawn: input => $.agent.spawn(input),
+      stopAgent: id => $.tool.call({ tool: 'TaskStop', task_id: id }),
+      fillPrompt: text => $.prompt.fill({ text, mode: 'replace' }),
       toast: (text, options) => $.ui.toast(text, options),
       notify: (text, options) => $.ui.notify(text, options),
       status: text => $.ui.status(text),
@@ -572,7 +685,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'devbench',
       description: 'AI 开发工作台：需求→开发→测试→评审→合并→部署',
-      argumentHint: '[new <需求> | approve | reject <理由> | retry | abort | list]',
+      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list]',
     })
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
     if (top?.exitCode === 0 && top.stdout.trim() !== '') root = top.stdout.trim()
@@ -620,10 +733,12 @@ export const register: Register = on => {
     const bench = io
     if (agentId === undefined || bench === undefined) return result
     const usage = e.usage
+    const status = (await $.agent.list()).find(a => a.id === agentId)?.status
     const completion: Completion = {
       answer: e.answer,
       ok: e.reason === 'answer',
       reason: e.reason,
+      final: isFinalAgentStatus(status),
       durationMs: e.durationMs,
       tokens:
         usage === undefined
@@ -643,8 +758,17 @@ export const register: Register = on => {
       bench.after(60_000, () => early.delete(agentId))
       return result
     }
+    const ref = { stage: owner.current, seq: owner.stages[owner.current].seq }
+    if (!completion.final) {
+      // 中途的 turn（例如在等后台命令）：只累计用量，等 agent 真正结束。
+      const { durationMs, tokens, model } = completion
+      bench.after(0, () => {
+        void dispatch(bench, owner.id, { kind: 'progress', ...ref, durationMs, tokens, model })
+      })
+      return result
+    }
     bench.after(0, () => {
-      void onAgentDone(bench, owner.id, owner.current, completion)
+      void onAgentDone(bench, owner.id, ref, completion)
     })
     return result
   })
@@ -705,21 +829,28 @@ export const register: Register = on => {
           </Text>
           <Text dimColor wrap="truncate-start">产物目录：{join(task.dir, 'artifacts')}</Text>
         </Box>
-        {task.status === 'waiting' && (
+        {(task.status === 'waiting' || task.status === 'failed' || task.status === 'aborted') && (
           <Box flexDirection="row" gap={1}>
-            <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }))}>
-              批准{stageDef(task.current).label}
-            </Button>
-            <Button key="reject" hotkey="r" onPress={() => void (io && dispatch(io, task.id, { kind: 'reject', reason: '在面板中驳回' }))}>
-              驳回
-            </Button>
-          </Box>
-        )}
-        {(task.status === 'failed' || task.status === 'aborted') && (
-          <Box flexDirection="row" gap={1}>
-            <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }))}>
-              重试当前阶段
-            </Button>
+            {task.status === 'waiting' && (
+              <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }))}>
+                批准{stageDef(task.current).label}
+              </Button>
+            )}
+            {task.status === 'waiting' && (
+              <Button key="reject" hotkey="r" onPress={() => void (io && askRejectReason(io))}>
+                驳回
+              </Button>
+            )}
+            {task.status !== 'waiting' && (
+              <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }))}>
+                重试当前阶段
+              </Button>
+            )}
+            {(task.status === 'waiting' || task.status === 'failed') && stageDef(task.current).skippable && (
+              <Button key="skip" hotkey="s" onPress={() => void (io && dispatch(io, task.id, { kind: 'skip', reason: '在面板中跳过' }))}>
+                跳过{stageDef(task.current).label}
+              </Button>
+            )}
           </Box>
         )}
         {others.length > 0 && (
