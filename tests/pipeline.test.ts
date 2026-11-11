@@ -289,8 +289,11 @@ test('重试运行中的测试后，旧进程的结果不算到新的这次运�
   expect(retried.action).toEqual({ kind: 'run', stage: 'test' })
 
   const stale = reduce(retried.task, { ...bad('test', '旧进程：exit 1'), seq: running.stages.test.seq }, 11_000, FULL)
-  expect(stale.task).toBe(retried.task)
   expect(stale.action.kind).toBe('none')
+  expect(stale.task.current).toBe('test')
+  expect(stale.task.stages.test.status).toBe('running')
+  expect(stale.task.stages.test.seq).toBe(2)
+  expect(stale.task.stages.test.note).toBe(undefined)
 
   const fresh = step(stale.task, ok('test'), 12_000)
   expect(fresh.action).toEqual({ kind: 'run', stage: 'review' })

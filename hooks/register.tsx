@@ -70,7 +70,7 @@ const DATA_DIR = '.devbench'
 const LIMIT = 1_000_000
 
 const tasksAtom = atom({ plugin: 'devbench', key: 'tasks' } as const, [] as Task[], {
-  shape: 'tasks-2',
+  shape: 'tasks-3',
 })
 const selectedAtom = atom({ plugin: 'devbench', key: 'selected' } as const, null as string | null)
 
@@ -160,11 +160,17 @@ const save = async (io: Io, task: Task): Promise<void> => {
   await io.write(taskFile(task), JSON.stringify(task, null, 2))
 }
 
-/** 加 seq 之前写的 task.json：用 attempts 补上，否则运行中的那次再也认领不到结果。 */
-const withSeq = (task: Task): Task => ({
+/**
+ * 旧版本写的 task.json：没有 seq 的用 attempts 补上，否则运行中的那次再也认领不到结果；
+ * 没有 runs 的补空数组，那之前的运行只剩累计值（时间线会注明）。
+ */
+const migrate = (task: Task): Task => ({
   ...task,
   stages: Object.fromEntries(
-    STAGES.map(s => [s.id, { ...task.stages[s.id], seq: task.stages[s.id].seq ?? task.stages[s.id].attempts }]),
+    STAGES.map(s => {
+      const run = task.stages[s.id]
+      return [s.id, { ...run, seq: run.seq ?? run.attempts, runs: run.runs ?? [] }]
+    }),
   ) as Task['stages'],
 })
 
@@ -176,7 +182,7 @@ const loadTasks = async (io: Io): Promise<Task[]> => {
   for (const entry of entries) {
     if (entry.kind !== 'dir') continue
     const task = (await readJson(io, join(dir, entry.name, 'task.json'))) as Task | undefined
-    if (task?.id !== undefined) tasks.push(withSeq(task))
+    if (task?.id !== undefined) tasks.push(migrate(task))
   }
   return tasks.sort((a, b) => a.createdAt - b.createdAt)
 }
