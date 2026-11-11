@@ -384,8 +384,15 @@ export const annotateRun = (
   return setRecord(claimed, ref.stage, ref.seq, () => patch)
 }
 
-/** 产物名并进阶段的产物列表；runName 记到这次运行上（被覆盖的产物传带 seq 的副本名）。 */
-export const withArtifact = (task: Task, ref: RunRef, name: string, runName = name): Task => {
+/** 每次运行都会覆盖的产物（spec、diff、合并与部署日志）另存的副本名：02-diff.patch → 02-diff-3.patch。 */
+export const versionedName = (name: string, seq: number): string => {
+  const dot = name.lastIndexOf('.')
+  return dot <= 0 ? `${name}-${seq}` : `${name.slice(0, dot)}-${seq}${name.slice(dot)}`
+}
+
+/** 产物名并进阶段的产物列表；记到这次运行上的是 versioned 时的副本名，否则就是它本身。 */
+export const withArtifact = (task: Task, ref: RunRef, name: string, versioned = false): Task => {
+  const runName = versioned ? versionedName(name, ref.seq) : name
   const run = task.stages[ref.stage]
   const listed = run.artifacts.includes(name) ? task : setStage(task, ref.stage, { artifacts: [...run.artifacts, name] })
   return setRecord(listed, ref.stage, ref.seq, r => ({ artifacts: r.artifacts.includes(runName) ? r.artifacts : [...r.artifacts, runName] }))

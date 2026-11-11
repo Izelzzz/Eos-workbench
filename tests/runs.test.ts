@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 
 import type { RunRecord, Task } from '../types'
 import { flowMetrics } from '../hooks/core/metrics'
-import { STAGES, annotateRun, emptyRun, reduce, startTask, withArtifact } from '../hooks/core/pipeline'
+import { STAGES, annotateRun, emptyRun, reduce, startTask, versionedName, withArtifact } from '../hooks/core/pipeline'
 import type { Event, MachineConfig, RunRef } from '../hooks/core/pipeline'
 
 const FULL: MachineConfig = { maxRework: 2, hasTest: true, hasDeploy: true }
@@ -120,8 +120,10 @@ test('子 agent 启动后的配置和产物记到对应那次运行上', () => {
   expect(annotated.stages.dev.agentId).toBe('a1')
   expect(annotated.stages.dev.runs[0]).toMatchObject({ agentId: 'a1', model: 'opus', effort: 'high', skills: ['pstack:poteto-mode'] })
 
-  const once = withArtifact(annotated, ref, '02-diff.patch', '02-diff-1.patch')
-  const twice = withArtifact(once, ref, '02-diff.patch', '02-diff-1.patch')
+  const once = withArtifact(annotated, ref, '02-diff.patch', true)
+  const twice = withArtifact(once, ref, '02-diff.patch', true)
   expect(twice.stages.dev.artifacts).toEqual(['02-diff.patch'])
   expect(twice.stages.dev.runs[0]!.artifacts).toEqual(['02-diff-1.patch'])
+  expect(withArtifact(twice, ref, '02-dev-notes-1.md').stages.dev.runs[0]!.artifacts).toEqual(['02-diff-1.patch', '02-dev-notes-1.md'])
+  expect(versionedName('06-deploy.log', 2)).toBe('06-deploy-2.log')
 })
