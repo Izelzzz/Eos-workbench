@@ -46,6 +46,7 @@ type Options = {
   extraFiles?: Record<string, string>
   /** agent.spawn 立刻答复（默认一直挂着不返回）。hook 造不出 agentId，所以答复等同于启动失败。 */
   answerSpawn?: boolean
+  failEvents?: boolean
 }
 
 /** 引擎之下的世界：内存文件、git、可控的子进程和子 agent。 */
@@ -69,6 +70,7 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
     return { value: text }
   })
   on('fs.write', (_$, e) => {
+    if (options.failEvents === true && e.path.endsWith('events.jsonl')) throw new Error('EFBIG')
     files.set(e.path, e.text)
     return { value: undefined }
   })
@@ -374,4 +376,13 @@ test('/devbench log：按 events.jsonl 和运行明细输出时间线', async ($
   expect(lines[2]).toMatch(/^\d{4}-\d\d-\d\d$/)
   expect(text).toContain('  单元测试  1 次，放弃 2 次（0s） · 0s')
   expect((await w.devbench('log nope')).text).toBe('找不到任务 nope')
+})
+
+test('events.jsonl 写不进去时流水线照常推进', async ($, on) => {
+  const w = await world($, on, { failEvents: true })
+  await w.devbench('retry')
+  w.children[0]!.exit(0, '通过')
+  await w.clock.settle()
+  expect(w.saved().current).toBe('review')
+  expect(w.events()).toEqual([])
 })

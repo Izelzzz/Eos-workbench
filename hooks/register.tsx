@@ -239,8 +239,13 @@ const serial = <T,>(taskId: string, fn: () => Promise<T>): Promise<T> => {
  */
 const appendAudit = async (io: Io, task: Task, entry: AuditEntry): Promise<void> => {
   const path = eventsFile(task)
-  const prev = (await io.exists(path)) ? await io.read(path) : ''
-  await io.write(path, `${prev}${prev === '' || prev.endsWith('\n') ? '' : '\n'}${JSON.stringify(entry)}\n`)
+  try {
+    const prev = (await io.exists(path)) ? await io.read(path) : ''
+    await io.write(path, `${prev}${prev === '' || prev.endsWith('\n') ? '' : '\n'}${JSON.stringify(entry)}\n`)
+  } catch (error) {
+    // 任务状态已经保存：审计写不进去不能让流水线停在半路（例如文件超过引擎的 4 MiB 读写上限）。
+    io.toast(`devbench：审计记录写入失败（${error instanceof Error ? error.message : String(error)}），流水线继续`)
+  }
 }
 
 /** 把事件交给状态机，保存结果、写审计记录并执行下一步。同一任务的事件串行处理。 */
