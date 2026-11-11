@@ -50,7 +50,7 @@ const seed = (on: any, tasks: Task[]) => {
   on('clock.now', () => ({ value: 600_000 }))
   on('state.get', (_$: unknown, e: { key: string }) =>
     e.key === 'tasks'
-      ? { value: { value: { shape: 'tasks-1', value: tasks }, version: 1 } }
+      ? { value: { value: { shape: 'tasks-2', value: tasks }, version: 1 } }
       : { value: { value: null, version: 0 } },
   )
 }
