@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { DevbenchConfig, StageId, Task, Tokens } from '../types'
-import { auditEntry } from './core/audit'
+import { auditEntry, parseEntries } from './core/audit'
 import type { Actor, AuditEntry } from './core/audit'
 import { ROLE, skillFileCandidates, skillPlan, stageAgents } from './core/config'
 import type { AgentStage, SkillPlan, StageAgent } from './core/config'
@@ -43,6 +43,7 @@ import {
   specTask,
   withReadFirst,
 } from './core/prompts'
+import { formatTimeline } from './core/timeline'
 import { parseVerdict, verdictFeedback } from './core/verdict'
 
 type Engine = EngineInterface
@@ -280,6 +281,21 @@ const stopAgent = async (io: Io, id: string): Promise<void> => {
   } catch (error) {
     io.toast(`未能停止子 agent：${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+const timeline = async (io: Io, task: Task): Promise<string> => {
+  const path = eventsFile(task)
+  const entries = (await io.exists(path)) ? parseEntries(await io.read(path)) : []
+  return formatTimeline({ task, entries, now: await io.now(), offsetMinutes: ts => -new Date(ts).getTimezoneOffset() })
+}
+
+/**
+ * 面板按钮：把 /devbench log 填进输入框，回车即输出时间线。没有用 $.command.run：
+ * 它不经过发起调用的插件自己的 hook，devbench 的命令正是由自己的 hook 回答的。
+ */
+const showTimeline = async (io: Io, task: Task): Promise<void> => {
+  const filled = await io.fillPrompt(`/devbench log ${task.id}`)
+  if (!filled.isFilled) io.toast(`请输入 /devbench log ${task.id} 查看时间线`)
 }
 
 /** 驳回必须写理由，面板按钮没法输入，就把命令填进输入框让用户补上。 */
@@ -651,6 +667,7 @@ const HELP = `用法：
 /devbench skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
 /devbench abort           中止当前任务
 /devbench list            列出任务
+/devbench log [id]        任务的完整时间线：每次批准、驳回、运行与用量
 /devbench select <id>     切换面板显示的任务
 /devbench                 打开面板`
 
@@ -688,6 +705,11 @@ const command = async (io: Io, args: string): Promise<string> => {
       return list
         .map(t => `${t.id}  ${TASK_LABEL[t.status]}  ${stageDef(t.current).label}  ${t.title}`)
         .join('\n')
+    }
+    case 'log': {
+      const task = await findTask(io, arg)
+      if (task === undefined) return arg === '' ? '没有任务。' : `找不到任务 ${arg}`
+      return timeline(io, task)
     }
     case 'select': {
       const task = await findTask(io, arg)
@@ -761,7 +783,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'devbench',
       description: 'AI 开发工作台：需求→开发→测试→评审→合并→部署',
-      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list]',
+      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list | log [id]]',
     })
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
     if (top?.exitCode === 0 && top.stdout.trim() !== '') root = top.stdout.trim()
@@ -900,30 +922,31 @@ export const register: Register = on => {
           </Text>
           <Text dimColor wrap="truncate-start">产物目录：{join(task.dir, 'artifacts')}</Text>
         </Box>
-        {(task.status === 'waiting' || task.status === 'failed' || task.status === 'aborted') && (
-          <Box flexDirection="row" gap={1}>
-            {task.status === 'waiting' && (
-              <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }, 'panel'))}>
-                批准{stageDef(task.current).label}
-              </Button>
-            )}
-            {task.status === 'waiting' && (
-              <Button key="reject" hotkey="r" onPress={() => void (io && askRejectReason(io))}>
-                驳回
-              </Button>
-            )}
-            {task.status !== 'waiting' && (
-              <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }, 'panel'))}>
-                重试当前阶段
-              </Button>
-            )}
-            {(task.status === 'waiting' || task.status === 'failed') && stageDef(task.current).skippable && (
-              <Button key="skip" hotkey="s" onPress={() => void (io && dispatch(io, task.id, { kind: 'skip', reason: '在面板中跳过' }, 'panel'))}>
-                跳过{stageDef(task.current).label}
-              </Button>
-            )}
-          </Box>
-        )}
+        <Box flexDirection="row" gap={1}>
+          {task.status === 'waiting' && (
+            <Button key="approve" variant="primary" hotkey="a" onPress={() => void (io && dispatch(io, task.id, { kind: 'approve' }, 'panel'))}>
+              批准{stageDef(task.current).label}
+            </Button>
+          )}
+          {task.status === 'waiting' && (
+            <Button key="reject" hotkey="r" onPress={() => void (io && askRejectReason(io))}>
+              驳回
+            </Button>
+          )}
+          {(task.status === 'failed' || task.status === 'aborted') && (
+            <Button key="retry" variant="primary" onPress={() => void (io && dispatch(io, task.id, { kind: 'retry' }, 'panel'))}>
+              重试当前阶段
+            </Button>
+          )}
+          {(task.status === 'waiting' || task.status === 'failed') && stageDef(task.current).skippable && (
+            <Button key="skip" hotkey="s" onPress={() => void (io && dispatch(io, task.id, { kind: 'skip', reason: '在面板中跳过' }, 'panel'))}>
+              跳过{stageDef(task.current).label}
+            </Button>
+          )}
+          <Button key="log" hotkey="l" onPress={() => void (io && showTimeline(io, task))}>
+            时间线
+          </Button>
+        </Box>
         {others.length > 0 && (
           <Box flexDirection="column">
             <Text dimColor>其他进行中的任务：</Text>

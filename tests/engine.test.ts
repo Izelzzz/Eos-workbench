@@ -62,6 +62,7 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   const spawns: { subagentType: string; prompt: string; model?: string }[] = []
   const registered: Record<string, unknown>[] = []
 
+  const filled: string[] = []
   on('fs.read', (_$, e) => {
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -119,6 +120,10 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   on('ui.toast', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.notify', () => ({ value: { isSent: true as const, channel: 'client' as const } }))
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true as const }
+  })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
 
   await $.session.start({ cwd: ROOT, surface: null, isInteractive: false })
@@ -129,7 +134,7 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   }
   const saved = (): Task => JSON.parse(files.get(TASK_FILE)!) as Task
   const events = (): AuditEntry[] => parseEntries(files.get(`${ROOT}/.devbench/tasks/t1/events.jsonl`) ?? '')
-  return { clock, files, children, spawned, spawns, registered, devbench, saved, events }
+  return { clock, files, children, spawned, spawns, registered, devbench, saved, events, filled }
 }
 
 test('重试运行中的测试：停掉旧进程，新进程的结果记到新的这次运行上', async ($, on) => {
@@ -230,6 +235,10 @@ test('面板上的批准记为 panel', async ($, on) => {
   await w.devbench('abort')
   expect(w.events().map(e => `${e.actor} ${e.event.kind}`)).toEqual(['panel approve', 'command abort', 'process progress'])
   expect(w.saved().stages.merge.runs.map(r => r.outcome)).toEqual(['abandoned'])
+
+  await ui.press({ key: 'log' })
+  await w.clock.settle()
+  expect(w.filled).toEqual(['/devbench log t1'])
   await ui.unmount()
 })
 
@@ -342,4 +351,27 @@ test('被中止的子 agent 迟到的 turn：用量记到它那次运行上，�
   expect(task.stages.dev.runs[0]).toMatchObject({ outcome: 'abandoned', durationMs: 42_000, tokens: { input: 1000, output: 200 }, model: 'opus' })
   expect(w.events().map(e => `${e.actor} ${e.event.kind} ${e.accepted}`)).toEqual(['command abort true', 'agent progress true'])
   expect(w.files.has(`${task.dir}/artifacts/02-diff.patch`)).toBe(false)
+})
+
+test('/devbench log：按 events.jsonl 和运行明细输出时间线', async ($, on) => {
+  const w = await world($, on)
+  await w.devbench('retry')
+  await w.devbench('retry')
+  w.children[1]!.exit(1, '1 failed')
+  await w.clock.settle()
+  const { text } = await w.devbench('log')
+  const lines = (text ?? '').split('\n').map(l => l.replace(/^  \d\d:\d\d:\d\d  /, '  hh:mm:ss  '))
+  expect(lines.slice(0, 8)).toEqual([
+    '「示例」 t1 · 进行中',
+    '',
+    lines[2]!,
+    '  hh:mm:ss  [命令] 放弃 单元测试 第 1 次（重试） → 开始 单元测试 第 2 次',
+    '  hh:mm:ss  [命令] 放弃 单元测试 第 2 次（重试） → 开始 单元测试 第 3 次',
+    '  hh:mm:ss  [进程] 单元测试 第 2 次（已放弃）迟到的用量：0s，只记到这次运行上',
+    '  hh:mm:ss  [进程] 单元测试 第 3 次运行结束：失败 · 0s（exit 1） → 开始 代码开发 第 2 次',
+    '',
+  ])
+  expect(lines[2]).toMatch(/^\d{4}-\d\d-\d\d$/)
+  expect(text).toContain('  单元测试  1 次，放弃 2 次（0s） · 0s')
+  expect((await w.devbench('log nope')).text).toBe('找不到任务 nope')
 })
