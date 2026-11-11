@@ -7,6 +7,7 @@
 - 任何写代码的任务（功能、修 bug、重构、评审修复）都按 poteto mode 执行：先完整读 `pstack:poteto-mode` 的 `SKILL.md`，再读它附带的 `docs/harness/claude-code.md`，按里面的映射把 Cursor 的名字换成 Claude Code 的（`Task` → `Agent`，其他 pstack skill 用 `Read` 读 SKILL.md 后照做）。
 - 按 SKILL.md 匹配 playbook，把 playbook 的步骤原样列成待办，再开始做。
 - 需要 Cursor 专属能力的步骤（Bugbot、Automations、cloud agent、`cursor-team-kit` 里的 `deslop` 等）按 harness 文档跳过，并在回复里写一行 `Skipped in Claude Code: <步骤>. <原因>.`。
+- **只用主 agent，不开子 agent。** 为控制用量，poteto mode 里所有"交给子 agent / poteto-agent 实现"的步骤都由主 agent 自己完成；`how`、`why`、`arena`、`swarm`、`interrogate`、`reflect` 等要多个子 agent 并行的 skill 不用，或只按其思路在主 agent 内做。跳过时在回复里写一行 `Skipped: <步骤>. 只用主 agent。`。写和审分开的要求由下面的自检（含 `/engineering:code-review`）承担。
 - 下面的自检流程是 poteto mode 之外的附加要求，两者都要做。
 
 ## 写完代码后必须自检
