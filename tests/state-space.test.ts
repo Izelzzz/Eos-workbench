@@ -21,7 +21,7 @@ const draft = (): Task => ({
   stages: Object.fromEntries(STAGES.map(s => [s.id, emptyRun(s.id)])) as Task['stages'],
   rework: 0,
   firstPass: {},
-  git: { baseBranch: 'main', baseSha: 'abc', branch: 'devbench/t1', worktree: '/w' },
+  git: { baseBranch: 'main', baseSha: 'abc', branch: 'eos/t1', worktree: '/w' },
   dir: '/d',
 })
 

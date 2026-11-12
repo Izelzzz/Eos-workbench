@@ -4,11 +4,11 @@ import type { Task } from '../types'
 import { STAGES, emptyRun } from '../hooks/core/pipeline'
 
 const PANE = {
-  plugin: 'devbench',
+  plugin: 'eos',
   component: 'Pane',
-  requestId: 'devbench',
+  requestId: 'eos',
   props: {
-    title: 'Devbench',
+    title: 'Eos',
     isFocused: false,
     bodyColumns: 60,
     placement: 'dock',
@@ -41,8 +41,8 @@ const task: Task = {
   },
   rework: 1,
   firstPass: { test: true, review: false },
-  git: { baseBranch: 'main', baseSha: 'abc', branch: 'devbench/2611091200-ab12', worktree: '/w' },
-  dir: '/repo/.devbench/tasks/2611091200-ab12',
+  git: { baseBranch: 'main', baseSha: 'abc', branch: 'eos/2611091200-ab12', worktree: '/w' },
+  dir: '/repo/.eos/tasks/2611091200-ab12',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

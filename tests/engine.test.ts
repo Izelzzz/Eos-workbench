@@ -9,7 +9,7 @@ import { parseEntries } from '../hooks/core/audit'
 import type { AuditEntry } from '../hooks/core/audit'
 
 const ROOT = '/repo'
-const TASK_FILE = `${ROOT}/.devbench/tasks/t1/task.json`
+const TASK_FILE = `${ROOT}/.eos/tasks/t1/task.json`
 
 const testRunning = (): Task => ({
   id: 't1',
@@ -34,8 +34,8 @@ const testRunning = (): Task => ({
   },
   rework: 0,
   firstPass: {},
-  git: { baseBranch: 'main', baseSha: 'abc', branch: 'devbench/t1', worktree: `${ROOT}/.devbench/worktrees/t1` },
-  dir: `${ROOT}/.devbench/tasks/t1`,
+  git: { baseBranch: 'main', baseSha: 'abc', branch: 'eos/t1', worktree: `${ROOT}/.eos/worktrees/t1` },
+  dir: `${ROOT}/.eos/tasks/t1`,
 })
 
 type Child = { argv: readonly string[]; killed: boolean; exit: (code: number, text: string) => void }
@@ -47,15 +47,18 @@ type Options = {
   /** agent.spawn 立刻答复（默认一直挂着不返回）。hook 造不出 agentId，所以答复等同于启动失败。 */
   answerSpawn?: boolean
   failEvents?: boolean
+  /** 改名前的布局：任务在 .devbench/tasks，配置是 .devbench.json。 */
+  legacy?: boolean
 }
 
 /** 引擎之下的世界：内存文件、git、可控的子进程和子 agent。 */
 const world = async ($: Engine, on: On, options: Options = {}) => {
   const clock = mock.clock(on)
   mock.env(on, { HOME: '/home/u' })
+  const base = options.legacy === true ? '.devbench' : '.eos'
   const files = new Map<string, string>([
-    [TASK_FILE, JSON.stringify(options.task ?? testRunning())],
-    [`${ROOT}/.devbench.json`, JSON.stringify({ testCommand: ['npm', 'test'], setupCommand: null, ...options.config })],
+    [`${ROOT}/${base}/tasks/t1/task.json`, JSON.stringify(options.task ?? testRunning())],
+    [`${ROOT}/${base === '.eos' ? '.eos.json' : '.devbench.json'}`, JSON.stringify({ testCommand: ['npm', 'test'], setupCommand: null, ...options.config })],
     ...Object.entries(options.extraFiles ?? {}),
   ])
   const children: Child[] = []
@@ -75,9 +78,10 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
     return { value: undefined }
   })
   on('fs.exists', (_$, e) => ({ value: [...files.keys()].some(p => p === e.path || p.startsWith(`${e.path}/`)) }))
-  on('fs.list', (_$, e) => ({
-    value: e.path === `${ROOT}/.devbench/tasks` ? [{ name: 't1', kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false }] : [],
-  }))
+  on('fs.list', (_$, e) => {
+    const names = new Set([...files.keys()].filter(p => p.startsWith(`${e.path}/`)).map(p => p.slice(e.path.length + 1).split('/')[0]!))
+    return { value: [...names].map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) }
+  })
   on('process.run', (_$, e) => ({
     value: {
       exitCode: 0,
@@ -129,22 +133,22 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
 
   await $.session.start({ cwd: ROOT, surface: null, isInteractive: false })
-  const devbench = async (args: string) => {
-    const r = await $.command.run({ command: 'devbench', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  const eos = async (args: string) => {
+    const r = await $.command.run({ command: 'eos', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
     await clock.settle()
     return r
   }
   const saved = (): Task => JSON.parse(files.get(TASK_FILE)!) as Task
-  const events = (): AuditEntry[] => parseEntries(files.get(`${ROOT}/.devbench/tasks/t1/events.jsonl`) ?? '')
-  return { clock, files, children, spawned, spawns, registered, devbench, saved, events, filled }
+  const events = (): AuditEntry[] => parseEntries(files.get(`${ROOT}/.eos/tasks/t1/events.jsonl`) ?? '')
+  return { clock, files, children, spawned, spawns, registered, eos, saved, events, filled }
 }
 
 test('重试运行中的测试：停掉旧进程，新进程的结果记到新的这次运行上', async ($, on) => {
   const w = await world($, on)
-  await w.devbench('retry')
+  await w.eos('retry')
   expect(w.children.map(c => c.argv.join(' '))).toEqual(['npm test'])
 
-  await w.devbench('retry')
+  await w.eos('retry')
   expect(w.children.length).toBe(2)
   expect(w.children[0]!.killed).toBe(true)
   expect(w.children[1]!.killed).toBe(false)
@@ -156,13 +160,13 @@ test('重试运行中的测试：停掉旧进程，新进程的结果记到新�
   expect(task.rework).toBe(0)
   expect(task.current).toBe('review')
   expect(w.files.get(`${task.dir}/artifacts/03-test-1.log`)).toContain('新进程：全部通过')
-  expect(w.spawned).toEqual(['devbench:reviewer'])
+  expect(w.spawned).toEqual(['eos:reviewer'])
 })
 
 test('中止运行中的测试：停掉进程，任务中止，不再记结果', async ($, on) => {
   const w = await world($, on)
-  await w.devbench('retry')
-  await w.devbench('abort')
+  await w.eos('retry')
+  await w.eos('abort')
   expect(w.children[0]!.killed).toBe(true)
   const task = w.saved()
   expect(task.status).toBe('aborted')
@@ -172,7 +176,7 @@ test('中止运行中的测试：停掉进程，任务中止，不再记结果',
 
 test('测试命令超过 600 秒：停掉进程，按失败处理', async ($, on) => {
   const w = await world($, on)
-  await w.devbench('retry')
+  await w.eos('retry')
   await w.clock.advance(600_000)
   await w.clock.settle()
   expect(w.children[0]!.killed).toBe(true)
@@ -184,9 +188,9 @@ test('测试命令超过 600 秒：停掉进程，按失败处理', async ($, on
 
 test('events.jsonl：每次交给状态机的事件一行，带着发起者；被放弃的进程只记用量', async ($, on) => {
   const w = await world($, on)
-  await w.devbench('retry')
-  await w.devbench('retry')
-  await w.devbench('approve')
+  await w.eos('retry')
+  await w.eos('retry')
+  await w.eos('approve')
   w.children[1]!.exit(0, '通过')
   await w.clock.settle()
   const lines = w.events().map(e => `${e.actor} ${e.event.kind}${'seq' in e.event ? `#${e.event.seq}` : ''} ${e.accepted ? '生效' : '未生效'}`)
@@ -201,9 +205,9 @@ test('events.jsonl：每次交给状态机的事件一行，带着发起者；�
   expect(task.stages.test.runs.map(r => `${r.seq}:${r.cause}:${r.outcome}`)).toEqual(['1:initial:abandoned', '2:retry:abandoned', '3:retry:passed'])
   expect(task.stages.test.runs.at(-1)!.artifacts).toEqual(['03-test-1.log'])
 
-  const before = w.files.get(`${ROOT}/.devbench/tasks/t1/events.jsonl`)!
-  await w.devbench('abort')
-  expect(w.files.get(`${ROOT}/.devbench/tasks/t1/events.jsonl`)!.startsWith(before)).toBe(true)
+  const before = w.files.get(`${ROOT}/.eos/tasks/t1/events.jsonl`)!
+  await w.eos('abort')
+  expect(w.files.get(`${ROOT}/.eos/tasks/t1/events.jsonl`)!.startsWith(before)).toBe(true)
   expect(w.events().at(-1)).toMatchObject({ actor: 'command', event: { kind: 'abort' }, stage: 'review', after: { status: 'aborted' } })
 })
 
@@ -225,22 +229,22 @@ const reviewWaitingMerge = (): Task => {
 test('面板上的批准记为 panel', async ($, on) => {
   const w = await world($, on, { task: reviewWaitingMerge() })
   const ui = await $.ui.mount({
-    plugin: 'devbench',
+    plugin: 'eos',
     component: 'Pane',
-    requestId: 'devbench',
+    requestId: 'eos',
     surface: 'terminal',
-    props: { title: 'Devbench', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+    props: { title: 'Eos', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
   })
   await ui.press({ key: 'approve' })
   await w.clock.settle()
   expect(w.events()[0]).toMatchObject({ actor: 'panel', event: { kind: 'approve' }, stage: 'merge', accepted: true, action: { kind: 'run', stage: 'merge' } })
-  await w.devbench('abort')
+  await w.eos('abort')
   expect(w.events().map(e => `${e.actor} ${e.event.kind}`)).toEqual(['panel approve', 'command abort', 'process progress'])
   expect(w.saved().stages.merge.runs.map(r => r.outcome)).toEqual(['abandoned'])
 
   await ui.press({ key: 'log' })
   await w.clock.settle()
-  expect(w.filled).toEqual(['/devbench log t1'])
+  expect(w.filled).toEqual(['/eos log t1'])
   await ui.unmount()
 })
 
@@ -249,7 +253,7 @@ test('旧版本的 task.json（没有 runs）照常载入并继续推进', async
   for (const s of STAGES) delete (legacy.stages[s.id] as Partial<Task['stages']['spec']>).runs
   expect(legacy.stages.test.runs).toBe(undefined)
   const w = await world($, on, { task: legacy })
-  await w.devbench('retry')
+  await w.eos('retry')
   w.children[0]!.exit(0, '通过')
   await w.clock.settle()
   const task = w.saved()
@@ -290,10 +294,10 @@ test('阶段配置：模型、effort、skill 用在启动的子 agent 上并记�
       [POTETO]: '---\nname: poteto-mode\ndisable-model-invocation: true\n---\n# Poteto mode\n',
     },
   })
-  await w.devbench('approve')
+  await w.eos('approve')
   await w.clock.settle()
   expect(w.spawns).toHaveLength(1)
-  expect(w.spawns[0]!.subagentType).toBe('devbench:developer')
+  expect(w.spawns[0]!.subagentType).toBe('eos:developer')
   expect(w.spawns[0]!.model).toBe('opus')
   expect(w.spawns[0]!.prompt.startsWith(`先完整阅读并遵循 ${POTETO}\n\n`)).toBe(true)
   expect(w.registered.at(-1)).toMatchObject({ name: 'developer', effort: 'high', skills: ['engineering:code-review'] })
@@ -303,8 +307,8 @@ test('阶段配置：模型、effort、skill 用在启动的子 agent 上并记�
 
 test('没有 stages 配置时沿用 models：评审默认 sonnet，不带 effort 和 skill', async ($, on) => {
   const w = await world($, on, { task: reviewWaitingMerge() })
-  await w.devbench('reject 命名不对')
-  expect(w.spawns[0]).toMatchObject({ subagentType: 'devbench:reviewer', model: 'sonnet' })
+  await w.eos('reject 命名不对')
+  expect(w.spawns[0]).toMatchObject({ subagentType: 'eos:reviewer', model: 'sonnet' })
   const spec = w.registered.filter(r => r.name === 'reviewer').at(-1)!
   expect('effort' in spec || 'skills' in spec).toBe(false)
   expect(w.saved().stages.review.runs.at(-1)).toMatchObject({ seq: 2, cause: 'reject' })
@@ -336,7 +340,7 @@ test('被中止的子 agent 迟到的 turn：用量记到它那次运行上，�
   on('tool.call', () => ({ result: 'stopped' }))
   on('turn.complete', () => ({ text: '' }))
   const w = await world($, on, { task: devRunningWithAgent() })
-  await w.devbench('abort')
+  await w.eos('abort')
   await $.turn.complete({
     answer: '做完了',
     durationMs: 42_000,
@@ -355,13 +359,13 @@ test('被中止的子 agent 迟到的 turn：用量记到它那次运行上，�
   expect(w.files.has(`${task.dir}/artifacts/02-diff.patch`)).toBe(false)
 })
 
-test('/devbench log：按 events.jsonl 和运行明细输出时间线', async ($, on) => {
+test('/eos log：按 events.jsonl 和运行明细输出时间线', async ($, on) => {
   const w = await world($, on)
-  await w.devbench('retry')
-  await w.devbench('retry')
+  await w.eos('retry')
+  await w.eos('retry')
   w.children[1]!.exit(1, '1 failed')
   await w.clock.settle()
-  const { text } = await w.devbench('log')
+  const { text } = await w.eos('log')
   const lines = (text ?? '').split('\n').map(l => l.replace(/^  \d\d:\d\d:\d\d  /, '  hh:mm:ss  '))
   expect(lines.slice(0, 8)).toEqual([
     '「示例」 t1 · 进行中',
@@ -375,14 +379,24 @@ test('/devbench log：按 events.jsonl 和运行明细输出时间线', async ($
   ])
   expect(lines[2]).toMatch(/^\d{4}-\d\d-\d\d$/)
   expect(text).toContain('  单元测试  1 次，放弃 2 次（0s） · 0s')
-  expect((await w.devbench('log nope')).text).toBe('找不到任务 nope')
+  expect((await w.eos('log nope')).text).toBe('找不到任务 nope')
 })
 
 test('events.jsonl 写不进去时流水线照常推进', async ($, on) => {
   const w = await world($, on, { failEvents: true })
-  await w.devbench('retry')
+  await w.eos('retry')
   w.children[0]!.exit(0, '通过')
   await w.clock.settle()
   expect(w.saved().current).toBe('review')
   expect(w.events()).toEqual([])
+})
+
+test('改名前 .devbench 里的任务和 .devbench.json 配置仍被读取', async ($, on) => {
+  const w = await world($, on, { legacy: true, config: { testCommand: ['make', 'check'] } })
+  const listed = await w.eos('list')
+  expect(listed.text).toContain('t1')
+  await w.eos('retry')
+  expect(w.children.at(-1)?.argv).toEqual(['make', 'check'])
+  w.children.at(-1)?.exit(0, 'ok')
+  await w.clock.settle()
 })

@@ -1,6 +1,6 @@
 ---
 name: verify-stage-state-machine
-description: 穷举验证 devbench 流水线状态机（hooks/core/pipeline.ts 的 reduce、TRANSITIONS、abandonedRun、运行记录 runs）。改动 hooks/core/pipeline.ts、阶段失败或驳回的去向表 TRANSITIONS、STAGES、Event 或 types/index.d.ts 里的 Task / StageRun / RunRecord 时使用；提交前必须跑一遍。
+description: 穷举验证 Eos 流水线状态机（hooks/core/pipeline.ts 的 reduce、TRANSITIONS、abandonedRun、运行记录 runs）。改动 hooks/core/pipeline.ts、阶段失败或驳回的去向表 TRANSITIONS、STAGES、Event 或 types/index.d.ts 里的 Task / StageRun / RunRecord 时使用；提交前必须跑一遍。
 ---
 
 # 验证流水线状态机

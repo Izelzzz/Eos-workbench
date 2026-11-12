@@ -1,5 +1,5 @@
 // 子 agent 阶段的配置：模型、effort、skill，以及哪些 skill 不能预加载、要改成在提示词里要求先读。纯函数。
-import type { DevbenchConfig, StageAgentConfig } from '../../types'
+import type { EosConfig, StageAgentConfig } from '../../types'
 
 export type AgentStage = 'spec' | 'dev' | 'review'
 
@@ -18,7 +18,7 @@ export type StageAgent = { model: string; effort?: string | number; skills: stri
 
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
 
-/** .devbench.json 是手写的：类型不对的字段当作没写，而不是让阶段启动失败。 */
+/** .eos.json 是手写的：类型不对的字段当作没写，而不是让阶段启动失败。 */
 const parseStage = (raw: unknown): StageAgentConfig => {
   if (typeof raw !== 'object' || raw === null) return {}
   const r = raw as Record<string, unknown>
@@ -28,7 +28,7 @@ const parseStage = (raw: unknown): StageAgentConfig => {
 }
 
 /** stages.<阶段>.model 优先，其次 models.<角色>，最后是默认值。 */
-export const stageAgents = (raw: Pick<DevbenchConfig, 'models' | 'stages'>): Record<AgentStage, StageAgent> => {
+export const stageAgents = (raw: Pick<EosConfig, 'models' | 'stages'>): Record<AgentStage, StageAgent> => {
   const stages = (typeof raw.stages === 'object' && raw.stages !== null ? raw.stages : {}) as Record<string, unknown>
   return Object.fromEntries(
     AGENT_STAGES.map(id => {

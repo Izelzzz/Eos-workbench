@@ -1,4 +1,4 @@
-// /devbench log 的时间线：events.jsonl 的每一行一条，加上每个阶段运行明细的汇总。纯函数。
+// /eos log 的时间线：events.jsonl 的每一行一条，加上每个阶段运行明细的汇总。纯函数。
 import type { RunRecord, StageId, Task, Tokens } from '../../types'
 import type { Actor, AuditEntry } from './audit'
 import { TASK_LABEL, flowMetrics, formatDuration, formatTokens, inputTotal } from './metrics'

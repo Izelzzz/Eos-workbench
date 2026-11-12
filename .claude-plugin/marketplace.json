@@ -1,13 +1,13 @@
 {
-  "name": "agents-pipeline",
+  "name": "eos-workbench",
   "owner": {
     "name": "Izelzzz"
   },
   "plugins": [
     {
-      "name": "devbench",
+      "name": "eos",
       "source": "./"
     }
   ],
-  "description": "个人 AI 开发工作台（Claude Code mod）"
+  "description": "Eos Workbench：个人 AI 开发工作台（Claude Code mod）"
 }

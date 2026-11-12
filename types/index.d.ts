@@ -1,4 +1,4 @@
-// devbench 的类型契约：任务、阶段运行记录，以及 $.state 中保存的值。
+// Eos 的类型契约：任务、阶段运行记录，以及 $.state 中保存的值。
 
 /** 流水线中的阶段 id，顺序见 hooks/core/pipeline.ts 的 STAGES。 */
 export type StageId = 'spec' | 'dev' | 'test' | 'review' | 'merge' | 'deploy'
@@ -114,8 +114,8 @@ export type StageAgentConfig = {
   skills?: string[]
 }
 
-/** .devbench.json 里的配置，均可省略。 */
-export type DevbenchConfig = {
+/** .eos.json 里的配置，均可省略。 */
+export type EosConfig = {
   /** 单元测试命令（argv，不经 shell）。省略时若 package.json 有 test 脚本则用 npm test，否则跳过该阶段。 */
   testCommand?: string[] | null
   /** 部署命令（argv）。省略则跳过部署阶段。 */
@@ -132,7 +132,7 @@ export type DevbenchConfig = {
 
 declare module 'claude-code' {
   interface PluginState {
-    devbench: {
+    eos: {
       tasks: Shaped<Task[]>
       selected: string | null
     }

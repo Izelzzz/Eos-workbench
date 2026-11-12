@@ -2,7 +2,7 @@
 import type { StageId, StageStatus, Task, TaskStatus } from '../../types'
 import type { Action, Event } from './pipeline'
 
-/** 谁触发的：/devbench 命令、面板按钮、子 agent 的回报、命令阶段的进程、devbench 自己。 */
+/** 谁触发的：/eos 命令、面板按钮、子 agent 的回报、命令阶段的进程、Eos 自己。 */
 export type Actor = 'command' | 'panel' | 'agent' | 'process' | 'system'
 
 /** 不经过状态机、但也要留痕的动作。 */

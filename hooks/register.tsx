@@ -1,9 +1,9 @@
-// devbench 引擎层：把纯逻辑（core/）接到 Claude Code 上。
+// Eos 引擎层：把纯逻辑（core/）接到 Claude Code 上。
 // 负责：命令、子 agent、执行阶段、记录用量、写产物、面板、受保护命令拦截。
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { DevbenchConfig, StageId, Task, Tokens } from '../types'
+import type { EosConfig, StageId, Task, Tokens } from '../types'
 import { auditEntry, parseEntries } from './core/audit'
 import type { Actor, AuditEntry } from './core/audit'
 import { ROLE, skillFileCandidates, skillPlan, stageAgents } from './core/config'
@@ -76,30 +76,33 @@ type Io = {
   select: (id: string) => Promise<unknown>
 }
 
-const PLUGIN = 'devbench'
-const PANE = 'devbench'
-const DATA_DIR = '.devbench'
+const PLUGIN = 'eos'
+const PANE = 'eos'
+const DATA_DIR = '.eos'
+/** 改名前（devbench）的数据目录和配置：只读，旧任务继续可见，task.dir 是绝对路径，写回仍落在原目录。 */
+const LEGACY_DATA_DIR = '.devbench'
+const LEGACY_CONFIG = '.devbench.json'
 const LIMIT = 1_000_000
 
-const tasksAtom = atom({ plugin: 'devbench', key: 'tasks' } as const, [] as Task[], {
+const tasksAtom = atom({ plugin: 'eos', key: 'tasks' } as const, [] as Task[], {
   shape: 'tasks-3',
 })
-const selectedAtom = atom({ plugin: 'devbench', key: 'selected' } as const, null as string | null)
+const selectedAtom = atom({ plugin: 'eos', key: 'selected' } as const, null as string | null)
 
-/** 三个子 agent 阶段的 agent 定义。model / effort / skill 来自 .devbench.json，每次启动前按当时的配置重新注册。 */
+/** 三个子 agent 阶段的 agent 定义。model / effort / skill 来自 .eos.json，每次启动前按当时的配置重新注册。 */
 const AGENTS: Record<AgentStage, { name: string; description: string; prompt: string; tools?: string[]; omitClaudeMd?: true }> = {
   spec: {
     name: ROLE.spec,
-    description: 'devbench 内部：把需求整理成 Spec',
+    description: 'Eos 内部：把需求整理成 Spec',
     prompt: PLANNER_PROMPT,
     // 只读：Spec 阶段在主仓库里运行，不给 Bash，避免改动主工作区。
     tools: ['Read', 'Grep', 'Glob'],
     omitClaudeMd: true,
   },
-  dev: { name: ROLE.dev, description: 'devbench 内部：在 worktree 中按 Spec 实现', prompt: DEVELOPER_PROMPT },
+  dev: { name: ROLE.dev, description: 'Eos 内部：在 worktree 中按 Spec 实现', prompt: DEVELOPER_PROMPT },
   review: {
     name: ROLE.review,
-    description: 'devbench 内部：独立评审变更并给出 JSON 结论',
+    description: 'Eos 内部：独立评审变更并给出 JSON 结论',
     prompt: REVIEWER_PROMPT,
     tools: ['Read', 'Grep', 'Glob'],
     omitClaudeMd: true,
@@ -148,7 +151,9 @@ const readJson = async (io: Io, path: string): Promise<Record<string, unknown> |
 }
 
 const loadConfig = async (io: Io): Promise<Resolved> => {
-  const raw = ((await readJson(io, join(root, '.devbench.json'))) ?? {}) as DevbenchConfig & {
+  const raw = ((await readJson(io, join(root, '.eos.json'))) ??
+    (await readJson(io, join(root, LEGACY_CONFIG))) ??
+    {}) as EosConfig & {
     setupCommand?: string[] | null
   }
   const pkg = await readJson(io, join(root, 'package.json'))
@@ -198,14 +203,15 @@ const migrate = (task: Task): Task => ({
 })
 
 const loadTasks = async (io: Io): Promise<Task[]> => {
-  const dir = join(root, DATA_DIR, 'tasks')
-  if (!(await io.exists(dir))) return []
-  const entries = await io.list(dir)
   const tasks: Task[] = []
-  for (const entry of entries) {
-    if (entry.kind !== 'dir') continue
-    const task = (await readJson(io, join(dir, entry.name, 'task.json'))) as Task | undefined
-    if (task?.id !== undefined) tasks.push(migrate(task))
+  for (const base of [DATA_DIR, LEGACY_DATA_DIR]) {
+    const dir = join(root, base, 'tasks')
+    if (!(await io.exists(dir))) continue
+    for (const entry of await io.list(dir)) {
+      if (entry.kind !== 'dir') continue
+      const task = (await readJson(io, join(dir, entry.name, 'task.json'))) as Task | undefined
+      if (task?.id !== undefined && !tasks.some(t => t.id === task.id)) tasks.push(migrate(task))
+    }
   }
   return tasks.sort((a, b) => a.createdAt - b.createdAt)
 }
@@ -244,7 +250,7 @@ const appendAudit = async (io: Io, task: Task, entry: AuditEntry): Promise<void>
     await io.write(path, `${prev}${prev === '' || prev.endsWith('\n') ? '' : '\n'}${JSON.stringify(entry)}\n`)
   } catch (error) {
     // 任务状态已经保存：审计写不进去不能让流水线停在半路（例如文件超过引擎的 4 MiB 读写上限）。
-    io.toast(`devbench：审计记录写入失败（${error instanceof Error ? error.message : String(error)}），流水线继续`)
+    io.toast(`Eos：审计记录写入失败（${error instanceof Error ? error.message : String(error)}），流水线继续`)
   }
 }
 
@@ -295,18 +301,18 @@ const timeline = async (io: Io, task: Task): Promise<string> => {
 }
 
 /**
- * 面板按钮：把 /devbench log 填进输入框，回车即输出时间线。没有用 $.command.run：
- * 它不经过发起调用的插件自己的 hook，devbench 的命令正是由自己的 hook 回答的。
+ * 面板按钮：把 /eos log 填进输入框，回车即输出时间线。没有用 $.command.run：
+ * 它不经过发起调用的插件自己的 hook，Eos 的命令正是由自己的 hook 回答的。
  */
 const showTimeline = async (io: Io, task: Task): Promise<void> => {
-  const filled = await io.fillPrompt(`/devbench log ${task.id}`)
-  if (!filled.isFilled) io.toast(`请输入 /devbench log ${task.id} 查看时间线`)
+  const filled = await io.fillPrompt(`/eos log ${task.id}`)
+  if (!filled.isFilled) io.toast(`请输入 /eos log ${task.id} 查看时间线`)
 }
 
 /** 驳回必须写理由，面板按钮没法输入，就把命令填进输入框让用户补上。 */
 const askRejectReason = async (io: Io): Promise<void> => {
-  const filled = await io.fillPrompt('/devbench reject ')
-  if (!filled.isFilled) io.toast('请输入 /devbench reject <理由> 驳回')
+  const filled = await io.fillPrompt('/eos reject ')
+  if (!filled.isFilled) io.toast('请输入 /eos reject <理由> 驳回')
 }
 
 const perform = async (io: Io, task: Task, action: Action, config: Resolved): Promise<void> => {
@@ -324,17 +330,17 @@ const perform = async (io: Io, task: Task, action: Action, config: Resolved): Pr
     case 'wait': {
       const text = `「${task.title}」等待批准：${stageDef(action.stage).label}`
       io.toast(text)
-      void io.notify(`${text}（/devbench approve 或在面板中批准）`, { title: 'Devbench' })
-      await io.open({ id: PANE, title: 'Devbench' })
+      void io.notify(`${text}（/eos approve 或在面板中批准）`, { title: 'Eos' })
+      await io.open({ id: PANE, title: 'Eos' })
       return
     }
     case 'done':
       io.toast(`「${task.title}」已完成`)
-      void io.notify(`「${task.title}」流水线已完成`, { title: 'Devbench' })
+      void io.notify(`「${task.title}」流水线已完成`, { title: 'Eos' })
       return
     case 'failed':
       io.toast(`「${task.title}」失败：${action.reason}`)
-      void io.notify(`「${task.title}」失败：${action.reason}`, { title: 'Devbench' })
+      void io.notify(`「${task.title}」失败：${action.reason}`, { title: 'Eos' })
       return
     case 'none':
       return
@@ -422,7 +428,7 @@ const runStage = async (io: Io, taskId: string, ref: RunRef, config: Resolved): 
 
     case 'dev': {
       if (task.stages.dev.attempts === 1 && config.setup !== null) {
-        io.status(`devbench：安装依赖 ${config.setup.join(' ')}`)
+        io.status(`Eos：安装依赖 ${config.setup.join(' ')}`)
         const setup = await exec(io, run, config.setup, task.git.worktree)
         io.status(undefined)
         if (setup === undefined) return abandoned()
@@ -435,7 +441,7 @@ const runStage = async (io: Io, taskId: string, ref: RunRef, config: Resolved): 
 
     case 'test': {
       const argv = config.test ?? []
-      io.status(`devbench：运行测试 ${argv.join(' ')}`)
+      io.status(`Eos：运行测试 ${argv.join(' ')}`)
       const result = await exec(io, run, argv, task.git.worktree)
       io.status(undefined)
       if (result === undefined) return abandoned()
@@ -518,7 +524,7 @@ const spawn = async (io: Io, task: Task, ref: AgentRef, config: Resolved, cwd: s
   const agent = config.agents[ref.stage]
   const def = AGENTS[ref.stage]
   const plan = await resolveSkills(io, agent.skills)
-  // agent 定义在 session.start 时注册过一次；按现在的 .devbench.json 重新注册（同名即替换），改了配置不用重启会话。
+  // agent 定义在 session.start 时注册过一次；按现在的 .eos.json 重新注册（同名即替换），改了配置不用重启会话。
   const refused = await io
     .registerAgent({
       ...def,
@@ -535,7 +541,7 @@ const spawn = async (io: Io, task: Task, ref: AgentRef, config: Resolved, cwd: s
   const spawned = await io.spawn({
     subagentType: `${PLUGIN}:${def.name}`,
     prompt: withReadFirst(prompt, plan.readFirst),
-    description: `devbench ${stageDef(ref.stage).label}：${task.title}`.slice(0, 80),
+    description: `eos ${stageDef(ref.stage).label}：${task.title}`.slice(0, 80),
     cwd,
     ...(agent.model === 'inherit' ? {} : { model: agent.model }),
   })
@@ -590,10 +596,10 @@ const onAgentDone = async (io: Io, taskId: string, ref: RunRef, c: Completion): 
       await git(io, ['add', '-A'], cwd)
       const staged = await git(io, ['diff', '--cached', '--quiet'], cwd)
       if (staged.exitCode !== 0) {
-        const message = `devbench(${task.id}): ${task.title} [dev #${n}]`
+        const message = `eos(${task.id}): ${task.title} [dev #${n}]`
         let commit = await git(io, ['commit', '-m', message], cwd)
         if (commit.exitCode !== 0) {
-          commit = await git(io, ['-c', 'user.name=devbench', '-c', 'user.email=devbench@localhost', 'commit', '-m', message], cwd)
+          commit = await git(io, ['-c', 'user.name=eos', '-c', 'user.email=eos@localhost', 'commit', '-m', message], cwd)
         }
         if (commit.exitCode !== 0) {
           return report({ ok: false, note: `提交失败：${tail(commit.stderr)}` })
@@ -617,9 +623,9 @@ const onAgentDone = async (io: Io, taskId: string, ref: RunRef, c: Completion): 
 // ---------- 命令 ----------
 
 const newTask = async (io: Io, request: string): Promise<string> => {
-  if (request.trim() === '') return '用法：/devbench new <需求描述>'
+  if (request.trim() === '') return '用法：/eos new <需求描述>'
   const inside = await git(io, ['rev-parse', '--is-inside-work-tree'])
-  if (inside.exitCode !== 0) return '当前目录不是 git 仓库，devbench 需要在 git 仓库中运行。'
+  if (inside.exitCode !== 0) return '当前目录不是 git 仓库，Eos 需要在 git 仓库中运行。'
   const top = (await git(io, ['rev-parse', '--show-toplevel'])).stdout.trim()
   if (top !== '') root = top
   const baseSha = (await git(io, ['rev-parse', 'HEAD'])).stdout.trim()
@@ -632,7 +638,7 @@ const newTask = async (io: Io, request: string): Promise<string> => {
   const id = `${stamp}-${rand}`
   const dir = join(root, DATA_DIR, 'tasks', id)
   const worktree = join(root, DATA_DIR, 'worktrees', id)
-  const branch = `devbench/${id}`
+  const branch = `eos/${id}`
 
   await io.write(join(root, DATA_DIR, '.gitignore'), '*\n')
   const added = await git(io, ['worktree', 'add', '-b', branch, worktree, baseSha])
@@ -658,23 +664,23 @@ const newTask = async (io: Io, request: string): Promise<string> => {
   await save(io, task)
   await appendAudit(io, task, auditEntry({ after: task, event: { kind: 'create', title, request: task.request }, action, actor: 'command', ts: now }))
   await io.select(id)
-  await io.open({ id: PANE, title: 'Devbench' })
+  await io.open({ id: PANE, title: 'Eos' })
   await perform(io, task, action, config)
-  const warn = config.test === null ? '\n⚠ 未检测到测试命令，单元测试阶段会被跳过（可在 .devbench.json 配置 testCommand）。' : ''
+  const warn = config.test === null ? '\n⚠ 未检测到测试命令，单元测试阶段会被跳过（可在 .eos.json 配置 testCommand）。' : ''
   return `已创建任务 ${id}：${title}\n分支 ${branch}，worktree ${worktree}${warn}`
 }
 
 const HELP = `用法：
-/devbench new <需求>      创建任务并开始流水线
-/devbench approve         批准当前等待的阶段
-/devbench reject <理由>   驳回，必须写理由（Spec 重写 / 合并前回到评审 / 跳过部署）
-/devbench retry           重试当前阶段
-/devbench skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
-/devbench abort           中止当前任务
-/devbench list            列出任务
-/devbench log [id]        任务的完整时间线：每次批准、驳回、运行与用量
-/devbench select <id>     切换面板显示的任务
-/devbench                 打开面板`
+/eos new <需求>      创建任务并开始流水线
+/eos approve         批准当前等待的阶段
+/eos reject <理由>   驳回，必须写理由（Spec 重写 / 合并前回到评审 / 跳过部署）
+/eos retry           重试当前阶段
+/eos skip <理由>     跳过当前等待中或失败的阶段（例如已手动合并）
+/eos abort           中止当前任务
+/eos list            列出任务
+/eos log [id]        任务的完整时间线：每次批准、驳回、运行与用量
+/eos select <id>     切换面板显示的任务
+/eos                 打开面板`
 
 const command = async (io: Io, args: string): Promise<string> => {
   const [sub = '', ...rest] = args.trim().split(/\s+/)
@@ -682,8 +688,8 @@ const command = async (io: Io, args: string): Promise<string> => {
   switch (sub) {
     case '':
     case 'open':
-      await io.open({ id: PANE, title: 'Devbench', focus: true })
-      return 'Devbench 面板已打开。'
+      await io.open({ id: PANE, title: 'Eos', focus: true })
+      return 'Eos 面板已打开。'
     case 'new':
       return newTask(io, arg)
     case 'approve':
@@ -720,7 +726,7 @@ const command = async (io: Io, args: string): Promise<string> => {
       const task = await findTask(io, arg)
       if (task === undefined) return `找不到任务 ${arg}`
       await io.select(task.id)
-      await io.open({ id: PANE, title: 'Devbench' })
+      await io.open({ id: PANE, title: 'Eos' })
       return `面板已切换到「${task.title}」`
     }
     default:
@@ -786,7 +792,7 @@ export const register: Register = on => {
     }
     root = e.cwd
     await $.command.register({
-      name: 'devbench',
+      name: 'eos',
       description: 'AI 开发工作台：需求→开发→测试→评审→合并→部署',
       argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list | log [id]]',
     })
@@ -796,19 +802,19 @@ export const register: Register = on => {
     if (onDisk.length > 0) await update($, tasksAtom, () => onDisk)
     // 启动时先注册一份默认定义，供 agent.offer 和 /agents 识别；每次阶段启动前会按配置重新注册。
     await Promise.all(Object.values(AGENTS).map(def => $.agent.register(def))).catch(err =>
-      $.ui.log(`devbench：注册子 agent 失败 ${String(err)}`, { to: 'debug' }),
+      $.ui.log(`Eos：注册子 agent 失败 ${String(err)}`, { to: 'debug' }),
     )
-    if (onDisk.some(t => !isTerminal(t))) void $.ui.open({ id: PANE, title: 'Devbench' })
+    if (onDisk.some(t => !isTerminal(t))) void $.ui.open({ id: PANE, title: 'Eos' })
     return started
   })
 
   // 三个阶段 agent 只供流水线使用，不出现在主模型的可选列表里。
-  on('agent.offer', { agent: 'devbench:planner' }, () => ({ isOffered: false }))
-  on('agent.offer', { agent: 'devbench:developer' }, () => ({ isOffered: false }))
-  on('agent.offer', { agent: 'devbench:reviewer' }, () => ({ isOffered: false }))
+  on('agent.offer', { agent: 'eos:planner' }, () => ({ isOffered: false }))
+  on('agent.offer', { agent: 'eos:developer' }, () => ({ isOffered: false }))
+  on('agent.offer', { agent: 'eos:reviewer' }, () => ({ isOffered: false }))
 
-  on('command.run', { command: 'devbench' }, async (_$, e) => ({
-    text: io === undefined ? 'devbench 尚未初始化，请重启会话后再试。' : await command(io, e.args),
+  on('command.run', { command: 'eos' }, async (_$, e) => ({
+    text: io === undefined ? 'Eos 尚未初始化，请重启会话后再试。' : await command(io, e.args),
   }))
 
   // 子 agent 结束：对回到正在运行的阶段。
@@ -851,7 +857,7 @@ export const register: Register = on => {
         })
         return result
       }
-      // 可能是 spawn 刚返回、agentId 还没落盘；也可能与 devbench 无关。暂存一小段时间。
+      // 可能是 spawn 刚返回、agentId 还没落盘；也可能与 Eos 无关。暂存一小段时间。
       early.set(agentId, completion)
       bench.after(60_000, () => early.delete(agentId))
       return result
@@ -879,9 +885,9 @@ export const register: Register = on => {
     const hit = protectedMatch(e.command, patterns)
     if (hit === undefined) return next(e)
     return {
-      deny: `devbench：有任务在流水线中，推送、合并、发布、部署由流水线在人工批准后执行（命中规则 /${hit}/）。请使用 /devbench approve。`,
+      deny: `Eos：有任务在流水线中，推送、合并、发布、部署由流水线在人工批准后执行（命中规则 /${hit}/）。请使用 /eos approve。`,
     }
-  }).catch((_$, e, next) => (next.called ? next(e) : { deny: 'devbench：受保护命令检查失败，已拦截。' }))
+  }).catch((_$, e, next) => (next.called ? next(e) : { deny: 'Eos：受保护命令检查失败，已拦截。' }))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
@@ -896,7 +902,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Text>还没有任务。</Text>
-          <Text dimColor>输入 /devbench new &lt;需求描述&gt; 开始一条流水线。</Text>
+          <Text dimColor>输入 /eos new &lt;需求描述&gt; 开始一条流水线。</Text>
         </Box>
       )
     }
