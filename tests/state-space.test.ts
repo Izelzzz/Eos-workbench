@@ -2,8 +2,8 @@
 // 维护方法见 .claude/skills/verify-stage-state-machine/SKILL.md。
 import { expect, test } from 'claude-code/testing'
 
-import type { StageId, Task } from '../types'
-import { STAGES, abandonedRun, emptyRun, reduce, startTask } from '../hooks/core/pipeline'
+import type { RunRecord, StageId, Task } from '../types'
+import { STAGES, abandonedRun, annotateRun, emptyRun, reduce, startTask } from '../hooks/core/pipeline'
 import type { Action, Event, MachineConfig } from '../hooks/core/pipeline'
 
 const AGENT_STAGES: readonly StageId[] = ['spec', 'dev', 'review']
@@ -21,7 +21,7 @@ const draft = (): Task => ({
   stages: Object.fromEntries(STAGES.map(s => [s.id, emptyRun(s.id)])) as Task['stages'],
   rework: 0,
   firstPass: {},
-  git: { baseBranch: 'main', baseSha: 'abc', branch: 'devbench/t1', worktree: '/w' },
+  git: { baseBranch: 'main', baseSha: 'abc', branch: 'eos/t1', worktree: '/w' },
   dir: '/d',
 })
 
@@ -61,11 +61,18 @@ const label = (e: Event): string => {
   }
 }
 
+/** alphabet 只给当前阶段发迟到的结果（当前 seq 与上一次的），它们是否落地取决于那两条记录是不是 abandoned。 */
+const lateTargets = (t: Task): string => {
+  const r = t.stages[t.current]
+  return [r.seq, r.seq - 1].map(seq => r.runs.find(x => x.seq === seq)?.outcome ?? '-').join(',')
+}
+
 const feedbackShape = (f: string | undefined) => (f === undefined ? '-' : f.trim() === '' ? 'blank' : 'set')
 
 /**
  * 抽象状态：只保留影响控制流的字段。attempts 封顶 2 是因为 reduce 只区分「第 1 次」与「之后」。
  * 不记 seq：reduce 只比较事件的 seq 与当前的是否相等，alphabet 按当前 seq 生成新旧两种。
+ * 记当前阶段这一次和上一次运行记录的 outcome：迟到的结果只记给 abandoned 的那条。
  */
 const keyOf = (t: Task): string =>
   [
@@ -73,6 +80,7 @@ const keyOf = (t: Task): string =>
     t.current,
     t.rework,
     feedbackShape(t.feedback),
+    lateTargets(t),
     ...STAGES.map(s => {
       const r = t.stages[s.id]
       return `${s.id}:${r.status}:${Math.min(r.attempts, 2)}:${r.agentId === undefined ? '' : 'a'}`
@@ -91,6 +99,10 @@ type Invariant = {
 const isRunning = (t: Task, id: StageId) => t.stages[id].status === 'running' && t.current === id
 const blank = (reason: string) => reason.trim() === ''
 const settledOk = (t: Task, id: StageId) => t.stages[id].status === 'passed' || t.stages[id].status === 'skipped'
+/** 去掉运行明细与时间戳后的任务：流转状态与累计值。 */
+const flow = (t: Task) =>
+  JSON.stringify({ ...t, updatedAt: 0, stages: STAGES.map(s => ({ ...t.stages[s.id], runs: undefined })) })
+const live = (runs: RunRecord[]) => runs.filter(r => r.outcome !== 'abandoned')
 
 const INVARIANTS: Invariant[] = [
   {
@@ -117,9 +129,50 @@ const INVARIANTS: Invariant[] = [
     },
   },
   {
-    name: '过期的运行结果不改变任务',
-    harm: '旧进程或旧子 agent 迟到的结果被记到新的这次运行上，新结果丢失，任务带着旧输出返工。',
-    holds: ({ before, event, after, action }) => !isStale(before, event) || (after === before && action.kind === 'none'),
+    name: '过期的运行结果不改变任务的流转状态，只把用量记到对应那次运行上',
+    harm: '旧进程或旧子 agent 迟到的结果被记到新的这次运行上，新结果丢失，任务带着旧输出返工；或者被放弃那次的真实用量丢失。',
+    holds: ({ before, event, after, action }) => {
+      if (!isStale(before, event) || (event.kind !== 'finished' && event.kind !== 'progress')) return true
+      if (action.kind !== 'none' || flow(after) !== flow(before)) return false
+      const old = before.stages[event.stage].runs.find(r => r.seq === event.seq)
+      if (old?.outcome !== 'abandoned') return after === before
+      const now = after.stages[event.stage].runs.find(r => r.seq === event.seq)
+      return now?.durationMs === old.durationMs + event.durationMs && now.outcome === 'abandoned'
+    },
+  },
+  {
+    name: '每次开始的运行恰有一条记录',
+    harm: '某次运行没有明细，时间线和被放弃运行的成本对不上。',
+    holds: ({ after }) =>
+      STAGES.every(s => {
+        const r = after.stages[s.id]
+        return JSON.stringify(r.runs.map(x => x.seq)) === JSON.stringify(Array.from({ length: r.seq }, (_, i) => i + 1))
+      }),
+  },
+  {
+    name: '至多一条运行中的记录，且就是当前运行',
+    harm: '被停掉的运行在明细里仍显示运行中，或正在跑的那次没有记录可记用量。',
+    holds: ({ after }) =>
+      STAGES.every(s => {
+        const r = after.stages[s.id]
+        const running = r.runs.filter(x => x.outcome === 'running')
+        if (isRunning(after, s.id)) return running.length === 1 && running[0]!.seq === r.seq
+        return running.length === 0
+      }),
+  },
+  {
+    name: '累计值等于未放弃记录之和',
+    harm: '面板上的耗时和 token 与明细对不上，或被放弃运行的用量混进了累计值。',
+    holds: ({ after }) =>
+      STAGES.every(s => {
+        const r = after.stages[s.id]
+        const runs = live(r.runs)
+        const total = (k: keyof Task['stages']['spec']['tokens']) => runs.reduce((n, x) => n + x.tokens[k], 0)
+        return (
+          runs.reduce((n, x) => n + x.durationMs, 0) === r.durationMs &&
+          (['input', 'output', 'cacheRead', 'cacheWrite'] as const).every(k => total(k) === r.tokens[k])
+        )
+      }),
   },
   {
     name: 'progress 不改变阶段与状态',
@@ -181,7 +234,7 @@ const explore = (config: MachineConfig): Exploration => {
   let agents = 0
   const spawn = (task: Task, action: Action): Task =>
     action.kind === 'run' && AGENT_STAGES.includes(action.stage)
-      ? { ...task, stages: { ...task.stages, [action.stage]: { ...task.stages[action.stage], agentId: `agent-${++agents}` } } }
+      ? annotateRun(task, { stage: action.stage, seq: task.stages[action.stage].seq }, { agentId: `agent-${++agents}` })
       : task
 
   const start = startTask(draft(), now)

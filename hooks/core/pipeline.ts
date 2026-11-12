@@ -1,5 +1,5 @@
 // 流水线的纯逻辑：阶段定义与状态机。不依赖引擎（$），可单独测试。
-import type { StageId, StageRun, Task, Tokens } from '../../types'
+import type { RunCause, RunRecord, StageId, StageRun, Task, Tokens } from '../../types'
 
 export type StageDef = {
   id: StageId
@@ -51,7 +51,7 @@ export type Event =
 
 export const zeroTokens = (): Tokens => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
 
-const addTokens = (a: Tokens, b?: Tokens): Tokens =>
+export const addTokens = (a: Tokens, b?: Tokens): Tokens =>
   b === undefined
     ? a
     : {
@@ -70,6 +70,7 @@ export const emptyRun = (stage: StageId): StageRun => ({
   waitMs: 0,
   tokens: zeroTokens(),
   artifacts: [],
+  runs: [],
 })
 
 /**
@@ -89,10 +90,37 @@ const setStage = (task: Task, id: StageId, patch: Partial<StageRun>): Task => ({
   stages: { ...task.stages, [id]: { ...task.stages[id], ...patch } },
 })
 
-/** 让某阶段开始运行（引擎层随后真正执行它）。 */
-const begin = (task: Task, id: StageId, now: number): Step => {
+/** 改某阶段里 seq 对应的那条运行记录；没有这条（早于 runs 的任务）就不改。 */
+const setRecord = (task: Task, id: StageId, seq: number, patch: (r: RunRecord) => Partial<RunRecord>): Task => {
+  const runs = task.stages[id].runs
+  if (!runs.some(r => r.seq === seq)) return task
+  return setStage(task, id, { runs: runs.map(r => (r.seq === seq ? { ...r, ...patch(r) } : r)) })
+}
+
+const withUsage = (r: RunRecord, e: { durationMs: number; tokens?: Tokens; model?: string }): Partial<RunRecord> => ({
+  durationMs: r.durationMs + e.durationMs,
+  tokens: addTokens(r.tokens, e.tokens),
+  model: e.model ?? r.model,
+})
+
+/** 运行中的那次被中止或重试放弃：记录留下，标成 abandoned。 */
+const abandon = (task: Task, id: StageId, now: number, note: string): Task =>
+  task.stages[id].status === 'running' ? setRecord(task, id, task.stages[id].seq, () => ({ outcome: 'abandoned', endedAt: now, note })) : task
+
+/** 让某阶段开始运行（引擎层随后真正执行它），并为这次运行追加一条记录。 */
+const begin = (task: Task, id: StageId, now: number, cause: RunCause): Step => {
   const run = task.stages[id]
   const waited = run.waitingSince === undefined ? 0 : now - run.waitingSince
+  const record: RunRecord = {
+    seq: run.seq + 1,
+    attempt: run.attempts + 1,
+    cause,
+    startedAt: now,
+    durationMs: 0,
+    tokens: zeroTokens(),
+    outcome: 'running',
+    artifacts: [],
+  }
   const next = setStage({ ...task, status: 'running', current: id }, id, {
     status: 'running',
     attempts: run.attempts + 1,
@@ -101,9 +129,16 @@ const begin = (task: Task, id: StageId, now: number): Step => {
     waitingSince: undefined,
     waitMs: run.waitMs + waited,
     agentId: undefined,
+    runs: [...run.runs, record],
   })
   return { task: next, action: { kind: 'run', stage: id } }
 }
+
+/**
+ * 顺着流水线走到的阶段：第一次是 initial。之后再走到，advanceFrom 那边只可能是上游返工或驳回后重新经过（rework），
+ * 闸门前（合并、部署）的批准只可能是失败后人工重试再批准（retry）。
+ */
+const reached = (task: Task, id: StageId, again: RunCause): RunCause => (task.stages[id].runs.length === 0 ? 'initial' : again)
 
 const wait = (task: Task, id: StageId, now: number): Step => ({
   task: setStage({ ...task, status: 'waiting', current: id }, id, {
@@ -137,7 +172,7 @@ const advanceFrom = (task: Task, from: StageId, now: number, config: MachineConf
       })
       continue
     }
-    return def.gate === 'before' ? wait(current, def.id, now) : begin(current, def.id, now)
+    return def.gate === 'before' ? wait(current, def.id, now) : begin(current, def.id, now, reached(current, def.id, 'rework'))
   }
   return finish(current, now)
 }
@@ -162,7 +197,7 @@ export const TRANSITIONS: Partial<Record<StageId, { fail?: Route; reject?: Route
 }
 
 /** 回到 to 阶段重跑：它之后的阶段重新排队（未配置而跳过的保持跳过）。 */
-const goBack = (task: Task, to: StageId, feedback: string, rework: boolean, now: number, config: MachineConfig): Step => {
+const goBack = (task: Task, to: StageId, feedback: string, rework: boolean, cause: RunCause, now: number, config: MachineConfig): Step => {
   if (rework && task.rework >= config.maxRework) {
     // 保留反馈：人工 retry 时会带着它回去。
     return fail({ ...task, feedback }, now, `已返工 ${task.rework} 次仍未通过，需要人工介入`)
@@ -171,13 +206,13 @@ const goBack = (task: Task, to: StageId, feedback: string, rework: boolean, now:
   for (const def of STAGES.slice(STAGES.findIndex(s => s.id === to) + 1)) {
     if (reset.stages[def.id].status !== 'skipped') reset = setStage(reset, def.id, { status: 'pending' })
   }
-  return begin(reset, to, now)
+  return begin(reset, to, now, cause)
 }
 
-const follow = (task: Task, from: StageId, route: Route, detail: string, now: number, config: MachineConfig): Step =>
+const follow = (task: Task, from: StageId, route: Route, detail: string, cause: RunCause, now: number, config: MachineConfig): Step =>
   route.kind === 'skip'
     ? advanceFrom(setStage(task, from, { status: 'skipped' }), from, now, config)
-    : goBack(task, route.to, route.feedback(detail), route.rework, now, config)
+    : goBack(task, route.to, route.feedback(detail), route.rework, cause, now, config)
 
 /** ref 是否就是任务当前运行中的那一次。 */
 export const isCurrentRun = (task: Task, ref: RunRef): boolean => {
@@ -186,10 +221,13 @@ export const isCurrentRun = (task: Task, ref: RunRef): boolean => {
 }
 
 /** 新任务进入流水线。 */
-export const startTask = (task: Task, now: number): Step => begin(task, 'spec', now)
+export const startTask = (task: Task, now: number): Step => begin(task, 'spec', now, 'initial')
 
 /** 状态机：给定事件返回新任务与下一步动作。纯函数。 */
 export const reduce = (task: Task, event: Event, now: number, config: MachineConfig): Step => {
+  if ((event.kind === 'finished' || event.kind === 'progress') && !isCurrentRun(task, event)) {
+    return { task: lateUsage(task, event), action: { kind: 'none', reason: '不是当前这次运行的结果' } }
+  }
   if (isTerminal(task) && event.kind !== 'retry' && !(event.kind === 'skip' && task.status === 'failed')) {
     return { task, action: { kind: 'none', reason: '任务已结束' } }
   }
@@ -200,7 +238,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
   switch (event.kind) {
     case 'abort':
       return {
-        task: setStage({ ...stamped, status: 'aborted', endedAt: now }, id, {
+        task: setStage({ ...abandon(stamped, id, now, '中止时放弃'), status: 'aborted', endedAt: now }, id, {
           status: run.status === 'running' || run.status === 'waiting' ? 'failed' : run.status,
           note: '已中止',
           agentId: undefined,
@@ -208,21 +246,24 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
         action: { kind: 'none', reason: '已中止' },
       }
 
-    case 'progress': {
-      if (!isCurrentRun(task, event)) return { task, action: { kind: 'none' } }
+    case 'progress':
       return {
-        task: setStage(stamped, id, {
+        task: setStage(setRecord(stamped, id, event.seq, r => withUsage(r, event)), id, {
           durationMs: run.durationMs + event.durationMs,
           tokens: addTokens(run.tokens, event.tokens),
           model: event.model ?? run.model,
         }),
         action: { kind: 'none' },
       }
-    }
 
     case 'finished': {
-      if (!isCurrentRun(task, event)) return { task, action: { kind: 'none', reason: '不是当前这次运行的结果' } }
-      const done = setStage(stamped, id, {
+      const recorded = setRecord(stamped, id, event.seq, r => ({
+        ...withUsage(r, event),
+        outcome: event.ok ? 'passed' : 'failed',
+        endedAt: now,
+        note: event.note,
+      }))
+      const done = setStage(recorded, id, {
         status: event.ok ? 'passed' : 'failed',
         endedAt: now,
         durationMs: run.durationMs + event.durationMs,
@@ -237,7 +278,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
           : done
       if (!event.ok) {
         const route = TRANSITIONS[id]?.fail
-        if (route !== undefined) return follow(settled, id, route, event.note ?? '', now, config)
+        if (route !== undefined) return follow(settled, id, route, event.note ?? '', 'rework', now, config)
         return fail(settled, now, `${stageDef(id).label} 失败：${event.note ?? ''}`)
       }
       if (stageDef(id).gate === 'after') return wait(settled, id, now)
@@ -255,7 +296,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
         })
         return advanceFrom(approved, id, now, config)
       }
-      return begin(stamped, id, now)
+      return begin(stamped, id, now, reached(stamped, id, 'retry'))
     }
 
     case 'reject': {
@@ -270,7 +311,7 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
         waitMs: run.waitMs + waited,
         note: `驳回：${reason}`,
       })
-      return follow(closed, id, route, reason, now, config)
+      return follow(closed, id, route, reason, 'reject', now, config)
     }
 
     case 'retry': {
@@ -279,15 +320,15 @@ export const reduce = (task: Task, event: Event, now: number, config: MachineCon
       // 返工用尽后的重试：重置计数，带着最后一轮反馈回去，而不是原地重跑测试 / 评审。
       const route = TRANSITIONS[id]?.fail
       if (task.status === 'failed' && run.status === 'failed' && route?.kind === 'back' && route.rework) {
-        return goBack({ ...revived, rework: 0 }, route.to, task.feedback ?? '', true, now, config)
+        return goBack({ ...revived, rework: 0 }, route.to, task.feedback ?? '', true, 'retry', now, config)
       }
       // 重试当前阶段：运行中的那次不再等待（例如会话重启后子 agent 已不在）。
-      const reverted = setStage(revived, id, {
+      const reverted = setStage(abandon(revived, id, now, '重试时放弃'), id, {
         status: 'pending',
         attempts: Math.max(0, run.attempts - (run.status === 'running' ? 1 : 0)),
       })
       if (stageDef(id).gate === 'before' && run.status !== 'running') return wait(reverted, id, now)
-      return begin(reverted, id, now)
+      return begin(reverted, id, now, 'retry')
     }
 
     case 'skip': {
@@ -321,4 +362,47 @@ export const abandonedRun = (before: Task, after: Task, event: Event): (RunRef &
   const run = before.stages[stage]
   if (run.status !== 'running' || isCurrentRun(after, { stage, seq: run.seq })) return undefined
   return { stage, seq: run.seq, agentId: run.agentId }
+}
+
+/**
+ * 旧运行迟到的结果：不改变流转，但被放弃的那次运行的真实用量要记到它自己的记录上。
+ * 只记给 abandoned 的记录：已正常结束的那次早就记过用量，重复的回报不能再加一遍。
+ */
+const lateUsage = (task: Task, event: Extract<Event, RunRef>): Task => {
+  const record = task.stages[event.stage].runs.find(r => r.seq === event.seq)
+  if (record?.outcome !== 'abandoned') return task
+  return setRecord(task, event.stage, event.seq, r => withUsage(r, event))
+}
+
+/** 子 agent 启动后把它和这次运行的配置记到运行记录上（引擎层调用，不是事件）。 */
+export const annotateRun = (
+  task: Task,
+  ref: RunRef,
+  patch: Pick<RunRecord, 'agentId' | 'model' | 'effort' | 'skills'>,
+): Task => {
+  const claimed = setStage(task, ref.stage, { agentId: patch.agentId, model: patch.model ?? task.stages[ref.stage].model })
+  return setRecord(claimed, ref.stage, ref.seq, () => patch)
+}
+
+/** 每次运行都会覆盖的产物（spec、diff、合并与部署日志）另存的副本名：02-diff.patch → 02-diff-3.patch。 */
+export const versionedName = (name: string, seq: number): string => {
+  const dot = name.lastIndexOf('.')
+  return dot <= 0 ? `${name}-${seq}` : `${name.slice(0, dot)}-${seq}${name.slice(dot)}`
+}
+
+/** 产物名并进阶段的产物列表；记到这次运行上的是 versioned 时的副本名，否则就是它本身。 */
+export const withArtifact = (task: Task, ref: RunRef, name: string, versioned = false): Task => {
+  const runName = versioned ? versionedName(name, ref.seq) : name
+  const run = task.stages[ref.stage]
+  const listed = run.artifacts.includes(name) ? task : setStage(task, ref.stage, { artifacts: [...run.artifacts, name] })
+  return setRecord(listed, ref.stage, ref.seq, r => ({ artifacts: r.artifacts.includes(runName) ? r.artifacts : [...r.artifacts, runName] }))
+}
+
+/** 用 seq 找回某个子 agent 属于哪次运行（含已被放弃的那些）。 */
+export const runOfAgent = (task: Task, agentId: string): RunRef | undefined => {
+  for (const s of STAGES) {
+    const record = task.stages[s.id].runs.find(r => r.agentId === agentId)
+    if (record !== undefined) return { stage: s.id, seq: record.seq }
+  }
+  return undefined
 }

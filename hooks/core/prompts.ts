@@ -65,3 +65,7 @@ ${p.testSummary === undefined ? '' : `- 单元测试：${p.testSummary}\n`}${
       : `\n## 人工驳回理由（必须逐条核实）\n\n${p.feedback}\n\n逐条确认是否成立；成立的按问题写进 issues。\n`
   }
 按约定只输出 JSON 结论。`
+
+/** 不能预加载的 skill：在任务提示词最前面要求子 agent 先读。 */
+export const withReadFirst = (prompt: string, paths: string[]): string =>
+  paths.length === 0 ? prompt : `${paths.map(p => `先完整阅读并遵循 ${p}`).join('\n')}\n\n${prompt}`

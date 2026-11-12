@@ -17,7 +17,7 @@ const BUILTIN: readonly RegExp[] = [
   /\bdocker\s+push\b/,
 ]
 
-/** 编译用户在 .devbench.json 里写的额外正则；写错的条目忽略。 */
+/** 编译用户在 .eos.json 里写的额外正则；写错的条目忽略。 */
 export const compilePatterns = (extra: readonly string[] = []): RegExp[] => [
   ...BUILTIN,
   ...extra.flatMap(source => {

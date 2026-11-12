@@ -1,5 +1,5 @@
 .claude-plugin/types/
-.devbench/
+.eos/
 node_modules/
 .DS_Store
 *.log
