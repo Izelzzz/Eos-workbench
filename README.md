@@ -55,6 +55,7 @@ claude --plugin-dir /path/to/agents-pipeline
 | `/devbench skip <理由>` | 跳过当前等待中或失败的阶段（测试 / 评审 / 合并 / 部署），用于已在流水线之外完成的情况，例如已手动合并；也可在面板上按 `s` |
 | `/devbench abort` | 中止任务，并停止当前阶段正在运行的子 agent 或命令（测试、合并、部署、依赖安装）；对运行中的阶段 `retry` 时也会先停掉旧的那次，旧的结果不会记到新的这次上 |
 | `/devbench list` | 列出所有任务 |
+| `/devbench log [id]` | 任务的完整时间线：每次批准、驳回、重试、跳过、子 agent 启动与每次运行的结果和用量，最后是各阶段汇总；面板上的「时间线」按钮（`l`）会把这条命令填进输入框 |
 | `/devbench select <id>` | 面板切换到某个任务 |
 | `/devbench` | 打开面板 |
 
@@ -69,6 +70,10 @@ claude --plugin-dir /path/to/agents-pipeline
   "deployCommand": ["npx", "wrangler", "deploy"],
   "maxRework": 2,
   "models": { "planner": "inherit", "developer": "inherit", "reviewer": "sonnet" },
+  "stages": {
+    "dev": { "model": "opus", "effort": "high", "skills": ["pstack:poteto-mode"] },
+    "review": { "skills": ["engineering:code-review"] }
+  },
   "protectedCommands": ["^make release"]
 }
 ```
@@ -80,26 +85,66 @@ claude --plugin-dir /path/to/agents-pipeline
 | `deployCommand` | 不配置则跳过部署阶段 |
 | `maxRework` | 2 |
 | `models` | 评审默认用 `sonnet`，其余继承当前会话模型 |
+| `stages` | 按阶段（`spec` / `dev` / `review`）配置子 agent：`model` 优先于 `models` 里对应角色的设置；`effort` 是 `low`…`max` 或整数预算；`skills` 是 skill 名（`插件:skill`，或项目 / 用户 `.claude/skills` 下的名字）。每次启动该阶段的子 agent 前按当时的配置重新注册，改了不用重启会话 |
 | `protectedCommands` | 在内置规则之外再拦截的命令（正则字符串） |
 
 命令都是 argv 数组，不经过 shell。
+
+关于 `skills`：Claude Code 不会把 frontmatter 写了 `disable-model-invocation: true` 的 skill 预加载进子 agent（pstack 的 skill 几乎都是这样；实测 `pstack:poteto-mode` 预加载后子 agent 上下文里没有它，`engineering:code-review` 和 `pstack:setup-pstack` 则有）。devbench 会找到这类 skill 的 `SKILL.md`（插件 skill 按 `~/.claude/plugins/installed_plugins.json` 里的安装目录找），在任务提示词最前面加一行「先完整阅读并遵循 <绝对路径>」；找不到文件的 skill 照常预加载。
 
 ## 产物与数据
 
 ```
 <repo>/.devbench/            # 自动写入 .gitignore，不会进仓库
-  tasks/<id>/task.json       # 任务与各阶段记录（状态、耗时、token、模型、返工）
+  tasks/<id>/task.json       # 任务与各阶段记录（状态、耗时、token、模型、返工、每次运行的明细）
+  tasks/<id>/events.jsonl    # 审计记录：每个事件一行，只追加
   tasks/<id>/artifacts/
-    01-spec.md
+    01-spec.md               # 最新版（提示词引用它）
+    01-spec-<seq>.md         # 每次运行各存一份
     02-setup.log
     02-dev-notes-<n>.md
     02-diff.patch
+    02-diff-<seq>.patch
     03-test-<n>.log
     04-review-<n>.json
     05-merge.log
+    05-merge-<seq>.log
     06-deploy.log
+    06-deploy-<seq>.log
   worktrees/<id>/            # 任务的独立 git worktree
 ```
+
+### 每次运行的明细（`task.json` 里 `stages.<阶段>.runs`）
+
+每次开始运行追加一条，按 `seq` 一一对应：
+
+| 字段 | 含义 |
+|---|---|
+| `seq` / `attempt` | 运行编号（只增不减）；开始时的 `attempts` |
+| `cause` | `initial` 第一次；`rework` 返工回来（含返工后重新经过的测试和评审）；`reject` 被驳回后重跑；`retry` 人工重试 |
+| `startedAt` / `endedAt` / `durationMs` / `tokens` | 这次运行的时间与用量 |
+| `model` / `effort` / `skills` / `agentId` | 子 agent 阶段启动时用的配置 |
+| `outcome` | `running` / `passed` / `failed` / `abandoned`（中止或重试时被放弃，子 agent 或命令已停掉） |
+| `note` | 失败原因，或放弃的原因 |
+| `artifacts` | 这次运行写下的产物（会被覆盖的那几个记带 `seq` 的副本名） |
+
+阶段上原有的累计值（`durationMs`、`tokens`、`attempts` 等）和面板上的数字保持原来的含义：`durationMs` 与 `tokens` 等于未被放弃的那些运行之和。被放弃的运行在被停掉之前已经花掉的时间和 token（包括它迟到的回报）只记在它自己的记录上，`/devbench log` 的汇总里单独列出。
+
+旧版本创建的任务载入时 `runs` 为空数组，之前的运行只剩累计值，时间线会注明。
+
+### 审计记录（`events.jsonl`）
+
+每次交给状态机的事件（命令、面板按钮、子 agent 的回报、测试 / 合并 / 部署命令的结果、devbench 自己的处理）都追加一行 JSON，另外任务创建和每次子 agent 启动也各记一行。文件只在末尾追加，已有的行不会被改写。
+
+| 字段 | 含义 |
+|---|---|
+| `ts` | 时间（ms） |
+| `taskId` / `stage` | 任务与事件涉及的阶段 |
+| `actor` | `command`（`/devbench` 命令）、`panel`（面板按钮）、`agent`（子 agent）、`process`（命令阶段的进程）、`system`（devbench 自己，例如子 agent 启动或启动失败） |
+| `event` | 事件本身，含驳回 / 跳过的理由、结果的说明与用量 |
+| `before` / `after` | 事件前后的任务状态、当前阶段，以及该阶段的状态和 `seq` |
+| `action` | 状态机给出的下一步 |
+| `accepted` | `false` 表示任务没有变化，例如没写理由的驳回、过期的运行结果 |
 
 ## 已知限制（MVP）
 
