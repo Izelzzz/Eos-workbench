@@ -146,3 +146,14 @@ test('时间线：跨天时换日期；旧任务没有事件和运行明细时�
   expect(old).toContain('（没有事件记录：这个任务创建于审计记录之前）')
   expect(old).toContain('  需求 Spec  2 次（早于运行明细，只有累计值） · 5s')
 })
+
+test('跳过的阶段在汇总里只写一次「跳过」', () => {
+  const task: Task = {
+    ...draft(),
+    status: 'done',
+    stages: { ...draft().stages, merge: { ...emptyRun('merge'), status: 'skipped', note: '跳过：主 agent 已手动合并' } },
+  }
+  const text = formatTimeline({ task, entries: [], now: T0, offsetMinutes: () => 0 })
+  expect(text).toContain('合并  已跳过：主 agent 已手动合并')
+  expect(text).not.toContain('跳过：跳过：')
+})
