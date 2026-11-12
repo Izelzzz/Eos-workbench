@@ -73,4 +73,4 @@ claude plugin test .
 
 `withArtifact`、`versionedName`、`runOfAgent` 也在 `pipeline.ts` 里，但不影响流转，由 `tests/runs.test.ts` 和 `tests/engine.test.ts` 覆盖。
 
-同步提交：`bc53587`（`76f1ff0` 引入运行记录；`bc53587` 只给 `pipeline.ts` 加了不影响流转的 `withArtifact` 参数形式和 `versionedName`）。上面的文件在这个提交之后有改动，就要重新确认探索器仍然描述代码。只有确认之后（必要时更新了探索器并做过一次故意改坏），才把这里的提交号往前移。
+同步提交：`b5c46b5c1db9dcb70b65f1c3481cc645bc7ce31c`（重命名为 Eos，流转逻辑未变；运行记录由 `76f1ff0` 引入）。上面的文件在这个提交之后有改动，就要重新确认探索器仍然描述代码。只有确认之后（必要时更新了探索器并做过一次故意改坏），才把这里的提交号往前移。
