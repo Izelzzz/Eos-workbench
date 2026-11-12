@@ -105,7 +105,7 @@ const summary = (task: Task, now: number): string[] => {
     }
     const head = `  ${s.label}`
     if (run.status === 'skipped' && run.runs.length === 0) {
-      lines.push(`${head}  已跳过${run.note === undefined ? '' : `：${firstLine(run.note)}`}`)
+      lines.push(`${head}  已跳过${run.note === undefined ? '' : `：${firstLine(run.note).replace(/^跳过：/, '')}`}`)
       continue
     }
     if (run.runs.length === 0 && run.attempts === 0) continue
