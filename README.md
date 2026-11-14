@@ -69,6 +69,7 @@ claude --plugin-dir /path/to/Eos-workbench
 | `/eos list` | 列出所有任务 |
 | `/eos log [id]` | 任务的完整时间线：每次批准、驳回、重试、跳过、子 agent 启动与每次运行的结果和用量，最后是各阶段汇总；面板上的「时间线」按钮（`l`）会把这条命令填进输入框 |
 | `/eos select <id>` | 面板切换到某个任务 |
+| `/eos sessions` | 所有 Claude Code 会话的总览：等你决定的排最前（附上它要你决定什么），然后是进行中、可以审查、失败、已完成（附上最近一步）。面板开着时每 2 分钟刷新，也可以按「刷新」；每条可以复制会话链接。只读会话状态，不调用模型 |
 | `/eos` | 打开面板 |
 
 ## 配置（可选）
@@ -103,6 +104,14 @@ claude --plugin-dir /path/to/Eos-workbench
 命令都是 argv 数组，不经过 shell。
 
 关于 `skills`：Claude Code 不会把 frontmatter 写了 `disable-model-invocation: true` 的 skill 预加载进子 agent（pstack 的 skill 几乎都是这样；实测 `pstack:poteto-mode` 预加载后子 agent 上下文里没有它，`engineering:code-review` 和 `pstack:setup-pstack` 则有）。Eos 会找到这类 skill 的 `SKILL.md`（插件 skill 按 `~/.claude/plugins/installed_plugins.json` 里的安装目录找），在任务提示词最前面加一行「先完整阅读并遵循 <绝对路径>」；找不到文件的 skill 照常预加载。
+
+## 所有会话总览（`/eos sessions`）
+
+数据来自 Claude Code 云端会话自带的 `claude-code-remote`（`list_sessions`，只列你自己的会话，不含已归档的）。每个会话的状态分为：等你决定、进行中、可以审查、失败、已完成，以及它最后一轮留下的"需要你做什么"或"最近做了什么"。
+
+- 需要在连接了 `claude-code-remote` 的 Claude Code 云端会话里使用，例如从桌面 app 或 claude.ai/code 开的会话。在本机终端里没有这个连接，面板会直接说明读不到的原因。
+- 列出的是你账号的 Claude Code 云端会话（`list_sessions` 只列云端会话）；本机终端里直接运行的会话不在其中。
+- 当前所在的会话会标注为「当前会话」。
 
 ## 产物与数据
 

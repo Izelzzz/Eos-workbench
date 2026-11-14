@@ -49,12 +49,15 @@ type Options = {
   failEvents?: boolean
   /** 改名前的布局：任务在 .devbench/tasks，配置是 .devbench.json。 */
   legacy?: boolean
+  env?: Record<string, string>
+  /** claude-code-remote 的回答；不给就当作这个会话没有连接它。 */
+  sessions?: () => { content: { type: 'text'; text: string }[]; isError: boolean }
 }
 
 /** 引擎之下的世界：内存文件、git、可控的子进程和子 agent。 */
 const world = async ($: Engine, on: On, options: Options = {}) => {
   const clock = mock.clock(on)
-  mock.env(on, { HOME: '/home/u' })
+  mock.env(on, { HOME: '/home/u', ...options.env })
   const base = options.legacy === true ? '.devbench' : '.eos'
   const files = new Map<string, string>([
     [`${ROOT}/${base}/tasks/t1/task.json`, JSON.stringify(options.task ?? testRunning())],
@@ -131,6 +134,17 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
     return { isFilled: true as const }
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const mcpCalls: { server: string; tool: string; args: Record<string, unknown> }[] = []
+  on('mcp.call', (_$, e) => {
+    mcpCalls.push({ server: e.server, tool: e.tool, args: e.args })
+    if (options.sessions === undefined) throw new Error('MCP server "claude-code-remote" is not connected')
+    return { value: options.sessions() }
+  })
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true as const } }
+  })
 
   await $.session.start({ cwd: ROOT, surface: null, isInteractive: false })
   const eos = async (args: string) => {
@@ -140,7 +154,7 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   }
   const saved = (): Task => JSON.parse(files.get(TASK_FILE)!) as Task
   const events = (): AuditEntry[] => parseEntries(files.get(`${ROOT}/.eos/tasks/t1/events.jsonl`) ?? '')
-  return { clock, files, children, spawned, spawns, registered, eos, saved, events, filled }
+  return { clock, files, children, spawned, spawns, registered, eos, saved, events, filled, mcpCalls, copied }
 }
 
 test('重试运行中的测试：停掉旧进程，新进程的结果记到新的这次运行上', async ($, on) => {
@@ -399,4 +413,62 @@ test('改名前 .devbench 里的任务和 .devbench.json 配置仍被读取', as
   expect(w.children.at(-1)?.argv).toEqual(['make', 'check'])
   w.children.at(-1)?.exit(0, 'ok')
   await w.clock.settle()
+})
+
+const SESSIONS_TEXT = `<other-session nonce="n" untrusted="true">\nheader:\n    ${JSON.stringify({
+  ccr: {
+    data: [
+      { id: 'session_done', title: '博客两个 bug 修复', session_status: 'SESSION_STATUS_IDLE', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_COMPLETED', post_turn_summary: { recent_action: 'PR #67 已开' } },
+      { id: 'session_wait', title: 'Izel profile README', session_status: 'SESSION_STATUS_IDLE', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_BLOCKED', post_turn_summary: { needs_action: 'PR 要不要我继续盯着?' } },
+      { id: 'session_me', title: '个人 AI 开发工作台', session_status: 'SESSION_STATUS_RUNNING', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_WORKING' },
+    ],
+    has_more: false,
+  },
+})}\n</other-session nonce="n">`
+
+const SESSIONS_PANE = {
+  plugin: 'eos',
+  component: 'Pane',
+  requestId: 'eos-sessions',
+  props: { title: '所有会话', isFocused: false, bodyColumns: 70, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+} as const
+
+test('/eos sessions：读 claude-code-remote；命令只回数量，面板显示内容、标出当前会话、能复制链接', async ($, on) => {
+  const w = await world($, on, {
+    env: { CLAUDE_CODE_REMOTE_SESSION_ID: 'cse_me' },
+    sessions: () => ({ content: [{ type: 'text', text: SESSIONS_TEXT }], isError: false }),
+  })
+  const out = (await w.eos('sessions')).text ?? ''
+  expect(w.mcpCalls.at(-1)).toEqual({ server: 'claude-code-remote', tool: 'list_sessions', args: { mine: true, limit: 50 } })
+  expect(out).toBe('「所有会话」面板已打开：等你决定 1 · 进行中 1 · 已完成 1。')
+  expect(out).not.toContain('PR 要不要我继续盯着')
+  for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...SESSIONS_PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /等你决定（1）/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /PR 要不要我继续盯着/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /个人 AI 开发工作台（当前会话）/ })).toBeDefined()
+    await ui.press({ key: 'copy-session_wait' })
+    expect(w.copied.at(-1)).toBe('https://claude.ai/code/session_wait')
+    await ui.unmount()
+  }
+})
+
+test('/eos sessions：读不到时说明原因，面板也显示', async ($, on) => {
+  const w = await world($, on)
+  const out = (await w.eos('sessions')).text ?? ''
+  expect(out).toContain('读不到会话列表')
+  expect(out).toContain('claude-code-remote')
+  const ui = await $.ui.mount({ ...SESSIONS_PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /读不到会话列表/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/eos sessions：面板开着时定时刷新', async ($, on) => {
+  let calls = 0
+  const w = await world($, on, { sessions: () => (calls++, { content: [{ type: 'text', text: SESSIONS_TEXT }], isError: false }) })
+  await w.eos('sessions')
+  expect(calls).toBe(1)
+  await w.clock.advance(120_000)
+  await w.clock.settle()
+  expect(calls).toBe(2)
 })
