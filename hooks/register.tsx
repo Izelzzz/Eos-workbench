@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { EosConfig, StageId, Task, Tokens } from '../types'
+import type { EosConfig, SessionsView, StageId, Task, Tokens } from '../types'
 import { auditEntry, parseEntries } from './core/audit'
 import type { Actor, AuditEntry } from './core/audit'
 import { ROLE, skillFileCandidates, skillPlan, stageAgents } from './core/config'
@@ -43,6 +43,7 @@ import {
   specTask,
   withReadFirst,
 } from './core/prompts'
+import { BUCKETS, formatAgo, formatSessionCounts, nextStep, parseSessionDetail, parseSessionList, sameSession, sessionDetail, sessionUrl } from './core/sessions'
 import { formatTimeline } from './core/timeline'
 import { parseVerdict, verdictFeedback } from './core/verdict'
 
@@ -74,10 +75,20 @@ type Io = {
   setTasks: (fn: (list: Task[]) => Task[]) => Promise<unknown>
   selected: () => Promise<string | null>
   select: (id: string) => Promise<unknown>
+  /** 账号下所有 Claude Code 会话（claude-code-remote 的 list_sessions）。 */
+  listSessions: () => ReturnType<Engine['mcp']['call']>
+  getSession: (id: string) => ReturnType<Engine['mcp']['call']>
+  /** 当前所在的云端会话 ID（cse_…），用来在会话列表里标出自己。 */
+  remoteSessionId: () => Promise<string | undefined>
+  sessions: () => Promise<SessionsView>
+  setSessions: (view: SessionsView) => Promise<unknown>
 }
 
 const PLUGIN = 'eos'
 const PANE = 'eos'
+const SESSIONS_PANE = 'eos-sessions'
+/** 会话面板开着时多久刷新一次；只读状态，不调用模型。 */
+const SESSIONS_REFRESH_MS = 120_000
 const DATA_DIR = '.eos'
 /** 改名前（devbench）的数据目录和配置：只读，旧任务继续可见，task.dir 是绝对路径，写回仍落在原目录。 */
 const LEGACY_DATA_DIR = '.devbench'
@@ -88,6 +99,11 @@ const tasksAtom = atom({ plugin: 'eos', key: 'tasks' } as const, [] as Task[], {
   shape: 'tasks-3',
 })
 const selectedAtom = atom({ plugin: 'eos', key: 'selected' } as const, null as string | null)
+const sessionsAtom = atom({ plugin: 'eos', key: 'sessions' } as const, { fetchedAt: null, items: [], hasMore: false } as SessionsView, {
+  shape: 'sessions-1',
+})
+/** 打开过会话面板后才定时刷新。 */
+let watchingSessions = false
 
 /** 三个子 agent 阶段的 agent 定义。model / effort / skill 来自 .eos.json，每次启动前按当时的配置重新注册。 */
 const AGENTS: Record<AgentStage, { name: string; description: string; prompt: string; tools?: string[]; omitClaudeMd?: true }> = {
@@ -670,6 +686,46 @@ const newTask = async (io: Io, request: string): Promise<string> => {
   return `已创建任务 ${id}：${title}\n分支 ${branch}，worktree ${worktree}${warn}`
 }
 
+/** 读一次所有会话写进面板状态；读不到时把原因写进去，不抛错。 */
+const refreshSessions = async (io: Io): Promise<SessionsView> => {
+  const now = await io.now()
+  const currentId = await io.remoteSessionId().catch(() => undefined)
+  let view: SessionsView
+  try {
+    const result = await io.listSessions()
+    const raw = result.content.map(c => ('text' in c ? String(c.text) : '')).join('\n')
+    if (result.isError) throw new Error(raw.slice(0, 300) || '工具返回错误')
+    const parsed = parseSessionList(raw)
+    // 等你决定和失败的会话再读一次详情：失败原因、仓库、上下文用量。只读，读不到就保留列表里的信息。
+    const items = await Promise.all(
+      parsed.items.map(async (item, i) => {
+        const wanted = (item.bucket === 'blocked' || item.bucket === 'failed') && i < 20
+        if (!wanted) return item
+        try {
+          const r = await io.getSession(item.id)
+          if (r.isError) return item
+          const detail = parseSessionDetail(r.content.map(c => ('text' in c ? String(c.text) : '')).join('\n'))
+          return { ...item, ...detail, needsAction: item.needsAction ?? detail.needsAction }
+        } catch {
+          return item
+        }
+      }),
+    )
+    view = { fetchedAt: now, items, hasMore: parsed.hasMore, currentId }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    view = {
+      fetchedAt: now,
+      items: [],
+      hasMore: false,
+      currentId,
+      error: `读不到会话列表：${reason.slice(0, 200)}。这个功能要在连接了 claude-code-remote 的 Claude Code 云端会话里使用。`,
+    }
+  }
+  await io.setSessions(view)
+  return view
+}
+
 const HELP = `用法：
 /eos new <需求>      创建任务并开始流水线
 /eos approve         批准当前等待的阶段
@@ -680,6 +736,7 @@ const HELP = `用法：
 /eos list            列出任务
 /eos log [id]        任务的完整时间线：每次批准、驳回、运行与用量
 /eos select <id>     切换面板显示的任务
+/eos sessions        所有 Claude Code 会话：等你决定的、进行中的、已完成的
 /eos                 打开面板`
 
 const command = async (io: Io, args: string): Promise<string> => {
@@ -709,6 +766,15 @@ const command = async (io: Io, args: string): Promise<string> => {
       const action = await dispatch(io, task.id, event, 'command')
       if (action?.kind === 'none' && action.reason !== undefined) return `「${task.title}」：${action.reason}`
       return `「${task.title}」：已${{ approve: '批准', reject: '驳回', retry: '重试', skip: '跳过', abort: '中止' }[sub]}`
+    }
+    case 'sessions': {
+      watchingSessions = true
+      const view = await refreshSessions(io)
+      const opened = await io.open({ id: SESSIONS_PANE, title: '所有会话' })
+      if (view.error !== undefined) return view.error
+      const counts = formatSessionCounts(view.items)
+      // 面板没放出来时要说清楚，不能只回一句"已打开"。
+      return opened.isPlaced ? counts : `${counts}\n⚠ 面板没有显示出来：${'reason' in opened ? String(opened.reason) : '当前界面没有放置它'}`
     }
     case 'list': {
       const list = await io.tasks()
@@ -789,12 +855,17 @@ export const register: Register = on => {
       setTasks: fn => update($, tasksAtom, fn),
       selected: () => read($, selectedAtom),
       select: id => update($, selectedAtom, () => id),
+      listSessions: () => $.mcp.call('claude-code-remote', 'list_sessions', { mine: true, limit: 50 }),
+      getSession: id => $.mcp.call('claude-code-remote', 'get_session', { session_id: id }),
+      remoteSessionId: () => $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID'),
+      sessions: () => read($, sessionsAtom),
+      setSessions: view => update($, sessionsAtom, () => view),
     }
     root = e.cwd
     await $.command.register({
       name: 'eos',
       description: 'AI 开发工作台：需求→开发→测试→评审→合并→部署',
-      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list | log [id]]',
+      argumentHint: '[new <需求> | approve | reject <理由> | retry | skip <理由> | abort | list | log [id] | sessions]',
     })
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
     if (top?.exitCode === 0 && top.stdout.trim() !== '') root = top.stdout.trim()
@@ -805,6 +876,10 @@ export const register: Register = on => {
       $.ui.log(`Eos：注册子 agent 失败 ${String(err)}`, { to: 'debug' }),
     )
     if (onDisk.some(t => !isTerminal(t))) void $.ui.open({ id: PANE, title: 'Eos' })
+    $.clock.every(SESSIONS_REFRESH_MS, () => {
+      const bench = io
+      if (watchingSessions && bench !== undefined) void refreshSessions(bench)
+    })
     return started
   })
 
@@ -888,6 +963,110 @@ export const register: Register = on => {
       deny: `Eos：有任务在流水线中，推送、合并、发布、部署由流水线在人工批准后执行（命中规则 /${hit}/）。请使用 /eos approve。`,
     }
   }).catch((_$, e, next) => (next.called ? next(e) : { deny: 'Eos：受保护命令检查失败，已拦截。' }))
+
+  on('ui.render', { component: 'Pane', requestId: SESSIONS_PANE }, async ($, e) => {
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
+    const view = await read($, sessionsAtom)
+    const now = await $.clock.now()
+    const refresh = () => void (io && refreshSessions(io))
+    const counts = BUCKETS.map(b => ({ ...b, n: view.items.filter(i => i.bucket === b.bucket).length })).filter(b => b.n > 0)
+    const header = (
+      <Box flexDirection="column">
+        <Box flexDirection="row" gap={2}>
+          {counts.map(b => (
+            <Text bold color={b.bucket === 'blocked' ? 'error' : b.bucket === 'working' ? 'success' : b.bucket === 'failed' ? 'warning' : undefined}>
+              {b.icon} {b.label} {b.n}
+            </Text>
+          ))}
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>{view.fetchedAt === null ? '还没读取' : `更新于 ${formatAgo(view.fetchedAt, now)}`}</Text>
+          <Button key="refresh" hotkey="r" onPress={refresh}>
+            刷新
+          </Button>
+        </Box>
+      </Box>
+    )
+    if (view.error !== undefined) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          {header}
+          <Text color="warning">{view.error}</Text>
+        </Box>
+      )
+    }
+    const meta = (item: (typeof view.items)[number]) =>
+      [formatAgo(item.updatedAt, now), ...(item.repos ?? []).map(r => r.replace(/^[^/]+\//, '')), item.contextUsed === undefined ? '' : `上下文 ${Math.round(item.contextUsed * 100)}%`]
+        .filter(x => x !== '')
+        .join(' · ')
+    const title = (item: (typeof view.items)[number]) => (
+      <Text bold>
+        <Link href={sessionUrl(item.id)}>{item.title}</Link>
+        {sameSession(item.id, view.currentId) ? '（当前会话）' : ''}
+      </Text>
+    )
+    const card = (item: (typeof view.items)[number], tone: 'error' | 'warning') => {
+      const step = nextStep(item)
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1}>
+          {title(item)}
+          <Text dimColor>{meta(item)}</Text>
+          {item.bucket === 'failed' && <Text color="warning" wrap="wrap">失败原因：{item.statusDetail ?? '会话没有留下原因'}</Text>}
+          {step !== undefined && (
+            <Text wrap="wrap">
+              <Text bold>{item.bucket === 'blocked' ? '等你决定：' : '需要你做：'}</Text>
+              {step}
+            </Text>
+          )}
+          <Box flexDirection="row" gap={1}>
+            <Text>
+              <Link href={sessionUrl(item.id)}>打开会话 →</Link>
+            </Text>
+            <Button key={`copy-${item.id}`} plain onPress={() => void $.ui.copy({ text: sessionUrl(item.id), surface: e.surface })}>
+              <Text dimColor>复制链接</Text>
+            </Button>
+          </Box>
+        </Box>
+      )
+    }
+    const row = (item: (typeof view.items)[number]) => {
+      const detail = item.bucket === 'working' ? (item.taskSummary !== undefined ? `正在：${item.taskSummary}` : undefined) : sessionDetail(item)
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            {title(item)}
+            <Text dimColor>{meta(item)}</Text>
+          </Box>
+          {detail !== undefined && (
+            <Text dimColor wrap="wrap">
+              {'  '}
+              {detail}
+            </Text>
+          )}
+        </Box>
+      )
+    }
+    const groups = BUCKETS.map(b => ({ ...b, items: view.items.filter(i => i.bucket === b.bucket) })).filter(g => g.items.length > 0)
+    return (
+      <Box flexDirection="column" gap={1}>
+        {header}
+        {groups.length === 0 && <Text dimColor>没有会话。</Text>}
+        {groups.map(g => {
+          const shown = g.bucket === 'completed' ? g.items.slice(0, 5) : g.items
+          return (
+            <Box flexDirection="column" gap={g.bucket === 'blocked' || g.bucket === 'failed' ? 1 : 0}>
+              <Text bold color={g.bucket === 'blocked' ? 'error' : g.bucket === 'working' ? 'success' : g.bucket === 'failed' ? 'warning' : undefined}>
+                {g.icon} {g.label}（{g.items.length}）
+              </Text>
+              {shown.map(item => (g.bucket === 'blocked' ? card(item, 'error') : g.bucket === 'failed' ? card(item, 'warning') : row(item)))}
+              {shown.length < g.items.length && <Text dimColor>  …另有 {g.items.length - shown.length} 个</Text>}
+            </Box>
+          )
+        })}
+        {view.hasMore && <Text dimColor>只列出了最近 50 个会话。</Text>}
+      </Box>
+    )
+  })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)

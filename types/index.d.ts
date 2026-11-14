@@ -130,11 +130,49 @@ export type EosConfig = {
   protectedCommands?: string[]
 }
 
+/** 会话列表里的状态分组，按需要你介入的紧迫程度排序。 */
+export type SessionBucket = 'blocked' | 'working' | 'review_ready' | 'failed' | 'completed' | 'unknown'
+
+/** 账号下的一个 Claude Code 会话，来自 claude-code-remote 的 list_sessions。 */
+export type SessionItem = {
+  id: string
+  title: string
+  bucket: SessionBucket
+  updatedAt: number
+  /** 会话最后一轮留下的"需要你做什么"。 */
+  needsAction?: string
+  /** 会话最后一轮留下的"最近做了什么"。 */
+  recentAction?: string
+  unread?: boolean
+  origin?: string
+  /** 进行中的会话此刻在做什么。 */
+  taskSummary?: string
+  /** 会话详情里的状态说明，失败时就是失败原因。 */
+  statusDetail?: string
+  /** 会话挂载的仓库（owner/repo）。 */
+  repos?: string[]
+  /** 上下文用了多少（0–1）。 */
+  contextUsed?: number
+}
+
+/** 「所有会话」面板显示的内容。 */
+export type SessionsView = {
+  fetchedAt: number | null
+  items: SessionItem[]
+  /** 读不到时的原因（例如当前会话没有连接会话工具）。 */
+  error?: string
+  /** 列表只取了最近的一部分。 */
+  hasMore: boolean
+  /** 当前所在的会话，面板里标出来。 */
+  currentId?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     eos: {
       tasks: Shaped<Task[]>
       selected: string | null
+      sessions: Shaped<SessionsView>
     }
   }
 }
