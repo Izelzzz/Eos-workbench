@@ -81,26 +81,13 @@ export const formatAgo = (ms: number, now: number): string => {
 export const sessionDetail = (item: SessionItem): string | undefined =>
   item.bucket === 'blocked' ? (item.needsAction ?? item.recentAction) : (item.recentAction ?? item.needsAction)
 
-/** 文字版（命令输出），已完成的只列最近 completedLimit 个。 */
-export const formatSessions = (p: { items: readonly SessionItem[]; now: number; currentId?: string; hasMore: boolean; completedLimit?: number }): string => {
-  const lines: string[] = []
-  for (const { bucket, label, icon } of BUCKETS) {
-    let group = p.items.filter(i => i.bucket === bucket)
-    if (group.length === 0) continue
-    const total = group.length
-    if (bucket === 'completed') group = group.slice(0, p.completedLimit ?? 5)
-    lines.push(`${icon} ${label}（${total}）`)
-    for (const item of group) {
-      const mark = sameSession(item.id, p.currentId) ? '（当前会话）' : ''
-      lines.push(`  ${item.title}${mark} · ${formatAgo(item.updatedAt, p.now)}`)
-      const detail = sessionDetail(item)
-      if (detail !== undefined) lines.push(`    ${detail}`)
-      lines.push(`    ${sessionUrl(item.id)}`)
-    }
-    if (group.length < total) lines.push(`  …另有 ${total - group.length} 个已完成`)
-    lines.push('')
-  }
-  if (lines.length === 0) return '没有会话。'
-  if (p.hasMore) lines.push('（只列出了最近的会话）')
-  return lines.join('\n').trimEnd()
+/**
+ * 命令的文字输出只给各组数量：标题和摘要是别的会话写的，命令输出会进入模型上下文，
+ * 具体内容只在面板里显示（面板不发给模型）。
+ */
+export const formatSessionCounts = (items: readonly SessionItem[]): string => {
+  const parts = BUCKETS.map(b => ({ ...b, n: items.filter(i => i.bucket === b.bucket).length }))
+    .filter(b => b.n > 0)
+    .map(b => `${b.label} ${b.n}`)
+  return parts.length === 0 ? '「所有会话」面板已打开：没有会话。' : `「所有会话」面板已打开：${parts.join(' · ')}。`
 }

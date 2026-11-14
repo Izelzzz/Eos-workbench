@@ -433,20 +433,20 @@ const SESSIONS_PANE = {
   props: { title: '所有会话', isFocused: false, bodyColumns: 70, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-test('/eos sessions：读 claude-code-remote，等你决定的排最前，标出当前会话，面板能复制链接', async ($, on) => {
+test('/eos sessions：读 claude-code-remote；命令只回数量，面板显示内容、标出当前会话、能复制链接', async ($, on) => {
   const w = await world($, on, {
     env: { CLAUDE_CODE_REMOTE_SESSION_ID: 'cse_me' },
     sessions: () => ({ content: [{ type: 'text', text: SESSIONS_TEXT }], isError: false }),
   })
   const out = (await w.eos('sessions')).text ?? ''
   expect(w.mcpCalls.at(-1)).toEqual({ server: 'claude-code-remote', tool: 'list_sessions', args: { mine: true, limit: 50 } })
-  expect(out.indexOf('等你决定')).toBeLessThan(out.indexOf('进行中'))
-  expect(out).toContain('PR 要不要我继续盯着?')
-  expect(out).toContain('个人 AI 开发工作台（当前会话）')
+  expect(out).toBe('「所有会话」面板已打开：等你决定 1 · 进行中 1 · 已完成 1。')
+  expect(out).not.toContain('PR 要不要我继续盯着')
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...SESSIONS_PANE, surface })
     expect(await ui.find({ type: 'Text', text: /等你决定（1）/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /PR 要不要我继续盯着/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /个人 AI 开发工作台（当前会话）/ })).toBeDefined()
     await ui.press({ key: 'copy-session_wait' })
     expect(w.copied.at(-1)).toBe('https://claude.ai/code/session_wait')
     await ui.unmount()

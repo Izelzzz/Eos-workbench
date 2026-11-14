@@ -43,7 +43,7 @@ import {
   specTask,
   withReadFirst,
 } from './core/prompts'
-import { BUCKETS, formatAgo, formatSessions, parseSessionList, sameSession, sessionDetail, sessionUrl } from './core/sessions'
+import { BUCKETS, formatAgo, formatSessionCounts, parseSessionList, sameSession, sessionDetail, sessionUrl } from './core/sessions'
 import { formatTimeline } from './core/timeline'
 import { parseVerdict, verdictFeedback } from './core/verdict'
 
@@ -756,7 +756,7 @@ const command = async (io: Io, args: string): Promise<string> => {
       const view = await refreshSessions(io)
       await io.open({ id: SESSIONS_PANE, title: '所有会话' })
       if (view.error !== undefined) return view.error
-      return formatSessions({ items: view.items, now: view.fetchedAt ?? (await io.now()), currentId: view.currentId, hasMore: view.hasMore })
+      return formatSessionCounts(view.items)
     }
     case 'list': {
       const list = await io.tasks()
