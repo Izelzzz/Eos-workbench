@@ -145,6 +145,14 @@ export type SessionItem = {
   recentAction?: string
   unread?: boolean
   origin?: string
+  /** 进行中的会话此刻在做什么。 */
+  taskSummary?: string
+  /** 会话详情里的状态说明，失败时就是失败原因。 */
+  statusDetail?: string
+  /** 会话挂载的仓库（owner/repo）。 */
+  repos?: string[]
+  /** 上下文用了多少（0–1）。 */
+  contextUsed?: number
 }
 
 /** 「所有会话」面板显示的内容。 */

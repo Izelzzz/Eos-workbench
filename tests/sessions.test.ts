@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { formatAgo, formatSessionCounts, parseSessionList, sameSession, sessionDetail } from '../hooks/core/sessions'
+import { formatAgo, formatSessionCounts, nextStep, parseSessionDetail, parseSessionList, sameSession, sessionDetail } from '../hooks/core/sessions'
 
 const row = (over: Record<string, unknown>) => ({
   id: 'session_x',
@@ -84,4 +84,36 @@ test('相对时间', () => {
   expect(formatAgo(NOW - 5_000, NOW)).toBe('刚刚')
   expect(formatAgo(NOW - 3 * 3600_000, NOW)).toBe('3 小时前')
   expect(formatAgo(NOW - 2 * 86400_000, NOW)).toBe('2 天前')
+})
+
+const DETAIL = `<other-session nonce="n" untrusted="true">\nheader:\n    ${JSON.stringify({
+  ccr: {
+    id: 'session_011n',
+    session_context: { sources: [{ git_repository: { url: 'https://github.com/Izelzzz/review-lab' } }, { git_repository: { url: 'https://github.com/Izelzzz/morgan-review' } }] },
+    post_turn_summary: { status_category: 'failed', status_detail: "You've hit your 5-hour limit · resets 4pm (UTC)" },
+    external_metadata: { context_usage: { max_tokens: 1000000, used_tokens: 705211 } },
+    status_bucket: 'SESSION_STATUS_BUCKET_FAILED',
+  },
+})}\n</other-session nonce="n">`
+
+test('会话详情：失败原因、仓库、上下文用量', () => {
+  const d = parseSessionDetail(DETAIL)
+  expect(d.statusDetail).toBe("You've hit your 5-hour limit · resets 4pm (UTC)")
+  expect(d.repos).toEqual(['Izelzzz/review-lab', 'Izelzzz/morgan-review'])
+  expect(Math.round((d.contextUsed ?? 0) * 100)).toBe(71)
+})
+
+test('需要你做什么：等你决定给问题，失败按原因给建议，其余没有', () => {
+  const base = { id: 's', title: 't', updatedAt: 0 }
+  expect(nextStep({ ...base, bucket: 'blocked', needsAction: '回复合并' })).toBe('回复合并')
+  expect(nextStep({ ...base, bucket: 'failed', statusDetail: "You've hit your 5-hour limit · resets 4pm (UTC)" })).toBe(
+    '用量额度用完了，4pm（UTC）重置；重置后打开会话，回复「继续」',
+  )
+  expect(nextStep({ ...base, bucket: 'failed' })).toBe('打开会话查看出错的地方，确认后回复「继续」或重新描述任务')
+  expect(nextStep({ ...base, bucket: 'completed', recentAction: 'x' })).toBe(undefined)
+})
+
+test('进行中的会话带上此刻在做什么', () => {
+  const parsed = parseSessionList(wrap([row({ id: 'session_run', status_bucket: 'SESSION_STATUS_BUCKET_WORKING', task_summary: '搜索插件 API' })]))
+  expect(parsed.items[0]!.taskSummary).toBe('搜索插件 API')
 })

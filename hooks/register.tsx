@@ -43,7 +43,7 @@ import {
   specTask,
   withReadFirst,
 } from './core/prompts'
-import { BUCKETS, formatAgo, formatSessionCounts, parseSessionList, sameSession, sessionDetail, sessionUrl } from './core/sessions'
+import { BUCKETS, formatAgo, formatSessionCounts, nextStep, parseSessionDetail, parseSessionList, sameSession, sessionDetail, sessionUrl } from './core/sessions'
 import { formatTimeline } from './core/timeline'
 import { parseVerdict, verdictFeedback } from './core/verdict'
 
@@ -77,6 +77,7 @@ type Io = {
   select: (id: string) => Promise<unknown>
   /** 账号下所有 Claude Code 会话（claude-code-remote 的 list_sessions）。 */
   listSessions: () => ReturnType<Engine['mcp']['call']>
+  getSession: (id: string) => ReturnType<Engine['mcp']['call']>
   /** 当前所在的云端会话 ID（cse_…），用来在会话列表里标出自己。 */
   remoteSessionId: () => Promise<string | undefined>
   sessions: () => Promise<SessionsView>
@@ -695,7 +696,22 @@ const refreshSessions = async (io: Io): Promise<SessionsView> => {
     const raw = result.content.map(c => ('text' in c ? String(c.text) : '')).join('\n')
     if (result.isError) throw new Error(raw.slice(0, 300) || '工具返回错误')
     const parsed = parseSessionList(raw)
-    view = { fetchedAt: now, items: parsed.items, hasMore: parsed.hasMore, currentId }
+    // 等你决定和失败的会话再读一次详情：失败原因、仓库、上下文用量。只读，读不到就保留列表里的信息。
+    const items = await Promise.all(
+      parsed.items.map(async (item, i) => {
+        const wanted = (item.bucket === 'blocked' || item.bucket === 'failed') && i < 20
+        if (!wanted) return item
+        try {
+          const r = await io.getSession(item.id)
+          if (r.isError) return item
+          const detail = parseSessionDetail(r.content.map(c => ('text' in c ? String(c.text) : '')).join('\n'))
+          return { ...item, ...detail, needsAction: item.needsAction ?? detail.needsAction }
+        } catch {
+          return item
+        }
+      }),
+    )
+    view = { fetchedAt: now, items, hasMore: parsed.hasMore, currentId }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     view = {
@@ -754,9 +770,11 @@ const command = async (io: Io, args: string): Promise<string> => {
     case 'sessions': {
       watchingSessions = true
       const view = await refreshSessions(io)
-      await io.open({ id: SESSIONS_PANE, title: '所有会话' })
+      const opened = await io.open({ id: SESSIONS_PANE, title: '所有会话' })
       if (view.error !== undefined) return view.error
-      return formatSessionCounts(view.items)
+      const counts = formatSessionCounts(view.items)
+      // 面板没放出来时要说清楚，不能只回一句"已打开"。
+      return opened.isPlaced ? counts : `${counts}\n⚠ 面板没有显示出来：${'reason' in opened ? String(opened.reason) : '当前界面没有放置它'}`
     }
     case 'list': {
       const list = await io.tasks()
@@ -838,6 +856,7 @@ export const register: Register = on => {
       selected: () => read($, selectedAtom),
       select: id => update($, selectedAtom, () => id),
       listSessions: () => $.mcp.call('claude-code-remote', 'list_sessions', { mine: true, limit: 50 }),
+      getSession: id => $.mcp.call('claude-code-remote', 'get_session', { session_id: id }),
       remoteSessionId: () => $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID'),
       sessions: () => read($, sessionsAtom),
       setSessions: view => update($, sessionsAtom, () => view),
@@ -946,16 +965,26 @@ export const register: Register = on => {
   }).catch((_$, e, next) => (next.called ? next(e) : { deny: 'Eos：受保护命令检查失败，已拦截。' }))
 
   on('ui.render', { component: 'Pane', requestId: SESSIONS_PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     const view = await read($, sessionsAtom)
     const now = await $.clock.now()
     const refresh = () => void (io && refreshSessions(io))
+    const counts = BUCKETS.map(b => ({ ...b, n: view.items.filter(i => i.bucket === b.bucket).length })).filter(b => b.n > 0)
     const header = (
-      <Box flexDirection="row" gap={1}>
-        <Text dimColor>{view.fetchedAt === null ? '还没读取' : `更新于 ${formatAgo(view.fetchedAt, now)}`}</Text>
-        <Button key="refresh" hotkey="r" onPress={refresh}>
-          刷新
-        </Button>
+      <Box flexDirection="column">
+        <Box flexDirection="row" gap={2}>
+          {counts.map(b => (
+            <Text bold color={b.bucket === 'blocked' ? 'error' : b.bucket === 'working' ? 'success' : b.bucket === 'failed' ? 'warning' : undefined}>
+              {b.icon} {b.label} {b.n}
+            </Text>
+          ))}
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>{view.fetchedAt === null ? '还没读取' : `更新于 ${formatAgo(view.fetchedAt, now)}`}</Text>
+          <Button key="refresh" hotkey="r" onPress={refresh}>
+            刷新
+          </Button>
+        </Box>
       </Box>
     )
     if (view.error !== undefined) {
@@ -963,6 +992,57 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           {header}
           <Text color="warning">{view.error}</Text>
+        </Box>
+      )
+    }
+    const meta = (item: (typeof view.items)[number]) =>
+      [formatAgo(item.updatedAt, now), ...(item.repos ?? []).map(r => r.replace(/^[^/]+\//, '')), item.contextUsed === undefined ? '' : `上下文 ${Math.round(item.contextUsed * 100)}%`]
+        .filter(x => x !== '')
+        .join(' · ')
+    const title = (item: (typeof view.items)[number]) => (
+      <Text bold>
+        <Link href={sessionUrl(item.id)}>{item.title}</Link>
+        {sameSession(item.id, view.currentId) ? '（当前会话）' : ''}
+      </Text>
+    )
+    const card = (item: (typeof view.items)[number], tone: 'error' | 'warning') => {
+      const step = nextStep(item)
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1}>
+          {title(item)}
+          <Text dimColor>{meta(item)}</Text>
+          {item.bucket === 'failed' && <Text color="warning" wrap="wrap">失败原因：{item.statusDetail ?? '会话没有留下原因'}</Text>}
+          {step !== undefined && (
+            <Text wrap="wrap">
+              <Text bold>{item.bucket === 'blocked' ? '等你决定：' : '需要你做：'}</Text>
+              {step}
+            </Text>
+          )}
+          <Box flexDirection="row" gap={1}>
+            <Text>
+              <Link href={sessionUrl(item.id)}>打开会话 →</Link>
+            </Text>
+            <Button key={`copy-${item.id}`} plain onPress={() => void $.ui.copy({ text: sessionUrl(item.id), surface: e.surface })}>
+              <Text dimColor>复制链接</Text>
+            </Button>
+          </Box>
+        </Box>
+      )
+    }
+    const row = (item: (typeof view.items)[number]) => {
+      const detail = item.bucket === 'working' ? (item.taskSummary !== undefined ? `正在：${item.taskSummary}` : undefined) : sessionDetail(item)
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            {title(item)}
+            <Text dimColor>{meta(item)}</Text>
+          </Box>
+          {detail !== undefined && (
+            <Text dimColor wrap="wrap">
+              {'  '}
+              {detail}
+            </Text>
+          )}
         </Box>
       )
     }
@@ -974,34 +1054,11 @@ export const register: Register = on => {
         {groups.map(g => {
           const shown = g.bucket === 'completed' ? g.items.slice(0, 5) : g.items
           return (
-            <Box flexDirection="column">
-              <Text bold color={g.bucket === 'blocked' ? 'error' : g.bucket === 'working' ? 'success' : undefined}>
+            <Box flexDirection="column" gap={g.bucket === 'blocked' || g.bucket === 'failed' ? 1 : 0}>
+              <Text bold color={g.bucket === 'blocked' ? 'error' : g.bucket === 'working' ? 'success' : g.bucket === 'failed' ? 'warning' : undefined}>
                 {g.icon} {g.label}（{g.items.length}）
               </Text>
-              {shown.map(item => {
-                const detail = sessionDetail(item)
-                const isCurrent = sameSession(item.id, view.currentId)
-                return (
-                  <Box flexDirection="column">
-                    <Box flexDirection="row" gap={1}>
-                      <Text bold={item.unread === true}>
-                        {item.title}
-                        {isCurrent ? '（当前会话）' : ''}
-                      </Text>
-                      <Text dimColor>{formatAgo(item.updatedAt, now)}</Text>
-                      <Button key={`copy-${item.id}`} plain onPress={() => void $.ui.copy({ text: sessionUrl(item.id), surface: e.surface })}>
-                        <Text dimColor>复制链接</Text>
-                      </Button>
-                    </Box>
-                    {detail !== undefined && (
-                      <Text dimColor={g.bucket !== 'blocked'} wrap="wrap">
-                        {'  '}
-                        {detail}
-                      </Text>
-                    )}
-                  </Box>
-                )
-              })}
+              {shown.map(item => (g.bucket === 'blocked' ? card(item, 'error') : g.bucket === 'failed' ? card(item, 'warning') : row(item)))}
               {shown.length < g.items.length && <Text dimColor>  …另有 {g.items.length - shown.length} 个</Text>}
             </Box>
           )

@@ -52,6 +52,10 @@ type Options = {
   env?: Record<string, string>
   /** claude-code-remote 的回答；不给就当作这个会话没有连接它。 */
   sessions?: () => { content: { type: 'text'; text: string }[]; isError: boolean }
+  /** get_session 的回答，按会话 ID。 */
+  sessionDetails?: Record<string, string>
+  /** 面板放不出来时 ui.open 的原因。 */
+  paneUnplaced?: string
 }
 
 /** 引擎之下的世界：内存文件、git、可控的子进程和子 agent。 */
@@ -125,7 +129,7 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
     return { value: { agent: e.name } }
   })
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', () => ({ value: options.paneUnplaced === undefined ? { isPlaced: true as const } : { isPlaced: false as const, reason: options.paneUnplaced } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.notify', () => ({ value: { isSent: true as const, channel: 'client' as const } }))
@@ -138,6 +142,10 @@ const world = async ($: Engine, on: On, options: Options = {}) => {
   on('mcp.call', (_$, e) => {
     mcpCalls.push({ server: e.server, tool: e.tool, args: e.args })
     if (options.sessions === undefined) throw new Error('MCP server "claude-code-remote" is not connected')
+    if (e.tool === 'get_session') {
+      const text = options.sessionDetails?.[String(e.args.session_id)]
+      return { value: text === undefined ? { content: [], isError: true } : { content: [{ type: 'text' as const, text }], isError: false } }
+    }
     return { value: options.sessions() }
   })
   const copied: string[] = []
@@ -420,9 +428,19 @@ const SESSIONS_TEXT = `<other-session nonce="n" untrusted="true">\nheader:\n    
     data: [
       { id: 'session_done', title: '博客两个 bug 修复', session_status: 'SESSION_STATUS_IDLE', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_COMPLETED', post_turn_summary: { recent_action: 'PR #67 已开' } },
       { id: 'session_wait', title: 'Izel profile README', session_status: 'SESSION_STATUS_IDLE', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_BLOCKED', post_turn_summary: { needs_action: 'PR 要不要我继续盯着?' } },
-      { id: 'session_me', title: '个人 AI 开发工作台', session_status: 'SESSION_STATUS_RUNNING', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_WORKING' },
+      { id: 'session_me', title: '个人 AI 开发工作台', session_status: 'SESSION_STATUS_RUNNING', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_WORKING', task_summary: '重做会话面板' },
+      { id: 'session_fail', title: 'review-lab', session_status: 'SESSION_STATUS_IDLE', updated_at: '1970-01-01T00:00:00Z', status_bucket: 'SESSION_STATUS_BUCKET_FAILED' },
     ],
     has_more: false,
+  },
+})}\n</other-session nonce="n">`
+
+const FAIL_DETAIL = `<other-session nonce="n" untrusted="true">\nheader:\n    ${JSON.stringify({
+  ccr: {
+    id: 'session_fail',
+    session_context: { sources: [{ git_repository: { url: 'https://github.com/Izelzzz/review-lab' } }] },
+    post_turn_summary: { status_category: 'failed', status_detail: "You've hit your 5-hour limit · resets 4pm (UTC)" },
+    external_metadata: { context_usage: { max_tokens: 1000000, used_tokens: 705211 } },
   },
 })}\n</other-session nonce="n">`
 
@@ -437,16 +455,24 @@ test('/eos sessions：读 claude-code-remote；命令只回数量，面板显示
   const w = await world($, on, {
     env: { CLAUDE_CODE_REMOTE_SESSION_ID: 'cse_me' },
     sessions: () => ({ content: [{ type: 'text', text: SESSIONS_TEXT }], isError: false }),
+    sessionDetails: { session_fail: FAIL_DETAIL },
   })
   const out = (await w.eos('sessions')).text ?? ''
-  expect(w.mcpCalls.at(-1)).toEqual({ server: 'claude-code-remote', tool: 'list_sessions', args: { mine: true, limit: 50 } })
-  expect(out).toBe('「所有会话」面板已打开：等你决定 1 · 进行中 1 · 已完成 1。')
+  expect(w.mcpCalls[0]).toEqual({ server: 'claude-code-remote', tool: 'list_sessions', args: { mine: true, limit: 50 } })
+  // 只给等你决定和失败的会话读详情。
+  expect(w.mcpCalls.filter(c => c.tool === 'get_session').map(c => c.args.session_id).sort()).toEqual(['session_fail', 'session_wait'])
+  expect(out).toBe('「所有会话」面板已打开：等你决定 1 · 进行中 1 · 失败 1 · 已完成 1。')
   expect(out).not.toContain('PR 要不要我继续盯着')
   for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...SESSIONS_PANE, surface })
     expect(await ui.find({ type: 'Text', text: /等你决定（1）/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /PR 要不要我继续盯着/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /个人 AI 开发工作台（当前会话）/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /正在：重做会话面板/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /失败原因：You've hit your 5-hour limit/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /需要你做：用量额度用完了，4pm（UTC）重置/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /review-lab · 上下文 71%/ })).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: /打开会话/ })).toBeDefined()
     await ui.press({ key: 'copy-session_wait' })
     expect(w.copied.at(-1)).toBe('https://claude.ai/code/session_wait')
     await ui.unmount()
@@ -471,4 +497,13 @@ test('/eos sessions：面板开着时定时刷新', async ($, on) => {
   await w.clock.advance(120_000)
   await w.clock.settle()
   expect(calls).toBe(2)
+})
+
+test('/eos sessions：面板没放出来时在输出里说明原因', async ($, on) => {
+  const w = await world($, on, {
+    sessions: () => ({ content: [{ type: 'text', text: SESSIONS_TEXT }], isError: false }),
+    paneUnplaced: 'no-surface',
+  })
+  const out = (await w.eos('sessions')).text ?? ''
+  expect(out).toContain('⚠ 面板没有显示出来：no-surface')
 })

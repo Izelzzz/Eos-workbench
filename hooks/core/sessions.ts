@@ -50,9 +50,54 @@ export const parseSessionList = (raw: string): ParsedSessions => {
       recentAction: text(summary.recent_action),
       unread: r.unread === true ? true : undefined,
       origin: text(r.origin),
+      taskSummary: text(r.task_summary),
     })
   }
   return { items: sortSessions(items), hasMore: body.has_more === true }
+}
+
+/** 取出外层标记里的 JSON 对象。 */
+const unwrap = (raw: string): Record<string, unknown> => {
+  const start = raw.indexOf('{')
+  const close = raw.lastIndexOf('</other-session')
+  const end = raw.lastIndexOf('}', close < 0 ? raw.length : close)
+  if (start < 0 || end <= start) throw new Error('不是 JSON')
+  const json = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>
+  return (typeof json.ccr === 'object' && json.ccr !== null ? json.ccr : json) as Record<string, unknown>
+}
+
+export type SessionDetail = Pick<SessionItem, 'statusDetail' | 'repos' | 'contextUsed' | 'needsAction'>
+
+/** get_session 的结果：失败原因、挂载的仓库、上下文用量。解析不了的字段留空。 */
+export const parseSessionDetail = (raw: string): SessionDetail => {
+  const body = unwrap(raw)
+  const obj = (v: unknown) => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {})
+  const summary = obj(body.post_turn_summary)
+  const sources = Array.isArray(obj(body.session_context).sources) ? (obj(body.session_context).sources as unknown[]) : []
+  const repos = sources
+    .map(src => String(obj(obj(src).git_repository).url ?? ''))
+    .map(url => url.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, ''))
+    .filter(name => name !== '')
+  const usage = obj(obj(body.external_metadata).context_usage)
+  const used = Number(usage.used_tokens)
+  const max = Number(usage.max_tokens)
+  return {
+    statusDetail: text(summary.status_detail),
+    needsAction: text(summary.needs_action),
+    repos: repos.length > 0 ? repos : undefined,
+    contextUsed: Number.isFinite(used) && Number.isFinite(max) && max > 0 ? Math.min(1, used / max) : undefined,
+  }
+}
+
+/** 需要你做什么：等你决定的就是它的问题；失败的按原因给建议。 */
+export const nextStep = (item: SessionItem): string | undefined => {
+  if (item.bucket === 'blocked') return item.needsAction ?? '打开会话看它在等什么'
+  if (item.bucket !== 'failed') return undefined
+  const detail = item.statusDetail ?? ''
+  const reset = detail.match(/resets ([^)·]+?)(?:\s*\(UTC\)|$)/i)
+  if (/limit/i.test(detail)) return `用量额度用完了${reset ? `，${reset[1]!.trim()}（UTC）重置` : ''}；重置后打开会话，回复「继续」`
+  if (/disconnect|container|environment/i.test(detail)) return '运行环境断开了；打开会话重新发一条消息即可恢复'
+  return '打开会话查看出错的地方，确认后回复「继续」或重新描述任务'
 }
 
 /** 先按分组顺序，组内最近更新的在前。 */
