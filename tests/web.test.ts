@@ -309,3 +309,92 @@ test('team conventions: list, validate without saving, save new versions, read h
     await s.close()
   }
 })
+
+const TEMPLATE = `name: auditor
+description: 审计：只读核对
+model: deepseek-flash
+write: none
+tools:
+  deny: [subagent]
+skills: [audit-notes]
+prompt: 你是审计员，不要修改任何文件。
+`
+
+const SKILL = `---
+name: audit-notes
+description: 写审计结论时使用
+---
+# 审计结论的写法
+
+逐条写：核对了什么、结论、证据。
+`
+
+test('agent templates and skills are listed, validated without saving, saved as versions, and recorded on the tasks that use them', async () => {
+  const s = await serve()
+  try {
+    const list = await (await fetch(`${s.base}/api/conventions`)).json()
+    assert.deepEqual(
+      list.templates.map((t: { name: string; version: number; write?: string; description?: string }) => [t.name, t.version, t.write, t.description]),
+      [['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'], ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'], ['spec-writer', 1, 'worktree', '规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。']],
+      'the seeded templates come with their description and write scope',
+    )
+    assert.deepEqual(list.skills.map((k: { name: string; version: number; description?: string }) => [k.name, k.version]), [['write-changes', 1]])
+    assert.match(list.skills[0].description, /改动说明/)
+
+    // 技能名必须和 frontmatter 里的 name 一致，正文不能空；错误带位置。
+    const skillUrl = '/api/conventions/skill/audit-notes'
+    const noBody = await postTo(s.base, skillUrl, { content: SKILL.replace(/# 审计结论[\s\S]*$/, ''), validateOnly: true })
+    assert.equal(noBody.status, 200)
+    assert.deepEqual(await noBody.json(), { ok: false, errors: [{ path: '(正文)', message: '技能正文不能为空' }] })
+    const misnamed = await postTo(s.base, skillUrl, { content: SKILL.replace('name: audit-notes', 'name: other'), validateOnly: true })
+    const mis = await misnamed.json()
+    assert.equal(mis.errors[0].path, 'name')
+    assert.match(mis.errors[0].message, /和要保存的「audit-notes」不一致/)
+    assert.equal((await fetch(`${s.base}${skillUrl}`)).status, 404, 'validateOnly saved nothing')
+
+    // 模板引用的技能还不存在：报错指到 skills[0]。
+    const dangling = await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE, validateOnly: true })
+    const dang = await dangling.json()
+    assert.equal(dang.ok, false)
+    assert.deepEqual(dang.errors, [{ path: 'skills[0]', message: '平台上没有名为「audit-notes」的技能' }])
+
+    // 先存技能，模板才能通过。
+    assert.equal((await postTo(s.base, skillUrl, { content: SKILL, note: '初版' })).status, 201)
+    assert.deepEqual(await (await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE, validateOnly: true })).json(), { ok: true })
+
+    // 模板自身的字段错误：只读角色不能写 writePaths；工具组只能是固定几个。
+    const readonlyWrite = await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE.replace('write: none', 'write: none\nwritePaths: [src/**]'), validateOnly: true })
+    const rw = await readonlyWrite.json()
+    assert.equal(rw.errors[0].path, 'writePaths')
+    assert.match(rw.errors[0].message, /只读（write: none）的角色不需要 writePaths/)
+    const badGroup = await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE.replace('deny: [subagent]', 'deny: [网络]'), validateOnly: true })
+    const bg = await badGroup.json()
+    assert.equal(bg.errors[0].path, 'tools.deny[0]')
+    assert.match(bg.errors[0].message, /只能是 web、subagent、bash、schedule、todo、goal 之一/)
+
+    assert.deepEqual(await (await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE, note: '初版' })).json(), { ok: true, version: 1 })
+    const again = await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE })
+    assert.equal(again.status, 400)
+    assert.match((await again.json()).errors[0].message, /内容和当前版本完全一样/)
+    assert.equal((await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE.replace('deny: [subagent]', 'deny: [subagent, web]'), note: '也禁联网' })).status, 201)
+    const history = await (await fetch(`${s.base}/api/conventions/template/auditor`)).json()
+    assert.equal(history.kind, 'template')
+    assert.deepEqual(history.versions.map((r: { version: number; note: string }) => [r.version, r.note]), [[2, '也禁联网'], [1, '初版']])
+    assert.match(history.versions[1].content, /deny: \[subagent\]/, 'the first version is kept so the page can diff it')
+
+    // 工作流用模板当角色：任务记下模板和技能各自用了哪一版。
+    const wf = 'name: audit\nroles:\n  checker: { template: auditor }\nnodes:\n  - { id: build, kind: agent, role: checker, task: 核对 }\n'
+    assert.equal((await postTo(s.base, '/api/conventions/workflow/audit', { content: wf })).status, 201)
+    const repo = join(s.dir, 'repo')
+    mkdirSync(repo)
+    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    const task = await postTo(s.base, '/api/tasks', { repo, workflow: 'audit', request: '核对改动' })
+    const { id } = await task.json()
+    await s.supervisor.idle()
+    const d = (await (await fetch(`${s.base}/api/tasks/${id}`)).json()) as TaskDetail
+    assert.deepEqual(d.conventions?.templates, [{ name: 'auditor', version: 2 }])
+    assert.deepEqual(d.conventions?.skills, [{ name: 'audit-notes', version: 1 }])
+  } finally {
+    await s.close()
+  }
+})
