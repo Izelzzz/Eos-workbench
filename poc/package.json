@@ -1,0 +1,2 @@
+{ "name": "eos-poc-dsh", "private": true, "type": "module",
+  "dependencies": { "@deepseek-ai/dsh": "0.2.2-rc.5" }, "devDependencies": { "tsx": "^4.20.0" } }
