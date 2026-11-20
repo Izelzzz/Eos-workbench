@@ -181,7 +181,10 @@ const checks = {
   })(),
   '被杀的进程组在 10 秒内没有活着的进程': killed && leftovers.length === 0,
 }
-const report = { task: id, answered, choices, calls: task.log.filter(e => e.type === 'call').map(e => (e.type === 'call' ? `${e.call} ${e.purpose}@${e.node} ${e.ms}ms` : '')), checks, errors }
+// 代码版本由脚本自己记录，不靠人手写：提交号，以及运行时工作区里有没有未提交的改动（只看 src/ web/ 和脚本自身之外的改动也列出来）。
+const git = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim()
+const code = { commit: git('rev-parse', '--short', 'HEAD'), uncommitted: git('status', '--porcelain', '--', 'src', 'web/src', 'scripts', 'package.json').split('\n').filter(Boolean) }
+const report = { task: id, code, answered, choices, calls: task.log.filter(e => e.type === 'call').map(e => (e.type === 'call' ? `${e.call} ${e.purpose}@${e.node} ${e.ms}ms` : '')), checks, errors }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1)
