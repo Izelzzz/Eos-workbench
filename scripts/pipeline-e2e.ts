@@ -206,7 +206,7 @@ const npmTest = (() => {
 const checks = {
   '工作流在页面上改过并保存为第 2 版，历史里有第 1 版（内置）': store.conventionHistory('workflow', 'standard').map(r => r.version).join(',') === '2,1',
   '页面对写错的 YAML 给出中文错误和位置': /nodes\[\d+\]\.kind/.test(yamlError) && /agent 或 dialog/.test(yamlError),
-  '任务记录了用到的约定版本（standard 第 2 版、研发约定第 1 版）': JSON.stringify(meta.conventions) === JSON.stringify({ workflow: { name: 'standard', version: 2 }, docs: [{ name: '研发约定', version: 1 }] }),
+  '任务记录了用到的约定版本（standard 第 2 版、研发约定第 1 版）': JSON.stringify({ workflow: meta.conventions?.workflow, docs: meta.conventions?.docs }) === JSON.stringify({ workflow: { name: 'standard', version: 2 }, docs: [{ name: '研发约定', version: 1 }] }),
   '约定文档注入到每个会话的第一条提示词': firstPromptOfSession.size > 0 && [...firstPromptOfSession.values()].every(p => p.includes('团队约定：研发约定（第 1 版）')),
   '开发的交付物检查没通过 → 同一个 agent 补齐 → 检查通过': inOrder(x => x.kind === 'check' && x.node === 'build' && x.passed === false, x => x.purpose === 'fix' && x.node === 'build', x => x.kind === 'check' && x.node === 'build' && x.passed === true),
   '测试失败 → 交回开发修改 → 重跑通过': inOrder(x => x.kind === 'check' && x.node === 'test' && x.passed === false, x => x.purpose === 'respond' && x.node === 'test', x => x.kind === 'check' && x.node === 'test' && x.passed === true),
