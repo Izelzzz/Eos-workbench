@@ -170,7 +170,9 @@ export class Conventions {
       if (k === undefined) return { ok: false, error: `工作流「${workflow.name}」的角色要用的技能「${name}」在平台上不存在` }
       skills.push({ name, version: k.version, content: k.content })
     }
+    // 按名字排序（和技能一样）：记录不随工作流里角色的书写顺序变化。
     const templates = [...new Map(Object.values(workflow.roles).flatMap(r => (r.template === undefined ? [] : [[r.template.name, r.template] as const]))).values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
     return {
       ok: true, workflow, source, docs, skills,
       used: {

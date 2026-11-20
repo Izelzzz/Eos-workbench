@@ -101,12 +101,12 @@ test('templates and skills are seeded, validated against each other, and snapsho
 
   assert.ok(c.save({ kind: 'skill', name: 'write-changes', content: '---\nname: write-changes\ndescription: 新写法\n---\n第二版', actor: 'web' }, 3).ok)
   assert.ok(c.save({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: 第二版开发\nwrite: worktree\nwritePaths: [src/**]\nskills: [write-changes]\n', actor: 'web' }, 4).ok)
-  const wf = 'name: team\nroles:\n  dev: { template: developer }\n  rev: { template: reviewer }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n'
+  const wf = 'name: team\nroles:\n  rev: { template: reviewer }\n  dev: { template: developer }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n'
   assert.ok(c.save({ kind: 'workflow', name: 'team', content: wf, actor: 'web' }, 5).ok)
   const r = c.resolve('team')
   assert.ok(r.ok, !r.ok ? r.error : '')
   assert.equal(r.workflow.roles.dev?.prompt, '第二版开发')
-  assert.deepEqual(r.used.templates, [{ name: 'developer', version: 2 }, { name: 'reviewer', version: 1 }])
+  assert.deepEqual(r.used.templates, [{ name: 'developer', version: 2 }, { name: 'reviewer', version: 1 }], 'sorted by name, not by role order')
   assert.deepEqual(r.skills, [{ name: 'write-changes', version: 2, content: '---\nname: write-changes\ndescription: 新写法\n---\n第二版' }])
   assert.deepEqual(r.used.skills, [{ name: 'write-changes', version: 2 }])
 
