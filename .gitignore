@@ -1,5 +1,6 @@
-.claude-plugin/types/
-.eos/
 node_modules/
+.eos/
 .DS_Store
 *.log
+!poc/logs/*.log
+dist/
