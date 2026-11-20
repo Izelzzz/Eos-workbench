@@ -1,6 +1,6 @@
 // 任务的 git worktree：每个任务一个分支和工作目录，放在平台数据目录下（不放 /tmp）。
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { matchesAny } from '../workflow/glob.ts'
 
@@ -221,6 +221,60 @@ const literal = (path: string): string => `:(literal)${path}`
 const inHead = (loc: Loc, path: string): boolean =>
   wgitText(loc, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', literal(path)]) !== ''
 
+/**
+ * 在核对过真实路径的目录里执行命令（Izelzzz/Eos-workbench#28）。shell 先进入目标的上级目录，用 pwd -P 确认它的
+ * 真实路径在 worktree 里，再在这个目录里执行 rm / mkdir / find：进入之后操作的就是这个目录本身，别的进程之后再把路径
+ * 换成指向外面的链接也引不走。核对不通过就什么都不做，抛错让提交停下（失败就关）。
+ */
+const VERIFIED = 'here=$(pwd -P) || exit 3; case "$here/" in "$1"/*) ;; *) exit 3;; esac; shift; exec "$@"'
+
+export class OutsideWorktree extends Error {}
+
+const inVerifiedDir = (worktree: string, parentRel: string, argv: string[]): void => {
+  const cwd = join(worktree, parentRel)
+  if (!existsSync(cwd)) return
+  try {
+    execFileSync('sh', ['-c', VERIFIED, 'sh', real(worktree), ...argv], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    const err = e as { status?: number; code?: string; stderr?: unknown }
+    // 目录在核对和执行之间消失了：要删的东西已经不在，不算错。
+    if (err.code === 'ENOENT') return
+    if (err.status === 3) throw new OutsideWorktree(`worktree 里的目录 ${parentRel || '.'} 被换成了指向外面的链接，平台没有删除也没有提交`)
+    throw new Error(`撤销时 ${argv[0]} 失败（worktree 里的文件在撤销过程中被改动），没有提交：${String(err.stderr ?? '').trim().split('\n')[0] ?? ''}`)
+  }
+}
+
+const splitLast = (rel: string): { dir: string; base: string } => {
+  const bare = rel.replace(/\/$/, '')
+  const i = bare.lastIndexOf('/')
+  return i < 0 ? { dir: '', base: bare } : { dir: bare.slice(0, i), base: bare.slice(i + 1) }
+}
+
+/** 删掉 worktree 里的一条路径（文件、目录或链接本身，不跟随链接）。 */
+export const safeRemove = (worktree: string, rel: string): void => {
+  const { dir, base } = splitLast(rel)
+  inVerifiedDir(worktree, dir, ['rm', '-rf', '--', base])
+}
+
+const safeMkdir = (worktree: string, rel: string): void => {
+  const { dir, base } = splitLast(rel)
+  inVerifiedDir(worktree, dir, ['mkdir', '-p', '--', base])
+}
+
+/** 删掉名字不是合法 UTF-8 的路径：在核对过的上级目录里按 inode 找到它再删（命令行参数传不了这种名字）。 */
+const safeRemoveRaw = (worktree: string, raw: Buffer): void => {
+  const slash = raw.lastIndexOf(0x2f)
+  const dir = slash < 0 ? '' : utf8(raw.subarray(0, slash))
+  if (dir === undefined) throw new Error('文件名不是合法 UTF-8、上级目录名也不是：平台没有删除也没有提交')
+  let ino: number
+  try {
+    ino = lstatSync(Buffer.concat([Buffer.from(worktree + sep), raw])).ino
+  } catch {
+    return
+  }
+  inVerifiedDir(worktree, dir, ['find', '.', '-mindepth', '1', '-maxdepth', '1', '-inum', String(ino), '-exec', 'rm', '-rf', '--', '{}', '+'])
+}
+
 /** 这条路径的上级目录里有没有符号链接：有的话不能顺着它删文件（会删到 worktree 外面去）。 */
 const behindLink = (worktree: string, path: string): boolean => {
   const parts = path.replace(/\/$/, '').split('/').slice(0, -1)
@@ -239,8 +293,8 @@ const revert = (loc: Loc, path: string, gitlink = false): void => {
   if (gitlink) {
     // 子模块路径：清掉暂存的改动，把路径恢复成空目录（新建 worktree 时子模块就是空目录）。
     wgit(loc, ['restore', '--source=HEAD', '--staged', '--', literal(path)])
-    rmSync(join(loc.worktree, path), { force: true, recursive: !isLink(join(loc.worktree, path)) })
-    mkdirSync(join(loc.worktree, path), { recursive: true })
+    safeRemove(loc.worktree, path)
+    safeMkdir(loc.worktree, path)
     return
   }
   if (behindLink(loc.worktree, path)) {
@@ -253,7 +307,7 @@ const revert = (loc: Loc, path: string, gitlink = false): void => {
     return
   }
   wgit(loc, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
-  rmSync(join(loc.worktree, path), { force: true, recursive: true })
+  safeRemove(loc.worktree, path)
 }
 
 /**
@@ -267,7 +321,7 @@ export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): strin
   // 先处理指向目录的符号链接：只删链接本身（不跟随）；换掉的是已跟踪的文件就从 HEAD 恢复，免得被当成删除提交。
   for (const change of changes(l).filter(c => c.linkDir && !c.gitlink)) {
     const path = change.path.replace(/\/$/, '')
-    rmSync(join(l.worktree, path), { force: true })
+    safeRemove(l.worktree, path)
     if (!change.untracked && inHead(l, path)) wgit(l, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
     reverted.add(path)
   }
@@ -275,7 +329,7 @@ export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): strin
     if (inScope(change, writePaths)) continue
     if (change.raw !== undefined) {
       if (change.untracked) {
-        rmSync(Buffer.concat([Buffer.from(l.worktree + sep), change.raw]), { force: true, recursive: true })
+        safeRemoveRaw(l.worktree, change.raw)
         reverted.add(change.path)
       }
       continue

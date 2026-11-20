@@ -377,3 +377,19 @@ test('范围内的已跟踪文件被换成指向目录的链接：算越界，�
   assert.equal(readFileSync(join(wt, 'src/a.ts'), 'utf8'), 'a\n')
   assert.equal(g(wt, 'status', '--porcelain'), '')
 })
+
+// —— Izelzzz/Eos-workbench#28：撤销时的删除不会被并发换上的链接引到外面 ——
+
+test('撤销时上级目录已经被换成指向外面的链接：拒绝删除，外面的文件还在', async () => {
+  const { safeRemove, OutsideWorktree } = await import('../src/runner/git.ts')
+  const { base, wt } = twoWorktrees()
+  const outside = join(base, 'OUTSIDE')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'x'), 'keep me\n')
+  execFileSync('ln', ['-s', outside, join(wt, 'd')])
+  assert.throws(() => safeRemove(wt, 'd/x'), OutsideWorktree)
+  assert.equal(readFileSync(join(outside, 'x'), 'utf8'), 'keep me\n')
+  safeRemove(wt, 'd')
+  assert.equal(existsSync(join(wt, 'd')), false, 'removing the link itself is fine and does not follow it')
+  assert.equal(readFileSync(join(outside, 'x'), 'utf8'), 'keep me\n')
+})

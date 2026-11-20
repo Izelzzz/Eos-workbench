@@ -1,0 +1,13 @@
+{
+    "gitModule": "/home/user/Eos-workbench/src/runner/git.old-race.ts",
+    "rounds": 1000,
+    "deletedOutside": 3,
+    "refused": 282,
+    "otherErrors": 18,
+    "errorSamples": {
+        "有越界改动撤销不了，没有提交：d": 188,
+        "有越界改动撤销不了，没有提交：d/x": 94,
+        "Path is a directory: rm returned EISDIR (is a directory) /home/user/Eos-workbench/.eos/revert-race/wt/d": 11,
+        "Path is a directory: /home/user/Eos-workbench/.eos/revert-race/wt/d": 7
+    }
+}

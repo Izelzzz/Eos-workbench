@@ -10,7 +10,11 @@ export type AgentSkill = { name: string; content: string }
  * agent 的能力面：去掉哪些工具组、能看到哪些技能、挂哪些 MCP 服务。
  * 没有"不限制"这种省略写法：能力面是安全边界，每个调用方都要写明白。
  */
-export type AgentProfile = { denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: McpServer[] }
+/**
+ * agent 进程的能力面。background：能不能起后台作业。可写角色不能（Izelzzz/Eos-workbench#28）：
+ * 后台进程会活过这一轮，在平台撤销越界改动时把目录换成指向外面的链接，让平台删到 worktree 之外。
+ */
+export type AgentProfile = { denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: McpServer[]; background: boolean }
 
 export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
 

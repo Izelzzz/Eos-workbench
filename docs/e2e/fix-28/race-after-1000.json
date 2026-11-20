@@ -1,0 +1,13 @@
+{
+    "gitModule": "/home/user/Eos-workbench/src/runner/git.ts",
+    "rounds": 1000,
+    "deletedOutside": 0,
+    "refused": 305,
+    "otherErrors": 68,
+    "errorSamples": {
+        "有越界改动撤销不了，没有提交：d": 185,
+        "有越界改动撤销不了，没有提交：d/x": 94,
+        "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 68,
+        "worktree 里的目录 d 被换成了指向外面的链接，平台没有删除也没有提交": 26
+    }
+}
