@@ -72,6 +72,7 @@ note(`页面上创建了任务 ${id}`)
 
 const detail = async () => (await (await fetch(`${base}/api/tasks/${id}`)).json()) as { status: string; position: string; runnerAlive: boolean }
 let killed = false
+let leftovers: string[] = ['未检查']
 let answered = 0
 const until = Date.now() + 25 * 60_000
 while (Date.now() < until) {
@@ -97,7 +98,29 @@ while (Date.now() < until) {
     await sleep(4000) // 让开发跑一会儿，确保是"进行中"被杀
     killed = true
     note(`开发进行中，SIGKILL 整个 eos web 进程组（pgid ${server.pid}）`)
-    process.kill(-server.pid!, 'SIGKILL')
+    const pgid = server.pid!
+    process.kill(-pgid, 'SIGKILL')
+    // 整组被杀后，组里不应再有任何进程（包括 eos web 启动的 dsh 子进程）在后台继续写 worktree。
+    // SIGKILL 是异步生效的：每 0.5 秒看一次组里剩下的进程和状态（Z 是已经死掉、等待回收的僵尸），最多 10 秒。
+    const inGroup = (): string[] => {
+      try {
+        return execFileSync('ps', ['-o', 'pid=,stat=,comm=', '-g', String(pgid)], { encoding: 'utf8' }).trim().split('\n').map(l => l.trim()).filter(Boolean)
+      } catch {
+        return []
+      }
+    }
+    for (let waited = 0; waited <= 10_000; waited += 500) {
+      const left = inGroup()
+      const running = left.filter(l => !/\sZ/.test(l))
+      if (left.length > 0) note(`杀掉后 ${waited}ms，进程组 ${pgid} 里还有：${left.join(' | ')}`)
+      if (running.length === 0) {
+        leftovers = []
+        note(`杀掉后 ${waited}ms，进程组 ${pgid} 里已经没有活着的进程`)
+        break
+      }
+      leftovers = running
+      await sleep(500)
+    }
     await page.waitForSelector('text=连接不上服务', { timeout: 20_000 })
     await snap('server-down')
     server = await startServer(2)
@@ -142,6 +165,8 @@ const checks = {
   '已完成的调用没有重复': new Set(calls).size === calls.length,
   'worktree 里 npm test 通过': npmTest,
   '页面没有脚本错误': errors.length === 0,
+  'agent 收到的是页面上选中的选项': store.trace(id).some(r => r.event.kind === 'tool_end' && r.event.output.includes('"selected"')),
+  '被杀的进程组在 10 秒内没有活着的进程': killed && leftovers.length === 0,
 }
 const report = { task: id, answered, calls: task.log.filter(e => e.type === 'call').map(e => (e.type === 'call' ? `${e.call} ${e.purpose}@${e.node} ${e.ms}ms` : '')), checks, errors }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))

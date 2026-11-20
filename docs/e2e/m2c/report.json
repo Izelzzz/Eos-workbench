@@ -1,10 +1,10 @@
 {
-  "task": "t261120080518939",
-  "answered": 4,
+  "task": "t261120084646lpt",
+  "answered": 3,
   "calls": [
-    "c1 produce@plan 154752ms",
-    "c2 produce@build 77580ms",
-    "c3 critique@review 208264ms"
+    "c1 produce@plan 161714ms",
+    "c2 produce@build 51291ms",
+    "c3 critique@review 104249ms"
   ],
   "checks": {
     "任务在页面上创建（created 由 web 发出）": true,
@@ -14,7 +14,9 @@
     "任务完成": true,
     "已完成的调用没有重复": true,
     "worktree 里 npm test 通过": true,
-    "页面没有脚本错误": true
+    "页面没有脚本错误": true,
+    "agent 收到的是页面上选中的选项": true,
+    "被杀的进程组在 10 秒内没有活着的进程": true
   },
   "errors": []
 }
