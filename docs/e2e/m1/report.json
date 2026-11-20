@@ -1,5 +1,5 @@
 {
-  "task": "t2611200602129hi",
+  "task": "t261120061422we1",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -13,7 +13,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-d3a6a1213c3b562e50bc0b32485951f1",
+      "sid": "session-d0ae5d89688db4d4e0daf952bc5bc286",
       "calls": [
         "c1"
       ],
@@ -24,7 +24,7 @@
       "asks": 1
     },
     "build": {
-      "sid": "session-5bdcf8020b4f821dba223e30ebf1c0f4",
+      "sid": "session-5b80146583d0ff18fd2aa53349569c91",
       "calls": [
         "c2",
         "c4"
@@ -35,7 +35,7 @@
       "asks": 0
     },
     "review": {
-      "sid": "session-56a7adf7f0b790cd3f642982031c0e40",
+      "sid": "session-a2761c9c22bb439822f00615f0b27cc4",
       "calls": [
         "c3",
         "c5"
@@ -49,12 +49,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 40590ms",
-    "c2 produce@build 37210ms",
-    "c3 critique@review#1 53850ms",
-    "c4 respond@review#1 20794ms",
-    "c5 critique@review#2 15799ms"
+    "c1 produce@plan 103672ms",
+    "c2 produce@build 19970ms",
+    "c3 critique@review#1 50014ms",
+    "c4 respond@review#1 30759ms",
+    "c5 critique@review#2 31927ms"
   ],
-  "commits": "5a4e91a eos: review respond (c4)\n242a7d9 eos: build produce (c2)\n",
-  "npmTest": "表示的小数使用容差比较 (0.090692ms)\n✔ 大数组求和 (0.311487ms)\n✔ 含非数字元素时抛 TypeError (0.615068ms)\n✔ 非数组入参时抛 TypeError (0.264114ms)\n✔ 可迭代的非数组入参也必须抛 TypeError (0.340137ms)\n✔ 稀疏数组的空洞视为非数字并抛 TypeError (0.15114ms)\n✔ NaN 原样参与运算 (0.327042ms)\n✔ Infinity 按 JS 语义参与运算 (0.144354ms)\n✔ 不修改入参数组 (0.85038ms)\n✔ 冻结数组可正常计算 (0.167495ms)\nℹ tests 15\nℹ suites 0\nℹ pass 15\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 79.143114\n"
+  "commits": "0498afe eos: review respond (c4)\n453dcc7 eos: build produce (c2)\n",
+  "npmTest": "组含非数字元素时抛 TypeError: NaN (0.067372ms)\n✔ 错误信息报告首个非法元素下标与类型 (1.683393ms)\n✔ 稀疏数组的 hole 视为非数字且下标正确 (0.308828ms)\n✔ 非数组入参抛 TypeError: undefined (0.162528ms)\n✔ 非数组入参抛 TypeError: null (0.067703ms)\n✔ 非数组入参抛 TypeError: 字符串 (0.085022ms)\n✔ 非数组入参抛 TypeError: Set (0.04549ms)\n✔ 非数组入参抛 TypeError: 类数组对象 (0.068452ms)\nℹ tests 24\nℹ suites 0\nℹ pass 24\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 95.36759\n"
 }
