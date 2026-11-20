@@ -3,19 +3,11 @@
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
 import type { Event, Step, Task, TaskStatus } from '../engine/types.ts'
+import type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { Workflow } from '../workflow/types.ts'
 
-/** 谁发出的事件：命令行、runner 自己、执行器（agent 回复或提问）。 */
-export type Actor = 'cli' | 'runner' | 'executor'
-
-export type EventRow = { seq: number; at: number; actor: Actor; event: Event | { kind: 'created' }; accepted: boolean; reason?: string }
-
-export type TaskSummary = { id: string; status: TaskStatus; request: string; workflow: string; createdAt: number; updatedAt: number }
-
-export type TraceRow = { call: string; seq: number; event: TraceEvent }
-
-export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string }
+export type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (

@@ -3,4 +3,5 @@ node_modules/
 .DS_Store
 *.log
 !poc/logs/*.log
+!docs/e2e/**/*.log
 dist/

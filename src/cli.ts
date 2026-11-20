@@ -11,6 +11,7 @@ import { commitAll, contextFor, createWorktree, diffStat } from './runner/git.ts
 import { acquire } from './runner/lock.ts'
 import { runTask } from './runner/runner.ts'
 import { Store } from './store/store.ts'
+import { createWebServer } from './web/server.ts'
 import { builtinTemplates, loadWorkflow } from './workflow/templates.ts'
 
 const HELP = `用法：
@@ -22,6 +23,7 @@ const HELP = `用法：
   eos log <任务>                                          完整对话记录与耗时、token 统计
   eos abort <任务>                                        中止任务
   eos workflows                                           列出内置工作流
+  eos web [--port 4317]                                   打开 Web 界面（任务列表与 trace 详情）
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）`
 
@@ -29,7 +31,7 @@ const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_u
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'feature' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' } },
+  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'feature' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
 })
 
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
@@ -160,6 +162,16 @@ const commands: Record<string, () => Promise<void> | void> = {
     const t = taskOf(positionals[1])
     const step = store.dispatch(t.id, { kind: 'abort' }, Date.now(), 'cli')
     say(step.accepted ? `任务 ${t.id} 已中止` : step.reason!)
+  },
+  async web() {
+    const port = Number(values.port)
+    const server = createWebServer({
+      store, staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
+      replay: new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: '' }),
+    })
+    await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
+    say(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，Ctrl+C 退出）`)
+    await new Promise(() => {})
   },
   workflows() {
     for (const name of builtinTemplates()) {
