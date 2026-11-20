@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { zstdCompressSync } from 'node:zlib'
-import { agentEnv, DshExecutor, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { parse as parseYaml } from 'yaml'
+import { agentEnv, ALWAYS_DISABLED, DshExecutor, GROUP_ROWS, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import type { AgentProfile } from '../src/executor/types.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
@@ -108,9 +110,9 @@ test('a live call returns its reply only when the last turn completed, trusting 
 
 /** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
 const fakeHarnesses = (closeMs = 0) => {
-  const created: { cwd?: string; processCwd?: string; model?: string; closed: boolean; resumed: string[] }[] = []
-  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string }) => {
-    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, closed: false, resumed: [] as string[] }
+  const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; closed: boolean; resumed: string[] }[] = []
+  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[] }) => {
+    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, closed: false, resumed: [] as string[] }
     created.push(rec)
     const session = (id: string) => ({
       id,
@@ -131,15 +133,30 @@ const fakeHarnesses = (closeMs = 0) => {
   return { created, createHarness }
 }
 
+/** 测试用的 dsh home：执行器会往里面写能力面的补丁和技能目录；跑完一起删掉。 */
+const homes: string[] = []
+const tmpHome = () => {
+  const home = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-dshhome-'))
+  homes.push(home)
+  return home
+}
+after(() => {
+  for (const home of homes) rmSync(home, { recursive: true, force: true })
+})
+
+/** 不限制任何东西的能力面：不涉及工具组、技能和 MCP 的用例用它。 */
+const bare: AgentProfile = { denyTools: [], skills: [], mcp: [] }
+
 test('each worktree gets its own dsh process whose workspace is that worktree; release closes only that one', async () => {
   const { created, createHarness } = fakeHarnesses()
-  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
+  const home = tmpHome()
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', createHarness })
   const send = (key: string, cwd: string, write: 'none' | 'worktree' = 'worktree') =>
-    ex.send({ key, nonce: `${key}/c1`, prompt: '做事', spec: { model: 'deepseek-flash', write, cwd }, ask: async () => '' })
+    ex.send({ key, nonce: `${key}/c1`, prompt: '做事', spec: { model: 'deepseek-flash', write, cwd, profile: bare }, ask: async () => '' })
   await send('t1/build', '/data/worktrees/t1')
   await send('t1/review', '/data/worktrees/t1', 'none')
   await send('t2/build', '/data/worktrees/t2')
-  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', '/data/dsh/process-cwd'], ['/data/worktrees/t2', '/data/dsh/process-cwd']],
+  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', join(home, 'process-cwd')], ['/data/worktrees/t2', join(home, 'process-cwd')]],
     'the session workspace (write root) is the task worktree; the dsh process itself runs in a platform directory, not in the worktree (no .env from the repo)')
   await ex.release('/data/worktrees/t1')
   assert.deepEqual(created.map(c => c.closed), [true, false])
@@ -151,7 +168,7 @@ test('each worktree gets its own dsh process whose workspace is that worktree; r
 
 /** 一个真实的 dsh home，里面有一个会话日志，会话头记着它的工作区。 */
 const homeWithSession = (key: string, workspace: string) => {
-  const home = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-dshhome-'))
+  const home = tmpHome()
   const dir = join(home, 'sessions', '--slug--', sessionIdFor(key))
   mkdirSync(dir, { recursive: true })
   const lines = [{ type: 'session', version: 4, id: sessionIdFor(key), cwd: workspace }, user('之前的消息', 1)]
@@ -162,7 +179,7 @@ const homeWithSession = (key: string, workspace: string) => {
 test('a session whose recorded workspace is not the task worktree is refused, not resumed; a matching one is resumed', async () => {
   const { created, createHarness } = fakeHarnesses()
   const old = new DshExecutor({ dshHome: homeWithSession('t1/build', '/home/user/Eos-workbench'), dshBin: 'dsh', createHarness })
-  const call = (ex: DshExecutor) => ex.send({ key: 't1/build', nonce: 't1/c9', prompt: '继续', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  const call = (ex: DshExecutor) => ex.send({ key: 't1/build', nonce: 't1/c9', prompt: '继续', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1', profile: bare }, ask: async () => '' })
   await assert.rejects(call(old), /可写范围是 \/home\/user\/Eos-workbench，不是任务的 worktree \/data\/worktrees\/t1[\s\S]*请中止这个任务后重新发起/)
   assert.deepEqual(created.flatMap(c => c.resumed), [], 'the unsafe session was never resumed')
   const ok = new DshExecutor({ dshHome: homeWithSession('t1/build', '/data/worktrees/t1'), dshBin: 'dsh', createHarness })
@@ -172,8 +189,8 @@ test('a session whose recorded workspace is not the task worktree is refused, no
 
 test('a worktree’s next process starts only after its released process has exited (its session lock is free)', async () => {
   const { created, createHarness } = fakeHarnesses(50)
-  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
-  const send = () => ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  const send = () => ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1', profile: bare }, ask: async () => '' })
   await send()
   const releasing = ex.release('/data/worktrees/t1')
   const again = send()
@@ -186,9 +203,104 @@ test('a worktree’s next process starts only after its released process has exi
 
 test('close waits for processes that are still being released', async () => {
   const { created, createHarness } = fakeHarnesses(50)
-  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
-  await ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  await ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1', profile: bare }, ask: async () => '' })
   void ex.release('/data/worktrees/t1')
   await ex.close()
   assert.equal(created[0]!.closed, true)
+})
+
+/** 从 dsh 进程实际拿到的补丁文件里读回配置。 */
+const rowsOf = (patch: string) => parseYaml(readFileSync(patch, 'utf8')) as { id?: string; disabled?: boolean; config?: Record<string, any>; insert?: { id: string; name: string; config: Record<string, any> }[] }[]
+const rowById = (patch: string, id: string) => rowsOf(patch).find(r => r.id === id)
+const disabledIn = (patch: string) => rowsOf(patch).filter(r => r.disabled === true).map(r => r.id)
+const insertedIn = (patch: string) => rowsOf(patch).find(r => r.insert !== undefined)?.insert ?? []
+
+const skillOf = (name: string, body: string) => ({ name, content: `---\nname: ${name}\ndescription: ${name} 用的技能\n---\n${body}\n` })
+
+/** 一次调用，返回这次新起的 dsh 进程拿到的补丁文件路径。 */
+const launch = async (ex: DshExecutor, created: { patches?: string[] }[], key: string, profile: AgentProfile, cwd = '/data/worktrees/t1') => {
+  await ex.send({ key, nonce: `${key}/c1`, prompt: '做事', ask: async () => '', spec: { model: 'deepseek-flash', write: 'none', cwd, profile } })
+  return created.at(-1)!.patches![0]!
+}
+
+test('the profile patch disables the denied groups’ rows, and always the plugin manager and the bundled office skills', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  const patch = await launch(ex, created, 't1/plan', { denyTools: ['bash', 'web'], skills: [], mcp: [] })
+  assert.deepEqual(disabledIn(patch).sort(), [...ALWAYS_DISABLED, ...GROUP_ROWS.bash, ...GROUP_ROWS.web].sort())
+  // 没限制的组一行都不关：工具组之间互不牵连。
+  for (const g of ['subagent', 'schedule', 'todo', 'goal'] as const) {
+    for (const row of GROUP_ROWS[g]) assert.ok(!disabledIn(patch).includes(row), `${row} 不该被关掉`)
+  }
+})
+
+test('an agent only sees its own skills: the skills dir holds exactly their SKILL.md, and dsh’s default skill roots are off', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  const skills = [skillOf('write-changes', '写改动说明的步骤'), skillOf('review', '评审要点')]
+  const profile: AgentProfile = { denyTools: [], skills, mcp: [] }
+  const patch = await launch(ex, created, 't1/plan', profile)
+  const skillsDir = join(ex.profileDir(profile), 'skills')
+  assert.deepEqual(rowById(patch, 'skill-filesystem')!.config, { includeDefaultRoots: false, customSkillDirs: [skillsDir] },
+    'includeDefaultRoots off means the repo’s and the user’s skills are invisible; only the template’s skills dir is read')
+  assert.deepEqual(readdirSync(skillsDir).sort(), ['review', 'write-changes'])
+  for (const s of skills) assert.equal(readFileSync(join(skillsDir, s.name, 'SKILL.md'), 'utf8'), s.content, '快照内容原样写出，不做改写')
+})
+
+test('a role with no skills still gets an empty skills dir, not dsh’s defaults', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  const profile: AgentProfile = { denyTools: [], skills: [], mcp: [] }
+  const patch = await launch(ex, created, 't1/plan', profile)
+  const skillsDir = join(ex.profileDir(profile), 'skills')
+  assert.deepEqual(rowById(patch, 'skill-filesystem')!.config, { includeDefaultRoots: false, customSkillDirs: [skillsDir] })
+  assert.deepEqual(readdirSync(skillsDir), [])
+  assert.deepEqual(insertedIn(patch), [], '没有 MCP 服务时不插入 mcp-client 行')
+})
+
+test('each MCP server becomes an inserted mcp-client row whose child runs in a platform dir, not in the worktree', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const home = tmpHome()
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', createHarness })
+  const mcp = [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { DOCS_ROOT: '/srv/docs' } }]
+  const inserted = insertedIn(await launch(ex, created, 't1/plan', { denyTools: [], skills: [], mcp }))
+  assert.equal(inserted.length, 1)
+  assert.equal(inserted[0]!.name, '@deepseek-ai/dsh-mcp-client')
+  assert.deepEqual(inserted[0]!.config, {
+    transport: 'stdio', serverName: 'docs', command: 'node', args: ['server.mjs'], env: { DOCS_ROOT: '/srv/docs' },
+    cwd: join(home, 'mcp-cwd'), toolCallTimeoutMs: 60_000, closeTimeoutMs: 5_000, expandTemplates: false, failOnStartupError: true,
+  })
+  assert.notEqual(inserted[0]!.config.cwd, '/data/worktrees/t1', 'the MCP child must not run in the task worktree')
+  assert.ok(existsSync(join(home, 'mcp-cwd')), 'that directory exists before dsh spawns the server')
+})
+
+test('the same worktree runs one dsh process per capability profile, and roles with the same profile share one', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
+  const plan: AgentProfile = { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [] }
+  await launch(ex, created, 't1/plan', plan)
+  // 同一个能力面（另建的等值对象）：共用进程，不再起新的。
+  await launch(ex, created, 't1/plan2', { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [] })
+  assert.equal(created.length, 1, '相同能力面共用一个 dsh 进程')
+  // 工具组不同、技能内容不同、MCP 不同：各起一个进程。
+  await launch(ex, created, 't1/build', { ...plan, denyTools: [] })
+  await launch(ex, created, 't1/doc', { ...plan, skills: [skillOf('review', '改过的评审要点')] })
+  await launch(ex, created, 't1/mcp', { ...plan, mcp: [{ name: 'docs', command: 'node', args: [], env: {} }] })
+  assert.equal(created.length, 4)
+  assert.equal(new Set(created.map(c => c.patches![0])).size, 4, '每个能力面有自己的补丁文件')
+  await ex.close()
+})
+
+test('the profile fingerprint ignores skill order but not skill content', () => {
+  const a = skillOf('a', 'A'), b = skillOf('b', 'B')
+  assert.equal(profileHash({ denyTools: ['web', 'bash'], skills: [a, b], mcp: [] }), profileHash({ denyTools: ['bash', 'web'], skills: [b, a], mcp: [] }))
+  assert.notEqual(profileHash({ denyTools: [], skills: [a], mcp: [] }), profileHash({ denyTools: [], skills: [{ ...a, content: '改了' }], mcp: [] }))
+})
+
+test('patch rows carry user values as data, never as interpolated yaml', () => {
+  const rows = patchRows({ denyTools: [], skills: [], mcp: [{ name: 'docs', command: 'node', args: ['--eval', 'x: 1\n- y'], env: { A: '*' } }] }, '/p/skills', '/p/mcp-cwd')
+  const insert = (rows as { insert?: { config: Record<string, any> }[] }[]).find(r => r.insert !== undefined)!.insert!
+  assert.deepEqual(insert[0]!.config.args, ['--eval', 'x: 1\n- y'], '像 yaml 的值仍然是一个字符串')
+  assert.equal(insert[0]!.config.expandTemplates, false)
 })

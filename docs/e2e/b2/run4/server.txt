@@ -1,0 +1,27 @@
+Eos Web：http://127.0.0.1:4322（数据目录 /home/user/Eos-workbench/.eos/templates-e2e/data，Ctrl+C 退出）
+[t261120191951hnc] → [spec] spec-writer · produce
+[t261120191951hnc]   已提交 841ca1f
+[t261120191951hnc] ✓ [spec] spec-writer · produce：135.6s，输入 19627，输出 21937，缓存读 432128
+[t261120191951hnc] → [spec] 检查（1 项）
+[t261120191951hnc] ✓ [spec] 检查：1/1 项通过
+[t261120191951hnc] → [build] developer · produce
+[t261120191951hnc]   已撤销 1 处越界改动：README.md
+[t261120191951hnc]   已提交 c953477
+[t261120191951hnc] ✓ [build] developer · produce：22.7s，输入 4878，输出 3295，缓存读 93952
+[t261120191951hnc] → [build] 检查（1 项）
+[t261120191951hnc] ✓ [build] 检查：1/1 项通过
+[t261120191951hnc] → [test 第 1 轮] 检查（1 项）
+[t261120191951hnc] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261120191951hnc] → [review 第 1 轮] 检查（1 项）
+[t261120191951hnc] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261120191951hnc] → [review 第 1 轮] reviewer · critique
+[t261120191951hnc] ✓ [review 第 1 轮] reviewer · critique：18.3s，输入 5364，输出 3089，缓存读 30464
+[t261120191951hnc] → [review 第 1 轮] developer · respond
+[t261120191951hnc]   已提交 cb201a9
+[t261120191951hnc] ✓ [review 第 1 轮] developer · respond：16.2s，输入 1758，输出 2688，缓存读 71040
+[t261120191951hnc] → [review 第 2 轮] 检查（1 项）
+[t261120191951hnc] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261120191951hnc] → [review 第 2 轮] reviewer · critique
+[t261120191951hnc] ✓ [review 第 2 轮] reviewer · critique：6.6s，输入 2629，输出 769，缓存读 41472
+[t261120191951hnc] → [deliver 第 1 轮] 检查（1 项）
+[t261120191951hnc] ✓ [deliver 第 1 轮] 检查：1/1 项通过

@@ -34,6 +34,16 @@ const requirements = (n: WorkflowNode): string =>
 const context = (task: Task, n: WorkflowNode): string =>
   section('需求', task.request) + section('环境', task.context) + n.inputs.map(i => section(`上游产出：${i}`, task.outputs[i])).join('')
 
+/**
+ * 上一次回复里有改动超出了角色的可写范围，已经被平台撤销：加在这个会话下一次调用的提示词最前面。
+ * 既列被撤销的路径，也列允许改动的路径，免得 agent 再试一次。
+ */
+export const scopeNotice = (reverted: string[], allowed: string[]): string =>
+  section('有改动被撤销（超出你的可写范围）',
+    `上一次回复之后，以下改动不在你的可写范围内，已经被撤销，也没有提交：\n${reverted.map(p => `- ${p}`).join('\n')}\n\n`
+    + (allowed.length === 0 ? '你这个角色是只读的，不能改动任何文件。' : `你可以改动的路径（任务 worktree 内的 glob）：\n${allowed.map(p => `- ${p}`).join('\n')}`)
+    + '\n\n可写范围由团队的 Agent 模板决定，任务里改不了（也不要建议用户在任务里放宽）。需要改范围外的文件时，在回复里说明要改什么、为什么，由用户决定，不要再直接改。')
+
 export const producePrompt = (task: Task, n: WorkflowNode): string =>
   `${intro(task, n.id, task.workflow, n)}${section('任务', n.task)}${context(task, n)}${requirements(n)}完成后，你的最终回复就是这一步的产出。`
 

@@ -7,6 +7,11 @@ import { isCheck, zeroUsage } from '../src/engine/types.ts'
 import type { AgentNode, DialogNode, Workflow } from '../src/workflow/types.ts'
 import { ASK, CHANGES, GARBAGE, PASS, REVISE, results, workflow } from './helpers.ts'
 
+/** 一次调用之后被平台撤销的越界路径（可写范围外的改动）。 */
+const REVERTED = ['docs/design.md', 'top.txt']
+/** 提示词里这段说明的标题，用来判断通知有没有发出去。 */
+const NOTICE = '有改动被撤销（超出你的可写范围）'
+
 const replies: Record<string, string[]> = {
   produce: ['产出'], fix: ['已补齐'], respond: ['已修改'], reapply: ['已按新方案修改'], instruct: ['已按指示修改'],
   critique: [PASS, CHANGES, GARBAGE], reconfirm: [REVISE, ASK, GARBAGE],
@@ -28,7 +33,12 @@ const eventsFor = (t: Task): Event[] => {
   } else if (t.pending !== undefined) {
     const call = t.pending
     out.push({ kind: 'checked', call: call.id, results: [], ms: 1 })
-    for (const text of replies[call.purpose]!) out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1 })
+    for (const text of replies[call.purpose]!) {
+      out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1 })
+      // 同一次回复的另一种结果：这次有改动越界、已被平台撤销。
+      out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1, reverted: REVERTED })
+      out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1, reverted: [] })
+    }
     out.push({ kind: 'call_failed', call: call.id, error: 'boom' })
     out.push({ kind: 'asked', call: call.id, question: { id: 'n', text: '问一下' } })
     out.push({ kind: 'asked', call: call.id, question: { id: 'n2', text: '换个问题' } })
@@ -48,6 +58,8 @@ const key = (t: Task): string => JSON.stringify({
   s: t.status, c: t.cursor, f: t.fixes, d: t.dialog && { ...t.dialog, lastCritique: undefined },
   p: t.pending && { u: t.pending.purpose, s: isCheck(t.pending) ? undefined : t.pending.session, n: t.pending.node }, q: t.question?.source,
   sessions: Object.keys(t.sessions).sort(),
+  // 有没有待通知的越界撤销会改变下一次调用的提示词，所以算不同的状态。
+  notices: Object.keys(t.scopeNotices).sort(),
 })
 
 type Check = (before: Task, event: Event, after: Task, accepted: boolean, wf: Workflow) => string | undefined
@@ -120,6 +132,31 @@ const INVARIANTS: Record<string, Check> = {
       return last?.type !== 'check' || !last.results.every(r => r.passed)
     })
     return unchecked === undefined ? undefined : `done while ${unchecked.id} failed its checks`
+  },
+  '越界撤销只记在出事的那个会话上，而且不会丢': (b, e, a, accepted) => {
+    if (!accepted || e.kind !== 'replied' || (e.reverted ?? []).length === 0) return undefined
+    const call = b.pending
+    if (call === undefined || isCheck(call)) return undefined
+    const stored = a.scopeNotices[call.session]
+    const next = a.pending !== undefined && !isCheck(a.pending) && a.pending !== b.pending ? a.pending : undefined
+    const delivered = next?.session === call.session && next.prompt.includes(NOTICE)
+    if (!delivered && !REVERTED.every(p => stored?.includes(p) === true)) return `notice for ${call.session} lost`
+    const elsewhere = Object.keys(a.scopeNotices).filter(s => s !== call.session && b.scopeNotices[s] === undefined)
+    return elsewhere.length === 0 ? undefined : `notice stored for ${elsewhere.join(',')}`
+  },
+  '待通知的越界撤销发给同一会话的下一次调用，发出后清除': (b, e, a, accepted) => {
+    const p = a.pending
+    if (!accepted || p === undefined || isCheck(p) || p === b.pending) return undefined
+    // 这次回复自己带来的撤销也算待通知：记下来和发出去可能发生在同一步。
+    const fresh = e.kind === 'replied' && (e.reverted ?? []).length > 0 && b.pending !== undefined && !isCheck(b.pending) && b.pending.session === p.session
+    const waiting = b.scopeNotices[p.session] ?? (fresh ? (e as { reverted?: string[] }).reverted : undefined)
+    if (waiting !== undefined) {
+      if (!p.prompt.includes(NOTICE)) return `notice for ${p.session} not delivered`
+      if (!waiting.every(path => p.prompt.includes(path))) return `notice for ${p.session} without its paths`
+      if (a.scopeNotices[p.session] !== undefined) return `notice for ${p.session} not cleared`
+    } else if (p.prompt.includes(NOTICE)) return `notice delivered to ${p.session} without one pending`
+    const dropped = Object.keys(b.scopeNotices).filter(s => s !== p.session && a.scopeNotices[s] === undefined)
+    return dropped.length === 0 ? undefined : `notice for ${dropped.join(',')} dropped`
   },
   '被拒绝的事件不改变任务': (b, _e, a, accepted) => (!accepted && a !== b ? 'rejected event changed the task' : undefined),
   '日志只追加': (b, _e, a) => (a.log.length < b.log.length || b.log.some((e, i) => a.log[i] !== e) ? 'log rewritten' : undefined),

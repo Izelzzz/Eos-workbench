@@ -6,8 +6,9 @@ import { Conventions } from '../conventions/conventions.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
+import { role as roleOf } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
-import { commitAll, contextFor, createWorktree } from './git.ts'
+import { commitInScope, contextFor, createWorktree } from './git.ts'
 import { acquire, holder } from './lock.ts'
 import { runTask } from './runner.ts'
 
@@ -57,7 +58,7 @@ export class Supervisor {
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
     this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-      meta: { ...w, conventions: resolved.used } }, Date.now(), this.o.actor ?? 'cli')
+      meta: { ...w, conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
   }
 
@@ -78,8 +79,12 @@ export class Supervisor {
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       checker: (t, run, signal) => runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal),
       afterWrite: (t, call) => {
-        const sha = commitAll(this.o.store.meta(t.id).worktree, `eos: ${call.node} ${call.purpose} (${call.id})`)
+        // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
+        const { writePaths } = roleOf(t.workflow, call.role)
+        const { sha, reverted } = commitInScope(this.o.store.meta(t.id).worktree, writePaths, `eos: ${call.node} ${call.purpose} (${call.id})`, this.o.store.meta(t.id).repo)
+        if (reverted.length > 0) log(`  已撤销 ${reverted.length} 处越界改动：${reverted.join('、')}`)
         if (sha !== undefined) log(`  已提交 ${sha}`)
+        return reverted
       },
     }).finally(async () => {
       // 先关掉这个任务的 agent 进程再放锁：worktree 各自一个进程，不释放会越积越多；

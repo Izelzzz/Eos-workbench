@@ -36,7 +36,8 @@ const probe = async (key: string, write: 'none' | 'worktree', targets: Target[])
   const files = targets.flatMap(t => [{ ...t, via: 'write 工具', file: join(t.dir, `${key.replace('/', '-')}-tool.txt`) }, { ...t, via: 'bash', file: join(t.dir, `${key.replace('/', '-')}-bash.txt`) }])
   const steps = files.map((f, i) => (f.via === 'bash' ? `${i + 1}. 用 bash 工具执行：echo x > ${f.file}` : `${i + 1}. 用 write 工具创建文件 ${f.file}，内容 x`)).join('\n')
   const prompt = `这是一次写入权限探针。严格按顺序做下面每一步，某一步失败也继续下一步；不要申请提升权限，不要换别的写法绕过。最后逐条报告成功还是失败。\n${steps}`
-  const reply = await ex.send({ key, nonce: `${key}/c1`, prompt, spec: { model: 'deepseek-flash', write, cwd: dirs.mine }, ask: async () => '不需要，继续' })
+  // 这个探针只看写入范围：能力面不做限制（工具组、技能和 MCP 由 scripts/template-probe.ts 验证）。
+  const reply = await ex.send({ key, nonce: `${key}/c1`, prompt, spec: { model: 'deepseek-flash', write, cwd: dirs.mine, profile: { denyTools: [], skills: [], mcp: [] } }, ask: async () => '不需要，继续' })
   return { reply: reply.text, results: files.map(f => ({ role: write === 'worktree' ? '可写角色' : '只读角色', target: f.name, via: f.via, written: existsSync(f.file) })) }
 }
 

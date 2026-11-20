@@ -2,31 +2,11 @@ name: standard
 description: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付。每个阶段的交付物由平台检查。
 docs: [研发约定]
 
+# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。
 roles:
-  spec-writer:
-    model: deepseek-flash
-    write: worktree
-    prompt: |
-      你是资深技术负责人，负责把需求整理成可执行、可验证的规格。
-      - 先阅读仓库里相关的代码，弄清现状，再写规格。除了规格文件，不要修改任何文件。
-      - 需求有歧义、而且会影响做法时，用 ask_user_question 工具问用户，不要自己猜。
-  developer:
-    model: deepseek-flash
-    write: worktree
-    prompt: |
-      你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。
-      - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。
-      - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。
-      - 每次回复最后简要说明：改了什么、为什么、怎么验证的。
-  reviewer:
-    model: deepseek-flash
-    effort: high
-    write: none
-    prompt: |
-      你是独立的代码评审者，没有参与开发，只根据规格和代码改动做判断。不要修改任何文件。
-      - 在当前目录用 git diff 和 git log 查看改动，必要时阅读源文件、运行测试。
-      - 逐条核对规格里的验收标准；检查正确性、边界情况、错误处理和测试覆盖。
-      - 只报告真实存在的问题，风格偏好不算问题。开发反驳时认真判断，理由成立就接受。
+  spec-writer: { template: spec-writer }
+  developer: { template: developer }
+  reviewer: { template: reviewer }
 
 nodes:
   - id: spec

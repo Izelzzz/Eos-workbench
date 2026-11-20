@@ -13,8 +13,8 @@ export type RunnerOptions = {
   pollMs?: number
   /** 对话尽头需要用户指示时：true 留在这里等回答，false 直接返回。 */
   wait?: boolean
-  /** 写 worktree 的角色每次回复后调用（提交改动）。 */
-  afterWrite?: (task: Task, call: Call) => void
+  /** 写 worktree 的角色每次回复后调用（撤销越界改动并提交剩下的）。返回被撤销的越界路径。 */
+  afterWrite?: (task: Task, call: Call) => string[] | void
   /** 执行一组检查（在任务的 worktree 里）。结果顺序与 run.checks 一致。 */
   checker?: (task: Task, run: CheckRun, signal: AbortSignal) => Promise<CheckResult[]>
   log?: (line: string) => void
@@ -67,6 +67,12 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     let reply = recovered
     let asking: Promise<unknown> = Promise.resolve()
     if (reply === undefined) {
+      const meta = o.store.meta(id)
+      // 这个角色能看到的技能：只有它自己列出来的，内容用任务创建时的快照（平台上之后的修改不影响正在跑的任务）。
+      const skills = (meta.skills ?? []).filter(s => role.skills.includes(s.name)).map(s => ({ name: s.name, content: s.content }))
+      // 角色写了技能名但任务快照里没有：agent 会少一份本该有的说明，结果看着正常却是错的，所以记一行。
+      const missing = role.skills.filter(name => !skills.some(s => s.name === name))
+      if (missing.length > 0) log(`  （警告：角色 ${call.role} 要的技能 ${missing.join('、')} 不在任务快照里，这次调用看不到它们）`)
       o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now(), call: { node: call.node, role: call.role, purpose: call.purpose, prompt: call.prompt } }])
       try {
         reply = await o.executor.send({
@@ -79,7 +85,10 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
               log(`  （trace 记录失败：${(err as Error).message}）`)
             }
           },
-          spec: { model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: o.store.meta(id).worktree },
+          spec: {
+            model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: meta.worktree,
+            profile: { denyTools: role.denyTools, skills, mcp: role.mcp },
+          },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
           ask: (q, signal) => {
             const next = asking.then(() => waitForAnswer(call, q, signal))
@@ -93,9 +102,10 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
         return
       }
     }
+    let reverted: string[] = []
     if (role.write === 'worktree') {
       try {
-        o.afterWrite?.(task, call)
+        reverted = o.afterWrite?.(task, call) ?? []
       } catch (e) {
         // 改动没提交上（例如 worktree 被删了）：这次调用记为失败，任务停下等人工处理，而不是让 runner 悄悄退出。
         const error = `提交改动失败：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}`
@@ -106,7 +116,8 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     }
     const u = reply.usage
     log(`✓ ${label(task, call)}：${(reply.ms / 1000).toFixed(1)}s，输入 ${u.input}，输出 ${u.output}，缓存读 ${u.cacheRead}`)
-    dispatch({ kind: 'replied', call: call.id, sessionId: reply.sessionId, text: reply.text, usage: reply.usage, ms: reply.ms, ...(reply.model === undefined ? {} : { model: reply.model }) })
+    dispatch({ kind: 'replied', call: call.id, sessionId: reply.sessionId, text: reply.text, usage: reply.usage, ms: reply.ms,
+      ...(reply.model === undefined ? {} : { model: reply.model }), ...(reverted.length === 0 ? {} : { reverted }) })
   }
 
   /** 检查没有副作用，崩溃后直接重跑即可，不需要像调用那样认领。 */

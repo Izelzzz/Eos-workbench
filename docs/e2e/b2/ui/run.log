@@ -1,0 +1,47 @@
+OK   侧栏四栏：工作流、约定文档、Agent 模板、技能
+OK   模板那栏显示可写范围
+OK   技能那栏列出 write-changes
+截图 01-四栏与介绍.png
+OK   新建技能有中文说明
+OK   技能起始文本是合法的 frontmatter
+截图 02-新建技能的起始文本.png
+OK   技能错误带位置：(正文)：技能正文不能为空
+截图 03-技能的中文错误带位置.png
+OK   改好后提示格式正确
+OK   保存后跳到这个技能的页面
+OK   技能保存成第 1 版
+OK   侧栏立刻出现新技能和它的说明
+截图 04-技能已保存.png
+OK   模板起始文本带 tools.deny 的中文注释
+OK   模板起始文本带 writePaths 的中文注释
+截图 05-新建模板的起始文本.png
+OK   工具组写错：tools.deny[0]：只能是 web、subagent、bash、schedule、todo、goal 之一
+OK   有错误时保存按钮不可点
+截图 06-模板的中文错误带位置-工具组.png
+OK   只读却给了 writePaths：writePaths：只读（write: none）的角色不需要 writePaths；要允许写入，把 write 改成 worktree
+截图 06b-模板的中文错误带位置-只读与可写范围.png
+OK   引用了不存在的技能：skills[0]：平台上没有名为「nope」的技能
+截图 06c-模板的中文错误带位置-技能不存在.png
+OK   改好后提示格式正确
+OK   保存后跳到这个模板的页面
+截图 07-模板已保存.png
+OK   未保存的改动有 diff
+截图 08-未保存的改动.png
+OK   历史里两版都在，带说明
+OK   diff 折叠了未改动的行：⋯ 省略 3 行未改动
+截图 09-历史版本与折叠 diff.png
+截图 10-看第一版的改动.png
+OK   工作流可以用 template 引用模板
+任务 demo-1 用到的约定版本：{"workflow":{"name":"audit","version":1},"docs":[],"templates":[{"name":"auditor","version":2}],"skills":[{"name":"audit-notes","version":1}]}
+OK   任务页显示模板版本：工作流 | audit · 第 1 版 | Agent 模板 | auditor · 第 2 版 | 技能 | audit-notes · 第 1 版 | 当前位置 | build | 已完成调用 | 0 次 | agent 耗时 | 0ms
+OK   任务页显示技能版本
+截图 11-任务页用到的约定版本.png
+OK   任务页的模板链接能点到模板页
+OK   12-手机宽度-约定首页：没有横向滚动（内容宽 390，窗口宽 390）
+截图 12-手机宽度-约定首页.png
+OK   13-手机宽度-模板页：没有横向滚动（内容宽 390，窗口宽 390）
+截图 13-手机宽度-模板页.png
+OK   14-手机宽度-任务页：没有横向滚动（内容宽 390，窗口宽 390）
+截图 14-手机宽度-任务页.png
+
+全部通过

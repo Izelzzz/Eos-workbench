@@ -30,11 +30,27 @@ test('runs the workflow to done, committing after every developer turn', async (
   const { store } = setup()
   const ex = new FakeExecutor(reviewOnce)
   const writes: string[] = []
-  const task = await runTask('t', { store, executor: ex, pollMs: 1, afterWrite: (_t, c) => writes.push(`${c.purpose}@${c.session}`) })
+  const task = await runTask('t', { store, executor: ex, pollMs: 1, afterWrite: (_t, c) => { writes.push(`${c.purpose}@${c.session}`) } })
   assert.equal(task.status, 'done')
   assert.deepEqual(writes, ['produce@build', 'respond@build'])
   assert.deepEqual(ex.sent, ['t/c1', 't/c2', 't/c3', 't/c4', 't/c5'])
   assert.equal(task.sessions.build, `s:${keyOf('t', 'build')}`)
+})
+
+test('afterWrite 报回的越界路径记进日志，并出现在同一会话下一次调用的提示词里', async () => {
+  (reviewOnce as any).n = 0
+  const { store } = setup()
+  const prompts: string[] = []
+  const ex = new FakeExecutor(async p => {
+    prompts.push(p.prompt)
+    return reviewOnce(p)
+  })
+  const task = await runTask('t', { store, executor: ex, pollMs: 1, afterWrite: (_t, c) => (c.purpose === 'produce' ? ['top.txt'] : []) })
+  assert.equal(task.status, 'done')
+  const entry = task.log.find(e => e.type === 'call' && e.purpose === 'produce' && e.node === 'build')
+  assert.deepEqual(entry?.type === 'call' ? entry.reverted : undefined, ['top.txt'])
+  const respond = prompts.find(p => /评审意见/.test(p))
+  assert.match(respond ?? '', /有改动被撤销[\s\S]*top\.txt/, '回应评审的提示词里带上了被撤销的路径')
 })
 
 test('a reply already in the session log is used instead of sending the call again', async () => {

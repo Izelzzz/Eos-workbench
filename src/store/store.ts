@@ -53,13 +53,18 @@ CREATE TABLE IF NOT EXISTS conventions (
 );`
 
 /**
- * 第 1 块之前保存的任务没有这些字段（任务的 docs、fixes，对话的 review，工作流快照里节点的 checks、maxFixes 和 docs）：
+ * 之前保存的任务没有这些字段（任务的 docs、fixes、scopeNotices，对话的 review，工作流快照里节点的 checks、maxFixes 和 docs，
+ * 角色的 writePaths、denyTools、skills、mcp）：
  * 读出时补上默认值，引擎内部只信任完整的 Task。
  */
 export const upgradeTask = (t: Task): Task => ({
-  ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0,
+  ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0, scopeNotices: t.scopeNotices ?? {},
   workflow: {
     ...t.workflow, docs: t.workflow.docs ?? [],
+    // 第 2 块之前的角色没有写入路径、工具组、技能和 MCP：按原来的行为补上（可写角色能写整个 worktree）。
+    roles: Object.fromEntries(Object.entries(t.workflow.roles).map(([k, r]) => [k, {
+      ...r, writePaths: r.writePaths ?? (r.write === 'worktree' ? ['**'] : []), denyTools: r.denyTools ?? [], skills: r.skills ?? [], mcp: r.mcp ?? [],
+    }])),
     nodes: t.workflow.nodes.map(n => ({ ...n, checks: n.checks ?? [], ...(n.kind === 'agent' ? { maxFixes: n.maxFixes ?? DEFAULT_MAX_FIXES } : {}) })),
   },
   ...(t.dialog === undefined ? {} : { dialog: { ...t.dialog, review: t.dialog.review ?? (t.dialog.round > 1 ? 'reply' : 'first') } }),

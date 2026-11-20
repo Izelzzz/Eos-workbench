@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds as boundsOf } from '../../src/trace/build.ts'
-import type { Span, TaskDetail, TaskSummary } from './api.ts'
+import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
@@ -64,6 +64,15 @@ function TaskList() {
 }
 
 const collect = (s: Span): string[] => [s.id, ...s.children.flatMap(collect)]
+
+/** 任务创建时用到的某一类约定及其版本，链到团队约定页。一个都没有时不占位置。 */
+const used = (label: string, kind: ConventionKind, items: { name: string; version: number }[] | undefined) =>
+  items === undefined || items.length === 0 ? null : (
+    <div key={kind}>
+      <span>{label}</span>
+      <b>{items.map((x, i) => <span key={x.name}>{i > 0 && '、'}<a href={conventionHref(kind, x.name)}>{x.name} · 第 {x.version} 版</a></span>)}</b>
+    </div>
+  )
 
 const find = (s: Span, id: string | undefined): Span | undefined =>
   id === undefined ? undefined : s.id === id ? s : s.children.map(c => find(c, id)).find(Boolean)
@@ -156,12 +165,9 @@ function TaskPage(props: { id: string }) {
             <b>{task.conventions?.workflow.version === undefined ? task.workflow
               : <a href={conventionHref('workflow', task.workflow)}>{task.workflow} · 第 {task.conventions.workflow.version} 版</a>}</b>
           </div>
-          {task.conventions && task.conventions.docs.length > 0 && (
-            <div>
-              <span>团队约定</span>
-              <b>{task.conventions.docs.map((d, i) => <span key={d.name}>{i > 0 && '、'}<a href={conventionHref('doc', d.name)}>{d.name} · 第 {d.version} 版</a></span>)}</b>
-            </div>
-          )}
+          {used('团队约定', 'doc', task.conventions?.docs)}
+          {used('Agent 模板', 'template', task.conventions?.templates)}
+          {used('技能', 'skill', task.conventions?.skills)}
           <div><span>当前位置</span><b>{task.position}</b></div>
           <div><span>已完成调用</span><b>{r.calls} 次</b></div>
           <div><span>agent 耗时</span><b>{duration(r.ms)}</b></div>

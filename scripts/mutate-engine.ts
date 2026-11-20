@@ -33,6 +33,12 @@ const MUTATIONS: [string, string, string][] = [
   ['评审方第一次被请来时只给"回复"提示词（缺任务和需求）', "const review = task.sessions[d.id] === undefined ? 'first' : task.dialog!.review", 'const review = task.dialog!.review'],
   ['不校验检查结果条数', 'if (event.results.length !== run.checks.length) return ignore', 'if (false) return ignore'],
   ['检查进行中接受模型回复', 'if (call === undefined || isCheck(call) || call.id !== event.call', 'if (call === undefined || call.id !== event.call'],
+  ['越界撤销不记下要通知的会话（agent 永远不知道自己写越界了）', 'append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } }', 'append(task'],
+  ['越界撤销记在节点上而不是会话上（通知发错会话）', '{ ...task.scopeNotices, [call.session]: reverted }', '{ ...task.scopeNotices, [call.node]: reverted }'],
+  ['发出调用时不把越界撤销的说明加进提示词', 'const prompt = reverted === undefined ? c.prompt : scopeNotice(reverted, roleOf(task.workflow, c.role).writePaths) + c.prompt', 'const prompt = c.prompt'],
+  ['越界撤销的说明发出后不清除（每次调用都重复通知）', 'pending: { ...c, id: nextId(task), prompt }, scopeNotices, nextCall', 'pending: { ...c, id: nextId(task), prompt }, scopeNotices: task.scopeNotices, nextCall'],
+  ['没有越界改动也记成一条通知', 'ok(onReply(reverted.length === 0 ? recorded : noteReverted(recorded, call, reverted, at)', 'ok(onReply(noteReverted(recorded, call, reverted, at)'],
+  ['调用日志不记被撤销的越界路径', '...(reverted.length === 0 ? {} : { reverted }) },', '},'],
 ]
 
 const TESTS = ['tests/engine.test.ts', 'tests/engine.checks.test.ts', 'tests/engine.state-space.test.ts']

@@ -15,8 +15,8 @@ import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type { ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, SaveConventionResponse, TaskDetail, WorkflowInfo } from './types.ts'
 
-/** /api/conventions/<workflow|doc>/<名字>，名字可以是中文（URL 编码）。 */
-const CONVENTION = /^\/api\/conventions\/(workflow|doc)\/([^/]+)$/
+/** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
+const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$/
 
 const decodeName = (raw: string): string | undefined => {
   try {
@@ -152,7 +152,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   const workflows = (): WorkflowInfo[] =>
     o.supervisor.conventions.list('workflow').map(w => ({ name: w.name, version: w.version, ...(w.description === undefined ? {} : { description: w.description }), nodes: w.nodes }))
 
-  const conventions = (): ConventionsResponse => ({ workflows: workflows(), docs: o.supervisor.conventions.list('doc') })
+  const conventions = (): ConventionsResponse => ({
+    workflows: workflows(), docs: o.supervisor.conventions.list('doc'),
+    templates: o.supervisor.conventions.list('template'), skills: o.supervisor.conventions.list('skill'),
+  })
 
   const convention = (kind: ConventionKind, name: string): ConventionDetail | undefined => {
     const versions = o.store.conventionHistory(kind, name)
