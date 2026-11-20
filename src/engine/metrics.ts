@@ -6,7 +6,8 @@
 // - 等用户：从提问到回答（调用中途 agent 的提问，和流程卡住时的提问）；
 // - 阻塞：从调用失败到人工重试（这段时间任务停着，等人处理）；
 // - 平台开销：剩下的部分（进程启动、提交改动、排队等）。
-// 各部分相加等于阶段时长（平台开销不会是负数：各部分有重叠时取 0，这种情况由测试覆盖）。
+// 各部分相加等于阶段时长（平台开销不会是负数：各部分有重叠时取 0）。
+// 阶段之间的间隔（平台停着、重启续跑、被杀掉没记下来的调用）不属于任何阶段，单独算成 betweenMs。
 import type { Entry, Task, Usage } from './types.ts'
 import { addUsage, zeroUsage } from './types.ts'
 
@@ -27,7 +28,14 @@ export type StageMetrics = {
   open: boolean
 }
 
-export type TaskMetrics = { stages: StageMetrics[]; total: Omit<StageMetrics, 'node' | 'open' | 'start' | 'end'> }
+export type TaskMetrics = {
+  stages: StageMetrics[]
+  total: Omit<StageMetrics, 'node' | 'open' | 'start' | 'end'>
+  /** 从第一个阶段开始到最后一个阶段结束（或 now）。 */
+  elapsedMs: number
+  /** 不在任何阶段里的时间：阶段之间的间隔，例如平台停着、重启续跑、被杀掉没记下来的调用。 */
+  betweenMs: number
+}
 
 /** 引擎写下的说明：调用失败、回复格式无法解析（任务停下）；人工重试（任务继续）。 */
 const isFailure = (e: Entry): boolean => e.type === 'note' && (e.text.startsWith('调用失败：') || e.text.startsWith('回复格式无法解析'))
@@ -91,7 +99,10 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
     ]
     const open = current === n.id
     if (activity.length === 0 && !open) continue
-    const start = activity.length === 0 ? undefined : Math.min(...activity.map(s => s.start))
+    // 进行中的阶段从上一个阶段结束时算起：正在跑的调用还没有记录，先算在平台开销里，调用结束后归到 agent。
+    const prevEnd = stages.at(-1)?.end
+    const starts = [...activity.map(s => s.start), ...(open && prevEnd !== undefined ? [prevEnd] : [])]
+    const start = starts.length === 0 ? undefined : Math.min(...starts)
     const end = open ? until : activity.length === 0 ? undefined : Math.max(...activity.map(s => s.end))
     const wallMs = start === undefined || end === undefined ? 0 : Math.max(0, end - start)
     // 调用中途的提问：等回答的时间不算 agent 工作时间。
@@ -106,12 +117,18 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
       ...(start === undefined ? {} : { start }), ...(end === undefined ? {} : { end }), open,
     })
   }
+  const starts = stages.flatMap(s => (s.start === undefined ? [] : [s.start]))
+  const ends = stages.flatMap(s => (s.end === undefined ? [] : [s.end]))
+  const elapsedMs = starts.length === 0 ? 0 : Math.max(0, Math.max(...ends) - Math.min(...starts))
   const sum = (k: 'calls' | 'checks' | 'agentMs' | 'checkMs' | 'waitUserMs' | 'blockedMs' | 'overheadMs' | 'wallMs') => stages.reduce((s, x) => s + x[k], 0)
+  const wallMs = sum('wallMs')
   return {
     stages,
+    elapsedMs,
+    betweenMs: Math.max(0, elapsedMs - wallMs),
     total: {
       calls: sum('calls'), checks: sum('checks'), usage: stages.reduce<Usage>((u, s) => addUsage(u, s.usage), zeroUsage()),
-      agentMs: sum('agentMs'), checkMs: sum('checkMs'), waitUserMs: sum('waitUserMs'), blockedMs: sum('blockedMs'), overheadMs: sum('overheadMs'), wallMs: sum('wallMs'),
+      agentMs: sum('agentMs'), checkMs: sum('checkMs'), waitUserMs: sum('waitUserMs'), blockedMs: sum('blockedMs'), overheadMs: sum('overheadMs'), wallMs,
     },
   }
 }
@@ -129,5 +146,6 @@ export const formatMetrics = (m: TaskMetrics): string => {
   const rows = [head, ...m.stages.map(s => row(s.node, s, s.open)), row('合计', m.total)]
   const widths = head.map((_, i) => Math.max(...rows.map(r => [...r[i]!].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0))))
   const pad = (s: string, w: number) => s + ' '.repeat(Math.max(0, w - [...s].reduce((x, ch) => x + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0)))
-  return rows.map(r => r.map((c, i) => pad(c, widths[i]!)).join('  ').trimEnd()).join('\n')
+  const table = rows.map(r => r.map((c, i) => pad(c, widths[i]!)).join('  ').trimEnd()).join('\n')
+  return `${table}\n任务总时长 ${secs(m.elapsedMs)}，其中不在任何阶段的 ${secs(m.betweenMs)}（阶段之间的间隔，例如平台停着或重启续跑）`
 }

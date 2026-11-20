@@ -110,9 +110,20 @@ test('stages follow workflow order, skip stages that never ran, and the parts ne
   c.reply(1000, 1000, '方案')
   const m = taskMetrics(c.task, 3000)
   assert.deepEqual(m.stages.map(s => [s.node, s.open]), [['plan', false], ['build', true]])
-  assert.equal(m.stages[1]!.wallMs, 0, 'a stage with no activity yet has no start')
+  assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one; its running call is overhead until it ends')
+  assert.equal(m.stages[1]!.overheadMs, 2000)
   assert.equal(m.total.calls, 1)
   for (const s of m.stages) assert.ok(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs === s.wallMs || s.overheadMs === 0)
+})
+
+test('time between stages is not in any stage and is reported separately', () => {
+  const c = new Clock()
+  c.reply(1000, 1000, '方案') // plan [0, 1000]
+  c.reply(9000, 500, '实现完了') // build [8500, 9000]：中间 7.5s 平台停着
+  const m = taskMetrics(c.task, 9000)
+  assert.equal(m.elapsedMs, 9000)
+  assert.equal(m.total.wallMs, 1500, 'review has just opened at 9000')
+  assert.equal(m.betweenMs, 7500)
 })
 
 test('the command-line table has a row per stage and a total, and marks the open stage', () => {
@@ -120,7 +131,8 @@ test('the command-line table has a row per stage and a total, and marks the open
   c.reply(1000, 1000, '方案', 12_345)
   const text = formatMetrics(taskMetrics(c.task, 2500))
   const lines = text.split('\n')
-  assert.equal(lines.length, 4)
+  assert.equal(lines.length, 5)
+  assert.match(lines[4]!, /^任务总时长 2\.5s，其中不在任何阶段的 0ms/)
   assert.match(lines[0]!, /^阶段\s+调用/)
   assert.match(lines[1]!, /^plan\s+1\s+0\s+12\.3k/)
   assert.match(lines[2]!, /^build（进行中）/)
