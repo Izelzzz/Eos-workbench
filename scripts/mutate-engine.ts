@@ -18,6 +18,7 @@ const MUTATIONS: [string, string, string][] = [
   ['不校验回复属于哪个调用', "if (call?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')", "if (call === undefined || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')"],
   ['不校验失败属于哪个调用', "if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')", "if (task.pending === undefined || task.status === 'failed') return ignore(task, '不是当前这次调用')"],
   ['提问不要求是当前调用', "if (task.pending?.id !== event.call) return ignore(task, '不是当前这次调用')", 'if (task.pending === undefined) return ignore(task, "")'],
+  ['失败的任务收到提问就离开失败状态', "if (open === undefined && task.status !== 'running') return ignore(task, '不是当前这次调用')", ''],
   ['同一个问题重复提出', "if (open !== undefined && open.text === event.question.text) return ignore(task, '同一个问题已经在等回答')", 'if (false) return ignore(task, "")'],
   ['回答不校验问题 id', "if (task.status !== 'waiting_user' || q?.id !== event.questionId) return ignore(task, '没有待回答的这个问题')", "if (task.status !== 'waiting_user' || q === undefined) return ignore(task, '没有待回答的这个问题')"],
 ]

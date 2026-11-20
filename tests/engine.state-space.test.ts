@@ -90,6 +90,8 @@ const INVARIANTS: Record<string, Check> = {
     if (e.kind === 'answered' && e.questionId !== b.question?.id) return 'answer to another question accepted'
     return undefined
   },
+  '失败状态只能通过重试或中止离开': (b, e, a, accepted) =>
+    b.status === 'failed' && accepted && a.status !== 'failed' && e.kind !== 'retry' && e.kind !== 'abort' ? `failed left by ${e.kind}` : undefined,
   '同一个问题不重复提出': (b, e, _a, accepted) =>
     e.kind === 'asked' && accepted && b.question?.call === e.call && b.question.text === e.question.text ? 'same question asked twice' : undefined,
 }
