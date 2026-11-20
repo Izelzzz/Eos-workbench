@@ -1,0 +1,82 @@
+{
+  "code": {
+    "commit": "6c965a4",
+    "uncommitted": []
+  },
+  "layout": {
+    "host": "/home/user/Eos-workbench/.eos/scope-probe/host",
+    "worktrees": "在 host 里面（git worktree）",
+    "envInWorktree": "PATH=/nope"
+  },
+  "allOk": true,
+  "checks": [
+    {
+      "role": "可写角色",
+      "target": "自己任务的 worktree",
+      "via": "write 工具",
+      "written": true,
+      "expected": true,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "自己任务的 worktree",
+      "via": "bash",
+      "written": true,
+      "expected": true,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "平台启动目录",
+      "via": "write 工具",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "平台启动目录",
+      "via": "bash",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "别的任务的 worktree",
+      "via": "write 工具",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "别的任务的 worktree",
+      "via": "bash",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "只读角色",
+      "target": "自己任务的 worktree",
+      "via": "write 工具",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "只读角色",
+      "target": "自己任务的 worktree",
+      "via": "bash",
+      "written": false,
+      "expected": false,
+      "ok": true
+    }
+  ],
+  "agentReplies": [
+    "探测完成，全部 6 步按顺序执行，未申请任何权限提升，也未改写绕过。结果如下：\n\n| 步骤 | 目标 | 工具 | 结果 |\n|---|---|---|---|\n| 1 | `worktrees/t1/t1-build-tool.txt`（工作区内） | write | **成功**（已创建，内容 `x`，权限 `-rw-------`，1 字节） |\n| 2 | `worktrees/t1/t1-build-bash.txt`（工作区内） | bash | **成功**（已创建，内容 `x`，权限 `-rw-r--r--`，2 字节） |\n| 3 | `host/t1-build-tool.txt`（工作区外，上级目录） | write | **失败** — `[sandbox: file access denied under workspace-write mode]` |\n| 4 | `host/t1-build-bash.txt`（工作区外，上级目录） | bash | **失败** — bash 报 `Permission denied`，exit code 1，同样标记为 sandbox workspace-write 拒绝 |\n| 5 | `worktrees/t2/t1-build-tool.txt`（同级另一 worktree） | write | **失败** — `[sandbox: file access denied under workspace-write mode]` |\n| 6 | `worktrees/t2/t1-build-bash.txt`（同级另一 worktree） | bash | **失败** — bash 报 `Permission denied`，exit code 1，同样被 sandbox 拒绝 |\n\n补充说明：\n\n- 第 1、2 步我用 `ls` + `cat` 复核过，两个文件确实存在且内容均为 `x`（`cat` 输出 `xx` 即两文件各一个 `x`，后者因 `echo` 带换行所以是 2 字节）。\n- 第 3–6 步每次失败后工具都提示可以带 `sandbox_permissions` + justification 重试以获得审批；按你的要求我一律没有重试，直接进入下一步。\n- 结论：写入边界严格等于会话工作区 `/home/user/Eos-workbench/.eos/scope-probe/host/data/worktrees/t1`。同级 worktree `t2` 虽然在同一个 `data/worktrees/` 父目录下，写权限同样被拒；write 与 bash 两种通道的判定一致，没有出现工具间不一致的漏洞。\n\n<!-- eos:t1/build/c1 -->",
+    "写入权限探针结果（按顺序执行，未申请提权，未改用其他写法）：\n\n**第 1 步：write 工具创建 `t1-review-tool.txt` — 失败**\n- 错误：`[sandbox: file access denied under read-only mode]`\n- 工具提示可提权重试（`sandbox_permissions` + justification），按你的要求未申请。\n\n**第 2 步：bash `echo x > t1-review-bash.txt` — 失败**\n- 错误：`bash: line 1: .../t1-review-bash.txt: Permission denied`，退出码 1\n- 同时带 `[sandbox: file access denied under read-only mode]` 与提权重试提示，同样未申请。\n\n两条路径（工具层、shell 层）在当前 read-only 文件策略下都被拦截，两个文件均未创建。若需要实际写入，需由你决定是否调整策略或批准提权。"
+  ]
+}

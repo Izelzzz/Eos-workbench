@@ -22,5 +22,7 @@ export interface Executor {
   findReply(key: string, nonce: string): Promise<Reply | undefined>
   /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。 */
   traceOf(key: string, nonce: string): Promise<TraceEvent[]>
+  /** 释放这个工作目录占用的资源（例如 agent 进程）。任务的 runner 结束时调用；之后的调用照常可用。 */
+  release(cwd: string): Promise<void>
   close(): Promise<void>
 }

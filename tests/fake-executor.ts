@@ -21,5 +21,9 @@ export class FakeExecutor implements Executor {
   async traceOf() {
     return [{ kind: 'call_start' as const, t: 1 }, { kind: 'step_start' as const, t: 2, step: 1 }]
   }
+  released: string[] = []
+  async release(cwd: string) {
+    this.released.push(cwd)
+  }
   async close() {}
 }

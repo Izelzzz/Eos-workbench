@@ -63,6 +63,7 @@ test('a created task gets its own branch and worktree under the data directory a
   const task = await started.done
   assert.equal(task.status, 'done')
   assert.equal(sup.running(created.id), false, 'lock released when the runner ends')
+  assert.deepEqual(happy.released.slice(-1), [meta.worktree], 'the task’s agent processes are released when its runner ends')
 })
 
 test('a task held by another live process is not started here', () => {

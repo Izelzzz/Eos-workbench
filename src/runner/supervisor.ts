@@ -81,7 +81,14 @@ export class Supervisor {
         const sha = commitAll(this.o.store.meta(t.id).worktree, `eos: ${call.node} ${call.purpose} (${call.id})`)
         if (sha !== undefined) log(`  已提交 ${sha}`)
       },
-    }).finally(() => {
+    }).finally(async () => {
+      // 先关掉这个任务的 agent 进程再放锁：worktree 各自一个进程，不释放会越积越多；
+      // 旧进程还没退出时下一个 runner 续接会话，会撞上它占着的会话锁。
+      try {
+        await this.o.executor.release(this.o.store.meta(id).worktree)
+      } catch (e) {
+        log(`  （关闭 agent 进程失败：${(e as Error).message}）`)
+      }
       lock.release()
       this.active.delete(id)
     })
