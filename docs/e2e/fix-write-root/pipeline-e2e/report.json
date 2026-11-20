@@ -1,12 +1,13 @@
 {
-  "task": "t261120163307m1f",
+  "task": "t261120164734vu0",
   "code": {
-    "commit": "4783079",
+    "commit": "f4b607c",
     "uncommitted": []
   },
   "status": "done",
   "answers": [
-    "对齐 Go 核心语义（推荐）"
+    "完整对齐 Go（推荐）",
+    "浮点秒，简化（推荐）"
   ],
   "testFailures": 1,
   "induced": [
