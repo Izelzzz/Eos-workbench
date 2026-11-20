@@ -73,9 +73,9 @@ export class Store {
       .run(id, next, at, actor, JSON.stringify(event), accepted ? 1 : 0, reason ?? null)
   }
 
-  create(p: { id: string; request: string; workflow: Workflow; workflowSource: string; meta: TaskMeta }, at: number): Task {
+  create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; meta: TaskMeta }, at: number): Task {
     return this.tx(() => {
-      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow }, at)
+      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, ...(p.context === undefined ? {} : { context: p.context }) }, at)
       this.db.prepare('INSERT INTO tasks (id, created_at, updated_at, status, request, workflow_name, workflow_source, meta, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(p.id, at, at, task.status, p.request, p.workflow.name, p.workflowSource, JSON.stringify(p.meta), JSON.stringify(task))
       this.append(p.id, at, 'cli', { kind: 'created' }, true)

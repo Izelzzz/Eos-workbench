@@ -8,9 +8,6 @@
   "engines": {
     "node": ">=24.9.0"
   },
-  "bin": {
-    "eos": "./bin/eos.js"
-  },
   "scripts": {
     "eos": "node --import tsx src/cli.ts",
     "typecheck": "tsc -p .",

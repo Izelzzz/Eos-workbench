@@ -62,6 +62,8 @@ export type Entry =
 export type Task = {
   id: string
   request: string
+  /** 平台提供的环境说明（工作目录、基线提交、查看改动的方法），放进每个节点的上下文。 */
+  context?: string
   workflow: Workflow
   status: TaskStatus
   /** 正在进行的节点下标；等于节点数时任务完成。 */

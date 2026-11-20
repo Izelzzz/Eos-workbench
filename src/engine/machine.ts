@@ -12,7 +12,7 @@ import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 export const MAX_FORMAT_RETRIES = 2
 
 /** 新任务直接进入第一个节点：创建即发出第一个调用，不存在"已创建但没有事可做"的状态。 */
-export const newTask = (p: { id: string; request: string; workflow: Workflow }, at: number): Task =>
+export const newTask = (p: { id: string; request: string; workflow: Workflow; context?: string }, at: number): Task =>
   enter({ ...p, status: 'running', cursor: 0, outputs: {}, sessions: {}, log: [], nextCall: 0 }, at)
 
 const ok = (task: Task): Step => ({ task, accepted: true })

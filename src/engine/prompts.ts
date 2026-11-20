@@ -25,7 +25,7 @@ const intro = (task: Task, session: NodeId, wf: Workflow, n: WorkflowNode): stri
   task.sessions[session] === undefined ? section('你的角色', roleOf(wf, n.role).prompt) : ''
 
 const context = (task: Task, n: WorkflowNode): string =>
-  section('需求', task.request) + n.inputs.map(i => section(`上游产出：${i}`, task.outputs[i])).join('')
+  section('需求', task.request) + section('环境', task.context) + n.inputs.map(i => section(`上游产出：${i}`, task.outputs[i])).join('')
 
 export const producePrompt = (task: Task, n: WorkflowNode): string =>
   `${intro(task, n.id, task.workflow, n)}${section('任务', n.task)}${context(task, n)}完成后，你的最终回复就是这一步的产出。`
