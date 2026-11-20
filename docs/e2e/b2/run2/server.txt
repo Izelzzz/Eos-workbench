@@ -1,0 +1,27 @@
+Eos Web：http://127.0.0.1:4322（数据目录 /home/user/Eos-workbench/.eos/templates-e2e/data，Ctrl+C 退出）
+[t2611201854042fr] → [spec] spec-writer · produce
+[t2611201854042fr]   已提交 5ac25be
+[t2611201854042fr] ✓ [spec] spec-writer · produce：46.8s，输入 4059，输出 8135，缓存读 79616
+[t2611201854042fr] → [spec] 检查（1 项）
+[t2611201854042fr] ✓ [spec] 检查：1/1 项通过
+[t2611201854042fr] → [build] developer · produce
+[t2611201854042fr]   已撤销 1 处越界改动：README.md
+[t2611201854042fr]   已提交 706e699
+[t2611201854042fr] ✓ [build] developer · produce：21.2s，输入 4282，输出 2884，缓存读 69248
+[t2611201854042fr] → [build] 检查（1 项）
+[t2611201854042fr] ✓ [build] 检查：1/1 项通过
+[t2611201854042fr] → [test 第 1 轮] 检查（1 项）
+[t2611201854042fr] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t2611201854042fr] → [review 第 1 轮] 检查（1 项）
+[t2611201854042fr] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t2611201854042fr] → [review 第 1 轮] reviewer · critique
+[t2611201854042fr] ✓ [review 第 1 轮] reviewer · critique：13.2s，输入 5312，输出 1782，缓存读 31360
+[t2611201854042fr] → [review 第 1 轮] developer · respond
+[t2611201854042fr]   已提交 65d7614
+[t2611201854042fr] ✓ [review 第 1 轮] developer · respond：18.4s，输入 1905，输出 2639，缓存读 81024
+[t2611201854042fr] → [review 第 2 轮] 检查（1 项）
+[t2611201854042fr] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t2611201854042fr] → [review 第 2 轮] reviewer · critique
+[t2611201854042fr] ✓ [review 第 2 轮] reviewer · critique：34.2s，输入 16020，输出 4998，缓存读 185472
+[t2611201854042fr] → [deliver 第 1 轮] 检查（1 项）
+[t2611201854042fr] ✓ [deliver 第 1 轮] 检查：1/1 项通过
