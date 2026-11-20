@@ -1,5 +1,5 @@
 {
-  "task": "t261120061422we1",
+  "task": "t261120070028q7c",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -13,7 +13,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-d0ae5d89688db4d4e0daf952bc5bc286",
+      "sid": "session-24f7c6f47a9ade92074d14e5238449a9",
       "calls": [
         "c1"
       ],
@@ -24,7 +24,7 @@
       "asks": 1
     },
     "build": {
-      "sid": "session-5b80146583d0ff18fd2aa53349569c91",
+      "sid": "session-69b4621bee5d651effa00b04462f30d0",
       "calls": [
         "c2",
         "c4"
@@ -35,7 +35,7 @@
       "asks": 0
     },
     "review": {
-      "sid": "session-a2761c9c22bb439822f00615f0b27cc4",
+      "sid": "session-1c29497ed4149886182c6084b90faf79",
       "calls": [
         "c3",
         "c5"
@@ -49,12 +49,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 103672ms",
-    "c2 produce@build 19970ms",
-    "c3 critique@review#1 50014ms",
-    "c4 respond@review#1 30759ms",
-    "c5 critique@review#2 31927ms"
+    "c1 produce@plan 78628ms",
+    "c2 produce@build 17291ms",
+    "c3 critique@review#1 48486ms",
+    "c4 respond@review#1 14799ms",
+    "c5 critique@review#2 6905ms"
   ],
-  "commits": "0498afe eos: review respond (c4)\n453dcc7 eos: build produce (c2)\n",
-  "npmTest": "组含非数字元素时抛 TypeError: NaN (0.067372ms)\n✔ 错误信息报告首个非法元素下标与类型 (1.683393ms)\n✔ 稀疏数组的 hole 视为非数字且下标正确 (0.308828ms)\n✔ 非数组入参抛 TypeError: undefined (0.162528ms)\n✔ 非数组入参抛 TypeError: null (0.067703ms)\n✔ 非数组入参抛 TypeError: 字符串 (0.085022ms)\n✔ 非数组入参抛 TypeError: Set (0.04549ms)\n✔ 非数组入参抛 TypeError: 类数组对象 (0.068452ms)\nℹ tests 24\nℹ suites 0\nℹ pass 24\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 95.36759\n"
+  "commits": "c8a1edd eos: review respond (c4)\n64fb53c eos: build produce (c2)\n",
+  "npmTest": ")\n✔ BigInt 元素抛 TypeError (0.128457ms)\n✔ Symbol 元素抛 TypeError (0.076498ms)\n✔ 函数元素抛 TypeError (0.070851ms)\n✔ NaN 元素抛 TypeError (0.160996ms)\n✔ 稀疏数组（部分空位）抛 TypeError (0.345135ms)\n✔ 全空位稀疏数组抛 TypeError (0.094251ms)\n✔ -0 求和结果为 +0 (0.089413ms)\n✔ 非数组入参抛 TypeError (0.224355ms)\n✔ 不修改入参数组，且可接受冻结数组 (1.791907ms)\nℹ tests 20\nℹ suites 0\nℹ pass 20\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 91.122495\n"
 }

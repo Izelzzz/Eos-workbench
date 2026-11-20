@@ -1,0 +1,7 @@
+{"i":1,"at":"06:57:38","status":"运行中","position":"plan","rows":15,"running":5,"liveBars":5}
+{"i":2,"at":"06:58:08","status":"运行中","position":"plan","rows":22,"running":4,"liveBars":4}
+{"i":3,"at":"06:58:38","status":"运行中","position":"plan","rows":22,"running":4,"liveBars":4}
+{"i":4,"at":"06:59:08","status":"运行中","position":"build","rows":27,"running":4,"liveBars":4}
+{"i":5,"at":"06:59:38","status":"运行中","position":"review 第 1/5 轮 · critique","rows":47,"running":3,"liveBars":3}
+{"i":6,"at":"07:00:09","status":"运行中","position":"review 第 1/5 轮 · critique","rows":59,"running":4,"liveBars":4}
+{"i":7,"at":"07:00:39","status":"已完成","position":"已完成","rows":62,"running":0,"liveBars":0}
