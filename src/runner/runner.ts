@@ -35,6 +35,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const waitForAnswer = async (call: Call, q: { id: string; text: string; options?: string[] }, signal: AbortSignal): Promise<string> => {
     const step = dispatch({ kind: 'asked', call: call.id, question: q })
     const current = step.task.question
+    // 被接受：新问题（可能替换了上一次运行留下的旧问题）；被拒绝但同一调用的问题还开着：就是同一个问题，接着等它的回答。
     const qid = step.accepted ? current!.id : current?.call === call.id ? current.id : undefined
     if (qid === undefined) throw new Error(`无法记录提问：${step.reason}`)
     log(`？ agent 提问（${qid}）：${q.text}${q.options ? `（选项：${q.options.join(' / ')}）` : ''}\n  在任务页面上回答，或用 eos answer ${id} "<回答>"`)

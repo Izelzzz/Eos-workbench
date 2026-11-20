@@ -143,9 +143,14 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
       return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `调用失败：${event.error}` }))
 
-    case 'asked':
-      if (task.pending?.id !== event.call || task.status !== 'running') return ignore(task, '不是当前这次调用')
+    case 'asked': {
+      if (task.pending?.id !== event.call) return ignore(task, '不是当前这次调用')
+      const open = task.status === 'waiting_user' && task.question?.call === event.call ? task.question : undefined
+      // 崩溃后重发这次调用：agent 问的还是同一个问题，就继续等原来的回答；问了别的，就换成新问题，旧问题作废。
+      if (open !== undefined && open.text === event.question.text) return ignore(task, '同一个问题已经在等回答')
+      if (open === undefined && task.status !== 'running') return ignore(task, '不是当前这次调用')
       return ok(ask(task, { source: 'agent', call: event.call, text: event.question.text, ...(event.question.options === undefined ? {} : { options: event.question.options }) }, at))
+    }
 
     case 'answered': {
       const q = task.question

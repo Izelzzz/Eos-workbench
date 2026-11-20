@@ -137,3 +137,26 @@ test('a commit that fails after a developer turn fails the call visibly instead 
   assert.equal(task.failure, '提交改动失败：fatal: not a git repository')
   assert.equal(task.pending?.node, 'build', 'the developer call is kept for retry')
 })
+
+test('after a crash, a resent call that asks something different replaces the stale question', async () => {
+  const { store, path } = setup()
+  const first = store.get('t')!.pending as Call
+  store.dispatch('t', { kind: 'asked', call: first.id, question: { id: 'n1', text: '红色还是绿色？' } }, 1, 'executor') // 上一个进程问的
+  const other = new Store(path)
+  const ex = new FakeExecutor(async ({ key, ask }) => {
+    if (key.endsWith('/plan')) return `方案：${await ask({ id: 'n1', text: '圆形还是方形？' }, new AbortController().signal)}`
+    return key.endsWith('/review') ? PASS : '实现'
+  })
+  // 另一个进程回答当前显示的问题
+  setTimeout(async () => {
+    for (;;) {
+      const q = other.get('t')!.question
+      if (q?.text === '圆形还是方形？') return other.dispatch('t', { kind: 'answered', questionId: q.id, text: '方形' }, 2, 'cli')
+      await new Promise(r => setTimeout(r, 2))
+    }
+  }, 5)
+  const task = await runTask('t', { store, executor: ex, pollMs: 2 })
+  assert.equal(task.outputs.plan, '方案：方形', 'the answer to the new question reaches the agent')
+  const questions = task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : ''))
+  assert.deepEqual(questions, ['红色还是绿色？', '圆形还是方形？'])
+})

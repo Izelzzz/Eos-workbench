@@ -21,7 +21,11 @@ const eventsFor = (t: Task): Event[] => {
     for (const text of replies[call.purpose]!) out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1 })
     out.push({ kind: 'call_failed', call: call.id, error: 'boom' })
     out.push({ kind: 'asked', call: call.id, question: { id: 'n', text: '问一下' } })
+    out.push({ kind: 'asked', call: call.id, question: { id: 'n2', text: '换个问题' } })
+    out.push({ kind: 'call_failed', call: 'c0' as never, error: '过期的失败' })
+    out.push({ kind: 'asked', call: 'c0' as never, question: { id: 'x', text: '过期的提问' } })
   }
+  out.push({ kind: 'answered', questionId: 'q999', text: '回答一个不存在的问题' })
   if (t.question !== undefined) {
     out.push({ kind: 'answered', questionId: t.question.id, text: '用户的回答' })
     out.push({ kind: 'answered', questionId: t.question.id, text: ' ' })
@@ -80,6 +84,14 @@ const INVARIANTS: Record<string, Check> = {
   '被拒绝的事件不改变任务': (b, _e, a, accepted) => (!accepted && a !== b ? 'rejected event changed the task' : undefined),
   '日志只追加': (b, _e, a) => (a.log.length < b.log.length || b.log.some((e, i) => a.log[i] !== e) ? 'log rewritten' : undefined),
   '空回答被拒绝': (_b, e, _a, accepted) => (e.kind === 'answered' && e.text.trim() === '' && accepted ? 'empty answer accepted' : undefined),
+  '过期事件被拒绝：指向别的调用或不存在的问题': (b, e, _a, accepted) => {
+    if (!accepted) return undefined
+    if ((e.kind === 'replied' || e.kind === 'call_failed' || e.kind === 'asked') && e.call !== b.pending?.id) return `stale ${e.kind} accepted`
+    if (e.kind === 'answered' && e.questionId !== b.question?.id) return 'answer to another question accepted'
+    return undefined
+  },
+  '同一个问题不重复提出': (b, e, _a, accepted) =>
+    e.kind === 'asked' && accepted && b.question?.call === e.call && b.question.text === e.question.text ? 'same question asked twice' : undefined,
 }
 
 const explore = (wf: Workflow, maxDepth: number) => {
