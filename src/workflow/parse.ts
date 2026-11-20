@@ -1,32 +1,43 @@
 // 把 YAML 文本解析成 Workflow，并做语义校验。错误用中文，带出错位置（例如 nodes[2].with）。
-import { parse as parseYaml, YAMLParseError } from 'yaml'
+// 角色可以直接写配置，也可以引用平台上的 Agent 模板（{ template: developer }）；模板由调用方注入的 lookup 查找，解析保持纯函数。
 import { z } from 'zod'
-import type { Check, NodeId, RoleId, Workflow, WorkflowNode } from './types.ts'
+import type { FieldError } from './agent.ts'
+import { agentErrors, agentFields, DEFAULT_MODEL, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
+import type { Check, NodeId, Role, RoleId, TemplateLookup, Workflow, WorkflowNode } from './types.ts'
 
-export type WorkflowError = { path: string; message: string }
+export type WorkflowError = FieldError
 export type ParseResult = { ok: true; workflow: Workflow } | { ok: false; errors: WorkflowError[] }
 
-export const DEFAULT_MODEL = 'deepseek-flash'
+export { DEFAULT_MODEL }
 export const DEFAULT_MAX_ROUNDS = 5
 export const DEFAULT_MAX_FIXES = 2
 export const DEFAULT_CHECK_TIMEOUT_SEC = 600
-const ID = /^[a-z][a-z0-9-]{0,31}$/
 
-const text = z.string({ error: '必须是文字' }).trim().min(1, { error: '不能为空' })
-const id = z.string({ error: '必须是文字' }).regex(ID, { error: '只能用小写字母、数字和连字符，以字母开头，最长 32 个字符' })
 const names = z.array(text, { error: '必须是列表' })
 
-const roleSchema = z.object({
-  model: text.default(DEFAULT_MODEL),
-  effort: z.enum(['low', 'high', 'max'], { error: '只能是 low、high 或 max' }).optional(),
-  prompt: text,
-  write: z.enum(['none', 'worktree'], { error: '只能是 none 或 worktree' }).default('none'),
-  tools: names.optional(),
-  skills: names.optional(),
-}, { error: '必须是对象' }).strict()
+const inlineRole = z.object(agentFields, { error: '必须是对象' }).strict()
+const templateRef = z.object({ template: id }, { error: '必须是对象' }).strict()
 
-/** worktree 内的相对路径：不能是绝对路径，也不能用 .. 跳出去。 */
-const relPath = text.refine(p => !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..'), { error: '必须是 worktree 内的相对路径，不能以 / 开头，也不能包含 ..' })
+/**
+ * 角色：有 template 字段就是引用模板（只能有这一个字段），否则是直接写的配置。
+ * 分开解析而不是用 union，这样错误能精确到字段（union 只会报"不匹配任何一种"）。
+ */
+const parseRole = (key: string, raw: unknown, lookup: TemplateLookup): { role?: Role; errors: WorkflowError[] } => {
+  const at = (field: string) => `roles.${key}${field === '' ? '' : `.${field}`}`
+  const isRef = typeof raw === 'object' && raw !== null && 'template' in raw
+  if (isRef) {
+    const r = templateRef.safeParse(raw)
+    if (!r.success) return { errors: r.error.issues.map(i => ({ path: at(pathOf(i.path).replace('(根)', '')), message: zodMessage(i) })) }
+    const found = lookup(r.data.template)
+    if (found === undefined) return { errors: [{ path: at('template'), message: `平台上没有名为「${r.data.template}」的 Agent 模板` }] }
+    const { name, description: _description, ...config } = found.template
+    return { role: { id: key as RoleId, ...config, template: { name, version: found.version } }, errors: [] }
+  }
+  const r = inlineRole.safeParse(raw)
+  if (!r.success) return { errors: r.error.issues.map(i => ({ path: at(pathOf(i.path).replace('(根)', '')), message: zodMessage(i) })) }
+  const errors = agentErrors(r.data, at)
+  return errors.length > 0 ? { errors } : { role: { id: key as RoleId, ...toAgentConfig(r.data) }, errors: [] }
+}
 
 const deliverable = z.object({
   path: relPath,
@@ -65,18 +76,10 @@ const workflowSchema = z.object({
   name: id,
   description: z.string().optional(),
   docs: z.array(text, { error: '必须是约定文档名组成的列表' }).default([]),
-  roles: z.record(id, roleSchema, { error: '必须是对象' }),
+  roles: z.record(id, z.unknown(), { error: '必须是对象' }),
   nodes: z.array(nodeSchema, { error: '必须是列表' }).min(1, { error: '至少要有一个节点' }),
 }, { error: '工作流必须是对象' }).strict()
 
-const pathOf = (path: readonly PropertyKey[]): string =>
-  path.reduce<string>((acc, p) => (typeof p === 'number' ? `${acc}[${p}]` : acc === '' ? String(p) : `${acc}.${String(p)}`), '') || '(根)'
-
-const zodMessage = (issue: z.core.$ZodIssue): string => {
-  if (issue.code === 'unrecognized_keys') return `不认识的字段：${issue.keys.join('、')}`
-  if (issue.code === 'invalid_type' && issue.input === undefined) return '缺少这个字段'
-  return issue.message
-}
 
 /** 结构正确之后的引用检查：角色存在、只引用前面的节点、对话和重新确认的对象是 agent 节点。 */
 const semantic = (wf: Workflow): WorkflowError[] => {
@@ -111,23 +114,25 @@ const semantic = (wf: Workflow): WorkflowError[] => {
   return errors
 }
 
-export const parseWorkflow = (source: string): ParseResult => {
-  let raw: unknown
-  try {
-    raw = parseYaml(source)
-  } catch (e) {
-    const where = e instanceof YAMLParseError && e.linePos ? `第 ${e.linePos[0].line} 行` : '(根)'
-    return { ok: false, errors: [{ path: where, message: `YAML 格式错误：${(e as Error).message.split('\n')[0]}` }] }
-  }
-  const parsed = workflowSchema.safeParse(raw)
-  if (!parsed.success) {
-    return { ok: false, errors: parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) })) }
-  }
+/** lookup：按名字找 Agent 模板；不给就是没有模板可用（引用模板的角色会报错）。 */
+export const parseWorkflow = (source: string, lookup: TemplateLookup = () => undefined): ParseResult => {
+  const y = yamlOf(source)
+  if (!y.ok) return y
+  const parsed = workflowSchema.safeParse(y.value)
+  // 角色单独解析，和工作流其余部分的错误一起报出来（不因为别处有错就漏报角色的错）。
+  const rawRoles = (y.value as { roles?: unknown } | null)?.roles
+  const roleEntries = typeof rawRoles === 'object' && rawRoles !== null && !Array.isArray(rawRoles) ? Object.entries(rawRoles) : []
+  const roleResults = roleEntries.map(([k, r]) => [k, parseRole(k, r, lookup)] as const)
+  const structural = [
+    ...(parsed.success ? [] : parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) }))),
+    ...roleResults.flatMap(([, r]) => r.errors),
+  ]
+  if (!parsed.success || structural.length > 0) return { ok: false, errors: structural }
   const p = parsed.data
   const workflow: Workflow = {
     name: p.name,
     ...(p.description === undefined ? {} : { description: p.description }),
-    roles: Object.fromEntries(Object.entries(p.roles).map(([k, r]) => [k, { id: k as RoleId, ...r }])),
+    roles: Object.fromEntries(roleResults.map(([k, r]) => [k, r.role!])),
     docs: p.docs,
     nodes: p.nodes.map(n => {
       const { deliverables, checks: runs, ...rest } = n

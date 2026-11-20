@@ -11,17 +11,44 @@ export type Effort = 'low' | 'high' | 'max'
 /** none：只读；worktree：只能写任务的 git worktree。 */
 export type WriteScope = 'none' | 'worktree'
 
-export type Role = {
-  id: RoleId
+/**
+ * 可以从 agent 进程里整组去掉的工具。dsh 只能按插件整组关掉工具，所以按组限制，不按单个工具名：
+ * web 联网抓取和搜索；subagent 子 agent 与编排；bash 命令行与后台任务；schedule 定时任务；todo 待办；goal 目标。
+ * 读写文件和向用户提问的工具始终保留（写哪些路径由 writePaths 管）。
+ */
+export const TOOL_GROUPS = ['web', 'subagent', 'bash', 'schedule', 'todo', 'goal'] as const
+export type ToolGroup = (typeof TOOL_GROUPS)[number]
+
+/** 用 stdio 启动的 MCP 服务。env 不放密钥（模板以明文保存）。 */
+export type McpServer = { name: string; command: string; args: string[]; env: Record<string, string> }
+
+/** agent 的配置：模板和工作流里直接写的角色共用。 */
+export type AgentConfig = {
   model: string
   effort?: Effort
   /** 角色的职责说明，作为该角色每个会话的第一段内容。 */
   prompt: string
   write: WriteScope
-  /** M3 生效；M1 只做解析和保存。 */
-  tools?: string[]
-  skills?: string[]
+  /** write 为 worktree 时允许改动的路径（worktree 内的 glob，例如 src/**）；越界的改动会被撤销。 */
+  writePaths: string[]
+  /** 从 agent 进程里去掉的工具组。 */
+  denyTools: ToolGroup[]
+  /** agent 能看到的技能（平台上的技能名）；只能看到这些，看不到仓库和用户目录里的技能。 */
+  skills: string[]
+  mcp: McpServer[]
 }
+
+/** 团队级 Agent 模板：平台上维护、带版本，工作流的角色可以直接引用。 */
+export type AgentTemplate = AgentConfig & { name: string; description?: string }
+
+export type Role = AgentConfig & {
+  id: RoleId
+  /** 角色来自哪个模板的哪个版本；工作流里直接写的角色没有。 */
+  template?: { name: string; version: number }
+}
+
+/** 按名字找模板的最新版本。解析工作流时注入：解析本身保持纯函数。 */
+export type TemplateLookup = (name: string) => { template: AgentTemplate; version: number } | undefined
 
 /**
  * 平台用程序执行的验收检查，不靠模型自评：

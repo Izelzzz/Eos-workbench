@@ -32,7 +32,9 @@ export type WorkflowInfo = { name: string; version: number; description?: string
 /** 带位置的错误，例如 { path: 'nodes[2].with', message: '…' }。 */
 export type FieldError = { path: string; message: string }
 
-export type ConventionsResponse = { workflows: WorkflowInfo[]; docs: ConventionSummary[] }
+export type TemplateInfo = ConventionSummary & { description?: string; write?: 'none' | 'worktree' }
+export type SkillInfo = ConventionSummary & { description?: string }
+export type ConventionsResponse = { workflows: WorkflowInfo[]; docs: ConventionSummary[]; templates: TemplateInfo[]; skills: SkillInfo[] }
 export type ConventionDetail = { kind: ConventionKind; name: string; versions: ConventionRow[] }
 export type SaveConventionRequest = { content: string; note?: string; validateOnly?: boolean }
 export type SaveConventionResponse = { ok: true; version?: number } | { ok: false; errors: FieldError[] } | { ok: false; error: string }

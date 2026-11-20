@@ -304,7 +304,7 @@ test('team conventions: list, validate without saving, save new versions, read h
     const { id } = await task.json()
     await s.supervisor.idle()
     const d = (await (await fetch(`${s.base}/api/tasks/${id}`)).json()) as TaskDetail
-    assert.deepEqual(d.conventions, { workflow: { name: 'team', version: 1 }, docs: [{ name: '评审约定', version: 2 }] })
+    assert.deepEqual(d.conventions, { workflow: { name: 'team', version: 1 }, docs: [{ name: '评审约定', version: 2 }], templates: [], skills: [] })
   } finally {
     await s.close()
   }

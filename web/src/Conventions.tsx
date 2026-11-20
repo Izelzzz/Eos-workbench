@@ -5,7 +5,7 @@ import { getConvention, listConventions, saveConvention } from './api.ts'
 import { diffLines, diffStat, fold } from './diff.ts'
 import { ago } from './format.ts'
 
-const KIND_LABEL: Record<ConventionKind, string> = { workflow: '工作流', doc: '约定文档' }
+const KIND_LABEL: Record<ConventionKind, string> = { workflow: '工作流', doc: '约定文档', template: 'Agent 模板', skill: '技能' }
 
 const NEW_WORKFLOW = `name: my-flow
 description: 一句话说明这个工作流做什么

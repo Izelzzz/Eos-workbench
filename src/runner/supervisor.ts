@@ -57,7 +57,7 @@ export class Supervisor {
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
     this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-      meta: { ...w, conventions: resolved.used } }, Date.now(), this.o.actor ?? 'cli')
+      meta: { ...w, conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
   }
 

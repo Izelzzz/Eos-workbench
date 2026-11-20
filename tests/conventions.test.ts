@@ -67,7 +67,7 @@ test('resolve snapshots the latest workflow and docs and records their versions'
   assert.ok(r.ok)
   assert.equal(r.workflow.roles.dev?.prompt, '写更好的代码')
   assert.deepEqual(r.docs, [{ name: doc, version: 2, content: '第二版约定' }])
-  assert.deepEqual(r.used, { workflow: { name: 'team', version: 2 }, docs: [{ name: doc, version: 2 }] })
+  assert.deepEqual(r.used, { workflow: { name: 'team', version: 2 }, docs: [{ name: doc, version: 2 }], templates: [], skills: [] })
 })
 
 test('resolve falls back to a YAML file path, still taking docs from the platform', () => {
@@ -87,4 +87,30 @@ test('two processes seeding the same database write each built-in only once', ()
   new Conventions(store).seed(1)
   new Conventions(store).seed(2)
   assert.deepEqual(store.conventionHistory('workflow', 'standard').map(r => r.version), [1])
+})
+
+test('templates and skills are seeded, validated against each other, and snapshotted into tasks with their versions', () => {
+  const { store, c } = setup()
+  assert.deepEqual(c.list('template').map(t => [t.name, t.version, t.write]), [['developer', 1, 'worktree'], ['reviewer', 1, 'none'], ['spec-writer', 1, 'worktree']])
+  assert.deepEqual(c.list('skill').map(k => k.name), ['write-changes'])
+
+  const missingSkill = c.save({ kind: 'template', name: 'helper', content: 'name: helper\nprompt: 帮忙\nskills: [no-such-skill]\n', actor: 'web' }, 2)
+  assert.deepEqual(!missingSkill.ok && missingSkill.errors, [{ path: 'skills[0]', message: '平台上没有名为「no-such-skill」的技能' }])
+  const renamedSkill = c.save({ kind: 'skill', name: 'other', content: '---\nname: write-changes\ndescription: x\n---\n正文', actor: 'web' }, 2)
+  assert.equal(!renamedSkill.ok && renamedSkill.errors[0]!.path, 'name')
+
+  assert.ok(c.save({ kind: 'skill', name: 'write-changes', content: '---\nname: write-changes\ndescription: 新写法\n---\n第二版', actor: 'web' }, 3).ok)
+  assert.ok(c.save({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: 第二版开发\nwrite: worktree\nwritePaths: [src/**]\nskills: [write-changes]\n', actor: 'web' }, 4).ok)
+  const wf = 'name: team\nroles:\n  dev: { template: developer }\n  rev: { template: reviewer }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n'
+  assert.ok(c.save({ kind: 'workflow', name: 'team', content: wf, actor: 'web' }, 5).ok)
+  const r = c.resolve('team')
+  assert.ok(r.ok, !r.ok ? r.error : '')
+  assert.equal(r.workflow.roles.dev?.prompt, '第二版开发')
+  assert.deepEqual(r.used.templates, [{ name: 'developer', version: 2 }, { name: 'reviewer', version: 1 }])
+  assert.deepEqual(r.skills, [{ name: 'write-changes', version: 2, content: '---\nname: write-changes\ndescription: 新写法\n---\n第二版' }])
+  assert.deepEqual(r.used.skills, [{ name: 'write-changes', version: 2 }])
+
+  const ghost = c.save({ kind: 'workflow', name: 'ghosts', content: wf.replace('name: team', 'name: ghosts').replace('template: reviewer', 'template: nobody'), actor: 'web' }, 6)
+  assert.deepEqual(!ghost.ok && ghost.errors, [{ path: 'roles.rev.template', message: '平台上没有名为「nobody」的 Agent 模板' }])
+  assert.equal(store.conventionHistory('template', 'developer').length, 2)
 })

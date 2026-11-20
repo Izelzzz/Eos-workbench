@@ -126,7 +126,7 @@ nodes:
   assert.ok(saved.ok, JSON.stringify(!saved.ok && saved.errors))
   const created = sup.create({ repo: s.repo, workflow: 'notes', request: '加一个求和函数' })
   assert.ok(created.ok)
-  assert.deepEqual(s.store.meta(created.id).conventions, { workflow: { name: 'notes', version: 1 }, docs: [{ name: '小组约定', version: 1 }] })
+  assert.deepEqual(s.store.meta(created.id).conventions, { workflow: { name: 'notes', version: 1 }, docs: [{ name: '小组约定', version: 1 }], templates: [], skills: [] })
   // 任务创建之后再改约定，不影响这个任务。
   sup.conventions.save({ kind: 'doc', name: '小组约定', content: '改过的约定', actor: 'web' }, 3)
   const started = sup.start(created.id)
