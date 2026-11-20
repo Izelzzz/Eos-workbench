@@ -1,10 +1,12 @@
 Eos Web：http://127.0.0.1:4320（数据目录 /home/user/Eos-workbench/.eos/web-e2e/data，Ctrl+C 退出）
-[t261120084646lpt] → [plan] planner · produce
-[t261120084646lpt] ？ agent 提问（q1）：slug 里的中文（及其他 CJK 字符）应该怎么处理？这直接决定是否需要引入拼音依赖。（选项：保留中文字符，仅作 URL 编码（推荐） / 删除中文（按分隔符处理） / 转成拼音 / 中文做 percent-encoding）
-  在任务页面上回答，或用 eos answer t261120084646lpt "<回答>"
-[t261120084646lpt] ？ agent 提问（q2）：标题中的 emoji 应该怎么处理？（选项：直接删除（推荐） / 替换为分隔符 / 保留 emoji / 转成英文描述）
-  在任务页面上回答，或用 eos answer t261120084646lpt "<回答>"
-[t261120084646lpt] ？ agent 提问（q3）：slug 的长度上限怎么定？（按 Unicode 字符/码点计数，超长时在边界处截断且去掉末尾连字符）（选项：默认 60，支持 options.maxLength 覆盖（推荐） / 固定 60，不提供配置 / 固定 80，不提供配置 / 不设上限）
-  在任务页面上回答，或用 eos answer t261120084646lpt "<回答>"
-[t261120084646lpt] ✓ [plan] planner · produce：161.7s，输入 5068，输出 27917，缓存读 201984
-[t261120084646lpt] → [build] developer · produce
+[t2611200930215if] → [plan] planner · produce
+[t2611200930215if] ？ agent 提问（q1）：标题里的中文（以及其他非 ASCII 文字，如日文、俄文）在 slug 里怎么处理？（选项：保留原字符（推荐） / 剥离，只留 ASCII / 转拼音）
+  在任务页面上回答，或用 eos answer t2611200930215if "<回答>"
+[t2611200930215if] ？ agent 提问（q2）：emoji（含 👨‍👩‍👧 这类 ZWJ 组合序列）在 slug 里怎么处理？（选项：整体删除（推荐） / 保留 emoji / 转成简短文字名）
+  在任务页面上回答，或用 eos answer t2611200930215if "<回答>"
+[t2611200930215if] ？ agent 提问（q3）：slug 要不要长度上限？按什么计数、怎么截断？（选项：默认 60 字符，在分隔符处截断（推荐） / 不设上限 / 支持 options.maxLength，默认 60 / 默认 80 个 UTF-8 字节）
+  在任务页面上回答，或用 eos answer t2611200930215if "<回答>"
+[t2611200930215if] ？ agent 提问（q4）：转换后结果为空（比如纯符号、纯 emoji、或中文被剥离）时返回什么？（选项：返回空串 ""（推荐） / 返回固定占位符 "untitled" / 抛出异常）
+  在任务页面上回答，或用 eos answer t2611200930215if "<回答>"
+[t2611200930215if] ✓ [plan] planner · produce：114.1s，输入 6756，输出 17441，缓存读 93312
+[t2611200930215if] → [build] developer · produce
