@@ -21,8 +21,8 @@ Eos 是一个自部署的多 agent 工作流平台，以 DeepSeek Harness（dsh�
    - 改动引擎（`src/engine/`）时，`tests/engine.state-space.test.ts` 的穷举验证必须通过
 3. 改动超过 100 行的 PR 必须做 E2E：用真实模型跑一次（`npm run e2e`），在 PR 里附日志或截图
 4. 用 `/engineering:code-review` 评审本次改动，修掉确认的问题再提交；评审结论写进 PR 描述
-6. 合并前做一次独立子 agent 审查（见上面「唯一的例外」），修掉确认的问题
 5. 升级 dsh 版本时，先重跑 `poc/run-all.sh`
+6. 合并前做一次独立子 agent 审查（见上面「唯一的例外」），修掉确认的问题
 
 ## 代码约定
 
