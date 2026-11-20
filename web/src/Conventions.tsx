@@ -1,11 +1,10 @@
-// 团队约定页：在平台上维护工作流（YAML）和约定文档（Markdown）。每次保存是一个新版本，可以看历史和改动。
+// 团队约定页：在平台上维护工作流（YAML）、约定文档（Markdown）、Agent 模板（YAML）和技能（Markdown）。
+// 每次保存是一个新版本，可以看历史和改动。四种约定共用同一套编辑、校验、保存和历史，差异都收在 SPEC 这张表里。
 import { useEffect, useMemo, useState } from 'react'
 import type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError } from './api.ts'
 import { getConvention, listConventions, saveConvention } from './api.ts'
 import { diffLines, diffStat, fold } from './diff.ts'
 import { ago } from './format.ts'
-
-const KIND_LABEL: Record<ConventionKind, string> = { workflow: '工作流', doc: '约定文档', template: 'Agent 模板', skill: '技能' }
 
 const NEW_WORKFLOW = `name: my-flow
 description: 一句话说明这个工作流做什么
@@ -28,14 +27,86 @@ const NEW_DOC = `# 约定名称
 写下团队所有 agent 都要遵守的规则。
 `
 
+const NEW_TEMPLATE = `name: my-agent
+description: 一句话说明这个 agent 负责什么
+model: deepseek-flash
+# effort 可选，只能是 low、high、max；不写用模型的默认档位。
+effort: high
+# write: none 只读；worktree 可以改任务 worktree 里的文件。
+write: worktree
+# writePaths 限制可以改哪些文件（worktree 内的相对路径或 glob），不写这一行表示整个 worktree 都能改。
+# 只读的 agent 不要写 writePaths。
+writePaths: [src/**, tests/**, docs/changes.md]
+tools:
+  # deny 列出不给这个 agent 的工具组：
+  # web 联网搜索抓取、subagent 开子 agent、bash 执行命令、schedule 定时任务、todo 待办清单、goal 目标管理。
+  deny: [subagent, schedule]
+# skills 填平台上已有的技能名（左边「技能」那一栏里的）。
+skills: [write-changes]
+# mcp 是用 stdio 启动的 MCP 服务，例如 [{ name: docs, command: node, args: [server.mjs] }]；env 里不能放密钥。
+mcp: []
+prompt: |
+  你是……（这个 agent 的身份和职责）
+  - 一条一条写清楚要做什么、不要做什么。
+  - 每次回复最后简要说明：做了什么、为什么、怎么验证的。
+`
+
+const NEW_SKILL = `---
+name: my-skill
+description: 一句话说明什么时候该用这个技能（agent 靠这句话决定要不要读正文）
+---
+# 技能名称
+
+写下这个技能要教给 agent 的做法：步骤、格式、例子。
+`
+
+/** YAML 顶层的 name:（新建时用来决定保存到哪个名字；真正的校验在服务端）。 */
+const yamlName = (source: string) => /^name:\s*(\S+)\s*$/m.exec(source)?.[1] ?? ''
+/** 技能的名字只看开头 --- 包住的那一段，正文里的 name: 不算。 */
+const frontmatterName = (source: string) => yamlName(/^---\r?\n([\s\S]*?)\r?\n---/.exec(source)?.[1] ?? '')
+
+type KindSpec = {
+  label: string
+  /** 侧栏分组标题（复数语气）。 */
+  group: string
+  starter: string
+  rows: number
+  /** 新建时名字取自内容；没有这一项的要单独填名字。 */
+  nameOf?: (content: string) => string
+  /** 新建时显示在编辑器上方的一行说明。 */
+  hint?: string
+  namePlaceholder?: string
+  nameLabel?: string
+}
+
+const SPEC: Record<ConventionKind, KindSpec> = {
+  workflow: {
+    label: '工作流', group: '工作流', starter: NEW_WORKFLOW, rows: 28, nameOf: yamlName,
+    hint: '工作流的名字取 YAML 里的 name（小写字母、数字和连字符）。',
+  },
+  doc: { label: '约定文档', group: '约定文档', starter: NEW_DOC, rows: 22, nameLabel: '文档名', namePlaceholder: '例如：评审约定' },
+  template: {
+    label: 'Agent 模板', group: 'Agent 模板', starter: NEW_TEMPLATE, rows: 28, nameOf: yamlName,
+    hint: '模板的名字取 YAML 里的 name（小写字母、数字和连字符）。工作流里写 role: { template: 名字 } 就能用上。',
+  },
+  skill: {
+    label: '技能', group: '技能', starter: NEW_SKILL, rows: 24, nameOf: frontmatterName,
+    hint: '技能的名字取开头 --- 之间的 name（小写字母、数字和连字符）。Agent 模板的 skills 里写上名字就会带给这个 agent。',
+  },
+}
+
+const KINDS = Object.keys(SPEC) as ConventionKind[]
+
 export const conventionHref = (kind: ConventionKind, name: string) => `#/conventions/${kind}/${encodeURIComponent(name)}`
+
+const KIND_PATTERN = KINDS.join('|')
 
 /** #/conventions、#/conventions/new/<kind>、#/conventions/<kind>/<名字> */
 export const parseConventionRoute = (hash: string): { kind?: ConventionKind; name?: string; isNew: boolean } | undefined => {
   if (hash === '#/conventions' || hash === '#/conventions/') return { isNew: false }
-  const fresh = /^#\/conventions\/new\/(workflow|doc)$/.exec(hash)
+  const fresh = new RegExp(`^#/conventions/new/(${KIND_PATTERN})$`).exec(hash)
   if (fresh) return { kind: fresh[1] as ConventionKind, isNew: true }
-  const m = /^#\/conventions\/(workflow|doc)\/(.+)$/.exec(hash)
+  const m = new RegExp(`^#/conventions/(${KIND_PATTERN})/(.+)$`).exec(hash)
   if (!m) return undefined
   try {
     return { kind: m[1] as ConventionKind, name: decodeURIComponent(m[2]!), isNew: false }
@@ -44,25 +115,33 @@ export const parseConventionRoute = (hash: string): { kind?: ConventionKind; nam
   }
 }
 
+/** 侧栏每一栏的条目：名字、版本，再加一句这一类特有的说明。 */
+const entriesOf = (list: ConventionsResponse): Record<ConventionKind, { name: string; version: number; extra?: string }[]> => ({
+  workflow: list.workflows.map(w => ({ name: w.name, version: w.version, extra: w.nodes.join(' → ') })),
+  doc: list.docs.map(d => ({ name: d.name, version: d.version })),
+  template: list.templates.map(t => ({ name: t.name, version: t.version, extra: `${t.write === 'worktree' ? '可写 worktree' : '只读'}${t.description === undefined ? '' : ` · ${t.description}`}` })),
+  skill: list.skills.map(k => ({ name: k.name, version: k.version, ...(k.description === undefined ? {} : { extra: k.description }) })),
+})
+
 function Sidebar(props: { list: ConventionsResponse | undefined; kind?: ConventionKind; name?: string }) {
-  const item = (kind: ConventionKind, name: string, version: number, extra?: string) => (
-    <li key={`${kind}/${name}`}>
-      <a href={conventionHref(kind, name)} className={props.kind === kind && props.name === name ? 'active' : ''}>
-        <span>{name}</span>
-        <small className="muted">第 {version} 版{extra === undefined ? '' : ` · ${extra}`}</small>
-      </a>
-    </li>
-  )
+  const entries = props.list === undefined ? undefined : entriesOf(props.list)
   return (
     <nav className="conv-side" aria-label="团队约定列表">
-      <div className="conv-group">
-        <div className="conv-group-head"><b>工作流</b><a href="#/conventions/new/workflow">新建</a></div>
-        <ul>{props.list?.workflows.map(w => item('workflow', w.name, w.version, w.nodes.join(' → ')))}</ul>
-      </div>
-      <div className="conv-group">
-        <div className="conv-group-head"><b>约定文档</b><a href="#/conventions/new/doc">新建</a></div>
-        <ul>{props.list?.docs.map(d => item('doc', d.name, d.version))}</ul>
-      </div>
+      {KINDS.map(kind => (
+        <div className="conv-group" key={kind}>
+          <div className="conv-group-head"><b>{SPEC[kind].group}</b><a href={`#/conventions/new/${kind}`}>新建</a></div>
+          <ul>
+            {entries?.[kind].map(e => (
+              <li key={e.name}>
+                <a href={conventionHref(kind, e.name)} className={props.kind === kind && props.name === e.name ? 'active' : ''}>
+                  <span>{e.name}</span>
+                  <small className="muted">第 {e.version} 版{e.extra === undefined || e.extra === '' ? '' : ` · ${e.extra}`}</small>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </nav>
   )
 }
@@ -115,10 +194,11 @@ function History(props: { detail: ConventionDetail; onRestore: (content: string)
 }
 
 function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; onSaved: (name: string) => void }) {
+  const spec = SPEC[props.kind]
   const [detail, setDetail] = useState<ConventionDetail>()
   const [loadError, setLoadError] = useState<string>()
   const [name, setName] = useState(props.name ?? '')
-  const [content, setContent] = useState(props.isNew ? (props.kind === 'workflow' ? NEW_WORKFLOW : NEW_DOC) : '')
+  const [content, setContent] = useState(props.isNew ? spec.starter : '')
   const [note, setNote] = useState('')
   const [errors, setErrors] = useState<FieldError[]>([])
   const [checked, setChecked] = useState<'idle' | 'checking' | 'ok' | 'bad'>('idle')
@@ -135,9 +215,8 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; on
     }, e => setLoadError((e as Error).message))
   }, [props.kind, props.name, props.isNew, reload])
 
-  // 新建工作流时名字取自 YAML 里的 name；文档的名字单独填写。
-  const yamlName = props.kind === 'workflow' ? /^name:\s*(\S+)\s*$/m.exec(content)?.[1] ?? '' : ''
-  const target = props.isNew ? (props.kind === 'workflow' ? yamlName : name.trim()) : props.name ?? ''
+  // 新建工作流、模板、技能时名字取自内容（YAML 或开头的 ---）；文档的名字单独填写。
+  const target = props.isNew ? (spec.nameOf === undefined ? name.trim() : spec.nameOf(content)) : props.name ?? ''
   const current: ConventionRow | undefined = detail?.versions[0]
   const dirty = props.isNew || current === undefined || content !== current.content
 
@@ -184,23 +263,23 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; on
   return (
     <div className="conv-main">
       <div className="conv-title">
-        <h1>{props.isNew ? `新建${KIND_LABEL[props.kind]}` : props.name}</h1>
-        {current && <span className="muted">{KIND_LABEL[props.kind]} · 当前第 {current.version} 版 · {ago(current.createdAt)}更新</span>}
+        <h1>{props.isNew ? `新建${spec.label}` : props.name}</h1>
+        {current && <span className="muted">{spec.label} · 当前第 {current.version} 版 · {ago(current.createdAt)}更新</span>}
       </div>
-      {props.isNew && props.kind === 'doc' && (
+      {props.isNew && spec.nameOf === undefined && (
         <label className="conv-field">
-          <span>文档名</span>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="例如：评审约定" />
+          <span>{spec.nameLabel ?? '名字'}</span>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder={spec.namePlaceholder} />
         </label>
       )}
-      {props.isNew && props.kind === 'workflow' && <p className="muted">工作流的名字取 YAML 里的 <code>name</code>（小写字母、数字和连字符）。</p>}
+      {props.isNew && spec.hint !== undefined && <p className="muted">{spec.hint}</p>}
       <textarea
         className="conv-editor mono"
-        aria-label={`${KIND_LABEL[props.kind]}内容`}
+        aria-label={`${spec.label}内容`}
         value={content}
         onChange={e => setContent(e.target.value)}
         spellCheck={false}
-        rows={props.kind === 'workflow' ? 28 : 22}
+        rows={spec.rows}
       />
       <div className="conv-check" aria-live="polite">
         {checked === 'checking' && <span className="muted">检查中…</span>}
@@ -244,10 +323,12 @@ export function Conventions(props: { route: { kind?: ConventionKind; name?: stri
       {kind === undefined ? (
         <div className="conv-main">
           <h1>团队约定</h1>
-          <p>团队的工作流和约定文档放在这里，所有成员发起的任务都按同一份约定执行。</p>
+          <p>团队的工作流、约定文档、Agent 模板和技能放在这里，所有成员发起的任务都按同一份约定执行。</p>
           <ul className="muted">
             <li><b>工作流</b>：从规格到交付的阶段、每个阶段由哪个 agent 做、交付物和验收检查。</li>
             <li><b>约定文档</b>：注入到任务里每个 agent 会话开头的团队规则。工作流用 <code>docs</code> 列出要注入哪些。</li>
+            <li><b>Agent 模板</b>：一个 agent 的模型、思考档位、提示词、可写范围、禁用的工具组、技能和 MCP 服务。工作流里写 <code>role: {'{ template: 名字 }'}</code> 复用它。</li>
+            <li><b>技能</b>：按需读取的做法说明（dsh 的 <code>SKILL.md</code> 格式）。Agent 模板用 <code>skills</code> 列出带哪些。</li>
             <li>每次保存都是一个新版本。新任务用最新版本，并记录用了哪一版；进行中的任务不受影响。</li>
           </ul>
         </div>
