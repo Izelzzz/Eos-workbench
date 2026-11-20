@@ -101,12 +101,26 @@ export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
   return [{ kind: 'call_start', t }, ...[...lead, ...found.range].map(normalize).filter((x): x is TraceEvent => x !== undefined)]
 }
 
+/** dsh 一轮结束的原因里，只有 completed 是完整的回复；被打断、出错、中止、达到输出上限的都不是。 */
+const COMPLETED = 'completed'
+
+const REASON: Record<string, string> = {
+  interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下', 'max-tokens': '输出超过上限', disposed: '会话被释放',
+}
+
+export const describeEnd = (kind: string | null | undefined): string => REASON[kind ?? ''] ?? `结束原因为 ${kind ?? '未知'}`
+
+/**
+ * 认领一次已完成的调用：最后一轮必须正常完成（reason.kind === completed）。
+ * 被打断或出错的那一轮里可能有一句中间文本（例如"我先看一下目录"），不能把它当成这次调用的回复。
+ */
 export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {
   const found = rangeOf(events, nonce)
   if (found === undefined) return undefined
   const { start, range } = found
   const end = range.findLastIndex(e => e.type === 'turn/end')
   if (end < 0 || range.slice(end + 1).some(e => e.type === 'turn/start')) return undefined
+  if (range[end]!.data?.reason?.kind !== COMPLETED) return undefined
   const turn = range.slice(0, end + 1)
   const final = turn.filter(e => e.type === 'assistant/message').map(textOf).filter(t => t.trim() !== '').at(-1)
   if (final === undefined) return undefined
@@ -204,7 +218,7 @@ export class DshExecutor implements Executor {
           if (e !== undefined) p.onEvent(e)
         },
       })
-      if (r.finishReason === 'error') throw new Error(r.finalResponse || 'dsh 返回错误')
+      if (r.finishReason !== COMPLETED) throw new Error(`这一轮没有正常完成（${describeEnd(r.finishReason)}）${r.finalResponse ? `：${r.finalResponse.slice(0, 200)}` : ''}`)
       const events = r.events as unknown as LogEvent[]
       const model = modelOf(events)
       return { sessionId: s.id, text: r.finalResponse, usage: usageOf(events), ms: Date.now() - started, ...(model === undefined ? {} : { model }) }

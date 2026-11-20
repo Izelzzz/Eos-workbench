@@ -5,7 +5,7 @@ import { agentEnv, replyAfter, sessionIdFor, traceAfter } from '../src/executor/
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
   ({ type: 'assistant/message', time, data: { usage, message: { content: text === '' ? [{ type: 'tool-call' }] : [{ type: 'text', text }], source: { model: 'deepseek-flash' } } } })
-const end = (time: number) => ({ type: 'turn/end', time })
+const end = (time: number, kind = 'completed') => ({ type: 'turn/end', time, data: { reason: { kind } } })
 
 test('session ids are stable per key and look like dsh ids', () => {
   assert.equal(sessionIdFor('t1/build'), sessionIdFor('t1/build'))
@@ -62,4 +62,14 @@ test('trace replay starts at the turn, keeping the first step that dsh opens bef
     { type: 'step/end', time: 19, data: { step: 1 } }, end(20),
   ]
   assert.deepEqual(traceAfter(log, 'n1').map(e => [e.kind, e.t]), [['call_start', 10], ['step_start', 11], ['model', 15], ['tool_start', 16], ['tool_end', 18], ['step_end', 19]])
+})
+
+test('a turn that ended any other way than completed is not claimed, even if it said something midway', () => {
+  for (const kind of ['interrupted', 'error', 'aborted', 'blocked', 'max-tokens']) {
+    const log = [user('m <!-- eos:n1 -->', 1), assistant('我先看一下目录结构。', 2), end(3, kind)]
+    assert.equal(replyAfter(log, 'n1', 's'), undefined, kind)
+  }
+  // 续接时 dsh 补写 interrupted 收尾，之后重发同一条消息并正常完成：认领重发的那一轮。
+  const resent = [user('m <!-- eos:n1 -->', 1), assistant('半截', 2), end(3, 'interrupted'), user('m <!-- eos:n1 -->', 5), assistant('完整的回复', 6), end(7)]
+  assert.equal(replyAfter(resent, 'n1', 's')?.text, '完整的回复')
 })
