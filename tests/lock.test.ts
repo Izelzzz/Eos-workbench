@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -40,19 +41,28 @@ test('taking over a stale lock waits for whoever is already taking it over', () 
   assert.equal(existsSync(join(d, 't3.takeover')), false, 'the guard is removed after the takeover')
 })
 
-test('six processes racing for the same stale lock: exactly one wins, every round', async () => {
-  const { spawn } = await import('node:child_process')
+test('a lock that was just created and is still empty is not mistaken for a dead holder', async () => {
+  const d = dir()
   const lockModule = join(import.meta.dirname, '..', 'src', 'runner', 'lock.ts')
-  const child = `const { acquire } = await import(${JSON.stringify(lockModule)}); const r = acquire(process.argv[1], 't'); console.log('release' in r ? 'won' : 'lost'); if ('release' in r) await new Promise(x => setTimeout(x, 2000))`
-  for (let round = 0; round < 5; round++) {
-    const d = dir()
-    writeFileSync(join(d, 't.pid'), '999999999') // 上一个 runner 被 SIGKILL 后留下的锁
-    const results = await Promise.all(Array.from({ length: 6 }, () => new Promise<string>(resolve => {
-      const p = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', child, d], { stdio: ['ignore', 'pipe', 'inherit'] })
-      let out = ''
-      p.stdout.on('data', c => (out += c))
-      p.on('exit', () => resolve(out.trim()))
-    })))
-    assert.equal(results.filter(r => r === 'won').length, 1, `round ${round}: ${results.join(',')}`)
-  }
+  // 子进程先加载好，等 go 文件出现才去抢锁；父进程放出 go 时锁文件还是空的，50ms 后才写入 pid。
+  const code = `const { acquire } = await import(${JSON.stringify(lockModule)}); const { existsSync, writeFileSync } = await import('node:fs');
+    writeFileSync(process.argv[1] + '/ready', ''); while (!existsSync(process.argv[1] + '/go')) {}
+    console.log(JSON.stringify(acquire(process.argv[1], 'e', 4242)))`
+  const out = new Promise<string>((resolve, reject) =>
+    execFile(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code, d], (e, stdout) => (e ? reject(e) : resolve(stdout.trim()))))
+  while (!existsSync(join(d, 'ready'))) await new Promise(r => setTimeout(r, 10))
+  writeFileSync(join(d, 'e.pid'), '') // 另一个进程刚用 O_EXCL 建好锁，还没写入 pid
+  writeFileSync(join(d, 'go'), '')
+  await new Promise(r => setTimeout(r, 50))
+  writeFileSync(join(d, 'e.pid'), String(process.pid))
+  assert.deepEqual(JSON.parse(await out), { heldBy: process.pid }, 'waits for the pid instead of taking the lock over')
+  assert.equal(readFileSync(join(d, 'e.pid'), 'utf8'), String(process.pid))
+})
+
+test('a lock left empty by a creator that crashed before writing is taken over after a short wait', () => {
+  const d = dir()
+  writeFileSync(join(d, 'z.pid'), '')
+  const lock = acquire(d, 'z', 4242)
+  assert.ok('release' in lock)
+  assert.equal(readFileSync(join(d, 'z.pid'), 'utf8'), '4242')
 })
