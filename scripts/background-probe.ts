@@ -56,7 +56,7 @@ try {
   // 平台撤销前做的事：关掉 dsh 进程，杀掉工作目录在 worktree 里的进程。
   const t0 = Date.now()
   await ex.release(wt)
-  const killed = await killProcessesIn(wt)
+  const killed = (await killProcessesIn(wt)).map(k => k.pid)
   const cleanupMs = Date.now() - t0
   const aliveAfter = bgPid !== undefined && isAlive(bgPid)
 

@@ -1,13 +1,31 @@
 {
-    "gitModule": "/home/user/Eos-workbench/src/runner/git.ts",
-    "rounds": 1000,
-    "deletedOutside": 0,
-    "refused": 305,
-    "otherErrors": 68,
-    "errorSamples": {
-        "有越界改动撤销不了，没有提交：d": 185,
-        "有越界改动撤销不了，没有提交：d/x": 94,
-        "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 68,
-        "worktree 里的目录 d 被换成了指向外面的链接，平台没有删除也没有提交": 26
+  "gitModule": "/home/user/Eos-workbench/src/runner/git.ts",
+  "results": [
+    {
+      "kind": "delete",
+      "rounds": 1000,
+      "touchedOutside": 0,
+      "refused": 248,
+      "errorSamples": {
+        "有越界改动撤销不了，没有提交：d": 137,
+        "有越界改动撤销不了，没有提交：d/x": 75,
+        "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 28,
+        "worktree 里的目录 d 被换成了指向外面的链接，平台没有删除也没有提交": 8
+      }
+    },
+    {
+      "kind": "restore",
+      "rounds": 1000,
+      "touchedOutside": 0,
+      "refused": 1000,
+      "errorSamples": {
+        "有越界改动撤销不了，没有提交：d/f": 676,
+        "撤销时 sh 失败（worktree 里的文件在撤销过程中被改动），没有提交：": 131,
+        "有越界改动撤销不了，没有提交：d/f、d": 119,
+        "worktree 里的目录 d 被换成了指向外面的链接，平台没有删除也没有提交": 61,
+        "有越界改动撤销不了，没有提交：d/f、d/f": 8,
+        "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 4
+      }
     }
+  ]
 }

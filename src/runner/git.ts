@@ -261,6 +261,45 @@ const safeMkdir = (worktree: string, rel: string): void => {
   inVerifiedDir(worktree, dir, ['mkdir', '-p', '--', base])
 }
 
+/**
+ * 在核对过的上级目录里，把一个文件恢复成 HEAD 里的内容（写回也不能被换上的链接引到外面，Izelzzz/Eos-workbench#28）：
+ * 先写到同一目录里的临时文件，再删掉目标、用 mv -T 换上（目标在这之间又变成目录时 mv 失败，不会写进去）。
+ */
+const RESTORE = [
+  'set -e',
+  'gd=$1; mode=$2; sha=$3; base=$4; tmp=$5',
+  'case "$mode" in',
+  '  120000) target=$(git --git-dir="$gd" cat-file blob "$sha"); ln -s -- "$target" "$tmp" ;;',
+  '  100644|100755) git --git-dir="$gd" cat-file blob "$sha" > "$tmp"; if [ "$mode" = 100755 ]; then chmod 755 "$tmp"; else chmod 644 "$tmp"; fi ;;',
+  '  *) exit 4 ;;',
+  'esac',
+  'rm -rf -- "$base"',
+  'mv -fT -- "$tmp" "$base"',
+].join('\n')
+
+const headEntry = (loc: Loc, path: string): { mode: string; sha: string } | undefined => {
+  const entry = splitNul(wgit(loc, ['ls-tree', '-z', 'HEAD', '--', literal(path)]))[0]
+  if (entry === undefined) return undefined
+  const [mode, , sha] = entry.subarray(0, entry.indexOf(0x09)).toString('utf8').split(' ')
+  return mode === undefined || sha === undefined ? undefined : { mode, sha }
+}
+
+/** 把已跟踪的一条路径恢复成 HEAD 里的样子：暂存区用 git 恢复（只改索引），文件在核对过的目录里写回。 */
+const safeRestore = (loc: Loc, path: string): void => {
+  wgit(loc, ['restore', '--source=HEAD', '--staged', '--', literal(path)])
+  const entry = headEntry(loc, path)
+  if (entry === undefined) return
+  const { dir, base } = splitLast(path)
+  // 上级目录被删掉了：一层一层在核对过的目录里重建。
+  const parts = dir === '' ? [] : dir.split('/')
+  for (let i = 1; i <= parts.length; i++) {
+    const prefix = parts.slice(0, i).join('/')
+    if (!existsSync(join(loc.worktree, prefix))) safeMkdir(loc.worktree, prefix)
+  }
+  const tmp = `.eos-restore-${process.pid}-${Date.now().toString(36)}`
+  inVerifiedDir(loc.worktree, dir, ['sh', '-c', RESTORE, 'sh', loc.gitDir, entry.mode, entry.sha, base, tmp])
+}
+
 /** 删掉名字不是合法 UTF-8 的路径：在核对过的上级目录里按 inode 找到它再删（命令行参数传不了这种名字）。 */
 const safeRemoveRaw = (worktree: string, raw: Buffer): void => {
   const slash = raw.lastIndexOf(0x2f)
@@ -303,7 +342,7 @@ const revert = (loc: Loc, path: string, gitlink = false): void => {
     return
   }
   if (!path.endsWith('/') && inHead(loc, path)) {
-    wgit(loc, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
+    safeRestore(loc, path)
     return
   }
   wgit(loc, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
@@ -322,7 +361,7 @@ export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): strin
   for (const change of changes(l).filter(c => c.linkDir && !c.gitlink)) {
     const path = change.path.replace(/\/$/, '')
     safeRemove(l.worktree, path)
-    if (!change.untracked && inHead(l, path)) wgit(l, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
+    if (!change.untracked && inHead(l, path)) safeRestore(l, path)
     reverted.add(path)
   }
   for (const change of changes(l)) {

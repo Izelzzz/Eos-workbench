@@ -309,6 +309,7 @@ test('writable roles cannot start background jobs: job tools are removed and bas
   const rowsFor = (background: boolean, denyTools: ('bash' | 'web')[] = []) => patchRows({ denyTools, skills: [], mcp: [], background }, '/p/skills', '/p/mcp-cwd') as { id?: string; disabled?: boolean; config?: Record<string, unknown> }[]
   const writer = rowsFor(false)
   assert.ok(writer.some(r => r.id === 'tool-jobs' && r.disabled === true))
+  assert.ok(writer.some(r => r.id === 'tool-workflow' && r.disabled === true), 'the workflow tool has its own background mode')
   assert.deepEqual(writer.find(r => r.id === 'tool-bash')?.config, { enableRunInBackground: false, promoteOnTimeout: false })
   const reader = rowsFor(true)
   assert.ok(!reader.some(r => r.id === 'tool-jobs'), 'read-only roles keep background jobs: the sandbox already stops them writing')

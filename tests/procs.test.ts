@@ -1,7 +1,7 @@
 // 撤销前结束 agent 留下的进程（Izelzzz/Eos-workbench#28）。
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { killProcessesIn } from '../src/runner/procs.ts'
@@ -32,7 +32,7 @@ test('processes whose working directory is inside the worktree are killed, detac
   const setsid = start(['setsid', 'sleep', '60'], wt)
   const other = start(['sleep', '60'], outside)
   await new Promise(r => setTimeout(r, 200))
-  const killed = await killProcessesIn(wt)
+  const killed = (await killProcessesIn(wt)).map(k => k.pid)
   // setsid 在这里是进程组组长，会先 fork 再在新会话里执行 sleep：sleep 的进程号不是 setsid 的，事先不知道。
   // 按工作目录找就能找到它：被杀的应该正好是 plain、nested 和这个脱离出去的 sleep。
   assert.ok(killed.includes(plain) && killed.includes(nested), `killed ${killed.join(',')}`)
@@ -42,4 +42,5 @@ test('processes whose working directory is inside the worktree are killed, detac
   assert.equal(alive(other), true, 'a process outside the worktree is not touched')
   process.kill(other, 'SIGKILL')
   assert.deepEqual(await killProcessesIn(wt), [], 'nothing left in the worktree')
+  rmSync(base, { recursive: true, force: true })
 })

@@ -1,13 +1,63 @@
 {
-    "gitModule": "/home/user/Eos-workbench/src/runner/git.old-race.ts",
-    "rounds": 1000,
-    "deletedOutside": 3,
-    "refused": 282,
-    "otherErrors": 18,
-    "errorSamples": {
-        "有越界改动撤销不了，没有提交：d": 188,
-        "有越界改动撤销不了，没有提交：d/x": 94,
-        "Path is a directory: rm returned EISDIR (is a directory) /home/user/Eos-workbench/.eos/revert-race/wt/d": 11,
-        "Path is a directory: /home/user/Eos-workbench/.eos/revert-race/wt/d": 7
-    }
+  "before": {
+    "gitModule": "/home/user/Eos-workbench/src/runner/git.race-main.ts",
+    "results": [
+      {
+        "kind": "delete",
+        "rounds": 1000,
+        "touchedOutside": 1,
+        "refused": 197,
+        "errorSamples": {
+          "有越界改动撤销不了，没有提交：d": 120,
+          "有越界改动撤销不了，没有提交：d/x": 75,
+          "Path is a directory: /home/user/Eos-workbench/.eos/revert-race/delete/wt/d": 1,
+          "Path is a directory: rm returned EISDIR (is a directory) /home/user/Eos-workbench/.eos/revert-race/delete/wt/d": 1
+        }
+      },
+      {
+        "kind": "restore",
+        "rounds": 1000,
+        "touchedOutside": 4,
+        "refused": 1000,
+        "errorSamples": {
+          "Command failed: git -c core.fsmonitor= -c core.hooksPath=/dev/null -c submodule.recurse=false -c diff.ignoreSubmodules=all -c status.submodu": 809,
+          "有越界改动撤销不了，没有提交：d/f": 150,
+          "有越界改动撤销不了，没有提交：d/f、d": 31,
+          "有越界改动撤销不了，没有提交：d/f、d/f": 5,
+          "Path is a directory: rm returned EISDIR (is a directory) /home/user/Eos-workbench/.eos/revert-race/restore/wt/d": 4,
+          "Path is a directory: /home/user/Eos-workbench/.eos/revert-race/restore/wt/d": 1
+        }
+      }
+    ]
+  },
+  "withoutRestoreFix": {
+    "gitModule": "/home/user/Eos-workbench/src/runner/git.race-head.ts",
+    "results": [
+      {
+        "kind": "delete",
+        "rounds": 1000,
+        "touchedOutside": 0,
+        "refused": 229,
+        "errorSamples": {
+          "有越界改动撤销不了，没有提交：d": 125,
+          "有越界改动撤销不了，没有提交：d/x": 60,
+          "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 36,
+          "worktree 里的目录 d 被换成了指向外面的链接，平台没有删除也没有提交": 8
+        }
+      },
+      {
+        "kind": "restore",
+        "rounds": 1000,
+        "touchedOutside": 3,
+        "refused": 999,
+        "errorSamples": {
+          "Command failed: git -c core.fsmonitor= -c core.hooksPath=/dev/null -c submodule.recurse=false -c diff.ignoreSubmodules=all -c status.submodu": 792,
+          "有越界改动撤销不了，没有提交：d/f": 163,
+          "有越界改动撤销不了，没有提交：d/f、d": 27,
+          "有越界改动撤销不了，没有提交：d/f、d/f": 15,
+          "撤销时 rm 失败（worktree 里的文件在撤销过程中被改动），没有提交：rm: cannot remove 'd': Is a directory": 2
+        }
+      }
+    ]
+  }
 }
