@@ -18,6 +18,34 @@ Eos 是一个可以自部署的多 agent 工作流平台。你在 Web 上发起�
 | M4 | 外部执行器：Claude Code、Codex |
 | M5 | Docker Compose 部署（含 bubblewrap）与端到端验收 |
 
+## 试用（M1 + Web 详情页）
+
+需要 Node ≥ 24.9、git，以及环境变量 `DEEPSEEK_API_KEY`。
+
+```bash
+npm install && npm run build:web
+```
+
+在一个 git 仓库上发起任务（数据默认在 `~/.eos`）：
+
+```bash
+npm run eos -- run --repo <仓库路径> "<需求>"
+```
+
+agent 提问时，另开一个终端回答：
+
+```bash
+npm run eos -- answer <任务id> "<回答>"
+```
+
+打开 Web 界面，看任务列表和每个任务的 trace（每次模型请求、工具调用、参数与结果、耗时、token），运行中的任务每 2 秒刷新：
+
+```bash
+npm run eos -- web
+```
+
+然后访问 http://127.0.0.1:4317 。其他命令：`resume`、`retry`、`status`、`log`、`abort`、`workflows`，见 `npm run eos -- --help`。
+
 ## 开发
 
 需要 Node ≥ 24.9。

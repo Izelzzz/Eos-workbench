@@ -16,6 +16,8 @@ const serve = async () => {
   mkdirSync(join(dir, 'static'))
   writeFileSync(join(dir, 'static', 'index.html'), '<html>eos</html>')
   writeFileSync(join(dir, 'secret.txt'), 'do not serve')
+  mkdirSync(join(dir, 'static-evil'))
+  writeFileSync(join(dir, 'static-evil', 'x.txt'), 'sibling secret')
   const store = new Store(join(dir, 'eos.db'))
   store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: '/r', worktree: '/w', branch: 'eos/t1', baseSha: 'abc' } }, 1000)
   const replayed: string[] = []
@@ -56,6 +58,9 @@ test('unknown tasks are 404, non-GET is refused, and static paths cannot escape 
     assert.equal((await fetch(`${s.base}/api/tasks`, { method: 'POST' })).status, 405)
     const escaped = await (await fetch(`${s.base}/..%2fsecret.txt`)).text()
     assert.doesNotMatch(escaped, /do not serve/)
+    for (const path of ['/../static-evil/x.txt', '/%2e%2e/static-evil/x.txt', '/..%2fstatic-evil%2fx.txt']) {
+      assert.doesNotMatch(await (await fetch(`${s.base}${path}`)).text(), /sibling secret/, path)
+    }
     assert.match(await (await fetch(`${s.base}/tasks/anything`)).text(), /eos/, 'SPA fallback to index.html')
   } finally {
     await s.close()

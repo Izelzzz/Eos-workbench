@@ -42,7 +42,6 @@ const steps = (callId: string, events: TraceEvent[], prompt: string, open: boole
         if (current === undefined) break
         Object.assign(current, { model: e.model, usage: e.usage, reasoning: e.reasoning, output: e.text })
         current.meta['模型耗时'] = `${((e.t - current.start) / 1000).toFixed(1)}s`
-        if (e.model !== undefined) current.meta['模型'] = e.model
         if (e.toolCalls.length > 0) current.meta['请求工具'] = e.toolCalls.map(t => t.name).join('、')
         break
       case 'tool_start': {

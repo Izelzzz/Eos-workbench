@@ -137,3 +137,17 @@ test('every call gets a trace: streamed while it runs, replayed from the session
   assert.deepEqual(trace.filter(r => r.call === 'c1').map(r => r.event.kind), ['call_start', 'step_start'], 'recovered call replayed from the log')
   assert.deepEqual(trace.filter(r => r.call === 'c2').map(r => r.event.kind), ['call_start', 'step_start', 'step_end'], 'live call streamed')
 })
+
+test('a trace write that fails does not break the agent call', async () => {
+  (reviewOnce as any).n = 0
+  const { store } = setup()
+  const original = store.appendTrace.bind(store)
+  store.appendTrace = (id, call, events) => {
+    if (events.some(e => e.kind === 'step_start')) throw new Error('database is locked')
+    original(id, call, events)
+  }
+  const lines: string[] = []
+  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, log: l => lines.push(l) })
+  assert.equal(task.status, 'done')
+  assert.ok(lines.some(l => l.includes('trace 记录失败：database is locked')))
+})

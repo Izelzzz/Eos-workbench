@@ -1,7 +1,7 @@
 // Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
@@ -53,7 +53,8 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: import('node:http').ServerResponse) => {
     const file = normalize(join(root, path))
-    const target = file.startsWith(root) && existsSync(file) && statSync(file).isFile() ? file : join(root, 'index.html')
+    const inside = file === root || file.startsWith(root + sep)
+    const target = inside && existsSync(file) && statSync(file).isFile() ? file : join(root, 'index.html')
     if (!existsSync(target)) {
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
       return res.end('前端还没有构建：先运行 npm run build:web')

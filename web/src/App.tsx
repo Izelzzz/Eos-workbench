@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks } from './api.ts'
 import { Detail } from './Detail.tsx'
@@ -49,6 +50,8 @@ function TaskList() {
   )
 }
 
+const collect = (s: Span): string[] => [s.id, ...s.children.flatMap(collect)]
+
 const find = (s: Span, id: string | undefined): Span | undefined =>
   id === undefined ? undefined : s.id === id ? s : s.children.map(c => find(c, id)).find(Boolean)
 
@@ -58,6 +61,7 @@ function TaskPage(props: { id: string }) {
   const [open, setOpen] = useState<Set<string>>()
   const [selected, setSelected] = useState<string>()
   const [now, setNow] = useState(Date.now())
+  const seen = useRef(new Set<string>())
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -68,10 +72,11 @@ function TaskPage(props: { id: string }) {
         if (stopped) return
         setTask(t)
         setNow(Date.now())
-        setOpen(prev => {
-          const base = defaultOpen(t.trace)
-          return prev === undefined ? base : new Set([...prev, ...[...base].filter(id => !prev.has(id) && id.startsWith('c'))])
-        })
+        // 只自动展开第一次出现的行；用户手动收起的不会在刷新时被重新展开。
+        const base = defaultOpen(t.trace)
+        const fresh = [...base].filter(id => !seen.current.has(id))
+        collect(t.trace).forEach(id => seen.current.add(id))
+        setOpen(prev => (prev === undefined ? base : new Set([...prev, ...fresh])))
         setError(undefined)
         if (LIVE.has(t.status)) timer = setTimeout(load, 2000)
       } catch (e) {
@@ -86,20 +91,7 @@ function TaskPage(props: { id: string }) {
   }, [props.id])
 
   const rows = useMemo(() => (task && open ? visibleRows(task.trace, open) : []), [task, open])
-  const bounds = useMemo(() => {
-    if (task === undefined) return { start: 0, end: 1 }
-    let start = Infinity
-    let end = -Infinity
-    const walk = (s: Span) => {
-      if (s.start > 0) {
-        start = Math.min(start, s.start)
-        end = Math.max(end, s.end ?? now)
-      }
-      s.children.forEach(walk)
-    }
-    walk(task.trace)
-    return Number.isFinite(start) ? { start, end: Math.max(end, start + 1) } : { start: now, end: now + 1 }
-  }, [task, now])
+  const bounds = useMemo(() => (task === undefined ? { start: 0, end: 1 } : boundsOf(task.trace, now)), [task, now])
 
   if (error) return <p className="error">{error}</p>
   if (task === undefined || open === undefined) return <p className="muted">加载中…</p>

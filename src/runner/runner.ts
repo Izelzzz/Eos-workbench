@@ -64,7 +64,14 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       try {
         reply = await o.executor.send({
           key, nonce, prompt: call.prompt,
-          onEvent: e => o.store.appendTrace(id, call.id, [e]),
+          onEvent: e => {
+            // trace 只是观测数据：写不进去（例如数据库忙）也不能打断 agent 的调用。
+            try {
+              o.store.appendTrace(id, call.id, [e])
+            } catch (err) {
+              log(`  （trace 记录失败：${(err as Error).message}）`)
+            }
+          },
           spec: { model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: o.store.meta(id).worktree },
           ask: (q, signal) => waitForAnswer(call, q, signal),
         })
