@@ -1,4 +1,5 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
+import { describeCheck } from './engine/checks.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -133,6 +134,7 @@ const commands: Record<string, () => Promise<void> | void> = {
         say(`>>> 提示词\n${e.prompt}\n<<< 回复\n${e.reply}`)
       } else if (e.type === 'question') say(`\n── ${time} 提问（${e.question.source}）：${e.question.text}`)
       else if (e.type === 'answer') say(`\n── ${time} 回答 ${e.questionId}：${e.text}`)
+      else if (e.type === 'check') say(`\n── ${time} [${e.node}${e.round === undefined ? '' : ` 第 ${e.round} 轮`}] 检查 · ${(e.ms / 1000).toFixed(1)}s\n${e.results.map(r => `${r.passed ? '✓' : '✗'} ${describeCheck(r.check)}${r.passed || r.detail === '' ? '' : `\n${r.detail}`}`).join('\n')}`)
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)

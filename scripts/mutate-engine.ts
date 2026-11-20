@@ -15,15 +15,26 @@ const MUTATIONS: [string, string, string][] = [
   ['中止不清空待执行的调用', "return ok(append({ ...task, status: 'aborted', pending: undefined, question: undefined }", "return ok(append({ ...task, status: 'aborted', question: undefined }"],
   ['任何状态都能重试', "if (task.status !== 'failed') return ignore(task, '只有失败的任务可以重试')", 'if (false) return ignore(task, "")'],
   ['接受空回答', "if (text === '') return ignore(task, '回答不能为空')", 'if (false) return ignore(task, "")'],
-  ['不校验回复属于哪个调用', "if (call?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')", "if (call === undefined || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')"],
+  ['不校验回复属于哪个调用', 'isCheck(call) || call.id !== event.call || task.status', 'isCheck(call) || task.status'],
   ['不校验失败属于哪个调用', "if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')", "if (task.pending === undefined || task.status === 'failed') return ignore(task, '不是当前这次调用')"],
-  ['提问不要求是当前调用', "if (task.pending?.id !== event.call) return ignore(task, '不是当前这次调用')", 'if (task.pending === undefined) return ignore(task, "")'],
+  ['提问不要求是当前调用', 'isCheck(task.pending) || task.pending.id !== event.call)', 'isCheck(task.pending))'],
+  ['检查进行中接受提问', "if (task.pending === undefined || isCheck(task.pending) || task.pending.id", "if (task.pending === undefined || task.pending.id"],
   ['失败的任务收到提问就离开失败状态', "if (open === undefined && task.status !== 'running') return ignore(task, '不是当前这次调用')", ''],
   ['同一个问题重复提出', "if (open !== undefined && open.text === event.question.text) return ignore(task, '同一个问题已经在等回答')", 'if (false) return ignore(task, "")'],
   ['回答不校验问题 id', "if (task.status !== 'waiting_user' || q?.id !== event.questionId) return ignore(task, '没有待回答的这个问题')", "if (task.status !== 'waiting_user' || q === undefined) return ignore(task, '没有待回答的这个问题')"],
+  ['agent 节点有检查也不跑', '(n.checks.length > 0 ? runChecks(task, n) : advance(task, at))', '(advance(task, at))'],
+  ['检查没通过也当通过', 'const passed = allPassed(results)', 'const passed = true'],
+  ['补齐次数不累加（无限次自动补齐）', 'return issue({ ...task, fixes: task.fixes + 1 }', 'return issue({ ...task, fixes: task.fixes }'],
+  ['补齐次数用完也不问用户', 'if (task.fixes < n.maxFixes) {', 'if (true) {'],
+  ['进入新节点不清零补齐次数', "dialog: undefined, fixes: 0 }, at)", 'dialog: undefined }, at)'],
+  ['用户指示后不重置补齐次数', "issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })", "issue(task, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })"],
+  ['对话跳过检查直接评审', 'return d.checks.length > 0 ? runChecks(', 'return false ? runChecks('],
+  ['检查通过后不请评审方', 'd.role === undefined ? passRound(task, d, at)', 'true ? passRound(task, d, at)'],
+  ['不校验检查结果条数', 'if (event.results.length !== run.checks.length) return ignore', 'if (false) return ignore'],
+  ['检查进行中接受模型回复', 'if (call === undefined || isCheck(call) || call.id !== event.call', 'if (call === undefined || call.id !== event.call'],
 ]
 
-const TESTS = ['tests/engine.test.ts', 'tests/engine.state-space.test.ts']
+const TESTS = ['tests/engine.test.ts', 'tests/engine.checks.test.ts', 'tests/engine.state-space.test.ts']
 const source = readFileSync(join(ROOT, 'src/engine/machine.ts'), 'utf8')
 const work = mkdtempSync(join(tmpdir(), 'eos-mutate-'))
 for (const dir of ['src', 'tests', 'vendor']) cpSync(join(ROOT, dir), join(work, dir), { recursive: true })

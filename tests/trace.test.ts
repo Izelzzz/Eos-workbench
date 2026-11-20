@@ -73,7 +73,7 @@ test('a call still in flight shows as running, with its open step and tool unfin
   const log = fixture.task.log.filter(e => !(e.type === 'call' && e.call === 'c3') && !(e.type === 'note' && e.at >= fixture.task.log.find(x => x.type === 'call' && x.call === 'c3')!.at))
   const running: Task = { ...fixture.task, status: 'running', cursor: 2, log,
     pending: { id: 'c3' as never, node: 'review' as never, session: 'review' as never, role: 'reviewer' as never, purpose: 'critique', prompt: '评审' },
-    dialog: { node: 'review' as never, round: 1, escalated: false, phase: 'critique', formatRetries: 0 } }
+    dialog: { node: 'review' as never, round: 1, escalated: false, phase: 'critique', formatRetries: 0, review: 'first' } }
   const root = buildTrace(running, partial)
   const review = root.children[2]!
   assert.equal(review.status, 'running')

@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
-import type { Event, Step, Task, TaskStatus } from '../engine/types.ts'
+import type { ConventionDoc, Event, Step, Task, TaskStatus } from '../engine/types.ts'
 import type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { Workflow } from '../workflow/types.ts'
@@ -41,6 +41,12 @@ CREATE TABLE IF NOT EXISTS trace (
   PRIMARY KEY (task_id, call_id, seq)
 );`
 
+/** 第 1 块之前保存的任务没有这些字段：读出时补上默认值，引擎内部只信任完整的 Task。 */
+const upgrade = (t: Task): Task => ({
+  ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0,
+  ...(t.dialog === undefined ? {} : { dialog: { ...t.dialog, review: t.dialog.review ?? (t.dialog.round > 1 ? 'reply' : 'first') } }),
+})
+
 export class Store {
   readonly db: DatabaseSync
 
@@ -69,7 +75,7 @@ export class Store {
 
   private load(id: string): Task | undefined {
     const row = this.db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string } | undefined
-    return row === undefined ? undefined : (JSON.parse(row.state) as Task)
+    return row === undefined ? undefined : upgrade(JSON.parse(row.state) as Task)
   }
 
   private append(id: string, at: number, actor: Actor, event: EventRow['event'], accepted: boolean, reason?: string): void {
@@ -78,9 +84,9 @@ export class Store {
       .run(id, next, at, actor, JSON.stringify(event), accepted ? 1 : 0, reason ?? null)
   }
 
-  create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; meta: TaskMeta }, at: number, actor: Actor = 'cli'): Task {
+  create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; docs?: ConventionDoc[]; meta: TaskMeta }, at: number, actor: Actor = 'cli'): Task {
     return this.tx(() => {
-      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, ...(p.context === undefined ? {} : { context: p.context }) }, at)
+      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, docs: p.docs ?? [], ...(p.context === undefined ? {} : { context: p.context }) }, at)
       this.db.prepare('INSERT INTO tasks (id, created_at, updated_at, status, request, workflow_name, workflow_source, meta, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(p.id, at, at, task.status, p.request, p.workflow.name, p.workflowSource, JSON.stringify(p.meta), JSON.stringify(task))
       this.append(p.id, at, actor, { kind: 'created' }, true)

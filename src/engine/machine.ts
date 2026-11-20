@@ -1,26 +1,33 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
-import type { DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
+import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { node as nodeOf } from '../workflow/types.ts'
+import { allPassed, describeFailures } from './checks.ts'
 import {
-  critiquePrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, stuckQuestion,
+  checksStuckQuestion, critiquePrompt, fixInstructPrompt, fixPrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, stuckQuestion,
 } from './prompts.ts'
-import type { Call, CallId, DialogState, Entry, Event, Question, Step, Task } from './types.ts'
-import { isTerminal } from './types.ts'
+import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, Question, ReviewKind, Step, Task } from './types.ts'
+import { isCheck, isTerminal } from './types.ts'
 import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 
 /** 回复格式不对时重新要求的次数；用完后任务失败，等人工重试。 */
 export const MAX_FORMAT_RETRIES = 2
 
-/** 新任务直接进入第一个节点：创建即发出第一个调用，不存在"已创建但没有事可做"的状态。 */
-export const newTask = (p: { id: string; request: string; workflow: Workflow; context?: string }, at: number): Task =>
-  enter({ ...p, status: 'running', cursor: 0, outputs: {}, sessions: {}, log: [], nextCall: 0 }, at)
+/** 新任务直接进入第一个节点：创建即发出第一项工作，不存在"已创建但没有事可做"的状态。 */
+export const newTask = (p: { id: string; request: string; workflow: Workflow; docs: ConventionDoc[]; context?: string }, at: number): Task =>
+  enter({ ...p, status: 'running', cursor: 0, outputs: {}, sessions: {}, fixes: 0, log: [], nextCall: 0 }, at)
 
 const ok = (task: Task): Step => ({ task, accepted: true })
 const ignore = (task: Task, reason: string): Step => ({ task, accepted: false, reason })
 const append = (task: Task, entry: Entry): Task => ({ ...task, log: [...task.log, entry] })
 
+const nextId = (task: Task): CallId => `c${task.nextCall + 1}` as CallId
+
 const issue = (task: Task, c: Omit<Call, 'id'>): Task => ({
-  ...task, status: 'running', pending: { ...c, id: `c${task.nextCall + 1}` as CallId }, nextCall: task.nextCall + 1,
+  ...task, status: 'running', pending: { ...c, id: nextId(task) }, nextCall: task.nextCall + 1,
+})
+
+const runChecks = (task: Task, n: WorkflowNode): Task => ({
+  ...task, status: 'running', pending: { id: nextId(task), node: n.id, purpose: 'check', checks: n.checks }, nextCall: task.nextCall + 1,
 })
 
 const current = (task: Task): WorkflowNode | undefined => task.workflow.nodes[task.cursor]
@@ -31,6 +38,12 @@ const dialogNode = (task: Task): DialogNode => {
   return n
 }
 
+const agentNode = (task: Task): AgentNode => {
+  const n = current(task)
+  if (n?.kind !== 'agent') throw new Error(`任务 ${task.id} 不在 agent 节点上`)
+  return n
+}
+
 const withDialog = (task: Task, patch: Partial<DialogState>): Task => ({ ...task, dialog: { ...task.dialog!, ...patch } })
 
 /** 进入 cursor 指向的节点；走完所有节点就完成。 */
@@ -38,17 +51,27 @@ const enter = (task: Task, at: number): Task => {
   const n = current(task)
   if (n === undefined) return append({ ...task, status: 'done', pending: undefined, dialog: undefined }, { type: 'note', at, text: '所有节点已完成' })
   if (n.kind === 'agent') return issue(task, { node: n.id, session: n.id, role: n.role, purpose: 'produce', prompt: producePrompt(task, n) })
-  const opened: Task = { ...task, dialog: { node: n.id, round: 1, escalated: false, phase: 'critique', formatRetries: 0 } }
-  return critique(opened, n, critiquePrompt(opened, n, 'first'))
+  const opened: Task = { ...task, dialog: { node: n.id, round: 1, escalated: false, phase: 'check', formatRetries: 0, review: 'first' } }
+  return beginRound(opened, n, 'first')
 }
 
-const advance = (task: Task, at: number): Task => enter({ ...task, cursor: task.cursor + 1, dialog: undefined }, at)
+const advance = (task: Task, at: number): Task => enter({ ...task, cursor: task.cursor + 1, dialog: undefined, fixes: 0 }, at)
 
-/** 只有评审方的对话在 U2 之前不会走到这里：解析允许"只有检查"的对话，引擎在 U2 里接上检查。 */
-const reviewer = (d: DialogNode): RoleId => {
-  if (d.role === undefined) throw new Error(`对话「${d.id}」没有评审角色，检查还没有接入引擎`)
-  return d.role
+/** 对话的一轮：先跑检查，检查通过（或没有检查）再请评审方。 */
+const beginRound = (task: Task, d: DialogNode, review: ReviewKind): Task => {
+  const t = withDialog(task, { review })
+  return d.checks.length > 0 ? runChecks(withDialog(t, { phase: 'check' }), d) : critique(t, d, critiquePrompt(t, d, review))
 }
+
+/** 一轮里检查（如果有）已通过：有评审方就请它评审，没有就算这一轮通过。 */
+const afterChecks = (task: Task, d: DialogNode, at: number): Task =>
+  d.role === undefined ? passRound(task, d, at) : critique(task, d, critiquePrompt(task, d, task.dialog!.review))
+
+const passRound = (task: Task, d: DialogNode, at: number): Task =>
+  advance(append(task, { type: 'note', at, node: d.id, text: `第 ${task.dialog!.round} 轮通过` }), at)
+
+/** agent 节点的产出（或补齐）之后：有检查就跑检查，没有就进入下一个节点。 */
+const afterWork = (task: Task, n: AgentNode, at: number): Task => (n.checks.length > 0 ? runChecks(task, n) : advance(task, at))
 
 const roleOfAgent = (task: Task, id: NodeId): RoleId => {
   const n = nodeOf(task.workflow, id)
@@ -56,8 +79,10 @@ const roleOfAgent = (task: Task, id: NodeId): RoleId => {
   return n.role
 }
 
-const critique = (task: Task, d: DialogNode, prompt: string): Task =>
-  issue(withDialog(task, { phase: 'critique' }), { node: d.id, session: d.id, role: reviewer(d), purpose: 'critique', prompt })
+const critique = (task: Task, d: DialogNode, prompt: string): Task => {
+  if (d.role === undefined) throw new Error(`对话「${d.id}」没有评审角色`)
+  return issue(withDialog(task, { phase: 'critique' }), { node: d.id, session: d.id, role: d.role, purpose: 'critique', prompt })
+}
 
 const toTarget = (task: Task, d: DialogNode, purpose: 'respond' | 'reapply' | 'instruct', prompt: string): Task =>
   issue(withDialog(task, { phase: purpose }), { node: d.id, session: d.with, role: roleOfAgent(task, d.with), purpose, prompt })
@@ -66,9 +91,29 @@ const toUpstream = (task: Task, d: DialogNode, prompt: string): Task =>
   issue(withDialog(task, { phase: 'reconfirm' }), { node: d.id, session: d.escalate!, role: roleOfAgent(task, d.escalate!), purpose: 'reconfirm', prompt })
 
 const ask = (task: Task, q: Omit<Question, 'id'>, at: number): Task => {
-  const node = task.dialog?.node ?? task.pending?.node
+  const node = current(task)?.id
   const question: Question = { ...q, ...(node === undefined ? {} : { node }), id: `q${task.log.filter(e => e.type === 'question').length + 1}` }
   return append({ ...task, status: 'waiting_user', question, pending: q.source === 'loop' ? undefined : task.pending }, { type: 'question', at, question })
+}
+
+/** agent 节点的检查没通过：还有次数就让同一个 agent 补齐，用完了问用户。 */
+const checksFailed = (task: Task, n: AgentNode, results: CheckResult[], at: number): Task => {
+  if (task.fixes < n.maxFixes) {
+    return issue({ ...task, fixes: task.fixes + 1 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixPrompt(task, n, results) })
+  }
+  return ask(task, { source: 'loop', text: checksStuckQuestion(n, results) }, at)
+}
+
+const onChecked = (task: Task, run: CheckRun, results: CheckResult[], at: number): Task => {
+  const n = current(task)!
+  const passed = allPassed(results)
+  if (n.kind === 'agent') {
+    if (passed) return advance(append(task, { type: 'note', at, node: n.id, text: '交付物检查通过' }), at)
+    return checksFailed(task, n, results, at)
+  }
+  const d = dialogNode(task)
+  if (passed) return afterChecks(task, d, at)
+  return notPassed(task, d, describeFailures(results), at)
 }
 
 /** 回复格式不对：在同一会话里重新要求；次数用完则失败，pending 保留成一个新的要求，人工重试时直接接着跑。 */
@@ -93,28 +138,33 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
 const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   switch (call.purpose) {
     case 'produce':
-      return advance({ ...task, outputs: { ...task.outputs, [call.node]: text } }, at)
+      return afterWork({ ...task, outputs: { ...task.outputs, [call.node]: text } }, agentNode(task), at)
+
+    case 'fix': {
+      const prev = task.outputs[call.node]
+      return afterWork({ ...task, outputs: { ...task.outputs, [call.node]: prev === undefined ? text : `${prev}\n\n# 补齐说明\n\n${text}` } }, agentNode(task), at)
+    }
 
     case 'critique': {
       const d = dialogNode(task)
       const v = parseVerdict(text)
       if (v === undefined) return reformat(task, d, at, t => critique(t, d, critiquePrompt(t, d, 'format')))
       const t = withDialog(task, { formatRetries: 0 })
-      if (v.verdict === 'pass') return advance(append(t, { type: 'note', at, node: d.id, text: `第 ${t.dialog!.round} 轮通过` }), at)
+      if (v.verdict === 'pass') return passRound(t, d, at)
       return notPassed(t, d, describeVerdict(v), at)
     }
 
     case 'respond': {
       const d = dialogNode(task)
       const t = withDialog({ ...task, outputs: { ...task.outputs, [d.with]: text } }, { round: task.dialog!.round + 1 })
-      return critique(t, d, critiquePrompt(t, d, 'reply', text))
+      return beginRound(t, d, 'reply')
     }
 
     case 'reapply':
     case 'instruct': {
       const d = dialogNode(task)
       const t = withDialog({ ...task, outputs: { ...task.outputs, [d.with]: text } }, { round: 1 })
-      return critique(t, d, critiquePrompt(t, d, call.purpose === 'reapply' ? 'revised' : 'reply', text))
+      return beginRound(t, d, call.purpose === 'reapply' ? 'revised' : 'reply')
     }
 
     case 'reconfirm': {
@@ -129,8 +179,13 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   }
 }
 
-/** 对话尽头的用户指示：有上游就交给上游修订方案，否则直接交给被评审方。 */
+/**
+ * 流程卡住时用户的指示。agent 节点：交给同一个 agent 补齐，补齐次数重新计算。
+ * 对话节点：有上游就交给上游修订方案，否则直接交给被评审方。
+ */
 const onLoopAnswer = (task: Task, text: string): Task => {
+  const n = current(task)
+  if (n?.kind === 'agent') return issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })
   const d = dialogNode(task)
   return d.escalate !== undefined
     ? toUpstream(task, d, reconfirmPrompt(task, d, { instruction: text }))
@@ -142,7 +197,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
   switch (event.kind) {
     case 'replied': {
       const call = task.pending
-      if (call?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')
+      if (call === undefined || isCheck(call) || call.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')
       const recorded = append(
         { ...task, pending: undefined, question: undefined, status: 'running', sessions: { ...task.sessions, [call.session]: event.sessionId } },
         { type: 'call', at, call: call.id, node: call.node, role: call.role, purpose: call.purpose, ...(task.dialog === undefined ? {} : { round: task.dialog.round }),
@@ -151,12 +206,21 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       return ok(onReply(recorded, call, event.text, at))
     }
 
+    case 'checked': {
+      const run = task.pending
+      if (run === undefined || !isCheck(run) || run.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次检查的结果')
+      if (event.results.length !== run.checks.length) return ignore(task, `检查结果有 ${event.results.length} 条，应该是 ${run.checks.length} 条`)
+      const recorded = append({ ...task, pending: undefined, status: 'running' },
+        { type: 'check', at, call: run.id, node: run.node, ...(task.dialog === undefined ? {} : { round: task.dialog.round }), results: event.results, ms: event.ms })
+      return ok(onChecked(recorded, run, event.results, at))
+    }
+
     case 'call_failed':
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
       return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `调用失败：${event.error}` }))
 
     case 'asked': {
-      if (task.pending?.id !== event.call) return ignore(task, '不是当前这次调用')
+      if (task.pending === undefined || isCheck(task.pending) || task.pending.id !== event.call) return ignore(task, '不是当前这次调用')
       const open = task.status === 'waiting_user' && task.question?.call === event.call ? task.question : undefined
       // 崩溃后重发这次调用：agent 问的还是同一个问题，就继续等原来的回答；问了别的，就换成新问题，旧问题作废。
       if (open !== undefined && open.text === event.question.text) return ignore(task, '同一个问题已经在等回答')
@@ -185,7 +249,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 /** 一次调用发到了哪个会话：完成工作和评审在节点自己的会话里，回应和调整在被评审方的会话里，重新确认在上游的会话里。 */
 export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['purpose'] }): string => {
   const n = wf.nodes.find(x => x.id === call.node)
-  if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'critique') return call.node
+  if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'fix' || call.purpose === 'critique') return call.node
   return call.purpose === 'reconfirm' ? n.escalate ?? call.node : n.with
 }
 
@@ -193,7 +257,7 @@ export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['pur
 export const describePosition = (task: Task): string => {
   const n = current(task)
   if (n === undefined) return '已完成'
-  if (task.dialog === undefined) return `${n.id}`
+  if (task.dialog === undefined) return task.pending?.purpose === 'check' ? `${n.id} · 检查` : task.fixes > 0 ? `${n.id} · 补齐 ${task.fixes}/${(n as AgentNode).maxFixes}` : `${n.id}`
   const d = task.dialog
   return `${n.id} 第 ${d.round}/${(n as DialogNode).maxRounds} 轮 · ${d.phase}${d.escalated ? ' · 已重新确认' : ''}`
 }
