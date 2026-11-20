@@ -67,7 +67,7 @@ const real = (p: string): string => realpathSync(p)
  * 找出 worktree 在主仓库里的管理目录：主仓库 <common>/worktrees/ 下，gitdir 文件指回这个 worktree 的 .git 的那一个。
  * repo 和 worktree 相同（测试里直接在仓库上操作）时就是仓库自己的 git 目录。
  */
-export const locate = (worktree: string, repo: string = worktree): Loc => {
+export const locate = (worktree: string, repo: string): Loc => {
   const common = resolve(repo, git(repo, ['rev-parse', '--git-common-dir']))
   if (real(repo) === real(worktree)) return { worktree, gitDir: real(resolve(repo, git(repo, ['rev-parse', '--git-dir']))) }
   const admin = join(common, 'worktrees')
@@ -104,26 +104,71 @@ export const assertGitLink = (loc: Loc): void => {
  * worktree 里的一处改动。path 是现在的路径；from 只在 git 认出的改名里有，是改名前的路径。
  * untracked：未跟踪的新文件或目录（目录以 / 结尾，是嵌套的 git 仓库）。
  * raw：路径不是合法 UTF-8 时的原始字节，这种改动一律算越界（path 只用来显示）。
- * linkDir：未跟踪的指向目录的符号链接（例如把目录换成指向外面的链接），一律算越界。
+ * linkDir：指向目录的符号链接，或换掉了 HEAD 里一个目录的符号链接（含悬空的），一律算越界。
+ * gitlink：HEAD 里是子模块的路径被改动（换成文件、删掉、里面放了东西），一律算越界：平台不管理子模块。
+ * hidden：被新加或改过的 .gitignore 藏起来的文件（agent 自己写的忽略规则不可信），按未跟踪的新文件处理。
  * dsh 的沙箱只能整体允许或禁止写 worktree，收不窄到子路径，所以越界的改动由平台在提交前撤销。
  */
-export type Change = { path: string; from?: string; untracked?: boolean; raw?: Buffer; linkDir?: boolean }
+export type Change = { path: string; from?: string; untracked?: boolean; raw?: Buffer; linkDir?: boolean; gitlink?: boolean; hidden?: boolean }
 
 /** 改动涉及的全部路径：改名要两边都在可写范围内才算没越界。 */
 export const pathsOf = (c: Change): string[] => (c.from === undefined ? [c.path] : [c.path, c.from])
 
 /** 这处改动是否在可写范围内。名字不是合法 UTF-8 的、嵌套的 git 仓库、指向目录的符号链接，一律不在。 */
 export const inScope = (c: Change, writePaths: string[]): boolean =>
-  c.raw === undefined && !c.linkDir && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
+  c.raw === undefined && !c.linkDir && !c.gitlink && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
 
 const shown = (b: Buffer): string => [...b].map(x => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : `\\x${x.toString(16).padStart(2, '0')}`)).join('')
 
-const isLinkToDir = (abs: string): boolean => {
+const isLink = (abs: string): boolean => {
   try {
-    return lstatSync(abs).isSymbolicLink() && statSync(abs).isDirectory()
+    return lstatSync(abs).isSymbolicLink()
   } catch {
     return false
   }
+}
+
+const isDir = (abs: string): boolean => {
+  try {
+    return statSync(abs).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** HEAD 里的子模块路径（mode 160000）和目录路径。 */
+const headShape = (loc: Loc): { gitlinks: Set<string>; dirs: Set<string> } => {
+  const gitlinks = new Set<string>()
+  const dirs = new Set<string>()
+  for (const entry of splitNul(wgit(loc, ['ls-tree', '-r', '-t', '-z', 'HEAD']))) {
+    const tab = entry.indexOf(0x09)
+    if (tab < 0) continue
+    const [mode, type] = entry.subarray(0, tab).toString('utf8').split(' ')
+    const path = utf8(entry.subarray(tab + 1))
+    if (path === undefined) continue
+    if (mode === '160000') gitlinks.add(path)
+    else if (type === 'tree') dirs.add(path)
+  }
+  return { gitlinks, dirs }
+}
+
+/**
+ * 被忽略的路径里，哪些是被"不可信的"忽略规则藏起来的：规则来自新加的或改过的 .gitignore（HEAD 里没有，或和 HEAD 不同）。
+ * 可信的规则（HEAD 里原样的 .gitignore、主仓库的 info/exclude、宿主机的全局配置）忽略的文件不算改动。
+ */
+const hiddenByAgent = (loc: Loc, ignored: string[], changed: Set<string>): string[] => {
+  if (ignored.length === 0) return []
+  const out = splitNul(wgit(loc, ['check-ignore', '-v', '-z', '--stdin'], Buffer.from(ignored.map(p => `${p}\0`).join(''))))
+  const hidden: string[] = []
+  // -v -z 的输出每条四段：规则来源、行号、规则、路径。
+  for (let i = 0; i + 3 < out.length; i += 4) {
+    const source = utf8(out[i]!)
+    const path = utf8(out[i + 3]!)
+    if (source === undefined || path === undefined) continue
+    const inWorktree = !source.startsWith('/') && !source.startsWith(loc.gitDir)
+    if (inWorktree && (changed.has(source) || ignored.includes(source) || wgitText(loc, ['ls-tree', '-z', '--name-only', 'HEAD', '--', literal(source)]) === '')) hidden.push(path)
+  }
+  return hidden
 }
 
 /**
@@ -131,15 +176,22 @@ const isLinkToDir = (abs: string): boolean => {
  * 外部数据只在这里解析：`-z` 的输出是 `XY 路径\0`，改名多一段 `\0 改名前的路径`，路径不转义、按原始字节读。
  */
 export const changes = (loc: Loc | string): Change[] => {
-  const l = typeof loc === 'string' ? locate(loc) : loc
-  const fields = splitNul(wgit(l, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all']))
+  const l = typeof loc === 'string' ? locate(loc, loc) : loc
+  // dirty：子模块不往里看内容（不会执行子模块里 agent 放的配置），但子模块路径本身被换掉、删掉能看到。
+  const fields = splitNul(wgit(l, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=dirty', '--ignored=matching']))
+  const shape = headShape(l)
   const out: Change[] = []
+  const ignored: string[] = []
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!
     if (field.length < 4) continue
     const [x, y] = [String.fromCharCode(field[0]!), String.fromCharCode(field[1]!)]
     const rawPath = field.subarray(3)
     const path = utf8(rawPath)
+    if (x === '!' && y === '!') {
+      if (path !== undefined) ignored.push(path)
+      continue
+    }
     const untracked = x === '?' && y === '?'
     let from: string | undefined
     let rawFrom: Buffer | undefined
@@ -149,12 +201,17 @@ export const changes = (loc: Loc | string): Change[] => {
       from = rawFrom === undefined || rawFrom.length === 0 ? undefined : utf8(rawFrom)
     }
     const invalid = path === undefined || (rawFrom !== undefined && rawFrom.length > 0 && from === undefined)
-    const linkDir = untracked && path !== undefined && isLinkToDir(join(l.worktree, path))
+    const bare = path?.replace(/\/$/, '')
+    const abs = bare === undefined ? undefined : join(l.worktree, bare)
+    const linkDir = abs !== undefined && isLink(abs) && (isDir(abs) || shape.dirs.has(bare!))
+    const gitlink = bare !== undefined && shape.gitlinks.has(bare)
     out.push({
       path: path ?? shown(rawPath), ...(from === undefined ? {} : { from }), ...(untracked ? { untracked } : {}),
-      ...(invalid ? { raw: rawPath } : {}), ...(linkDir ? { linkDir } : {}),
+      ...(invalid ? { raw: rawPath } : {}), ...(linkDir ? { linkDir } : {}), ...(gitlink ? { gitlink } : {}),
     })
   }
+  // 被 agent 自己写的忽略规则藏起来的文件，当成未跟踪的新文件。
+  for (const path of hiddenByAgent(l, ignored, new Set(out.flatMap(pathsOf)))) out.push({ path, untracked: true, hidden: true })
   return out
 }
 
@@ -178,7 +235,14 @@ const behindLink = (worktree: string, path: string): boolean => {
 }
 
 /** 把一条路径恢复成 HEAD 里的样子：HEAD 里有就还原（同时清掉暂存），没有就从暂存区去掉并删掉文件（目录整个删）。 */
-const revert = (loc: Loc, path: string): void => {
+const revert = (loc: Loc, path: string, gitlink = false): void => {
+  if (gitlink) {
+    // 子模块路径：清掉暂存的改动，把路径恢复成空目录（新建 worktree 时子模块就是空目录）。
+    wgit(loc, ['restore', '--source=HEAD', '--staged', '--', literal(path)])
+    rmSync(join(loc.worktree, path), { force: true, recursive: !isLink(join(loc.worktree, path)) })
+    mkdirSync(join(loc.worktree, path), { recursive: true })
+    return
+  }
   if (behindLink(loc.worktree, path)) {
     // 上级目录是符号链接：只清暂存，不碰文件（链接本身作为未跟踪的改动另行撤销）。
     wgit(loc, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
@@ -198,11 +262,14 @@ const revert = (loc: Loc, path: string): void => {
  * 先删越界的符号链接（目录换成的链接），再处理其余改动。撤销不了的留着，由 commitInScope 拒绝提交。重复调用结果相同。
  */
 export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): string[] => {
-  const l = typeof loc === 'string' ? locate(loc) : loc
+  const l = typeof loc === 'string' ? locate(loc, loc) : loc
   const reverted = new Set<string>()
-  for (const change of changes(l).filter(c => c.linkDir && !inScope(c, writePaths))) {
-    rmSync(join(l.worktree, change.path), { force: true })
-    reverted.add(change.path)
+  // 先处理指向目录的符号链接：只删链接本身（不跟随）；换掉的是已跟踪的文件就从 HEAD 恢复，免得被当成删除提交。
+  for (const change of changes(l).filter(c => c.linkDir && !c.gitlink)) {
+    const path = change.path.replace(/\/$/, '')
+    rmSync(join(l.worktree, path), { force: true })
+    if (!change.untracked && inHead(l, path)) wgit(l, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
+    reverted.add(path)
   }
   for (const change of changes(l)) {
     if (inScope(change, writePaths)) continue
@@ -215,7 +282,7 @@ export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): strin
     }
     // 先恢复改名前的路径，再处理改名后的：反过来会把刚恢复的文件又删掉（HEAD 里没有改名后的路径）。
     for (const p of [...pathsOf(change)].reverse()) {
-      revert(l, p)
+      revert(l, p, change.gitlink === true)
       reverted.add(p)
     }
   }
@@ -223,7 +290,7 @@ export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): strin
 }
 
 const staged = (loc: Loc): { paths: string[]; invalid: number } => {
-  const parts = splitNul(wgit(loc, ['diff', '--cached', '--name-only', '-z', '--ignore-submodules=all'])).filter(b => b.length > 0)
+  const parts = splitNul(wgit(loc, ['diff', '--cached', '--name-only', '-z', '--ignore-submodules=dirty'])).filter(b => b.length > 0)
   const paths = parts.map(utf8)
   return { paths: paths.filter((p): p is string => p !== undefined), invalid: paths.filter(p => p === undefined).length }
 }
@@ -234,7 +301,7 @@ const staged = (loc: Loc): { paths: string[]; invalid: number } => {
  * 失败就关（fail closed）：撤销之后再列一遍改动、提交前再核对暂存区，还有越界就不提交，抛错让任务停下等人处理。
  * 只暂存范围内的路径（白名单，路径从标准输入传给 git，不受命令行长度限制），不用 add -A：撤销漏掉的东西不会被顺手提交。
  */
-export const commitInScope = (worktree: string, writePaths: string[], message: string, repo: string = worktree): { sha?: string; reverted: string[] } => {
+export const commitInScope = (worktree: string, writePaths: string[], message: string, repo: string): { sha?: string; reverted: string[] } => {
   const loc = locate(worktree, repo)
   if (real(repo) !== real(worktree)) assertGitLink(loc)
   const reverted = revertOutOfScope(loc, writePaths)

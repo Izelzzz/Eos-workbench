@@ -80,7 +80,7 @@ test('commitInScope 只提交范围内的改动，并返回被撤销的越界路
   write(dir, 'src/deep/c.ts', '新文件\n')
   write(dir, 'docs/design.md', '越界\n')
   write(dir, 'top.txt', '越界\n')
-  const first = commitInScope(dir, ['src/**'], 'eos: build produce (c1)')
+  const first = commitInScope(dir, ['src/**'], 'eos: build produce (c1)', dir)
   assert.notEqual(first.sha, undefined)
   assert.deepEqual(first.reverted, ['docs/design.md', 'top.txt'])
   assert.deepEqual(committed(git), ['src/a.ts', 'src/deep/c.ts'], '提交里只有范围内的改动')
@@ -88,7 +88,7 @@ test('commitInScope 只提交范围内的改动，并返回被撤销的越界路
 
   // 只有越界改动时：撤销掉，没有东西可提交。
   write(dir, 'top.txt', '又越界了\n')
-  const second = commitInScope(dir, ['src/**'], 'eos: build fix (c2)')
+  const second = commitInScope(dir, ['src/**'], 'eos: build fix (c2)', dir)
   assert.deepEqual([second.sha, second.reverted], [undefined, ['top.txt']])
   assert.equal(git('rev-list', '--count', 'HEAD').trim(), '2', '没有产生空提交')
 })
@@ -97,12 +97,12 @@ test('writePaths 为 ** 时和原来一样提交全部改动；只读角色（�
   const { dir, git } = repo()
   write(dir, 'anywhere/x.txt', 'x\n')
   writeFileSync(join(dir, 'README.md'), '# 改过\n')
-  const all = commitInScope(dir, ['**'], 'eos: build produce (c1)')
+  const all = commitInScope(dir, ['**'], 'eos: build produce (c1)', dir)
   assert.deepEqual(all.reverted, [])
   assert.deepEqual(committed(git), ['README.md', 'anywhere/x.txt'])
 
   write(dir, 'readonly.txt', 'x\n')
-  const none = commitInScope(dir, [], 'eos: review critique (c2)')
+  const none = commitInScope(dir, [], 'eos: review critique (c2)', dir)
   assert.deepEqual([none.sha, none.reverted], [undefined, ['readonly.txt']])
   assert.equal(git('rev-list', '--count', 'HEAD').trim(), '2')
 })
@@ -116,7 +116,7 @@ test('文件名里的通配符按字面量处理，不会连带撤销别的文�
   write(dir, 'keep[1].txt', '越界\n')
   write(dir, 'k*.txt', '越界\n')
   write(dir, 'src/a.ts', 'a\n范围内\n')
-  const r = commitInScope(dir, ['src/**'], 'eos: build produce (c1)')
+  const r = commitInScope(dir, ['src/**'], 'eos: build produce (c1)', dir)
   assert.deepEqual(r.reverted, ['k*.txt', 'keep[1].txt'])
   assert.equal(existsSync(join(dir, 'keep[1].txt')), false)
   assert.equal(existsSync(join(dir, 'k*.txt')), false)
@@ -130,7 +130,7 @@ test('agent 自己 git add 过的越界改动也会被撤销，不会留在暂�
   write(dir, 'top.txt', '越界\n')
   rmSync(join(dir, 'docs/design.md'))
   git('add', '-A')
-  const r = commitInScope(dir, ['src/**'], 'eos: build produce (c1)')
+  const r = commitInScope(dir, ['src/**'], 'eos: build produce (c1)', dir)
   assert.deepEqual(r.reverted, ['docs/design.md', 'top.txt'])
   assert.deepEqual(committed(git), ['src/a.ts'])
   assert.equal(read(dir, 'docs/design.md'), '# 设计\n')
@@ -142,7 +142,7 @@ test('一个文件名不是合法 UTF-8 的越界文件：被按原始字节删�
   const { dir, git } = repo()
   writeFileSync(Buffer.concat([Buffer.from(dir + '/'), Buffer.from([0x62, 0xff, 0x2e, 0x74, 0x78, 0x74])]), 'x\n')
   write(dir, 'src/ok.ts', 'ok\n')
-  const r = commitInScope(dir, ['src/**'], 'm')
+  const r = commitInScope(dir, ['src/**'], 'm', dir)
   assert.deepEqual(r.reverted, ['b\\xff.txt'])
   assert.deepEqual(committed(git), ['src/ok.ts'])
   assert.equal(git('status', '--porcelain'), '', 'the bad file is gone from the worktree too')
@@ -156,14 +156,14 @@ test('已跟踪的非 UTF-8 文件名撤销不了：拒绝提交，而不是悄�
   git('-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'base has a bad name')
   const before = git('rev-parse', 'HEAD')
   writeFileSync(bad, 'v2\n')
-  assert.throws(() => commitInScope(dir, ['src/**'], 'm'), /有越界改动撤销不了，没有提交/)
+  assert.throws(() => commitInScope(dir, ['src/**'], 'm', dir), /有越界改动撤销不了，没有提交/)
   assert.equal(git('rev-parse', 'HEAD'), before)
 })
 
 test('文件名里的反斜杠不是目录分隔符：根目录下名为 src\\evil.ts 的文件不在 src/** 里', () => {
   const { dir, git } = repo()
   writeFileSync(join(dir, 'src\\evil.ts'), 'evil\n')
-  const r = commitInScope(dir, ['src/**'], 'm')
+  const r = commitInScope(dir, ['src/**'], 'm', dir)
   assert.deepEqual(r.reverted, ['src\\evil.ts'])
   assert.equal(r.sha, undefined, 'nothing in scope to commit')
   assert.equal(existsSync(join(dir, 'src\\evil.ts')), false)
@@ -176,7 +176,7 @@ test('嵌套的 git 仓库（未跟踪目录）一律越界：整个删掉，不
     execFileSync('git', ['init', '-q'], { cwd: join(dir, where) })
     writeFileSync(join(dir, where, 'x.txt'), 'x\n')
   }
-  const r = commitInScope(dir, ['src/**'], 'm')
+  const r = commitInScope(dir, ['src/**'], 'm', dir)
   assert.deepEqual(r.reverted, ['evil/', 'src/vendored/'])
   assert.equal(existsSync(join(dir, 'evil')), false)
   assert.equal(existsSync(join(dir, 'src/vendored')), false)
@@ -303,4 +303,77 @@ test('改动很多（4 万个文件，git 输出超过 1MB）也能正常提交'
   // 测试自己读提交内容也要放大缓冲区（这里的 4 万个路径同样超过 1MB）。
   const names = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: wt, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   assert.equal(names.trim().split('\n').length, 40_000)
+})
+
+// —— 第三轮独立审查发现的问题 ——
+
+test('自己忽略自己的 .gitignore 藏不住越界文件：.gitignore 和它藏起来的文件都被撤销', () => {
+  const { main, wt, g } = twoWorktrees()
+  write(wt, '.gitignore', '*\n')
+  write(wt, '.npmrc', 'node-options=--require ./evil.cjs\n')
+  write(wt, 'evil.cjs', 'process.exit(0)\n')
+  write(wt, 'docs/x/.gitignore', '*\n')
+  write(wt, 'docs/x/payload.sh', 'echo pwned\n')
+  write(wt, 'src/a.ts', 'mine\n')
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  // 整个新目录被藏起来时按目录撤销（docs/），其余按文件。
+  for (const p of ['.gitignore', '.npmrc', 'evil.cjs', 'docs/x/.gitignore', 'docs/x/payload.sh']) {
+    assert.ok(r.reverted.some(x => x === p || (x.endsWith('/') && p.startsWith(x))), `${p} reverted (got ${r.reverted.join(', ')})`)
+    assert.equal(existsSync(join(wt, p)), false, `${p} removed`)
+  }
+  assert.equal(g(wt, 'show', 'HEAD:src/a.ts'), 'mine\n')
+})
+
+test('仓库自己的、没改过的 .gitignore 忽略的文件照常不管（不撤销、不提交）', () => {
+  const { main, wt, g } = twoWorktrees()
+  write(main, '.gitignore', 'node_modules/\n*.log\n')
+  g(main, 'add', '.gitignore')
+  g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'ignore')
+  g(wt, 'merge', '-q', '--ff-only', 'main')
+  write(wt, 'node_modules/pkg/index.js', 'x\n')
+  write(wt, 'debug.log', 'log\n')
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  assert.deepEqual(r.reverted, [])
+  assert.ok(existsSync(join(wt, 'node_modules/pkg/index.js')) && existsSync(join(wt, 'debug.log')))
+})
+
+test('子模块路径被换成文件、换成链接或删掉：一律越界，恢复成空目录，不提交', () => {
+  for (const tamper of ['file', 'link', 'delete'] as const) {
+    const { base, main, wt, g } = twoWorktrees()
+    const sha = g(main, 'rev-parse', 'HEAD').trim()
+    g(main, 'update-index', '--add', '--cacheinfo', `160000,${sha},sub`)
+    g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'add submodule')
+    g(wt, 'merge', '-q', '--ff-only', 'main')
+    const outside = join(base, 'OUT')
+    mkdirSync(outside)
+    rmSync(join(wt, 'sub'), { recursive: true, force: true })
+    if (tamper === 'file') writeFileSync(join(wt, 'sub'), 'evil\n')
+    if (tamper === 'link') execFileSync('ln', ['-s', outside, join(wt, 'sub')])
+    const before = g(wt, 'rev-parse', 'HEAD')
+    const r = commitInScope(wt, ['**'], 'm', main)
+    assert.deepEqual(r.reverted, ['sub'], tamper)
+    assert.equal(g(wt, 'rev-parse', 'HEAD'), before, `${tamper}: nothing committed`)
+    assert.ok(lstatSync(join(wt, 'sub')).isDirectory() && !lstatSync(join(wt, 'sub')).isSymbolicLink(), `${tamper}: back to an empty directory`)
+    assert.ok(existsSync(outside), `${tamper}: the outside directory is untouched`)
+  }
+})
+
+test('已跟踪目录被换成悬空的符号链接：不让任务崩溃，链接被删掉', () => {
+  const { main, wt } = twoWorktrees()
+  rmSync(join(wt, 'src'), { recursive: true })
+  execFileSync('ln', ['-s', '/nonexistent-eos-target', join(wt, 'src')])
+  assert.doesNotThrow(() => commitInScope(wt, ['src/**'], 'm', main))
+  assert.equal(lstatSync(join(wt, 'src'), { throwIfNoEntry: false })?.isSymbolicLink() ?? false, false)
+})
+
+test('范围内的已跟踪文件被换成指向目录的链接：算越界，恢复原文件', () => {
+  const { base, main, wt, g } = twoWorktrees()
+  const outside = join(base, 'DIR')
+  mkdirSync(outside)
+  rmSync(join(wt, 'src/a.ts'))
+  execFileSync('ln', ['-s', outside, join(wt, 'src/a.ts')])
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  assert.ok(r.reverted.includes('src/a.ts'))
+  assert.equal(readFileSync(join(wt, 'src/a.ts'), 'utf8'), 'a\n')
+  assert.equal(g(wt, 'status', '--porcelain'), '')
 })
