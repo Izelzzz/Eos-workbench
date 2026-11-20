@@ -1,0 +1,24 @@
+Eos Web：http://127.0.0.1:4321（数据目录 /home/user/Eos-workbench/.eos/pipeline-e2e/data，Ctrl+C 退出）
+[t2611201036066ry] → [spec] spec-writer · produce
+[t2611201036066ry]   已提交 375995c
+[t2611201036066ry] ✓ [spec] spec-writer · produce：143.0s，输入 9031，输出 24823，缓存读 276224
+[t2611201036066ry] → [spec] 检查（1 项）
+[t2611201036066ry] ✓ [spec] 检查：1/1 项通过
+[t2611201036066ry] → [build] developer · produce
+[t2611201036066ry]   已提交 b7bda66
+[t2611201036066ry] ✓ [build] developer · produce：54.1s，输入 7078，输出 9325，缓存读 136832
+[t2611201036066ry] → [build] 检查（1 项）
+[t2611201036066ry] ✗ [build] 检查：0/1 项通过
+[t2611201036066ry] → [build] developer · fix
+[t2611201036066ry]   已提交 e63827d
+[t2611201036066ry] ✓ [build] developer · fix：8.9s，输入 641，输出 1155，缓存读 74368
+[t2611201036066ry] → [build] 检查（1 项）
+[t2611201036066ry] ✓ [build] 检查：1/1 项通过
+[t2611201036066ry] → [test 第 1 轮] 检查（1 项）
+[t2611201036066ry] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t2611201036066ry] → [review 第 1 轮] 检查（1 项）
+[t2611201036066ry] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t2611201036066ry] → [review 第 1 轮] reviewer · critique
+[t2611201036066ry] ✓ [review 第 1 轮] reviewer · critique：79.0s，输入 14930，输出 13429，缓存读 156160
+[t2611201036066ry] → [deliver 第 1 轮] 检查（1 项）
+[t2611201036066ry] ✓ [deliver 第 1 轮] 检查：1/1 项通过

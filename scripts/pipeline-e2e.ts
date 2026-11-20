@@ -6,7 +6,9 @@
 // 人为设置（如实写进报告）：
 // - 开发节点的任务说明改成「先不要写 docs/changes.md，平台检查会提醒你补」，让交付物检查必然先失败一次；
 // - 测试节点的命令换成平台持有的验收测试（在 worktree 外面，开发看不到）。需求说「写法参考 Go 的 time.ParseDuration」，
-//   验收测试里有小数（1.5h），开发如果没想到就会失败、把失败输出交回开发。这一项不保证一定触发，报告里如实记录有没有触发。
+//   验收测试里有小数（1.5h），开发如果没想到就会失败、把失败输出交回开发。
+// - 验收测试里还有一条需求里没写的用例（单位大写 1H30M 也要支持）：第 1 次运行开发把小数做对了，测试一次就过、没有触发
+//   "测试失败 → 退回开发"，所以加了这一条来确定触发。它证明的是退回机制，不是模型会漏掉边界情况。
 // 用法：NODE_PATH=<playwright 所在目录> node --import tsx scripts/pipeline-e2e.ts [端口]
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs'
@@ -48,6 +50,7 @@ test('组合单位', () => assert.equal(parseDuration('1h30m'), 5400))
 test('单个单位', () => { assert.equal(parseDuration('45s'), 45); assert.equal(parseDuration('2h'), 7200) })
 test('三个单位', () => assert.equal(parseDuration('1h2m3s'), 3723))
 test('小数（Go 的写法支持）', () => assert.equal(parseDuration('1.5h'), 5400))
+test('单位大小写都可以（需求里没写，验收测试才有）', () => assert.equal(parseDuration('1H30M'), 5400))
 test('非法输入抛 RangeError', () => { for (const s of ['', '10x', 'h', '1h30']) assert.throws(() => parseDuration(s), RangeError, JSON.stringify(s)) })
 `)
 
@@ -216,7 +219,7 @@ const git = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'u
 const code = { commit: git('rev-parse', '--short', 'HEAD'), uncommitted: git('status', '--porcelain', '--', 'src', 'web/src', 'scripts', 'package.json').split('\n').filter(Boolean) }
 const report = {
   task: id, code, status: task.status, failure: task.failure, answers, testFailures,
-  induced: ['开发节点的任务说明要求先不写 docs/changes.md（让交付物检查先失败一次）', '测试节点改用 worktree 外的验收测试（含 1.5h 小数用例）'],
+  induced: ['开发节点的任务说明要求先不写 docs/changes.md（让交付物检查先失败一次）', '测试节点改用 worktree 外的验收测试（含 1.5h 小数用例）', '验收测试里加了需求没写的大写单位用例（1H30M），确定触发测试失败退回开发'],
   timeline: items.map(x => (x.kind === 'call' ? `${x.purpose}@${x.node}` : `check@${x.node}:${x.passed ? '通过' : '没通过'}`)),
   checks,
   errors,
