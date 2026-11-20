@@ -86,6 +86,9 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     const at = (field: string) => `nodes[${i}].${field}`
     if (seen.has(n.id)) errors.push({ path: at('id'), message: `节点 id「${n.id}」重复` })
     if (n.role !== undefined && wf.roles[n.role] === undefined) errors.push({ path: at('role'), message: `没有名为「${n.role}」的角色` })
+    if (n.kind === 'agent' && n.checks.some(c => c.kind === 'file') && wf.roles[n.role]?.write === 'none') {
+      errors.push({ path: at('deliverables'), message: `角色「${n.role}」只读（write: none），写不出交付物文件；把它的 write 改成 worktree` })
+    }
     if (n.kind === 'dialog' && n.role === undefined && n.checks.length === 0) {
       errors.push({ path: at('role'), message: '对话节点至少要有评审角色（role）或检查（checks、deliverables）其中之一' })
     }

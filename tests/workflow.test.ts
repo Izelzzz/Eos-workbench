@@ -83,7 +83,7 @@ const withChecks = `
 name: std
 docs: [研发约定]
 roles:
-  planner: { prompt: 写规格 }
+  planner: { prompt: 写规格, write: worktree }
   dev: { prompt: 写代码, write: worktree }
   rev: { prompt: 评审 }
 nodes:
@@ -127,4 +127,9 @@ test('absolute paths and empty commands are rejected in Chinese', () => {
   const errors = errorsOf(withChecks.replace('path: docs/spec.md', 'path: /etc/passwd').replace('run: [npm, run, lint]', 'run: []'))
   assert.ok(errors.some(e => e.path === 'nodes[0].deliverables[0].path'))
   assert.ok(errors.some(e => e.path === 'nodes[1].checks[0].run' && e.message === '命令不能为空'))
+})
+
+test('a deliverable on a read-only role is rejected: it could never write the file', () => {
+  const errors = errorsOf(withChecks.replace('planner: { prompt: 写规格, write: worktree }', 'planner: { prompt: 写规格, write: none }'))
+  assert.deepEqual(errors, [{ path: 'nodes[0].deliverables', message: '角色「planner」只读（write: none），写不出交付物文件；把它的 write 改成 worktree' }])
 })

@@ -176,6 +176,16 @@ export class Store {
     })
   }
 
+  /** 这个名字还没有任何版本时才写入第 1 版（同一个事务里判断，多个进程同时启动也只写一次）。返回是否写入。 */
+  seedConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): boolean {
+    return this.tx(() => {
+      if (this.db.prepare('SELECT 1 FROM conventions WHERE kind = ? AND name = ? LIMIT 1').get(p.kind, p.name) !== undefined) return false
+      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)')
+        .run(p.kind, p.name, p.content, p.note, p.actor, at)
+      return true
+    })
+  }
+
   /** 某个约定的指定版本；不给版本就是最新版本。 */
   convention(kind: ConventionKind, name: string, version?: number): ConventionRow | undefined {
     const row = (version === undefined

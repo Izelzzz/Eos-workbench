@@ -29,9 +29,7 @@ export class Conventions {
   seed(at: number): string[] {
     const added: string[] = []
     const put = (kind: ConventionKind, name: string, content: string) => {
-      if (this.store.convention(kind, name) !== undefined) return
-      this.store.saveConvention({ kind, name, content, note: '内置模板', actor: 'platform' }, at)
-      added.push(name)
+      if (this.store.seedConvention({ kind, name, content, note: '内置模板', actor: 'platform' }, at)) added.push(name)
     }
     for (const name of builtinDocs()) put('doc', name, readFileSync(join(DOCS_DIR, `${name}.md`), 'utf8'))
     for (const name of builtinTemplates()) put('workflow', name, loadWorkflow(name).source)

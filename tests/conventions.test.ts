@@ -81,3 +81,10 @@ test('resolve falls back to a YAML file path, still taking docs from the platfor
   const missing = c.resolve('nope')
   assert.match(!missing.ok ? missing.error : '', /平台上没有工作流「nope」/)
 })
+
+test('two processes seeding the same database write each built-in only once', () => {
+  const store = new Store(':memory:')
+  new Conventions(store).seed(1)
+  new Conventions(store).seed(2)
+  assert.deepEqual(store.conventionHistory('workflow', 'standard').map(r => r.version), [1])
+})
