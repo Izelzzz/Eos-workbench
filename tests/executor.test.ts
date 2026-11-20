@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentEnv, replyAfter, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { agentEnv, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
@@ -74,17 +74,31 @@ test('a turn that ended any other way than completed is not claimed, even if it 
   assert.equal(replyAfter(resent, 'n1', 's')?.text, '完整的回复')
 })
 
-test('a turn that hit the output limit at some step but finished still counts, as dsh itself treats it', () => {
-  const log = [user('m <!-- eos:n1 -->', 1), assistant('写到上限后接着写完的回复', 2), end(3, 'max-tokens')]
-  assert.equal(replyAfter(log, 'n1', 's')?.text, '写到上限后接着写完的回复')
+test('a turn cut off at the output limit is not claimed: its last step never ran its tools', () => {
+  const log = [user('m <!-- eos:n1 -->', 1), assistant('我来写测试文件', 2), end(3, 'max-tokens')]
+  assert.equal(replyAfter(log, 'n1', 's'), undefined)
 })
 
 test('the live call and the log claim judge how a turn ended the same way', () => {
   assert.deepEqual(turnOutcome('completed'), { ok: true })
-  assert.deepEqual(turnOutcome('max-tokens'), { ok: true })
+  assert.deepEqual(turnOutcome('max-tokens'), { ok: false, error: '这一轮没有正常完成（输出达到上限被截断，这一步的工具调用没有执行）' })
   assert.deepEqual(turnOutcome('interrupted', '我先看一下目录'), { ok: false, error: '这一轮没有正常完成（被打断）：我先看一下目录' })
   assert.deepEqual(turnOutcome('error'), { ok: false, error: '这一轮没有正常完成（出错）' })
   assert.deepEqual(turnOutcome('aborted'), { ok: false, error: '这一轮没有正常完成（被中止）' })
   assert.deepEqual(turnOutcome('blocked'), { ok: false, error: '这一轮没有正常完成（被拦下）' })
   assert.deepEqual(turnOutcome(null), { ok: false, error: '这一轮没有正常完成（结束原因为 未知）' })
+})
+
+test('a live call returns its reply only when the last turn completed, trusting the turn over the SDK status', () => {
+  const run = (kind: string, finishReason: string) => ({
+    finishReason, finalResponse: '最终回复',
+    events: [user('m', 1), assistant('最终回复', 2), end(3, kind)] as never,
+  })
+  assert.deepEqual(replyFromRun(run('completed', 'completed'), 's', 7), {
+    sessionId: 's', text: '最终回复', ms: 7, model: 'deepseek-flash', usage: { input: 5, output: 2, cacheRead: 100, cacheWrite: 0 },
+  })
+  // sdk profile 的 maxTokensAsSuccess 会把截断报告成成功：以 turn/end 为准，仍然失败。
+  assert.throws(() => replyFromRun(run('max-tokens', 'completed'), 's', 7), /输出达到上限被截断/)
+  assert.throws(() => replyFromRun(run('interrupted', 'interrupted'), 's', 7), /被打断/)
+  assert.throws(() => replyFromRun({ finishReason: 'error', finalResponse: '', events: [] }, 's', 7), /出错/)
 })

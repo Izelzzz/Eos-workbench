@@ -102,12 +102,15 @@ export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
 }
 
 /**
- * 一轮结束的原因算不算这次调用完成：completed 算；max-tokens 也算——dsh 只要某一步达到过输出上限就记成 max-tokens，
- * 即使之后这一轮正常写完了，dsh 的 SDK 默认也把它当成功。被打断、出错、中止、被拦下的都不算。
+ * 一轮结束的原因里，只有 completed 算这次调用完成。
+ * max-tokens 不算：dsh 在某一步达到输出上限时直接结束这一轮，那一步要调用的工具不会执行（例如写文件），
+ * 回复是截断的。dsh 的 sdk profile 会把它报告为成功（maxTokensAsSuccess），但交给下游的不能是半成品。
  */
-const DONE = new Set(['completed', 'max-tokens'])
+const DONE = new Set(['completed'])
 
-const REASON: Record<string, string> = { interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下' }
+const REASON: Record<string, string> = {
+  interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下', 'max-tokens': '输出达到上限被截断，这一步的工具调用没有执行',
+}
 
 export const describeEnd = (kind: string | null | undefined): string => REASON[kind ?? ''] ?? `结束原因为 ${kind ?? '未知'}`
 
@@ -133,6 +136,20 @@ export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string)
   if (final === undefined) return undefined
   const model = modelOf(turn)
   return { sessionId, text: final, usage: usageOf(turn), ms: turn.at(-1)!.time - events[start]!.time, ...(model === undefined ? {} : { model }) }
+}
+
+export type RunLike = { finishReason: string | null; finalResponse: string; events: LogEvent[] }
+
+/**
+ * 一次实时调用的结果 → Reply；没有正常完成就抛出带原因的错误。
+ * 结束原因以事件里最后一个 turn/end 为准：sdk profile 可能把 max-tokens 报告成成功，SDK 给的 finishReason 不可靠。
+ */
+export const replyFromRun = (r: RunLike, sessionId: string, ms: number): Reply => {
+  const lastEnd = r.events.findLast(e => e.type === 'turn/end')?.data?.reason?.kind as string | undefined
+  const outcome = turnOutcome(lastEnd ?? r.finishReason, r.finalResponse)
+  if (!outcome.ok) throw new Error(outcome.error)
+  const model = modelOf(r.events)
+  return { sessionId, text: r.finalResponse, usage: usageOf(r.events), ms, ...(model === undefined ? {} : { model }) }
 }
 
 export class DshExecutor implements Executor {
@@ -225,11 +242,7 @@ export class DshExecutor implements Executor {
           if (e !== undefined) p.onEvent(e)
         },
       })
-      const outcome = turnOutcome(r.finishReason, r.finalResponse)
-      if (!outcome.ok) throw new Error(outcome.error)
-      const events = r.events as unknown as LogEvent[]
-      const model = modelOf(events)
-      return { sessionId: s.id, text: r.finalResponse, usage: usageOf(events), ms: Date.now() - started, ...(model === undefined ? {} : { model }) }
+      return replyFromRun(r as unknown as RunLike, s.id, Date.now() - started)
     } finally {
       this.asks.delete(s.id)
     }
