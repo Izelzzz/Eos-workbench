@@ -37,6 +37,7 @@
 - **对话循环**：被评审的一方（例如开发）在整个任务里只用一个会话；评审方在一次对话节点内也保持同一个会话。每一轮由评审方给出结构化结论（`pass` / `changes`）。
 - **effect 幂等**：每条发给 agent 的消息都带一个 nonce。重启后，先在 dsh 会话日志里查这个 nonce 对应的回复；查到就直接使用，查不到才重发。
 - **写入范围**：用 dsh 的权限档位实现（`read-only` / `workspace-write`）。部署镜像必须安装 bubblewrap；任务 worktree 放在平台数据目录下，不放在 `/tmp`。
+  - 2026-11-20 更正：dsh 在创建会话时把 dsh 进程的 cwd 记成会话的工作区，`workspace-write` 只允许写这个工作区，之后设工作目录不会改变它。最初的实现所有任务共用一个 dsh 进程、没有设 cwd，可写范围实际是平台的启动目录（开发 agent 能改平台自己的文件，而写不了不在启动目录下的 worktree）。已改为每个 worktree 一个 dsh 进程，cwd 设为 worktree；`scripts/scope-probe.ts` 用真实 dsh 验证，修复前后的结果在 `docs/e2e/fix-write-root/`。
 
 ## 为什么这样做
 

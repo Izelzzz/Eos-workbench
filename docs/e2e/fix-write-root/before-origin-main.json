@@ -1,0 +1,79 @@
+{
+  "code": {
+    "commit": "b18464b",
+    "uncommitted": [
+      "?? scripts/scope-probe.ts"
+    ]
+  },
+  "allOk": false,
+  "checks": [
+    {
+      "role": "可写角色",
+      "target": "自己任务的 worktree",
+      "via": "write 工具",
+      "written": false,
+      "expected": true,
+      "ok": false
+    },
+    {
+      "role": "可写角色",
+      "target": "自己任务的 worktree",
+      "via": "bash",
+      "written": false,
+      "expected": true,
+      "ok": false
+    },
+    {
+      "role": "可写角色",
+      "target": "平台启动目录",
+      "via": "write 工具",
+      "written": true,
+      "expected": false,
+      "ok": false
+    },
+    {
+      "role": "可写角色",
+      "target": "平台启动目录",
+      "via": "bash",
+      "written": true,
+      "expected": false,
+      "ok": false
+    },
+    {
+      "role": "可写角色",
+      "target": "别的任务的 worktree",
+      "via": "write 工具",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "可写角色",
+      "target": "别的任务的 worktree",
+      "via": "bash",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "只读角色",
+      "target": "自己任务的 worktree",
+      "via": "write 工具",
+      "written": false,
+      "expected": false,
+      "ok": true
+    },
+    {
+      "role": "只读角色",
+      "target": "自己任务的 worktree",
+      "via": "bash",
+      "written": false,
+      "expected": false,
+      "ok": true
+    }
+  ],
+  "agentReplies": [
+    "探针执行完毕，全部 6 步均按要求顺序执行，未申请任何权限提升，也未绕过沙箱限制。逐条结果：\n\n| 步骤 | 操作 | 目标 | 结果 |\n|---|---|---|---|\n| 1 | write 工具 | `worktrees/t1/t1-build-tool.txt` | ❌ 失败 — `[sandbox: file access denied under workspace-write mode]` |\n| 2 | bash `echo x >` | `worktrees/t1/t1-build-bash.txt` | ❌ 失败 — `Permission denied`，exit code 1 |\n| 3 | write 工具 | `host/t1-build-tool.txt` | ✅ 成功 — 已创建 |\n| 4 | bash `echo x >` | `host/t1-build-bash.txt` | ✅ 成功 — exit code 0，无输出 |\n| 5 | write 工具 | `worktrees/t2/t1-build-tool.txt` | ❌ 失败 — `[sandbox: file access denied under workspace-write mode]` |\n| 6 | bash `echo x >` | `worktrees/t2/t1-build-bash.txt` | ❌ 失败 — `Permission denied`，exit code 1 |\n\n结论：4 次失败全部集中在会话工作区之外（`worktrees/t1` 和 `worktrees/t2`），2 次成功全部位于策略声明的工作区内（`.../scope-probe/host`）。write 工具和 bash 重定向在同一路径上的判定完全一致，说明限制来自文件沙箱的工作区边界，而非某一工具的差异。\n\n另外说明：第 1、2、5、6 步的失败信息里都附带了 “escalation available” 提示，即可以带 `sandbox_permissions` 重试并弹出审批。按照你的要求，我没有发起任何这类重试。",
+    "写入权限探针结果（未申请提权，按原样执行）：\n\n| 步骤 | 操作 | 结果 |\n|---|---|---|\n| 1 | `write` 创建 `t1-review-tool.txt`（内容 `x`） | ❌ 失败 — `Error: [sandbox: file access denied under read-only mode]` |\n| 2 | `bash` 执行 `echo x > …/t1-review-bash.txt` | ❌ 失败 — `bash: line 1: …/t1-review-bash.txt: Permission denied`，`[sandbox: file access denied under read-only mode]`，exit code 1 |\n\n补充观察：\n\n- 两次失败原因一致，都是 DSH 文件沙箱的只读策略（read-only）拦截，而不是路径不存在或命令语法问题。\n- 两次均提示可带 `sandbox_permissions` 升级重试，但按你的要求未使用，也未改用其他写法绕过。\n- 两个目标文件均未被创建，目录内容未发生任何改动。\n\n结论：当前会话处于 read-only 文件策略下，`write` 工具与 `bash` 重定向两种写入途径均被拒绝，探针未观测到任何可写能力。"
+  ]
+}
