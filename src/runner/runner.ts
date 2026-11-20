@@ -60,6 +60,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       if (!o.store.hasTrace(id, call.id)) o.store.appendTrace(id, call.id, await o.executor.traceOf(key, nonce))
     } else log(`→ ${label(task, call)}`)
     let reply = recovered
+    let asking: Promise<unknown> = Promise.resolve()
     if (reply === undefined) {
       o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now(), call: { node: call.node, role: call.role, purpose: call.purpose, prompt: call.prompt } }])
       try {
@@ -74,7 +75,12 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
             }
           },
           spec: { model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: o.store.meta(id).worktree },
-          ask: (q, signal) => waitForAnswer(call, q, signal),
+          // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
+          ask: (q, signal) => {
+            const next = asking.then(() => waitForAnswer(call, q, signal))
+            asking = next.catch(() => undefined)
+            return next
+          },
         })
       } catch (e) {
         log(`✗ ${label(task, call)}：${(e as Error).message}`)

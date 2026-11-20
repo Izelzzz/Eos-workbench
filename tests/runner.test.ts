@@ -160,3 +160,27 @@ test('after a crash, a resent call that asks something different replaces the st
   const questions = task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : ''))
   assert.deepEqual(questions, ['红色还是绿色？', '圆形还是方形？'])
 })
+
+test('two questions asked at once in the same call are put to the user one after the other, each getting its own answer', { timeout: 20_000 }, async () => {
+  const { store, path } = setup()
+  const other = new Store(path)
+  const ex = new FakeExecutor(async ({ key, ask }) => {
+    if (!key.endsWith('/plan')) return key.endsWith('/review') ? PASS : '实现'
+    const signal = new AbortController().signal
+    const [color, shape] = await Promise.all([ask({ id: 'a', text: '红色还是绿色？' }, signal), ask({ id: 'b', text: '圆形还是方形？' }, signal)])
+    return `${color}/${shape}`
+  })
+  const answers: Record<string, string> = { '红色还是绿色？': '绿色', '圆形还是方形？': '方形' }
+  const answering = (async () => {
+    let answered = 0
+    while (answered < 2) {
+      const q = other.get('t')!.question
+      if (q !== undefined && other.dispatch('t', { kind: 'answered', questionId: q.id, text: answers[q.text]! }, 2, 'cli').accepted) answered++
+      await new Promise(r => setTimeout(r, 2))
+    }
+  })()
+  const task = await runTask('t', { store, executor: ex, pollMs: 2 })
+  await answering
+  assert.equal(task.outputs.plan, '绿色/方形')
+  assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['红色还是绿色？', '圆形还是方形？'])
+})
