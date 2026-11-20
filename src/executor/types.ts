@@ -1,9 +1,18 @@
 // 执行器接口：引擎和 runner 只认这个接口。dsh 原生 agent 是第一个实现，外部 agent（M4）按同一接口接入。
 import type { Usage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { Effort, WriteScope } from '../workflow/types.ts'
+import type { Effort, McpServer, ToolGroup, WriteScope } from '../workflow/types.ts'
 
-export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string }
+/** 角色能看到的一个技能：名字和 SKILL.md 全文（任务创建时的快照，见 store 的 SkillSnapshot）。 */
+export type AgentSkill = { name: string; content: string }
+
+/**
+ * agent 的能力面：去掉哪些工具组、能看到哪些技能、挂哪些 MCP 服务。
+ * 没有"不限制"这种省略写法：能力面是安全边界，每个调用方都要写明白。
+ */
+export type AgentProfile = { denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: McpServer[] }
+
+export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
 
 export type Reply = { sessionId: string; text: string; usage: Usage; ms: number; model?: string }
 
