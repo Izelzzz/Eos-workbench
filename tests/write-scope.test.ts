@@ -1,7 +1,7 @@
 // 真实临时仓库上的可写范围检查：越界的改动必须被撤销、不进提交，范围内的照常提交。
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { changes, commitInScope, revertOutOfScope } from '../src/runner/git.ts'
@@ -203,4 +203,104 @@ test('worktree 的 .git 被换成 agent 自己的仓库：平台不执行 git，
   write(wt, 'src/b.ts', 'b\n')
   assert.throws(() => commitInScope(wt, ['src/**'], 'm', main), /worktree 的 \.git 被改动过/)
   assert.equal(existsSync(pwned), false, 'the agent’s fsmonitor command never ran')
+})
+
+// —— 第二轮独立审查（复审）发现的绕过，每条先复现、再证明已经关上 ——
+
+/** 主仓库 + 两个任务的 worktree（和平台一样用真实的 git worktree）。 */
+const twoWorktrees = () => {
+  const base = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-wt2-'))
+  const main = join(base, 'main')
+  mkdirSync(main)
+  const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' })
+  write(main, 'src/a.ts', 'a\n')
+  write(main, 'README.md', '# demo\n')
+  g(main, 'init', '-q', '-b', 'main')
+  g(main, 'add', '-A')
+  g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'init')
+  const wt = join(base, 'wt')
+  const wt2 = join(base, 'wt2')
+  g(main, 'worktree', 'add', '-q', '-b', 'eos/t', wt)
+  g(main, 'worktree', 'add', '-q', '-b', 'eos/other', wt2)
+  return { base, main, wt, wt2, g }
+}
+
+test('把 .git 指向别的任务的管理目录：平台不会把提交落到别的任务的分支上', () => {
+  const { main, wt, wt2, g } = twoWorktrees()
+  const otherBefore = g(main, 'rev-parse', 'eos/other')
+  writeFileSync(join(wt, '.git'), readFileSync(join(wt2, '.git')))
+  write(wt, 'src/a.ts', 'changed\n')
+  assert.throws(() => commitInScope(wt, ['src/**'], 'm', main), /worktree 的 \.git 被改动过/)
+  assert.equal(g(main, 'rev-parse', 'eos/other'), otherBefore, 'the other task’s branch did not move')
+})
+
+test('子模块目录里 agent 放的仓库和 clean filter：平台的 git 不进入子模块，命令不会执行', () => {
+  const { main, wt, base, g } = twoWorktrees()
+  // 主仓库里登记一个子模块（gitlink），新建的 worktree 里这个目录是空的。
+  const sha = g(main, 'rev-parse', 'HEAD').trim()
+  g(main, 'update-index', '--add', '--cacheinfo', `160000,${sha},vendor/lib`)
+  g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'add submodule')
+  g(wt, 'merge', '-q', '--ff-only', 'main')
+  const pwned = join(base, 'PWNED')
+  const lib = join(wt, 'vendor/lib')
+  mkdirSync(lib, { recursive: true })
+  g(lib, 'init', '-q')
+  g(lib, 'config', 'filter.x.clean', `sh -c 'touch ${pwned}; cat'`)
+  writeFileSync(join(lib, '.gitattributes'), '* filter=x\n')
+  writeFileSync(join(lib, 'f.txt'), 'f\n')
+  write(wt, 'src/a.ts', 'mine\n')
+  for (const scope of [['src/**'], ['**']]) {
+    commitInScope(wt, scope, 'm', main)
+    assert.equal(existsSync(pwned), false, `the agent’s filter never ran (writePaths ${scope.join(',')})`)
+  }
+  assert.equal(g(wt, 'show', 'HEAD:src/a.ts'), 'mine\n')
+})
+
+test('撤销时不顺着上级目录的符号链接删到 worktree 外面', () => {
+  const { base, main, wt, g } = twoWorktrees()
+  const outside = join(base, 'OUTSIDE')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'x'), 'keep me\n')
+  write(wt, 'evil/x', 'x\n')
+  g(wt, 'add', 'evil/x')
+  rmSync(join(wt, 'evil'), { recursive: true })
+  execFileSync('ln', ['-s', outside, join(wt, 'evil')])
+  commitInScope(wt, ['src/**'], 'm', main)
+  assert.equal(readFileSync(join(outside, 'x'), 'utf8'), 'keep me\n', 'the file outside the worktree is untouched')
+  assert.equal(existsSync(join(wt, 'evil')), false, 'the symlink itself is removed')
+})
+
+test('文件名开头是 UTF-8 BOM：不会被当成没有 BOM 的同名路径，越界的照样撤销', () => {
+  const { main, wt, g } = twoWorktrees()
+  write(wt, '﻿src/a.ts', 'bom\n')
+  write(wt, '﻿README.md', 'bom\n')
+  write(wt, 'src/a.ts', 'real\n')
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  assert.deepEqual(r.reverted, ['﻿README.md', '﻿src/a.ts'])
+  assert.equal(g(wt, 'status', '--porcelain'), '')
+  assert.equal(g(wt, 'show', 'HEAD:src/a.ts'), 'real\n')
+})
+
+test('目录被换成指向外面的符号链接：不会让任务崩溃，外面的文件不受影响', () => {
+  const { base, main, wt } = twoWorktrees()
+  const outside = join(base, 'ELSEWHERE')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'a.ts'), 'outside\n')
+  rmSync(join(wt, 'src'), { recursive: true })
+  execFileSync('ln', ['-s', outside, join(wt, 'src')])
+  assert.doesNotThrow(() => commitInScope(wt, ['src/**'], 'm', main))
+  assert.equal(readFileSync(join(outside, 'a.ts'), 'utf8'), 'outside\n')
+  assert.equal(lstatSync(join(wt, 'src'), { throwIfNoEntry: false })?.isSymbolicLink() ?? false, false, 'the link is gone')
+})
+
+test('改动很多（4 万个文件，git 输出超过 1MB）也能正常提交', () => {
+  const { main, wt } = twoWorktrees()
+  const dir = join(wt, 'src', 'generated-files-for-the-buffer-test')
+  mkdirSync(dir, { recursive: true })
+  for (let i = 0; i < 40_000; i++) writeFileSync(join(dir, `file-number-${String(i).padStart(5, '0')}.txt`), '')
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  assert.ok(r.sha !== undefined)
+  // 测试自己读提交内容也要放大缓冲区（这里的 4 万个路径同样超过 1MB）。
+  const names = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: wt, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  assert.equal(names.trim().split('\n').length, 40_000)
 })

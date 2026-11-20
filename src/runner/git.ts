@@ -1,24 +1,27 @@
 // 任务的 git worktree：每个任务一个分支和工作目录，放在平台数据目录下（不放 /tmp）。
 import { execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { matchesAny } from '../workflow/glob.ts'
 
 /**
- * 平台自己调 git 时关掉 worktree 里能触发执行命令的配置（fsmonitor、hooks）：agent 能写 worktree，
- * 不能让平台以平台的权限替它执行命令。
+ * 平台自己调 git 时关掉能触发执行命令的配置（fsmonitor、hooks），也不进入子模块（子模块目录里 agent 能放自己的仓库和配置）。
+ * agent 能写 worktree，不能让平台以平台的权限替它执行命令。
  */
-const SAFE = ['-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null']
+const SAFE = ['-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false']
 
-const gitRaw = (cwd: string, args: string[]): Buffer =>
-  execFileSync('git', [...SAFE, ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+/** 改动很多时 git 的输出会超过默认的 1MB 缓冲区。 */
+const MAX_BUFFER = 1024 * 1024 * 1024
+
+const gitRaw = (cwd: string, args: string[], input?: Buffer): Buffer =>
+  execFileSync('git', [...SAFE, ...args], { cwd, maxBuffer: MAX_BUFFER, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], ...(input === undefined ? {} : { input }) })
 
 const git = (cwd: string, args: string[]): string => gitRaw(cwd, args).toString('utf8').trim()
 
-/** 严格按 UTF-8 解码；不是合法 UTF-8 返回 undefined（不能用替换字符当路径：会对不上真实文件）。 */
+/** 严格按 UTF-8 解码；不是合法 UTF-8 返回 undefined（不能用替换字符当路径：会对不上真实文件）。保留开头的 BOM。 */
 const utf8 = (b: Buffer): string | undefined => {
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(b)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(b)
   } catch {
     return undefined
   }
@@ -53,28 +56,83 @@ export const createWorktree = (repoPath: string, dataDir: string, taskId: string
 }
 
 /**
+ * 平台在 worktree 里执行 git 时用的位置。gitDir 是主仓库里这个 worktree 的管理目录，从主仓库找出来（主仓库在 agent 沙箱之外），
+ * 不读 worktree 里的 .git（agent 能改它：换成自己的仓库让平台执行它的配置，或指向别的任务的管理目录把提交落到别的分支上）。
+ */
+export type Loc = { worktree: string; gitDir: string }
+
+const real = (p: string): string => realpathSync(p)
+
+/**
+ * 找出 worktree 在主仓库里的管理目录：主仓库 <common>/worktrees/ 下，gitdir 文件指回这个 worktree 的 .git 的那一个。
+ * repo 和 worktree 相同（测试里直接在仓库上操作）时就是仓库自己的 git 目录。
+ */
+export const locate = (worktree: string, repo: string = worktree): Loc => {
+  const common = resolve(repo, git(repo, ['rev-parse', '--git-common-dir']))
+  if (real(repo) === real(worktree)) return { worktree, gitDir: real(resolve(repo, git(repo, ['rev-parse', '--git-dir']))) }
+  const admin = join(common, 'worktrees')
+  const target = join(real(worktree), '.git')
+  for (const name of existsSync(admin) ? readdirSync(admin) : []) {
+    const file = join(admin, name, 'gitdir')
+    if (!existsSync(file)) continue
+    const recorded = readFileSync(file, 'utf8').trim()
+    if (recorded === target || (existsSync(dirname(recorded)) && join(real(dirname(recorded)), '.git') === target)) return { worktree, gitDir: real(join(admin, name)) }
+  }
+  throw new Error(`主仓库 ${repo} 里找不到 worktree ${worktree} 的登记，平台不在这里执行 git`)
+}
+
+/** 在 worktree 里执行 git：显式指定 git 目录和工作目录，不让 git 自己找（不看 worktree 里的 .git）。 */
+const wgit = (loc: Loc, args: string[], input?: Buffer): Buffer =>
+  gitRaw(loc.worktree, ['--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], input)
+const wgitText = (loc: Loc, args: string[]): string => wgit(loc, args).toString('utf8').trim()
+
+/**
+ * worktree 的 .git 必须还是 git 建 worktree 时写的那个普通文件，指向它自己的管理目录。平台的 git 已经不读它；
+ * 被改过说明 agent 在动 git 的元数据，任务停下等人看。
+ */
+export const assertGitLink = (loc: Loc): void => {
+  const file = join(loc.worktree, '.git')
+  const fail = () => {
+    throw new Error(`worktree 的 .git 被改动过，平台不再在这里执行 git：${file}。请人工检查这个任务的 worktree`)
+  }
+  if (!existsSync(file) || !lstatSync(file).isFile()) fail()
+  const target = /^gitdir: (.+?)\s*$/.exec(readFileSync(file, 'utf8'))?.[1]
+  if (target === undefined || !existsSync(resolve(loc.worktree, target)) || real(resolve(loc.worktree, target)) !== loc.gitDir) fail()
+}
+
+/**
  * worktree 里的一处改动。path 是现在的路径；from 只在 git 认出的改名里有，是改名前的路径。
  * untracked：未跟踪的新文件或目录（目录以 / 结尾，是嵌套的 git 仓库）。
  * raw：路径不是合法 UTF-8 时的原始字节，这种改动一律算越界（path 只用来显示）。
+ * linkDir：未跟踪的指向目录的符号链接（例如把目录换成指向外面的链接），一律算越界。
  * dsh 的沙箱只能整体允许或禁止写 worktree，收不窄到子路径，所以越界的改动由平台在提交前撤销。
  */
-export type Change = { path: string; from?: string; untracked?: boolean; raw?: Buffer }
+export type Change = { path: string; from?: string; untracked?: boolean; raw?: Buffer; linkDir?: boolean }
 
 /** 改动涉及的全部路径：改名要两边都在可写范围内才算没越界。 */
 export const pathsOf = (c: Change): string[] => (c.from === undefined ? [c.path] : [c.path, c.from])
 
-/** 这处改动是否在可写范围内。名字不是合法 UTF-8 的、嵌套的 git 仓库，一律不在。 */
+/** 这处改动是否在可写范围内。名字不是合法 UTF-8 的、嵌套的 git 仓库、指向目录的符号链接，一律不在。 */
 export const inScope = (c: Change, writePaths: string[]): boolean =>
-  c.raw === undefined && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
+  c.raw === undefined && !c.linkDir && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
 
 const shown = (b: Buffer): string => [...b].map(x => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : `\\x${x.toString(16).padStart(2, '0')}`)).join('')
 
+const isLinkToDir = (abs: string): boolean => {
+  try {
+    return lstatSync(abs).isSymbolicLink() && statSync(abs).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /**
- * 列出 worktree 里全部改动（改过的、删掉的、改名的、新加的未跟踪文件），不管有没有 git add 过。
+ * 列出 worktree 里全部改动（改过的、删掉的、改名的、新加的未跟踪文件），不管有没有 git add 过；不进入子模块。
  * 外部数据只在这里解析：`-z` 的输出是 `XY 路径\0`，改名多一段 `\0 改名前的路径`，路径不转义、按原始字节读。
  */
-export const changes = (worktree: string): Change[] => {
-  const fields = splitNul(gitRaw(worktree, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
+export const changes = (loc: Loc | string): Change[] => {
+  const l = typeof loc === 'string' ? locate(loc) : loc
+  const fields = splitNul(wgit(l, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all']))
   const out: Change[] = []
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!
@@ -91,9 +149,10 @@ export const changes = (worktree: string): Change[] => {
       from = rawFrom === undefined || rawFrom.length === 0 ? undefined : utf8(rawFrom)
     }
     const invalid = path === undefined || (rawFrom !== undefined && rawFrom.length > 0 && from === undefined)
+    const linkDir = untracked && path !== undefined && isLinkToDir(join(l.worktree, path))
     out.push({
       path: path ?? shown(rawPath), ...(from === undefined ? {} : { from }), ...(untracked ? { untracked } : {}),
-      ...(invalid ? { raw: rawPath } : {}),
+      ...(invalid ? { raw: rawPath } : {}), ...(linkDir ? { linkDir } : {}),
     })
   }
   return out
@@ -102,92 +161,101 @@ export const changes = (worktree: string): Change[] => {
 /** 按字面量（而不是通配符）传给 git 的路径：文件名里的 *、? 和 [] 不能被当成 pathspec 的通配。 */
 const literal = (path: string): string => `:(literal)${path}`
 
-const inHead = (worktree: string, path: string): boolean =>
-  git(worktree, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', literal(path)]) !== ''
+const inHead = (loc: Loc, path: string): boolean =>
+  wgitText(loc, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', literal(path)]) !== ''
+
+/** 这条路径的上级目录里有没有符号链接：有的话不能顺着它删文件（会删到 worktree 外面去）。 */
+const behindLink = (worktree: string, path: string): boolean => {
+  const parts = path.replace(/\/$/, '').split('/').slice(0, -1)
+  for (let i = 1; i <= parts.length; i++) {
+    try {
+      if (lstatSync(join(worktree, ...parts.slice(0, i))).isSymbolicLink()) return true
+    } catch {
+      return false
+    }
+  }
+  return false
+}
 
 /** 把一条路径恢复成 HEAD 里的样子：HEAD 里有就还原（同时清掉暂存），没有就从暂存区去掉并删掉文件（目录整个删）。 */
-const revert = (worktree: string, path: string): void => {
-  if (!path.endsWith('/') && inHead(worktree, path)) {
-    git(worktree, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
+const revert = (loc: Loc, path: string): void => {
+  if (behindLink(loc.worktree, path)) {
+    // 上级目录是符号链接：只清暂存，不碰文件（链接本身作为未跟踪的改动另行撤销）。
+    wgit(loc, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
     return
   }
-  git(worktree, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
-  rmSync(join(worktree, path), { force: true, recursive: true })
+  if (!path.endsWith('/') && inHead(loc, path)) {
+    wgit(loc, ['restore', '--source=HEAD', '--staged', '--worktree', '--', literal(path)])
+    return
+  }
+  wgit(loc, ['rm', '-r', '-f', '--quiet', '--cached', '--ignore-unmatch', '--', literal(path.replace(/\/$/, ''))])
+  rmSync(join(loc.worktree, path), { force: true, recursive: true })
 }
 
 /**
  * 撤销超出可写范围的改动，返回被撤销的路径（排序去重）。改名只要有一边越界就整条撤销：
  * 恢复改名前的路径、删掉改名后的路径。名字不是合法 UTF-8 的未跟踪文件按原始字节删掉；
- * 撤销不了的（已跟踪的非 UTF-8 文件名）留着，由 commitInScope 拒绝提交。重复调用结果相同。
+ * 先删越界的符号链接（目录换成的链接），再处理其余改动。撤销不了的留着，由 commitInScope 拒绝提交。重复调用结果相同。
  */
-export const revertOutOfScope = (worktree: string, writePaths: string[]): string[] => {
+export const revertOutOfScope = (loc: Loc | string, writePaths: string[]): string[] => {
+  const l = typeof loc === 'string' ? locate(loc) : loc
   const reverted = new Set<string>()
-  for (const change of changes(worktree)) {
+  for (const change of changes(l).filter(c => c.linkDir && !inScope(c, writePaths))) {
+    rmSync(join(l.worktree, change.path), { force: true })
+    reverted.add(change.path)
+  }
+  for (const change of changes(l)) {
     if (inScope(change, writePaths)) continue
     if (change.raw !== undefined) {
       if (change.untracked) {
-        rmSync(Buffer.concat([Buffer.from(worktree + sep), change.raw]), { force: true, recursive: true })
+        rmSync(Buffer.concat([Buffer.from(l.worktree + sep), change.raw]), { force: true, recursive: true })
         reverted.add(change.path)
       }
       continue
     }
     // 先恢复改名前的路径，再处理改名后的：反过来会把刚恢复的文件又删掉（HEAD 里没有改名后的路径）。
     for (const p of [...pathsOf(change)].reverse()) {
-      revert(worktree, p)
+      revert(l, p)
       reverted.add(p)
     }
   }
   return [...reverted].sort()
 }
 
-/**
- * worktree 的 .git 必须还是 git 建 worktree 时写的那个普通文件，指向主仓库的 worktrees 目录。
- * agent 能写 worktree：它把 .git 换成自己的仓库，就能用那个仓库的配置让平台的 git 执行命令。被改过就不再执行 git。
- */
-export const assertGitLink = (worktree: string, repo: string): void => {
-  const file = join(worktree, '.git')
-  const fail = () => {
-    throw new Error(`worktree 的 .git 被改动过，平台不再在这里执行 git：${file}。请人工检查这个任务的 worktree`)
-  }
-  if (!existsSync(file) || !lstatSync(file).isFile()) fail()
-  const target = /^gitdir: (.+?)\s*$/.exec(readFileSync(file, 'utf8'))?.[1]
-  const common = resolve(repo, git(repo, ['rev-parse', '--git-common-dir']))
-  if (target === undefined || !resolve(worktree, target).startsWith(join(common, 'worktrees') + sep)) fail()
-}
-
-const staged = (worktree: string): { paths: string[]; invalid: number } => {
-  const parts = splitNul(gitRaw(worktree, ['diff', '--cached', '--name-only', '-z'])).filter(b => b.length > 0)
+const staged = (loc: Loc): { paths: string[]; invalid: number } => {
+  const parts = splitNul(wgit(loc, ['diff', '--cached', '--name-only', '-z', '--ignore-submodules=all'])).filter(b => b.length > 0)
   const paths = parts.map(utf8)
   return { paths: paths.filter((p): p is string => p !== undefined), invalid: paths.filter(p => p === undefined).length }
 }
 
 /**
  * 先撤销越界的改动，再提交剩下的；没有可提交的改动就只撤销。重复调用结果相同。
- * writePaths 是角色的可写范围（worktree 内的 glob）；['**'] 表示整个 worktree 都能写。
+ * writePaths 是角色的可写范围（worktree 内的 glob）；['**'] 表示整个 worktree 都能写。repo 是主仓库（用来找 git 目录）。
  * 失败就关（fail closed）：撤销之后再列一遍改动、提交前再核对暂存区，还有越界就不提交，抛错让任务停下等人处理。
- * 只暂存范围内的路径（白名单），不用 add -A：撤销漏掉的东西不会被顺手提交。
+ * 只暂存范围内的路径（白名单，路径从标准输入传给 git，不受命令行长度限制），不用 add -A：撤销漏掉的东西不会被顺手提交。
  */
-export const commitInScope = (worktree: string, writePaths: string[], message: string, repo?: string): { sha?: string; reverted: string[] } => {
-  if (repo !== undefined) assertGitLink(worktree, repo)
-  const reverted = revertOutOfScope(worktree, writePaths)
-  const after = changes(worktree)
+export const commitInScope = (worktree: string, writePaths: string[], message: string, repo: string = worktree): { sha?: string; reverted: string[] } => {
+  const loc = locate(worktree, repo)
+  if (real(repo) !== real(worktree)) assertGitLink(loc)
+  const reverted = revertOutOfScope(loc, writePaths)
+  const after = changes(loc)
   const left = after.filter(c => !inScope(c, writePaths))
   if (left.length > 0) throw new Error(`有越界改动撤销不了，没有提交：${left.map(c => c.path).join('、')}`)
   const paths = [...new Set(after.flatMap(pathsOf))]
   if (paths.length === 0) return { reverted }
-  git(worktree, ['add', '-A', '--', ...paths.map(literal)])
-  const s = staged(worktree)
+  wgit(loc, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], Buffer.from(paths.map(p => `${literal(p)}\0`).join('')))
+  const s = staged(loc)
   const bad = s.paths.filter(p => !matchesAny(writePaths, p))
   if (bad.length > 0 || s.invalid > 0) {
-    git(worktree, ['reset', '-q'])
+    wgit(loc, ['reset', '-q'])
     throw new Error(`暂存区里有越界改动，没有提交：${[...bad, ...(s.invalid > 0 ? [`${s.invalid} 个文件名不是合法 UTF-8 的文件`] : [])].join('、')}`)
   }
   if (s.paths.length === 0) return { reverted }
-  git(worktree, ['-c', 'user.name=Eos', '-c', 'user.email=eos@localhost', 'commit', '-q', '--no-verify', '-m', message])
-  return { sha: git(worktree, ['rev-parse', '--short', 'HEAD']), reverted }
+  wgit(loc, ['-c', 'user.name=Eos', '-c', 'user.email=eos@localhost', 'commit', '-q', '--no-verify', '-m', message])
+  return { sha: wgitText(loc, ['rev-parse', '--short', 'HEAD']), reverted }
 }
 
-export const diffStat = (w: Worktree): string => git(w.worktree, ['diff', '--stat', w.baseSha, 'HEAD'])
+export const diffStat = (w: Worktree): string => wgitText(locate(w.worktree, w.repo), ['diff', '--stat', w.baseSha, 'HEAD'])
 
 export const contextFor = (w: Worktree): string =>
   `工作目录是任务的 git worktree：${w.worktree}（分支 ${w.branch}）。基线提交是 ${w.baseSha.slice(0, 12)}。` +
