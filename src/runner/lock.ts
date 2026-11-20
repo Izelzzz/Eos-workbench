@@ -16,12 +16,15 @@ export type Lock = { release: () => void }
 
 const nap = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
-/** 空文件最多等这么久：别的进程用 O_EXCL 建好文件、还没写入 pid 的那一瞬间，文件是空的。 */
-const EMPTY_WAIT_MS = 1000
+/**
+ * 空文件最多等这么久：别的进程用 O_EXCL 建好文件、还没写入 pid 的那一瞬间，文件是空的。
+ * 正常写入只需要微秒；等待是同步的（会卡住整个进程，包括 Web 服务），所以只等 200ms。
+ */
+const EMPTY_WAIT_MS = 200
 
 /**
  * 读锁文件里的 pid。文件不存在返回 undefined。读到空文件时先等它写完，
- * 不能把"刚创建、还没写入"当成"持有者已死"；等了 1 秒仍是空的，才当作创建者在写入前就崩溃了（返回 0）。
+ * 不能把"刚创建、还没写入"当成"持有者已死"；等了 200ms 仍是空的，才当作创建者在写入前就崩溃了（返回 0）。
  */
 const readPid = (file: string): number | undefined => {
   for (let waited = 0; ; waited += 10) {

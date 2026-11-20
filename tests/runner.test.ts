@@ -173,7 +173,8 @@ test('two questions asked at once in the same call are put to the user one after
   const answers: Record<string, string> = { '红色还是绿色？': '绿色', '圆形还是方形？': '方形' }
   const answering = (async () => {
     let answered = 0
-    while (answered < 2) {
+    const deadline = Date.now() + 15_000 // 修复失效时不要让整个测试进程挂住
+    while (answered < 2 && Date.now() < deadline) {
       const q = other.get('t')!.question
       if (q !== undefined && other.dispatch('t', { kind: 'answered', questionId: q.id, text: answers[q.text]! }, 2, 'cli').accepted) answered++
       await new Promise(r => setTimeout(r, 2))
@@ -183,4 +184,32 @@ test('two questions asked at once in the same call are put to the user one after
   await answering
   assert.equal(task.outputs.plan, '绿色/方形')
   assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['红色还是绿色？', '圆形还是方形？'])
+})
+
+test('a queued question that was cancelled before its turn is never put to the user', { timeout: 20_000 }, async () => {
+  const { store, path } = setup()
+  const other = new Store(path)
+  const cancelB = new AbortController()
+  const outcome: Record<string, string> = {}
+  const ex = new FakeExecutor(async ({ key, ask }) => {
+    if (!key.endsWith('/plan')) return key.endsWith('/review') ? PASS : '实现'
+    const a = ask({ id: 'a', text: 'A？' }, new AbortController().signal).then(x => (outcome.a = x))
+    const b = ask({ id: 'b', text: 'B？' }, cancelB.signal).then(x => (outcome.b = x), e => (outcome.b = `失败：${(e as Error).message}`))
+    cancelB.abort() // B 还在排队时被取消
+    await Promise.all([a, b])
+    return '方案'
+  })
+  const deadline = Date.now() + 15_000
+  const answering = (async () => {
+    while (Date.now() < deadline) {
+      const q = other.get('t')!.question
+      if (q?.text === 'A？' && other.dispatch('t', { kind: 'answered', questionId: q.id, text: '是' }, 2, 'cli').accepted) return
+      await new Promise(r => setTimeout(r, 2))
+    }
+  })()
+  const task = await runTask('t', { store, executor: ex, pollMs: 2 })
+  await answering
+  assert.deepEqual(outcome, { a: '是', b: '失败：提问被取消' })
+  assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['A？'], 'B was never asked')
+  assert.equal(task.status, 'done')
 })

@@ -33,6 +33,8 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
 
   /** agent 中途提问：记成问题，等 `eos answer` 写入回答。崩溃前已经提过的同一个问题直接复用。 */
   const waitForAnswer = async (call: Call, q: { id: string; text: string; options?: string[] }, signal: AbortSignal): Promise<string> => {
+    // 排在队里时已经被取消的提问，不再提给用户。
+    if (signal.aborted) throw new Error('提问被取消')
     const step = dispatch({ kind: 'asked', call: call.id, question: q })
     const current = step.task.question
     // 被接受：新问题（可能替换了上一次运行留下的旧问题）；被拒绝但同一调用的问题还开着：就是同一个问题，接着等它的回答。
