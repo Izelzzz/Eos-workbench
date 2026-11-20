@@ -139,7 +139,7 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     return {
       id: n.id, kind: 'node', name: n.id, start: start ?? 0, ...(end === undefined ? {} : { end }), status,
       usage: sumUsage(children.filter(c => c.kind === 'call')),
-      meta: { 类型: n.kind === 'agent' ? 'agent 节点' : '对话节点', 角色: n.role, ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}) },
+      meta: { 类型: n.kind === 'agent' ? 'agent 节点' : '对话节点', ...(n.role === undefined ? {} : { 角色: n.role }), ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}) },
       children,
     }
   })

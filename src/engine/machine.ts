@@ -1,5 +1,5 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
-import type { DialogNode, Workflow, WorkflowNode } from '../workflow/types.ts'
+import type { DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { node as nodeOf } from '../workflow/types.ts'
 import {
   critiquePrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, stuckQuestion,
@@ -44,14 +44,26 @@ const enter = (task: Task, at: number): Task => {
 
 const advance = (task: Task, at: number): Task => enter({ ...task, cursor: task.cursor + 1, dialog: undefined }, at)
 
+/** 只有评审方的对话在 U2 之前不会走到这里：解析允许"只有检查"的对话，引擎在 U2 里接上检查。 */
+const reviewer = (d: DialogNode): RoleId => {
+  if (d.role === undefined) throw new Error(`对话「${d.id}」没有评审角色，检查还没有接入引擎`)
+  return d.role
+}
+
+const roleOfAgent = (task: Task, id: NodeId): RoleId => {
+  const n = nodeOf(task.workflow, id)
+  if (n.kind !== 'agent') throw new Error(`「${id}」不是 agent 节点`)
+  return n.role
+}
+
 const critique = (task: Task, d: DialogNode, prompt: string): Task =>
-  issue(withDialog(task, { phase: 'critique' }), { node: d.id, session: d.id, role: d.role, purpose: 'critique', prompt })
+  issue(withDialog(task, { phase: 'critique' }), { node: d.id, session: d.id, role: reviewer(d), purpose: 'critique', prompt })
 
 const toTarget = (task: Task, d: DialogNode, purpose: 'respond' | 'reapply' | 'instruct', prompt: string): Task =>
-  issue(withDialog(task, { phase: purpose }), { node: d.id, session: d.with, role: nodeOf(task.workflow, d.with).role, purpose, prompt })
+  issue(withDialog(task, { phase: purpose }), { node: d.id, session: d.with, role: roleOfAgent(task, d.with), purpose, prompt })
 
 const toUpstream = (task: Task, d: DialogNode, prompt: string): Task =>
-  issue(withDialog(task, { phase: 'reconfirm' }), { node: d.id, session: d.escalate!, role: nodeOf(task.workflow, d.escalate!).role, purpose: 'reconfirm', prompt })
+  issue(withDialog(task, { phase: 'reconfirm' }), { node: d.id, session: d.escalate!, role: roleOfAgent(task, d.escalate!), purpose: 'reconfirm', prompt })
 
 const ask = (task: Task, q: Omit<Question, 'id'>, at: number): Task => {
   const node = task.dialog?.node ?? task.pending?.node

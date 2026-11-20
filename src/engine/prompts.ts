@@ -22,7 +22,7 @@ const section = (title: string, body: string | undefined) => (body === undefined
 
 /** 会话的第一条消息带上角色说明；之后同一会话里不再重复。 */
 const intro = (task: Task, session: NodeId, wf: Workflow, n: WorkflowNode): string =>
-  task.sessions[session] === undefined ? section('你的角色', roleOf(wf, n.role).prompt) : ''
+  task.sessions[session] === undefined && n.role !== undefined ? section('你的角色', roleOf(wf, n.role).prompt) : ''
 
 const context = (task: Task, n: WorkflowNode): string =>
   section('需求', task.request) + section('环境', task.context) + n.inputs.map(i => section(`上游产出：${i}`, task.outputs[i])).join('')
