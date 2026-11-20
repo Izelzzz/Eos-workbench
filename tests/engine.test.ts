@@ -160,3 +160,65 @@ test('a blocker reported with verdict pass counts as changes', () => {
   d.reply('```json\n{"verdict":"pass","issues":[{"severity":"blocker","message":"会崩溃"}]}\n```')
   assert.equal(d.pending.purpose, 'respond')
 })
+
+/** 回复当前调用，并带上这次被平台撤销的越界路径。 */
+const replyReverting = (d: Driver, text: string, reverted: string[]) => {
+  const call = d.pending
+  return d.send({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ms: 1, reverted })
+}
+
+test('被撤销的越界改动记进调用日志和节点说明，并通知同一会话的下一次调用', () => {
+  const d = new Driver(workflow({ maxRounds: 3, escalate: true, checks: 'review' }))
+  d.reply('方案 v1')
+  replyReverting(d, '实现 v1', ['docs/design.md', 'top.txt'])
+  const entry = d.task.log.findLast(e => e.type === 'call')
+  assert.deepEqual(entry?.type === 'call' ? entry.reverted : undefined, ['docs/design.md', 'top.txt'], '调用日志记下被撤销的路径')
+  const note = d.task.log.findLast(e => e.type === 'note')
+  assert.deepEqual(note?.type === 'note' ? [note.node, note.text] : undefined, ['build', '撤销了 2 处越界改动：docs/design.md、top.txt'])
+  assert.deepEqual(d.task.scopeNotices, { build: ['docs/design.md', 'top.txt'] }, '通知挂在开发的会话上，等下一次调用')
+
+  // 先是开发节点的交付物检查，再是对话这一轮的检查，通过了才请评审（评审在 review 会话，不带这段说明）。
+  d.check(true)
+  d.check(true)
+  assert.equal(d.pending.session, 'review')
+  assert.doesNotMatch(d.pending.prompt, /有改动被撤销/, '别的会话不会收到这段说明')
+  d.reply(CHANGES)
+  // 回应评审走 build 会话：这时才带上说明。
+  assert.equal(d.pending.session, 'build')
+  assert.match(d.pending.prompt, /# 有改动被撤销（超出你的可写范围）[\s\S]*- docs\/design\.md\n- top\.txt/)
+  assert.match(d.pending.prompt, /你可以改动的路径（任务 worktree 内的 glob）：\n- \*\*/, '同时列出允许的范围')
+  assert.match(d.pending.prompt, /有改动被撤销[\s\S]*评审意见（第 1 轮）/, '说明加在原来的提示词最前面')
+  assert.deepEqual(d.task.scopeNotices, {}, '发出去之后就清除')
+  // 第 2 轮：再一次回到 build 会话时不会重复通知。
+  d.reply('已改')
+  d.check(true)
+  d.reply(CHANGES)
+  assert.equal(d.pending.session, 'build')
+  assert.doesNotMatch(d.pending.prompt, /有改动被撤销/, '不会重复通知')
+})
+
+test('同一个会话再次越界：通知换成最新一次的路径，每次只通知一遍', () => {
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true, checks: 'only', maxFixes: 2 }))
+  d.reply('方案 v1')
+  replyReverting(d, '实现 v1', ['top.txt'])
+  d.check(false)
+  assert.equal(d.pending.purpose, 'fix')
+  assert.match(d.pending.prompt, /有改动被撤销[\s\S]*- top\.txt/)
+  assert.deepEqual(d.task.scopeNotices, {}, '发给补齐调用之后就清除')
+  replyReverting(d, '已补齐', ['out/a.txt'])
+  assert.deepEqual(d.task.scopeNotices, { build: ['out/a.txt'] })
+  d.check(false)
+  assert.match(d.pending.prompt, /有改动被撤销[\s\S]*- out\/a\.txt/)
+  assert.doesNotMatch(d.pending.prompt, /- top\.txt/, '上一次已经通知过的不再重复')
+  assert.deepEqual(d.task.scopeNotices, {})
+})
+
+test('没有越界改动时提示词和日志都不变', () => {
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true }))
+  d.reply('方案 v1')
+  replyReverting(d, '实现 v1', [])
+  const entry = d.task.log.findLast(e => e.type === 'call')
+  assert.equal(entry?.type === 'call' ? 'reverted' in entry : true, false, '空数组不写进日志')
+  assert.deepEqual(d.task.scopeNotices, {})
+  assert.doesNotMatch(d.pending.prompt, /有改动被撤销/)
+})

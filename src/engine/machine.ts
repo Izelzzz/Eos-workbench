@@ -1,9 +1,9 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
 import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
-import { node as nodeOf } from '../workflow/types.ts'
+import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeFailures } from './checks.ts'
 import {
-  checksStuckQuestion, critiquePrompt, fixInstructPrompt, fixPrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, stuckQuestion,
+  checksStuckQuestion, critiquePrompt, fixInstructPrompt, fixPrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, scopeNotice, stuckQuestion,
 } from './prompts.ts'
 import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, Question, ReviewKind, Step, Task } from './types.ts'
 import { isCheck, isTerminal } from './types.ts'
@@ -14,7 +14,7 @@ export const MAX_FORMAT_RETRIES = 2
 
 /** 新任务直接进入第一个节点：创建即发出第一项工作，不存在"已创建但没有事可做"的状态。 */
 export const newTask = (p: { id: string; request: string; workflow: Workflow; docs: ConventionDoc[]; context?: string }, at: number): Task =>
-  enter({ ...p, status: 'running', cursor: 0, outputs: {}, sessions: {}, fixes: 0, log: [], nextCall: 0 }, at)
+  enter({ ...p, status: 'running', cursor: 0, outputs: {}, sessions: {}, scopeNotices: {}, fixes: 0, log: [], nextCall: 0 }, at)
 
 const ok = (task: Task): Step => ({ task, accepted: true })
 const ignore = (task: Task, reason: string): Step => ({ task, accepted: false, reason })
@@ -22,9 +22,16 @@ const append = (task: Task, entry: Entry): Task => ({ ...task, log: [...task.log
 
 const nextId = (task: Task): CallId => `c${task.nextCall + 1}` as CallId
 
-const issue = (task: Task, c: Omit<Call, 'id'>): Task => ({
-  ...task, status: 'running', pending: { ...c, id: nextId(task) }, nextCall: task.nextCall + 1,
-})
+/**
+ * 发出一次调用。这个会话还有没通知出去的越界撤销时，说明加在提示词最前面，并在这里清除：
+ * 通知只跟会话走，所以不管接下来是哪种用途的调用，发到这个会话的第一次调用一定带上它，而且只带一次。
+ */
+const issue = (task: Task, c: Omit<Call, 'id'>): Task => {
+  const reverted = task.scopeNotices[c.session]
+  const prompt = reverted === undefined ? c.prompt : scopeNotice(reverted, roleOf(task.workflow, c.role).writePaths) + c.prompt
+  const { [c.session]: _cleared, ...scopeNotices } = task.scopeNotices
+  return { ...task, status: 'running', pending: { ...c, id: nextId(task), prompt }, scopeNotices, nextCall: task.nextCall + 1 }
+}
 
 const runChecks = (task: Task, n: WorkflowNode): Task => ({
   ...task, status: 'running', pending: { id: nextId(task), node: n.id, purpose: 'check', checks: n.checks }, nextCall: task.nextCall + 1,
@@ -141,6 +148,15 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
   return ask(withDialog(t, { phase: 'ask' }), { source: 'loop', text: stuckQuestion(t, d) }, at)
 }
 
+/**
+ * 这次调用有改动越界、已被平台撤销：记进日志，并记下要通知的会话（下一次发到这个会话的调用带上说明）。
+ * 通知按 call.session 记，不按节点：同一个节点的会话会被别的节点的调用（例如对话里的回应）接着用。
+ * 一个会话最多只有一条待通知的记录：要再收到一次回复，就得先往这个会话发一次调用，而那次调用会把它带走。
+ */
+const noteReverted = (task: Task, call: Call, reverted: string[], at: number): Task =>
+  append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },
+    { type: 'note', at, node: call.node, text: `撤销了 ${reverted.length} 处越界改动：${reverted.join('、')}` })
+
 const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   switch (call.purpose) {
     case 'produce':
@@ -204,12 +220,14 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
     case 'replied': {
       const call = task.pending
       if (call === undefined || isCheck(call) || call.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用的结果')
+      const reverted = event.reverted ?? []
       const recorded = append(
         { ...task, pending: undefined, question: undefined, status: 'running', sessions: { ...task.sessions, [call.session]: event.sessionId } },
         { type: 'call', at, call: call.id, node: call.node, role: call.role, purpose: call.purpose, ...(task.dialog === undefined ? {} : { round: task.dialog.round }),
-          prompt: call.prompt, reply: event.text, usage: event.usage, ms: event.ms, ...(event.model === undefined ? {} : { model: event.model }) },
+          prompt: call.prompt, reply: event.text, usage: event.usage, ms: event.ms, ...(event.model === undefined ? {} : { model: event.model }),
+          ...(reverted.length === 0 ? {} : { reverted }) },
       )
-      return ok(onReply(recorded, call, event.text, at))
+      return ok(onReply(reverted.length === 0 ? recorded : noteReverted(recorded, call, reverted, at), call, event.text, at))
     }
 
     case 'checked': {
