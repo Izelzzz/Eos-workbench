@@ -125,7 +125,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   const create = (body: Record<string, unknown>): [number, CreateResponse] => {
     const field = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : '')
-    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'feature', request: field('request') })
+    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'standard', request: field('request') })
     if (!created.ok) return [400, created]
     const started = o.supervisor.start(created.id)
     return started.ok ? [201, { ok: true, id: created.id }] : [500, { ok: false, error: started.error }]

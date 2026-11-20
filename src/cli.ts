@@ -15,7 +15,7 @@ import { createWebServer } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
 
 const HELP = `用法：
-  eos run --repo <仓库路径> [--workflow feature] "<需求>"   创建任务并运行
+  eos run --repo <仓库路径> [--workflow standard] "<需求>"   创建任务并运行
   eos resume <任务>                                       续跑（进程中断后）
   eos retry <任务>                                        重试失败的任务
   eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
@@ -31,7 +31,7 @@ const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_u
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'feature' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
+  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
 })
 
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))

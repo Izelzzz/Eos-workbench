@@ -24,7 +24,7 @@ const remember = (repo: string) => {
 export function NewTask() {
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>()
   const [repo, setRepo] = useState(remembered)
-  const [workflow, setWorkflow] = useState('feature')
+  const [workflow, setWorkflow] = useState('standard')
   const [request, setRequest] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
