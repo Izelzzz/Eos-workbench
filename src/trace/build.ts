@@ -78,6 +78,12 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   for (const r of trace) eventsOf.set(r.call, [...(eventsOf.get(r.call) ?? []), r.event])
   const done = new Map(task.log.filter((e): e is Extract<Entry, { type: 'call' }> => e.type === 'call').map(e => [e.call as string, e]))
 
+  /** 只有检查、没有评审方的对话里，被评审方回应的是检查失败，不是评审意见。 */
+  const purposeLabel = (info: { node: string; purpose: Purpose }): string => {
+    const n = task.workflow.nodes.find(x => x.id === info.node)
+    return info.purpose === 'respond' && n?.kind === 'dialog' && n.role === undefined ? '处理检查失败' : PURPOSE[info.purpose]
+  }
+
   const callSpan = (id: string): Span | undefined => {
     const entry = done.get(id)
     const pending = task.pending?.id === id && !isCheck(task.pending) ? task.pending : undefined
@@ -104,11 +110,11 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const usage = entry?.usage ?? sumUsage(children)
     const model = entry?.model ?? children.find(c => c.model !== undefined)?.model
     return {
-      id, kind: 'call', name: `${info.role} · ${PURPOSE[info.purpose]}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
+      id, kind: 'call', name: `${info.role} · ${purposeLabel(info)}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
       start: started ?? entry?.at ?? 0, ...(entry === undefined ? {} : { end: entry.at }), status, usage,
       ...(model === undefined ? {} : { model }),
       input: info.prompt, ...(entry === undefined ? {} : { output: entry.reply }),
-      meta: { 调用: id, 角色: info.role, 用途: PURPOSE[info.purpose], ...(round === undefined ? {} : { 轮次: String(round) }),
+      meta: { 调用: id, 角色: info.role, 用途: purposeLabel(info), ...(round === undefined ? {} : { 轮次: String(round) }),
         ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}),
         ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }) },
       children,

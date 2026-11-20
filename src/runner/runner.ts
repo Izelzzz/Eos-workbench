@@ -16,7 +16,7 @@ export type RunnerOptions = {
   /** 写 worktree 的角色每次回复后调用（提交改动）。 */
   afterWrite?: (task: Task, call: Call) => void
   /** 执行一组检查（在任务的 worktree 里）。结果顺序与 run.checks 一致。 */
-  checker?: (task: Task, run: CheckRun) => Promise<CheckResult[]>
+  checker?: (task: Task, run: CheckRun, signal: AbortSignal) => Promise<CheckResult[]>
   log?: (line: string) => void
 }
 
@@ -118,14 +118,21 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     }
     log(`→ ${where}（${run.checks.length} 项）`)
     const started = now()
+    // 检查进行中任务被中止：结束检查命令，不让它以平台的权限一直跑到超时。
+    const aborter = new AbortController()
+    const watch = setInterval(() => {
+      if (o.store.get(id)?.status === 'aborted') aborter.abort()
+    }, pollMs)
     let results: CheckResult[]
     try {
-      results = await o.checker(task, run)
+      results = await o.checker(task, run, aborter.signal)
     } catch (e) {
+      clearInterval(watch)
       log(`✗ ${where}：${(e as Error).message}`)
       dispatch({ kind: 'call_failed', call: run.id, error: `检查无法执行：${(e as Error).message}` })
       return
     }
+    clearInterval(watch)
     log(`${results.every(r => r.passed) ? '✓' : '✗'} ${where}：${results.filter(r => r.passed).length}/${results.length} 项通过`)
     dispatch({ kind: 'checked', call: run.id, results, ms: now() - started })
   }

@@ -146,7 +146,8 @@ const explore = (wf: Workflow, maxDepth: number) => {
   let transitions = 0
   const violations: string[] = []
   const stuck: string[] = []
-  while (frontier.length > 0 && depth < maxDepth) {
+  // 一旦有不变量被破坏就停下：被改坏的引擎可能让状态空间不收敛，继续搜只会超时、掩盖真正的原因。
+  while (frontier.length > 0 && depth < maxDepth && violations.length === 0) {
     const next: Task[] = []
     for (const t of frontier) {
       let movable = false
@@ -182,8 +183,8 @@ const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试',
 for (const config of CONFIGS) {
   const result = explore(workflow(config), 200)
   test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
-    assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.violations.slice(0, 5), [])
+    assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')
   })
 }
@@ -194,7 +195,9 @@ test('sessionOf agrees with the session every reachable pending call was sent to
     const wf = workflow(config)
     const seen = new Set<string>()
     let frontier = [newTask({ id: 't', request: 'r', workflow: wf, docs: [] }, 0)]
-    while (frontier.length > 0) {
+    // 和上面的穷举一样限制深度：被改坏的引擎状态空间可能不收敛。
+    for (let depth = 0; frontier.length > 0; depth++) {
+      assert.ok(depth < 200, 'state space did not converge')
       const next: Task[] = []
       for (const t of frontier) {
         if (t.pending !== undefined && !isCheck(t.pending)) assert.equal(sessionOf(wf, t.pending), t.pending.session, `${t.pending.purpose}@${t.pending.node}`)

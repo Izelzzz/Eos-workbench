@@ -64,11 +64,13 @@ test('a failing test in a review dialog goes back to the developer as a round, a
   assert.equal(d.checking.node, 'review', 'the tests run again before the reviewer')
   d.check(true)
   assert.equal(d.pending.purpose, 'critique')
-  assert.match(d.pending.prompt, /平台检查（本轮已通过）[\s\S]*npm test[\s\S]*第 2 轮：build 的回复[\s\S]*修了加法/)
+  // 评审方这时第一次被请来（第 1 轮测试没过、开发改完才轮到它）：给它完整的第一条消息。
+  assert.match(d.pending.prompt, /平台检查（本轮已通过）[\s\S]*npm test[\s\S]*# 需求[\s\S]*待评审：build 的说明\n\n修了加法/)
   d.reply(CHANGES)
   d.reply('补了测试')
   assert.equal(d.task.dialog?.round, 3)
   d.check(true)
+  assert.match(d.pending.prompt, /第 3 轮：build 的回复[\s\S]*补了测试/, 'later rounds are replies in the reviewer’s own session')
   d.reply(PASS)
   assert.equal(d.task.status, 'done')
   assert.deepEqual(d.task.log.filter(e => e.type === 'check').map(e => `${e.node}:${e.type === 'check' && e.results.every(r => r.passed)}`),
@@ -127,4 +129,16 @@ test('convention docs open every session once, before the role', () => {
   assert.match(d.pending.prompt, /团队约定：研发约定/, 'so does the reviewer')
   d.reply(CHANGES)
   assert.doesNotMatch(d.pending.prompt, /团队约定/, 'not repeated in the developer’s existing session')
+})
+
+test('when round 1’s tests fail, the reviewer’s first message still carries the task, the request and the upstream output', () => {
+  const d = new Driver(workflow({ maxRounds: 3, escalate: true, checks: 'review' }))
+  d.reply('方案 PLAN-V1')
+  d.reply('实现 v1')
+  d.check(true)
+  d.check(false)
+  d.reply('修好了测试')
+  d.check(true)
+  assert.equal(d.pending.purpose, 'critique')
+  assert.match(d.pending.prompt, /# 你的角色[\s\S]*# 任务\n\n评审[\s\S]*# 需求\n\n加一个求和函数[\s\S]*上游产出：plan\n\n方案 PLAN-V1[\s\S]*待评审：build 的说明\n\n修好了测试/)
 })

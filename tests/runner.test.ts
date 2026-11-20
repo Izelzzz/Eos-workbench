@@ -213,3 +213,22 @@ test('a queued question that was cancelled before its turn is never put to the u
   assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['A？'], 'B was never asked')
   assert.equal(task.status, 'done')
 })
+
+test('aborting the task while a check runs signals the checker, and the runner stops', async () => {
+  const store = new Store(dbPath())
+  store.create({ id: 't', request: '需求', workflow: workflow({ maxRounds: 2, escalate: true, checks: 'review' }), workflowSource: 'yaml', meta }, 0)
+  let aborted = false
+  const done = runTask('t', {
+    store, executor: new FakeExecutor(async () => '回复'), pollMs: 5,
+    checker: (_t, run, signal) => new Promise(resolve => {
+      store.dispatch('t', { kind: 'abort' }, 1, 'cli')
+      signal.addEventListener('abort', () => {
+        aborted = true
+        resolve(run.checks.map(check => ({ check, passed: false, detail: '任务已中止' })))
+      })
+    }),
+  })
+  const task = await done
+  assert.equal(task.status, 'aborted')
+  assert.equal(aborted, true, 'the check was told to stop')
+})

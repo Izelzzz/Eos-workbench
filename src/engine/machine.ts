@@ -63,9 +63,15 @@ const beginRound = (task: Task, d: DialogNode, review: ReviewKind): Task => {
   return d.checks.length > 0 ? runChecks(withDialog(t, { phase: 'check' }), d) : critique(t, d, critiquePrompt(t, d, review))
 }
 
-/** 一轮里检查（如果有）已通过：有评审方就请它评审，没有就算这一轮通过。 */
-const afterChecks = (task: Task, d: DialogNode, at: number): Task =>
-  d.role === undefined ? passRound(task, d, at) : critique(task, d, critiquePrompt(task, d, task.dialog!.review))
+/**
+ * 一轮里检查（如果有）已通过：有评审方就请它评审，没有就算这一轮通过。
+ * 评审方还没有会话时（例如第 1 轮检查没通过、开发改完后才第一次请它），给它完整的任务、需求和上游产出。
+ */
+const afterChecks = (task: Task, d: DialogNode, at: number): Task => {
+  if (d.role === undefined) return passRound(task, d, at)
+  const review = task.sessions[d.id] === undefined ? 'first' : task.dialog!.review
+  return critique(task, d, critiquePrompt(task, d, review))
+}
 
 const passRound = (task: Task, d: DialogNode, at: number): Task =>
   advance(append(task, { type: 'note', at, node: d.id, text: `第 ${task.dialog!.round} 轮通过` }), at)

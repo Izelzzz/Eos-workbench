@@ -76,7 +76,7 @@ export class Supervisor {
     const done = runTask(id, {
       store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
-      checker: (t, run) => runChecks(this.o.store.meta(t.id).worktree, run.checks),
+      checker: (t, run, signal) => runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal),
       afterWrite: (t, call) => {
         const sha = commitAll(this.o.store.meta(t.id).worktree, `eos: ${call.node} ${call.purpose} (${call.id})`)
         if (sha !== undefined) log(`  已提交 ${sha}`)

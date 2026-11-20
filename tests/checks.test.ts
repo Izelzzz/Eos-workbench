@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { headings, missingSections, OUTPUT_TAIL, runChecks } from '../src/runner/checks.ts'
+import { headings, missingSections, OUTPUT_TAIL, PIPE_GRACE_MS, runChecks } from '../src/runner/checks.ts'
 
 const worktree = () => mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-checks-'))
 
@@ -70,4 +70,38 @@ test('commands get a minimal environment: no model keys, CI=1', async () => {
 
 test('a missing worktree is an error, not a failed check', async () => {
   await assert.rejects(runChecks('/nonexistent/eos-worktree', []), /worktree 不存在/)
+})
+
+test('a command that exits 0 but leaves a background child holding the pipes passes promptly, and the child is cleaned up', async () => {
+  const w = worktree()
+  const started = Date.now()
+  const [r] = await runChecks(w, [{ kind: 'run', run: ['sh', '-c', 'sleep 30 & echo $! > child.pid; echo hi; exit 0'], timeoutSec: 10 }])
+  assert.equal(r?.passed, true, r?.detail)
+  assert.ok(Date.now() - started < 5000)
+  const { readFileSync } = await import('node:fs')
+  const pid = Number(readFileSync(join(w, 'child.pid'), 'utf8'))
+  // SIGKILL 异步生效：最多等 2 秒看它消失（被 init 回收）。
+  const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
+  for (let i = 0; i < 40 && alive(); i++) await new Promise(r => setTimeout(r, 50))
+  assert.equal(alive(), false, 'the background child was killed with the process group')
+})
+
+test('a grandchild that escapes the process group cannot keep a check from finishing', async () => {
+  const w = worktree()
+  const started = Date.now()
+  const [r] = await runChecks(w, [{ kind: 'run', run: ['sh', '-c', 'setsid sleep 30 & sleep 30'], timeoutSec: 1 }])
+  assert.equal(r?.passed, false)
+  assert.match(r!.detail, /超过 1 秒/)
+  assert.ok(Date.now() - started < 1000 + PIPE_GRACE_MS + 2000)
+})
+
+test('aborting stops a running command right away', async () => {
+  const w = worktree()
+  const ac = new AbortController()
+  setTimeout(() => ac.abort(), 300)
+  const started = Date.now()
+  const [r] = await runChecks(w, [{ kind: 'run', run: ['sleep', '30'], timeoutSec: 60 }], process.env, ac.signal)
+  assert.equal(r?.passed, false)
+  assert.match(r!.detail, /任务已中止/)
+  assert.ok(Date.now() - started < 5000)
 })

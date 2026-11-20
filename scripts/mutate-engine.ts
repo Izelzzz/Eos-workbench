@@ -29,7 +29,8 @@ const MUTATIONS: [string, string, string][] = [
   ['进入新节点不清零补齐次数', "dialog: undefined, fixes: 0 }, at)", 'dialog: undefined }, at)'],
   ['用户指示后不重置补齐次数', "issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })", "issue(task, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })"],
   ['对话跳过检查直接评审', 'return d.checks.length > 0 ? runChecks(', 'return false ? runChecks('],
-  ['检查通过后不请评审方', 'd.role === undefined ? passRound(task, d, at)', 'true ? passRound(task, d, at)'],
+  ['检查通过后不请评审方', 'if (d.role === undefined) return passRound(task, d, at)', 'return passRound(task, d, at)'],
+  ['评审方第一次被请来时只给"回复"提示词（缺任务和需求）', "const review = task.sessions[d.id] === undefined ? 'first' : task.dialog!.review", 'const review = task.dialog!.review'],
   ['不校验检查结果条数', 'if (event.results.length !== run.checks.length) return ignore', 'if (false) return ignore'],
   ['检查进行中接受模型回复', 'if (call === undefined || isCheck(call) || call.id !== event.call', 'if (call === undefined || call.id !== event.call'],
 ]
@@ -43,12 +44,15 @@ symlinkSync(join(ROOT, 'node_modules'), join(work, 'node_modules'))
 
 const run = (): { failed: boolean; summary: string } => {
   try {
-    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], { cwd: work, stdio: 'pipe', timeout: 120_000, encoding: 'utf8' })
+    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], { cwd: work, stdio: 'pipe', timeout: 120_000, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
     return { failed: false, summary: '全部通过' }
   } catch (e) {
     const out = String((e as { stdout?: string }).stdout ?? '')
     const fail = /ℹ fail (\d+)/.exec(out)?.[1]
-    return { failed: true, summary: (e as { signal?: string }).signal === 'SIGTERM' ? '超时（状态空间不收敛）' : `${fail ?? '?'} 个测试失败` }
+    const err = String((e as { stderr?: string }).stderr ?? '')
+    const crashed = /heap out of memory|ERR_CHILD_PROCESS_STDIO_MAXBUFFER|RangeError/.exec(err + String((e as Error).message))?.[0]
+    return { failed: true, summary: (e as { signal?: string }).signal === 'SIGTERM' ? '超时（状态空间不收敛）'
+      : fail !== undefined ? `${fail} 个测试失败` : `测试进程异常退出（${crashed ?? err.trim().split('\n').at(-1)?.slice(0, 80) ?? '无输出'}）` }
   }
 }
 
