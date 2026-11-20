@@ -19,6 +19,14 @@ type LogEvent = { type: string; time: number; data?: Record<string, any> }
 
 const marker = (nonce: string) => `<!-- eos:${nonce} -->`
 
+/**
+ * 交给 dsh 进程的环境。宿主机用 GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n 注入 git 配置时，
+ * dsh 会把名字像凭据的 GIT_CONFIG_KEY_n 清掉、留下另外两组，agent 沙箱里的 git 就全部报
+ * "missing config key"。三组一起去掉：agent 的 shell 不需要宿主机注入的 git 配置。
+ */
+export const agentEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(env).filter(([k]) => !/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(k)))
+
 export const sessionIdFor = (key: string): string => `session-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`
 
 const usageOf = (events: LogEvent[]): Usage =>
@@ -65,7 +73,7 @@ export class DshExecutor implements Executor {
       h = new DeepSeekHarness({
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        ...(this.opts.env === undefined ? {} : { env: this.opts.env }),
+        env: agentEnv(this.opts.env ?? process.env),
         initializeTimeoutMs: 60_000,
         onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
       })
