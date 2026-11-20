@@ -1,0 +1,28 @@
+{
+ "ms": 4465,
+ "sessionId": "session-4d96040045fe4d09b5d84c3e8f9cef80",
+ "finishReason": "completed",
+ "final": "1+1 等于 2。",
+ "model": [
+  "deepseek-flash"
+ ],
+ "eventTypes": [
+  "agent/inbox/spliced",
+  "turn/start",
+  "step/start",
+  "system/message",
+  "user/message",
+  "request/header",
+  "request/context",
+  "session/title",
+  "session-log-deepseek/delivery-accepted",
+  "assistant/message",
+  "step/end",
+  "turn/end"
+ ],
+ "notifs": [
+  "session.event",
+  "session.status"
+ ]
+}
+usage [{"inputTokens":671,"outputTokens":9,"cacheReadTokens":8320,"cacheWriteTokens":0,"totalTokens":9000}]

@@ -1,0 +1,133 @@
+// M1 端到端验证：用真实的 deepseek-flash 跑 feature 模板，验证 M1 的完成标准。
+// 1. 在 .eos/e2e/repo 建一个示例仓库，通过 CLI 发起任务；
+// 2. agent 提问时用 `eos answer`（另一个进程）回答；
+// 3. 开发第一次完成后 SIGKILL 掉 runner，再用 `eos resume` 续跑；
+// 4. 跑完后从存储里逐条检查，结果写到 .eos/e2e/report.json，完整输出在 .eos/e2e/run.log。
+import { execFileSync, spawn } from 'node:child_process'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { zstdDecompressSync } from 'node:zlib'
+import { sessionIdFor } from '../src/executor/dsh.ts'
+import { keyOf } from '../src/runner/runner.ts'
+import { Store } from '../src/store/store.ts'
+
+const ROOT = join(import.meta.dirname, '..')
+const E2E = join(ROOT, '.eos', 'e2e')
+const REPO = join(E2E, 'repo')
+const DATA = join(E2E, 'data')
+const LOG = join(E2E, 'run.log')
+
+const REQUEST = [
+  '在 src/math.js 里实现并导出一个求和函数，接收一个数字数组，返回总和；空数组返回 0；数组里有非数字时抛出 TypeError。',
+  '为它写 node:test 测试（放在 test/ 目录），`npm test` 必须通过。',
+  '函数名还没定：规划阶段先用 ask_user_question 工具问我用 sum 还是 total。',
+  '（E2E 验证要求：评审第一轮必须至少提出一条 major 意见，例如补充边界情况的测试，以验证对话循环。）',
+].join('\n')
+
+const env = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
+const record = (s: string) => {
+  process.stdout.write(s)
+  appendFileSync(LOG, s)
+}
+
+const setupRepo = () => {
+  rmSync(E2E, { recursive: true, force: true })
+  mkdirSync(join(REPO, 'src'), { recursive: true })
+  writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'e2e-sample', type: 'module', scripts: { test: 'node --test' } }, null, 2))
+  writeFileSync(join(REPO, 'src', 'math.js'), '// 数学工具函数\n')
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: REPO })
+  git('init', '-q', '-b', 'main')
+  git('add', '-A')
+  git('-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init')
+}
+
+const cli = (args: string[]) => spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env })
+
+const answer = (id: string, text: string) =>
+  execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'answer', id, text, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
+
+/** 运行一个 CLI 进程，遇到提问就回答；killAfter 匹配到某一行时 SIGKILL。返回任务 id 与是否被杀。 */
+const drive = (args: string[], opts: { killAfter?: RegExp } = {}) => new Promise<{ id: string; killed: boolean }>((resolve, reject) => {
+  const child = cli(args)
+  let id = args[0] === 'resume' ? args[1]! : ''
+  let buffer = ''
+  let killed = false
+  const onLine = (line: string) => {
+    const created = /^任务 (t\w+)：工作流/.exec(line)
+    if (created) id = created[1]!
+    if (line.startsWith('？ agent 提问')) {
+      // 有选项就选第一个（原文照抄，执行器才会按"选中选项"回传），没有选项才回答 sum。
+      const options = /（选项：(.+)）$/.exec(line)?.[1]?.split(' / ')
+      const reply = options?.[0] ?? 'sum'
+      const out = answer(id, reply)
+      record(`[e2e] 用户回答「${reply}」：${out}`)
+    }
+    if (line.startsWith('待回答')) {
+      const out = answer(id, '按评审意见改，保留 sum 这个名字')
+      record(`[e2e] 用户回答对话尽头的问题：${out}`)
+    }
+    if (!killed && opts.killAfter?.test(line)) {
+      killed = true
+      record(`\n[e2e] 匹配到「${line}」，SIGKILL runner（pid ${child.pid}）\n\n`)
+      child.kill('SIGKILL')
+    }
+  }
+  const take = (chunk: Buffer) => {
+    record(chunk.toString())
+    buffer += chunk.toString()
+    const lines = buffer.split('\n')
+    buffer = lines.pop()!
+    lines.forEach(onLine)
+  }
+  child.stdout.on('data', take)
+  child.stderr.on('data', take)
+  child.on('error', reject)
+  child.on('exit', () => resolve({ id, killed }))
+})
+
+setupRepo()
+writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
+const first = await drive(['run', '--repo', REPO, REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
+await drive(['resume', first.id])
+
+const store = new Store(join(DATA, 'eos.db'))
+const task = store.get(first.id)!
+const calls = task.log.filter(e => e.type === 'call')
+const ids = calls.map(c => c.call)
+const meta = store.meta(first.id)
+const testRun = (() => {
+  try {
+    return { ok: true, out: execFileSync('npm', ['test'], { cwd: meta.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).slice(-400) }
+  } catch (e) {
+    return { ok: false, out: String((e as { stdout?: string }).stdout ?? e).slice(-400) }
+  }
+})()
+/** dsh 会话日志里，每个会话收到过哪些调用（按消息里的 nonce）以及它的权限档位变化。 */
+const sessionLog = (session: string) => {
+  const sid = sessionIdFor(keyOf(first.id, session))
+  const root = join(DATA, 'dsh', 'sessions')
+  const dir = readdirSync(root).find(d => existsSync(join(root, d, sid)))!
+  const events = zstdDecompressSync(readFileSync(join(root, dir, sid, 'session.v4.jsonl.zstd'))).toString().trim().split('\n').map(l => JSON.parse(l))
+  const calls = events.filter(e => e.type === 'user/message').map(e => /eos:[^/]+\/(c\d+) -->/.exec(JSON.stringify(e.data))?.[1]).filter(Boolean)
+  const presets = events.filter(e => e.type === 'permission/preset').map(e => e.data?.preset ?? e.data?.name)
+  const asks = events.filter(e => e.type === 'tool/call' && e.data?.name === 'ask_user_question').length
+  return { sid, calls, presets, asks }
+}
+const sessions = Object.fromEntries(['plan', 'build', 'review'].map(s => [s, sessionLog(s)]))
+const devCalls = calls.filter(c => c.role === 'developer').map(c => c.call)
+const checks = {
+  '任务完成': task.status === 'done',
+  '评审至少打回一次，开发回应': calls.some(c => c.purpose === 'respond'),
+  '开发的每次调用都在同一个 dsh 会话里': devCalls.length >= 2 && devCalls.every(c => sessions.build!.calls.includes(c)),
+  '规划和评审是只读档位，开发是 workspace-write': sessions.plan!.presets.at(-1) === 'read-only' && sessions.review!.presets.at(-1) === 'read-only' && sessions.build!.presets.at(-1) === 'workspace-write',
+  'agent 主动提问并收到回答': task.log.some(e => e.type === 'question' && e.question.source === 'agent') && task.log.some(e => e.type === 'answer'),
+  '杀进程后续跑：没有重复记录同一个调用': new Set(ids).size === ids.length,
+  '耗时和 token 都有记录': calls.every(c => c.ms > 0 && c.usage.input + c.usage.cacheRead > 0),
+  'worktree 里 npm test 通过': testRun.ok,
+}
+const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
+const result = { task: first.id, killed: first.killed, checks, sessions, rejectedReplies: resent, calls: calls.map(c => `${c.call} ${c.purpose}@${c.node}${c.round ? `#${c.round}` : ''} ${c.ms}ms`), commits: execFileSync('git', ['log', '--oneline', `${meta.baseSha}..HEAD`], { cwd: meta.worktree, encoding: 'utf8' }), npmTest: testRun.out }
+writeFileSync(join(E2E, 'report.json'), JSON.stringify(result, null, 2))
+record(`\n[e2e] 结果：\n${JSON.stringify(result, null, 2)}\n`)
+process.exit(Object.values(checks).every(Boolean) ? 0 : 1)

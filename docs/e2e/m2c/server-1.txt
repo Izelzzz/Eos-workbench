@@ -1,0 +1,10 @@
+Eos Web：http://127.0.0.1:4320（数据目录 /home/user/Eos-workbench/.eos/web-e2e/data，Ctrl+C 退出）
+[t261120095158wm5] → [plan] planner · produce
+[t261120095158wm5] ？ agent 提问（q1）：中文（及其他 CJK 字符）在 slug 里怎么处理？（选项：保留中文原字符（推荐） / 转成拼音 ASCII / 丢弃中文）
+  在任务页面上回答，或用 eos answer t261120095158wm5 "<回答>"
+[t261120095158wm5] ？ agent 提问（q2）：emoji 在 slug 里怎么处理？（选项：删除 emoji（推荐） / 保留 emoji / 转成文字别名）
+  在任务页面上回答，或用 eos answer t261120095158wm5 "<回答>"
+[t261120095158wm5] ？ agent 提问（q3）：长度上限怎么定？（会影响是否加第二个参数和截断算法）（选项：默认 60 字符，可用 options 覆盖（推荐） / 固定上限 60 字符 / 固定上限 80 字符 / 不设上限）
+  在任务页面上回答，或用 eos answer t261120095158wm5 "<回答>"
+[t261120095158wm5] ✓ [plan] planner · produce：86.7s，输入 2691，输出 13658，缓存读 109184
+[t261120095158wm5] → [build] developer · produce

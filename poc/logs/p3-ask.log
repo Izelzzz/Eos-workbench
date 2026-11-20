@@ -1,0 +1,24 @@
+{
+ "asked": [
+  [
+   {
+    "id": "color",
+    "question": "配色方案选红色还是绿色？",
+    "header": "选择配色",
+    "options": [
+     {
+      "label": "红色",
+      "description": "以红色作为主配色。"
+     },
+     {
+      "label": "绿色",
+      "description": "以绿色作为主配色。"
+     }
+    ]
+   }
+  ]
+ ],
+ "tools": [],
+ "final": "你已选择 **绿色**，颜色名已写入 [color.txt](color.txt)。任务结束。",
+ "file": "绿色\n"
+}

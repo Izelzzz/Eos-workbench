@@ -1,0 +1,80 @@
+{
+  "task": "t261120071452f1b",
+  "note": "页面上的回答（events 表）与 agent 实际收到的 ask_user_question 工具结果（trace 表），从 .eos/demo/data/eos.db 导出",
+  "answers": [
+    {
+      "actor": "web",
+      "accepted": true,
+      "kind": "answered",
+      "questionId": "q1",
+      "text": "原样保留（推荐）"
+    },
+    {
+      "actor": "web",
+      "accepted": true,
+      "kind": "answered",
+      "questionId": "q2",
+      "text": "丢弃（推荐）"
+    },
+    {
+      "actor": "web",
+      "accepted": true,
+      "kind": "answered",
+      "questionId": "q3",
+      "text": "合并为单个连字符，并去掉首尾连字符（推荐）"
+    },
+    {
+      "actor": "web",
+      "accepted": true,
+      "kind": "answered",
+      "questionId": "q4",
+      "text": "默认上限 60，按单词边界截断（推荐）"
+    },
+    {
+      "actor": "web",
+      "accepted": true,
+      "kind": "answered",
+      "questionId": "q5",
+      "text": "去重音转 ASCII（推荐）"
+    }
+  ],
+  "received": [
+    {
+      "call": "c1",
+      "toolResult": {
+        "answers": [
+          {
+            "id": "cjk",
+            "selected": [
+              "原样保留（推荐）"
+            ]
+          },
+          {
+            "id": "emoji",
+            "selected": [
+              "丢弃（推荐）"
+            ]
+          },
+          {
+            "id": "separators",
+            "selected": [
+              "合并为单个连字符，并去掉首尾连字符（推荐）"
+            ]
+          },
+          {
+            "id": "length",
+            "selected": [
+              "默认上限 60，按单词边界截断（推荐）"
+            ]
+          },
+          {
+            "id": "accents",
+            "selected": [
+              "去重音转 ASCII（推荐）"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

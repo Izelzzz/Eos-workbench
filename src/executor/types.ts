@@ -1,0 +1,26 @@
+// 执行器接口：引擎和 runner 只认这个接口。dsh 原生 agent 是第一个实现，外部 agent（M4）按同一接口接入。
+import type { Usage } from '../engine/types.ts'
+import type { TraceEvent } from '../trace/types.ts'
+import type { Effort, WriteScope } from '../workflow/types.ts'
+
+export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string }
+
+export type Reply = { sessionId: string; text: string; usage: Usage; ms: number; model?: string }
+
+export type AgentQuestion = { id: string; text: string; options?: string[] }
+
+/** agent 在调用中途提问：返回用户的回答；被取消时 signal 触发。 */
+export type AskHandler = (q: AgentQuestion, signal: AbortSignal) => Promise<string>
+
+export interface Executor {
+  /**
+   * 在 key 对应的会话里发一条消息并等它完成。同一个 key 总是同一个会话：第一次创建，之后续接。
+   * nonce 写进消息里，供 findReply 认领。
+   */
+  send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply>
+  /** 会话里带这个 nonce 的消息如果已经有完整的回复，返回它；否则返回 undefined（需要重发）。 */
+  findReply(key: string, nonce: string): Promise<Reply | undefined>
+  /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。 */
+  traceOf(key: string, nonce: string): Promise<TraceEvent[]>
+  close(): Promise<void>
+}
