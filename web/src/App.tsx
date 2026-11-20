@@ -24,13 +24,13 @@ function TaskList() {
   const [tasks, setTasks] = useState<TaskSummary[]>()
   const [error, setError] = useState<string>()
   useEffect(() => {
-    const load = () => listTasks().then(setTasks, e => setError(String(e.message)))
+    // 失败时显示错误，但不停止刷新；服务恢复后自动清掉错误。
+    const load = () => listTasks().then(t => { setTasks(t); setError(undefined) }, e => setError(String(e.message)))
     load()
     const timer = setInterval(load, 5000)
     return () => clearInterval(timer)
   }, [])
-  if (error) return <p className="error">{error}</p>
-  if (tasks === undefined) return <p className="muted">加载中…</p>
+  if (tasks === undefined) return error ? <p className="error">{error}（自动重试中）</p> : <p className="muted">加载中…</p>
   const head = (
     <div className="list-head">
       <h1>任务</h1>
@@ -41,6 +41,7 @@ function TaskList() {
   return (
     <>
     {head}
+    {error && <p className="notice warn" role="alert">连接不上服务：{error}（每 5 秒自动重试）</p>}
     <table className="tasks">
       <thead>
         <tr><th>任务</th><th>状态</th><th>工作流</th><th>需求</th><th>更新</th></tr>
