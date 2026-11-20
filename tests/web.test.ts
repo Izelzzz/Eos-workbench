@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { acquire } from '../src/runner/lock.ts'
+import { Supervisor } from '../src/runner/supervisor.ts'
+import { execFileSync } from 'node:child_process'
 import { request } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -9,6 +11,7 @@ import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { createWebServer } from '../src/web/server.ts'
 import type { TaskDetail } from '../src/web/types.ts'
+import { FakeExecutor } from './fake-executor.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -21,17 +24,21 @@ const serve = async () => {
   mkdirSync(join(dir, 'static-evil'))
   writeFileSync(join(dir, 'static-evil', 'x.txt'), 'sibling secret')
   const store = new Store(join(dir, 'eos.db'))
-  store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: '/r', worktree: '/w', branch: 'eos/t1', baseSha: 'abc' } }, 1000)
+  const worktree = join(dir, 'wt')
+  mkdirSync(worktree)
+  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: worktree })
+  store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: worktree, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
   const replayed: string[] = []
   // c1 跑在事件流之前（只能回放），c2 运行时记录了事件流。
   store.dispatch('t1', { kind: 'replied', call: 'c1' as never, sessionId: 's', text: '方案', usage: zero, ms: 100 }, 1100, 'executor')
   store.appendTrace('t1', 'c2', [{ kind: 'call_start', t: 1200 }, { kind: 'step_start', t: 1201, step: 1 }])
   const replay = { traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => { replayed.push(`${key} ${nonce}`); return [{ kind: 'call_start', t: 1000 }, { kind: 'step_start', t: 1001, step: 1 }, { kind: 'step_end', t: 1090, step: 1 }] } }
-  const locksDir = join(dir, 'locks')
-  const server = createWebServer({ store, replay, staticDir: join(dir, 'static'), locksDir })
+  const supervisor = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: dir, pollMs: 5 })
+  const locksDir = supervisor.locksDir
+  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static') })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { base, store, replayed, locksDir, close: () => new Promise(r => server.close(r)) }
+  return { base, dir, store, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(r)) }
 }
 
 test('lists tasks and returns a detail with the trace tree, replaying calls recorded before the trace existed', async () => {
@@ -58,7 +65,7 @@ test('unknown tasks are 404, non-GET is refused, and static paths cannot escape 
   const s = await serve()
   try {
     assert.equal((await fetch(`${s.base}/api/tasks/nope`)).status, 404)
-    assert.equal((await fetch(`${s.base}/api/tasks`, { method: 'POST' })).status, 405)
+    assert.equal((await fetch(`${s.base}/api/tasks`, { method: 'PUT' })).status, 405)
     const escaped = await (await fetch(`${s.base}/..%2fsecret.txt`)).text()
     assert.doesNotMatch(escaped, /do not serve/)
     for (const path of ['/../static-evil/x.txt', '/%2e%2e/static-evil/x.txt', '/..%2fstatic-evil%2fx.txt']) {
@@ -185,5 +192,74 @@ test('requests whose Host is not a local address are refused, which stops DNS re
     for (const host of [`localhost:${port}`, `127.0.0.1:${port}`]) assert.equal((await raw(s.base, 'GET', '/api/tasks', { host })).status, 200, host)
   } finally {
     await s.close()
+  }
+})
+
+const postTo = (base: string, path: string, body: unknown) =>
+  fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(body) })
+
+test('the page can list workflows, create a task that starts running, and gets Chinese errors for bad input', async () => {
+  const s = await serve()
+  try {
+    const wfs = await (await fetch(`${s.base}/api/workflows`)).json()
+    assert.equal(wfs[0].name, 'feature')
+    assert.deepEqual(wfs[0].nodes, ['plan', 'build', 'review'])
+    const repo = join(s.dir, 'repo')
+    mkdirSync(repo)
+    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    const bad = await postTo(s.base, '/api/tasks', { repo: join(s.dir, 'static'), workflow: 'feature', request: 'x' })
+    assert.equal(bad.status, 400)
+    assert.match((await bad.json()).error, /不是 git 仓库/)
+    const r = await postTo(s.base, '/api/tasks', { repo, workflow: 'feature', request: '加一个函数' })
+    assert.equal(r.status, 201)
+    const { id } = await r.json()
+    await s.supervisor.idle()
+    assert.equal(s.store.get(id)!.status, 'done', 'the fake executor finished the workflow')
+  } finally {
+    await s.close()
+  }
+})
+
+test('resume, retry and abort act on existing tasks and refuse what does not apply', async () => {
+  const s = await serve()
+  try {
+    // t1 进行中、没有 runner：继续会在服务里跑起来（假执行器把它跑完）
+    const resume = await postTo(s.base, '/api/tasks/t1/resume', {})
+    assert.equal(resume.status, 200)
+    await s.supervisor.idle()
+    assert.equal(s.store.get('t1')!.status, 'done')
+    const again = await postTo(s.base, '/api/tasks/t1/resume', {})
+    assert.equal(again.status, 409)
+    assert.equal((await again.json()).error, '只有进行中的任务可以继续')
+    assert.equal((await postTo(s.base, '/api/tasks/t1/retry', {})).status, 409)
+    assert.equal((await postTo(s.base, '/api/tasks/t1/abort', {})).status, 409)
+    assert.equal((await postTo(s.base, '/api/tasks/nope/resume', {})).status, 404)
+    assert.equal((await postTo(s.base, '/api/tasks/t1/explode', {})).status, 404)
+    const crossSite = await fetch(`${s.base}/api/tasks/t1/abort`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{}' })
+    assert.equal(crossSite.status, 403)
+  } finally {
+    await s.close()
+  }
+})
+
+test('a failed task is retried from the page and a running one can be aborted', async () => {
+  const s = await serve()
+  try {
+    s.store.dispatch('t1', { kind: 'call_failed', call: 'c2' as never, error: '网络错误' }, 1300, 'executor')
+    const retry = await postTo(s.base, '/api/tasks/t1/retry', {})
+    assert.equal(retry.status, 200)
+    await s.supervisor.idle()
+    assert.equal(s.store.get('t1')!.status, 'done')
+    assert.equal(s.store.events('t1').filter(e => e.event.kind === 'retry').at(-1)?.actor, 'web')
+  } finally {
+    await s.close()
+  }
+  const t = await serve()
+  try {
+    const abort = await postTo(t.base, '/api/tasks/t1/abort', {})
+    assert.equal(abort.status, 200)
+    assert.equal(t.store.get('t1')!.status, 'aborted')
+  } finally {
+    await t.close()
   }
 })

@@ -81,7 +81,17 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
         return
       }
     }
-    if (role.write === 'worktree') o.afterWrite?.(task, call)
+    if (role.write === 'worktree') {
+      try {
+        o.afterWrite?.(task, call)
+      } catch (e) {
+        // 改动没提交上（例如 worktree 被删了）：这次调用记为失败，任务停下等人工处理，而不是让 runner 悄悄退出。
+        const error = `提交改动失败：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}`
+        log(`✗ ${label(task, call)}：${error}`)
+        dispatch({ kind: 'call_failed', call: call.id, error })
+        return
+      }
+    }
     const u = reply.usage
     log(`✓ ${label(task, call)}：${(reply.ms / 1000).toFixed(1)}s，输入 ${u.input}，输出 ${u.output}，缓存读 ${u.cacheRead}`)
     dispatch({ kind: 'replied', call: call.id, sessionId: reply.sessionId, text: reply.text, usage: reply.usage, ms: reply.ms, ...(reply.model === undefined ? {} : { model: reply.model }) })

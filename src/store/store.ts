@@ -1,5 +1,7 @@
 // SQLite 存储：任务状态快照 + 只追加的事件记录。每次 dispatch 在一个写事务里"读状态 → reduce → 写事件和快照"，
 // 所以 runner 和 `eos answer` 这样的多个进程同时写，也不会互相覆盖。
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
 import type { Event, Step, Task, TaskStatus } from '../engine/types.ts'
@@ -43,6 +45,7 @@ export class Store {
   readonly db: DatabaseSync
 
   constructor(path: string) {
+    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
     this.db = new DatabaseSync(path, { timeout: 10_000 })
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
     this.db.exec(SCHEMA)

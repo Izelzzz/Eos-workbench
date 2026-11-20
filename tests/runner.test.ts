@@ -3,37 +3,14 @@ import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import type { Call, Task } from '../src/engine/types.ts'
-import type { AskHandler, Executor, Reply } from '../src/executor/types.ts'
-import type { TraceEvent } from '../src/trace/types.ts'
+import type { AskHandler } from '../src/executor/types.ts'
 import { keyOf, nonceOf, runTask } from '../src/runner/runner.ts'
 import { Store } from '../src/store/store.ts'
+import { FakeExecutor, type Script } from './fake-executor.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const meta = { repo: '/r', worktree: '/w', branch: 'eos/t', baseSha: 'abc' }
 const dbPath = () => join(mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-test-')), 'eos.db')
-
-type Script = (p: { key: string; prompt: string; nonce: string; ask: AskHandler }) => Promise<string>
-
-/** 假执行器：按剧本回复；completed 模拟"会话日志里已经有的回复"。 */
-class FakeExecutor implements Executor {
-  sent: string[] = []
-  completed = new Map<string, Reply>()
-  constructor(private readonly script: Script) {}
-  async send(p: { key: string; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
-    this.sent.push(p.nonce)
-    p.onEvent?.({ kind: 'step_start', t: 10, step: 1 })
-    const text = await this.script(p)
-    p.onEvent?.({ kind: 'step_end', t: 20, step: 1 })
-    return { sessionId: `s:${p.key}`, text, usage: { input: 100, output: 10, cacheRead: 1000, cacheWrite: 0 }, ms: 50, model: 'deepseek-flash' }
-  }
-  async findReply(_key: string, nonce: string) {
-    return this.completed.get(nonce)
-  }
-  async traceOf() {
-    return [{ kind: 'call_start' as const, t: 1 }, { kind: 'step_start' as const, t: 2, step: 1 }]
-  }
-  async close() {}
-}
 
 const setup = (escalate = true, maxRounds = 2) => {
   const path = dbPath()
@@ -150,4 +127,13 @@ test('a trace write that fails does not break the agent call', async () => {
   const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, log: l => lines.push(l) })
   assert.equal(task.status, 'done')
   assert.ok(lines.some(l => l.includes('trace 记录失败：database is locked')))
+})
+
+test('a commit that fails after a developer turn fails the call visibly instead of stopping the runner silently', async () => {
+  (reviewOnce as any).n = 0
+  const { store } = setup()
+  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw new Error('fatal: not a git repository') } })
+  assert.equal(task.status, 'failed')
+  assert.equal(task.failure, '提交改动失败：fatal: not a git repository')
+  assert.equal(task.pending?.node, 'build', 'the developer call is kept for retry')
 })

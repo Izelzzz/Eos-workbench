@@ -1,5 +1,5 @@
 // Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
-// 唯一的写接口是回答提问：要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
+// 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
@@ -7,12 +7,13 @@ import { describePosition, sessionOf } from '../engine/machine.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
-import { holder } from '../runner/lock.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
+import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { AnswerResponse, TaskDetail } from './types.ts'
+import { builtinTemplates, loadWorkflow } from '../workflow/templates.ts'
+import type { ActionResponse, AnswerResponse, CreateResponse, TaskDetail, WorkflowInfo } from './types.ts'
 
 const summaryOf = (t: Task) => ({ id: t.id, status: t.status, workflow: t.workflow.name })
 
@@ -54,7 +55,7 @@ const sameOrigin = (req: IncomingMessage): boolean => {
   return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
 }
 
-export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'traceOf'>; staticDir: string; locksDir: string }): Server => {
+export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string }): Server => {
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
 
@@ -80,7 +81,7 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       branch: meta.branch, worktree: meta.worktree, report: report(task), trace: buildTrace(task, await traceRows(task)),
-      runnerAlive: holder(o.locksDir, id) !== undefined,
+      runnerAlive: o.supervisor.running(id),
     }
   }
 
@@ -89,21 +90,58 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
     res.end(JSON.stringify(body))
   }
 
-  const answer = async (id: string, req: IncomingMessage): Promise<[number, AnswerResponse]> => {
+  /** 写接口的公共检查：同源、JSON、大小。通过时返回解析后的请求体。 */
+  const guarded = async (req: IncomingMessage): Promise<{ body: Record<string, unknown> } | [number, { ok: false; error: string }]> => {
     if (!sameOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
     const read = await readJson(req)
     if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]
-    const body = read.value as { questionId?: unknown; text?: unknown } | undefined
-    if (typeof body?.questionId !== 'string' || typeof body.text !== 'string') return [400, { ok: false, error: '需要 questionId 和 text' }]
+    const body = read.value
+    return typeof body === 'object' && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : [400, { ok: false, error: '请求体必须是 JSON 对象' }]
+  }
+
+  const answer = (id: string, body: Record<string, unknown>): [number, AnswerResponse] => {
+    if (typeof body.questionId !== 'string' || typeof body.text !== 'string') return [400, { ok: false, error: '需要 questionId 和 text' }]
     const task = o.store.get(id)
     if (task === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
     const step = o.store.dispatch(id, { kind: 'answered', questionId: body.questionId, text: body.text }, Date.now(), 'web')
     if (!step.accepted) return [409, { ok: false, error: step.reason ?? '回答没有被接受' }]
     // agent 中途的提问由正在等待的 runner 接着处理；对话尽头的问题回答后要有 runner 执行下一步。
-    const resumeNeeded = task.question?.source === 'loop' && holder(o.locksDir, id) === undefined
+    const resumeNeeded = task.question?.source === 'loop' && !o.supervisor.running(id)
     return [200, { ok: true, resumeNeeded }]
   }
+
+  const create = (body: Record<string, unknown>): [number, CreateResponse] => {
+    const field = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : '')
+    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'feature', request: field('request') })
+    if (!created.ok) return [400, created]
+    const started = o.supervisor.start(created.id)
+    return started.ok ? [201, { ok: true, id: created.id }] : [500, { ok: false, error: started.error }]
+  }
+
+  /** 继续、重试、中止：都是对已有任务的操作。 */
+  const act = (id: string, action: string): [number, ActionResponse] => {
+    const task = o.store.get(id)
+    if (task === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
+    if (action === 'abort') {
+      const step = o.store.dispatch(id, { kind: 'abort' }, Date.now(), 'web')
+      return step.accepted ? [200, { ok: true }] : [409, { ok: false, error: step.reason ?? '无法中止' }]
+    }
+    if (action === 'retry') {
+      const step = o.store.dispatch(id, { kind: 'retry' }, Date.now(), 'web')
+      if (!step.accepted) return [409, { ok: false, error: step.reason ?? '无法重试' }]
+    } else if (task.status !== 'running' && task.status !== 'waiting_user') {
+      return [409, { ok: false, error: '只有进行中的任务可以继续' }]
+    }
+    const started = o.supervisor.start(id)
+    return started.ok ? [200, { ok: true }] : [409, { ok: false, error: started.error }]
+  }
+
+  const workflows = (): WorkflowInfo[] =>
+    builtinTemplates().map(name => {
+      const { workflow } = loadWorkflow(name)
+      return { name, ...(workflow.description === undefined ? {} : { description: workflow.description }), nodes: workflow.nodes.map(n => n.id) }
+    })
 
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {
@@ -122,9 +160,16 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
     try {
       if (!localHost(req)) return json(res, 421, { error: '只接受通过本机地址访问' })
       const url = new URL(req.url ?? '/', 'http://localhost')
-      const answerPath = /^\/api\/tasks\/([\w-]+)\/answer$/.exec(url.pathname)
-      if (req.method === 'POST' && answerPath) return json(res, ...(await answer(answerPath[1]!, req)))
+      if (req.method === 'POST') {
+        const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
+        if (url.pathname !== '/api/tasks' && action === null) return json(res, 404, { error: '没有这个接口' })
+        const g = await guarded(req)
+        if (Array.isArray(g)) return json(res, ...g)
+        if (action === null) return json(res, ...create(g.body))
+        return json(res, ...(action[2] === 'answer' ? answer(action[1]!, g.body) : act(action[1]!, action[2]!)))
+      }
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
+      if (url.pathname === '/api/workflows') return json(res, 200, workflows())
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {

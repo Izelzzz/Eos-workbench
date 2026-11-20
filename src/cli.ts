@@ -7,9 +7,8 @@ import { describePosition } from './engine/machine.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor } from './executor/dsh.ts'
-import { commitAll, contextFor, createWorktree, diffStat } from './runner/git.ts'
-import { acquire } from './runner/lock.ts'
-import { runTask } from './runner/runner.ts'
+import { diffStat } from './runner/git.ts'
+import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
 import { createWebServer } from './web/server.ts'
 import { builtinTemplates, loadWorkflow } from './workflow/templates.ts'
@@ -54,16 +53,6 @@ const taskOf = (id: string | undefined): Task => {
   return store.get(id) ?? fail(`没有任务 ${id}`)
 }
 
-const withLock = async <T>(id: string, fn: () => Promise<T>): Promise<T> => {
-  const lock = acquire(join(dataDir, 'locks'), id)
-  if ('heldBy' in lock) return fail(`任务 ${id} 正在被进程 ${lock.heldBy} 运行`)
-  try {
-    return await fn()
-  } finally {
-    lock.release()
-  }
-}
-
 const showQuestion = (t: Task) => {
   if (t.question === undefined) return
   say(`\n待回答（${t.question.id}）：${t.question.text}${t.question.options ? `\n选项：${t.question.options.join(' / ')}` : ''}`)
@@ -81,46 +70,34 @@ const summary = (t: Task) => {
   say(`\n${formatReport(report(t))}`)
 }
 
+const executor = () => new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin() })
+
 const run = async (id: string) => {
-  const executor = new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin() })
+  const ex = executor()
   const shutdown = () => {
-    void executor.close().finally(() => process.exit(130))
+    void ex.close().finally(() => process.exit(130))
   }
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const task = await withLock(id, () => runTask(id, {
-      store, executor, wait: !values['no-wait'], log: say,
-      afterWrite: (t, call) => {
-        const sha = commitAll(store.meta(t.id).worktree, `eos: ${call.node} ${call.purpose} (${call.id})`)
-        if (sha !== undefined) say(`  已提交 ${sha}`)
-      },
-    }))
-    summary(task)
+    const sup = new Supervisor({ store, executor: ex, dataDir, log: (_id, line) => say(line) })
+    const started = sup.start(id, { wait: !values['no-wait'] })
+    if (!started.ok) return fail(started.error)
+    summary(await started.done)
   } finally {
-    await executor.close()
+    await ex.close()
   }
 }
 
-const newId = () => `t${new Date().toISOString().replace(/\D/g, '').slice(2, 14)}${Math.random().toString(36).slice(2, 5)}`
-
 const commands: Record<string, () => Promise<void> | void> = {
   async run() {
-    const request = positionals.slice(1).join(' ').trim()
-    if (request === '') fail('需要写明需求')
     if (values.repo === undefined) fail('需要 --repo <仓库路径>')
-    const { workflow, source } = (() => {
-      try {
-        return loadWorkflow(values.workflow!)
-      } catch (e) {
-        return fail((e as Error).message)
-      }
-    })()
-    const id = newId()
-    const w = createWorktree(values.repo!, dataDir, id)
-    store.create({ id, request, context: contextFor(w), workflow, workflowSource: source, meta: w }, Date.now())
-    say(`任务 ${id}：工作流 ${workflow.name}，分支 ${w.branch}，worktree ${w.worktree}`)
-    await run(id)
+    const sup = new Supervisor({ store, executor: executor(), dataDir })
+    const created = sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
+    if (!created.ok) return fail(created.error)
+    const meta = store.meta(created.id)
+    say(`任务 ${created.id}：工作流 ${store.get(created.id)!.workflow.name}，分支 ${meta.branch}，worktree ${meta.worktree}`)
+    await run(created.id)
   },
   async resume() {
     await run(taskOf(positionals[1]).id)
@@ -165,12 +142,19 @@ const commands: Record<string, () => Promise<void> | void> = {
   },
   async web() {
     const port = Number(values.port)
-    const server = createWebServer({
-      store, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), locksDir: join(dataDir, 'locks'),
-      replay: new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: '' }),
-    })
+    const ex = executor()
+    const sup = new Supervisor({ store, executor: ex, dataDir, log: (id, line) => say(`[${id}] ${line}`) })
+    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist') })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
     say(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，Ctrl+C 退出）`)
+    const resumed = sup.resumeAll()
+    if (resumed.length > 0) say(`接着运行上次没跑完的任务：${resumed.join('、')}`)
+    const shutdown = () => {
+      server.close()
+      void ex.close().finally(() => process.exit(130))
+    }
+    process.once('SIGINT', shutdown)
+    process.once('SIGTERM', shutdown)
     await new Promise(() => {})
   },
   workflows() {
