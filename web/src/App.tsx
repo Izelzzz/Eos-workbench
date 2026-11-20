@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { Span, TaskDetail, TaskSummary } from './api.ts'
-import { getTask, listTasks } from './api.ts'
+import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { Detail } from './Detail.tsx'
+import { NewTask } from './NewTask.tsx'
 import { ago, duration, STATUS, statusClass, tokens } from './format.ts'
 import { defaultOpen, TraceTree, visibleRows } from './Trace.tsx'
 
@@ -30,8 +31,16 @@ function TaskList() {
   }, [])
   if (error) return <p className="error">{error}</p>
   if (tasks === undefined) return <p className="muted">加载中…</p>
-  if (tasks.length === 0) return <p className="muted">还没有任务。用 <code>npm run eos -- run --repo &lt;仓库&gt; "&lt;需求&gt;"</code> 创建一个。</p>
+  const head = (
+    <div className="list-head">
+      <h1>任务</h1>
+      <a className="button primary" href="#/new">新建任务</a>
+    </div>
+  )
+  if (tasks.length === 0) return <>{head}<p className="muted">还没有任务。点「新建任务」开始第一个。</p></>
   return (
+    <>
+    {head}
     <table className="tasks">
       <thead>
         <tr><th>任务</th><th>状态</th><th>工作流</th><th>需求</th><th>更新</th></tr>
@@ -48,6 +57,7 @@ function TaskList() {
         ))}
       </tbody>
     </table>
+    </>
   )
 }
 
@@ -64,6 +74,15 @@ function TaskPage(props: { id: string }) {
   const [now, setNow] = useState(Date.now())
   const [reload, setReload] = useState(0)
   const [notice, setNotice] = useState<string>()
+  const [acting, setActing] = useState(false)
+  const ACTION = { resume: '已继续运行。', retry: '已重新开始失败的那一步。', abort: '已中止。' }
+  const act = async (action: 'resume' | 'retry' | 'abort') => {
+    setActing(true)
+    const r = await taskAction(props.id, action)
+    setActing(false)
+    setNotice(r.ok ? ACTION[action] : r.error)
+    setReload(n => n + 1)
+  }
   const seen = useRef(new Set<string>())
 
   useEffect(() => {
@@ -83,7 +102,10 @@ function TaskPage(props: { id: string }) {
         setError(undefined)
         if (LIVE.has(t.status)) timer = setTimeout(load, 2000)
       } catch (e) {
-        if (!stopped) setError((e as Error).message)
+        if (stopped) return
+        // 服务重启或网络中断时不停止刷新：显示错误，2 秒后再试。
+        setError((e as Error).message)
+        timer = setTimeout(load, 2000)
       }
     }
     void load()
@@ -96,8 +118,7 @@ function TaskPage(props: { id: string }) {
   const rows = useMemo(() => (task && open ? visibleRows(task.trace, open) : []), [task, open])
   const bounds = useMemo(() => (task === undefined ? { start: 0, end: 1 } : boundsOf(task.trace, now)), [task, now])
 
-  if (error) return <p className="error">{error}</p>
-  if (task === undefined || open === undefined) return <p className="muted">加载中…</p>
+  if (task === undefined || open === undefined) return error ? <p className="error">{error}（自动重试中）</p> : <p className="muted">加载中…</p>
   const r = task.report.total
   const toggle = (id: string) => setOpen(prev => {
     const next = new Set(prev)
@@ -135,16 +156,22 @@ function TaskPage(props: { id: string }) {
             key={task.question.id}
             task={task}
             onAnswered={resumeNeeded => {
-              setNotice(resumeNeeded ? `已回答。没有 runner 在运行这个任务，执行 npm run eos -- resume ${task.id} 让它继续。` : '已回答，任务继续。')
+              setNotice(resumeNeeded ? '已回答。没有程序在运行这个任务，点「继续」让它接着跑。' : '已回答，任务继续。')
               setReload(n => n + 1)
             }}
           />
         )}
-        {notice && !task.question && <p className="notice" role="status">{notice}</p>}
+        {error && <p className="notice warn" role="alert">连接不上服务：{error}（每 2 秒自动重试）</p>}
+        {notice && <p className="notice" role="status">{notice}</p>}
         {LIVE.has(task.status) && !task.runnerAlive && (
-          <p className="notice warn">没有 runner 在运行这个任务{task.question?.source === 'agent' ? '（agent 的提问来自上一次运行，回答后需要续跑）' : ''}。执行 <code>npm run eos -- resume {task.id}</code> 继续。</p>
+          <p className="notice warn">没有程序在运行这个任务{task.question?.source === 'agent' ? '（这个提问来自上一次运行，回答后点「继续」）' : ''}。点「继续」接着跑。</p>
         )}
         {task.failure && <div className="failure"><b>失败原因</b>：{task.failure}</div>}
+        <div className="actions">
+          {LIVE.has(task.status) && !task.runnerAlive && <button className="primary" disabled={acting} onClick={() => void act('resume')}>继续</button>}
+          {task.status === 'failed' && <button className="primary" disabled={acting} onClick={() => void act('retry')}>重试</button>}
+          {LIVE.has(task.status) && <button disabled={acting} onClick={() => { if (confirm('中止这个任务？正在进行的这一轮会跑完，之后不再继续。')) void act('abort') }}>中止</button>}
+        </div>
       </section>
       <div className="toolbar">
         <button onClick={expandAll}>全部展开</button>
@@ -167,7 +194,7 @@ export function App() {
         <a href="#/" className="brand">Eos Workbench</a>
         <span className="muted">多 agent 工作流</span>
       </header>
-      <main>{id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}</main>
+      <main>{hash === '#/new' ? <NewTask /> : id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}</main>
     </>
   )
 }

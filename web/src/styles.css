@@ -123,3 +123,16 @@ button:disabled { opacity: 0.55; cursor: default; }
 .block h3 { font-size: 13px; margin: 0; flex: 1; }
 .block pre { margin: 6px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
 .more { margin-top: 6px; }
+
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.list-head h1 { font-size: 18px; margin: 0; }
+a.button { display: inline-block; border-radius: 6px; padding: 6px 14px; border: 1px solid var(--line); color: var(--text); }
+a.button.primary { background: var(--running); border-color: var(--running); color: #fff; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+.actions:empty { display: none; }
+.new-task { max-width: 760px; display: flex; flex-direction: column; gap: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; }
+.new-task h1 { font-size: 18px; margin: 0; }
+.new-task label { display: flex; flex-direction: column; gap: 6px; }
+.new-task label > span { font-weight: 600; }
+.new-task input, .new-task select, .new-task textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+.new-task input { font-family: var(--mono); font-size: 13px; }

@@ -1,8 +1,8 @@
 // 与后端接口对应的类型和请求。类型从后端源码只做类型导入，前后端用同一份定义。
 import type { TaskSummary } from '../../src/store/types.ts'
-import type { AnswerResponse, TaskDetail } from '../../src/web/types.ts'
+import type { ActionResponse, AnswerResponse, CreateResponse, TaskDetail, WorkflowInfo } from '../../src/web/types.ts'
 
-export type { TaskDetail, TaskSummary }
+export type { TaskDetail, TaskSummary, WorkflowInfo }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -15,9 +15,19 @@ const get = async <T,>(path: string): Promise<T> => {
 export const listTasks = () => get<TaskSummary[]>('/api/tasks')
 export const getTask = (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`)
 
-export const answerQuestion = async (id: string, questionId: string, text: string): Promise<AnswerResponse> => {
-  const res = await fetch(`/api/tasks/${encodeURIComponent(id)}/answer`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ questionId, text }),
-  })
-  return (await res.json()) as AnswerResponse
+/** 写接口统一走这里：JSON 请求体，浏览器自动带上同源 Origin。网络或服务端错误都变成 { ok: false, error }。 */
+const post = async <T extends { ok: boolean }>(path: string, body: unknown): Promise<T | { ok: false; error: string }> => {
+  try {
+    const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return (await res.json()) as T
+  } catch (e) {
+    return { ok: false, error: `请求失败：${(e as Error).message}` }
+  }
 }
+
+export const listWorkflows = () => get<WorkflowInfo[]>('/api/workflows')
+export const createTask = (input: { repo: string; workflow: string; request: string }) => post<CreateResponse>('/api/tasks', input)
+export const answerQuestion = (id: string, questionId: string, text: string) =>
+  post<AnswerResponse>(`/api/tasks/${encodeURIComponent(id)}/answer`, { questionId, text })
+export const taskAction = (id: string, action: 'resume' | 'retry' | 'abort') =>
+  post<ActionResponse>(`/api/tasks/${encodeURIComponent(id)}/${action}`, {})
