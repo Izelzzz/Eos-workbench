@@ -8,6 +8,8 @@
 // - 平台开销：剩下的部分（进程启动、提交改动、排队等）。
 // 各部分相加等于阶段时长（平台开销不会是负数：各部分有重叠时取 0）。
 // 阶段之间的间隔（平台停着、重启续跑、被杀掉没记下来的调用）不属于任何阶段，单独算成 betweenMs。
+// 已知偏差：崩溃后从 dsh 会话日志认领的回复，记录的时刻是认领时、耗时是原来那次运行的，调用区间会落在重启之后，
+// 停机时间算进这个阶段的平台开销；调用失败前已经跑掉的时间没有记录，也算在平台开销里。
 import type { Entry, Task, Usage } from './types.ts'
 import { addUsage, zeroUsage } from './types.ts'
 
@@ -58,7 +60,8 @@ const union = (spans: Span[]): number => {
   return total + (cur ? len(cur) : 0)
 }
 
-const overlap = (a: Span, b: Span): number => len({ start: Math.max(a.start, b.start), end: Math.min(a.end, b.end) })
+/** a 落在 b 里的部分。 */
+const clip = (a: Span, b: Span): Span => ({ start: Math.max(a.start, b.start), end: Math.min(a.end, b.end) })
 
 /** now：还在进行的等待（没回答的提问、没重试的失败）和阶段算到这个时刻。 */
 export const taskMetrics = (task: Task, now: number): TaskMetrics => {
@@ -67,10 +70,10 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
   const until = finished ? lastAt : now
   const current = finished ? undefined : task.workflow.nodes[task.cursor]?.id
 
-  // 提问的等待区间，按问题 id。
-  const answers = new Map(task.log.flatMap(e => (e.type === 'answer' ? [[e.questionId, e.at] as const] : [])))
-  const waits = task.log.flatMap(e => (e.type === 'question'
-    ? [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end: answers.get(e.question.id) ?? until } }]
+  // 提问的等待区间：到下一条日志为止。等回答时只有这些事会写日志，而且都结束这次等待：回答、调用回复（问题作废）、
+  // 调用失败、换成新问题（续跑后 agent 重新提问）、中止。还没有下一条日志的算到 until。
+  const waits = task.log.flatMap((e, i) => (e.type === 'question'
+    ? [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end: task.log[i + 1]?.at ?? until } }]
     : []))
 
   // 失败到重试的阻塞区间：失败说明带着节点，重试说明不带，按顺序配对。
@@ -107,7 +110,7 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
     const wallMs = start === undefined || end === undefined ? 0 : Math.max(0, end - start)
     // 调用中途的提问：等回答的时间不算 agent 工作时间。
     const callSpans = calls.map(c => ({ id: c.call as string, span: { start: c.at - c.ms, end: c.at } }))
-    const agentMs = callSpans.reduce((sum, c) => sum + len(c.span) - nodeWaits.filter(w => w.call === c.id).reduce((s, w) => s + overlap(c.span, w.span), 0), 0)
+    const agentMs = callSpans.reduce((sum, c) => sum + len(c.span) - union(nodeWaits.filter(w => w.call === c.id).map(w => clip(w.span, c.span))), 0)
     const checkMs = union(checks.map(c => ({ start: c.at - c.ms, end: c.at })))
     const waitUserMs = union(nodeWaits.map(w => w.span))
     const blockedMs = union(nodeBlocks.map(b => b.span))

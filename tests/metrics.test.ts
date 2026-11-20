@@ -105,7 +105,7 @@ test('a loop question waits for the user in its stage; a finished task stops the
   assert.ok(m.total.wallMs < 1e6, 'a done task is not measured up to now')
 })
 
-test('stages follow workflow order, skip stages that never ran, and the parts never exceed the wall time', () => {
+test('stages follow workflow order and skip stages that never ran', () => {
   const c = new Clock('review')
   c.reply(1000, 1000, '方案')
   const m = taskMetrics(c.task, 3000)
@@ -113,7 +113,71 @@ test('stages follow workflow order, skip stages that never ran, and the parts ne
   assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one; its running call is overhead until it ends')
   assert.equal(m.stages[1]!.overheadMs, 2000)
   assert.equal(m.total.calls, 1)
-  for (const s of m.stages) assert.ok(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs === s.wallMs || s.overheadMs === 0)
+})
+
+/** 各部分不重复计算：加起来不超过阶段时长，平台开销补齐到正好相等；阶段之间不重叠。 */
+const consistent = (t: Task, now: number) => {
+  const m = taskMetrics(t, now)
+  for (const s of m.stages) {
+    assert.ok(s.agentMs >= 0 && s.checkMs >= 0 && s.waitUserMs >= 0 && s.blockedMs >= 0, JSON.stringify(s))
+    assert.ok(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs <= s.wallMs, JSON.stringify(s))
+    assert.equal(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs, s.wallMs)
+  }
+  for (let i = 1; i < m.stages.length; i++) assert.ok(m.stages[i]!.start === undefined || m.stages[i]!.start! >= m.stages[i - 1]!.end!, 'stages do not overlap')
+  assert.equal(m.total.wallMs + m.betweenMs, m.elapsedMs)
+  return m
+}
+
+test('a question that is never answered stops waiting when the call fails, and is not counted twice with the blocked time', () => {
+  const c = new Clock()
+  c.reply(1000, 1000, '方案')
+  c.send(1500, { kind: 'asked', call: c.call, question: { id: 'q', text: '?' } })
+  c.send(2000, { kind: 'call_failed', call: c.call, error: '断了' })
+  c.send(3000, { kind: 'retry' })
+  c.reply(4000, 500, '实现完了')
+  for (let at = 5000; (c.task.status as string) !== 'done'; at += 1000) c.reply(at, 500, PASS)
+  const build = consistent(c.task, 1e9).stages.find(s => s.node === 'build')!
+  assert.deepEqual([build.waitUserMs, build.blockedMs, build.end], [500, 1000, 4000])
+})
+
+test('a question replaced by another (the agent asks again after a restart) ends at the new one; overlapping waits are not subtracted twice', () => {
+  const c = new Clock()
+  c.reply(1000, 1000, '方案')
+  const call = c.call
+  c.send(1500, { kind: 'asked', call, question: { id: 'a', text: '?' } })
+  c.send(1600, { kind: 'asked', call, question: { id: 'b', text: '换个问法？' } })
+  c.send(2400, { kind: 'answered', questionId: c.task.question!.id, text: '好' })
+  c.reply(2500, 1400, '实现完了')
+  const build = consistent(c.task, 100_000).stages.find(s => s.node === 'build')!
+  assert.deepEqual([build.agentMs, build.waitUserMs, build.wallMs, build.end], [500, 900, 1400, 2500])
+})
+
+test('a question still waiting runs to now; an abort while waiting stops it', () => {
+  const c = new Clock()
+  c.reply(1000, 1000, '方案')
+  c.send(1500, { kind: 'asked', call: c.call, question: { id: 'q', text: '?' } })
+  assert.equal(consistent(c.task, 6000).stages.find(s => s.node === 'build')!.waitUserMs, 4500)
+  c.send(7000, { kind: 'abort' })
+  const build = consistent(c.task, 1e9).stages.find(s => s.node === 'build')!
+  assert.deepEqual([build.waitUserMs, build.end], [5500, 7000])
+})
+
+test('every metric stays consistent through dialog rounds, check failures and fixes', () => {
+  const c = new Clock('review')
+  let at = 0
+  const step = () => (at += 1000)
+  c.reply(step(), 600, '方案')
+  c.reply(step(), 600, '实现')
+  c.check(step(), 300, false) // 交付物不全：补齐
+  consistent(c.task, at)
+  while ((c.task.status as string) !== 'done') {
+    const p = c.task.pending!
+    if (isCheck(p)) c.check(step(), 300, true)
+    else c.reply(step(), 600, p.purpose === 'critique' ? PASS : '好了')
+    consistent(c.task, at)
+  }
+  const m = consistent(c.task, 1e9)
+  assert.ok(m.stages.find(s => s.node === 'build')!.checks >= 2)
 })
 
 test('time between stages is not in any stage and is reported separately', () => {
