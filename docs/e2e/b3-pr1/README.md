@@ -21,4 +21,4 @@
 - build 会话收到 c2、c2、c4（c2 两次是杀进程后重发），开发的调用都在同一个会话里；
 - plan、review 会话的档位最后都是 read-only，build 是 workspace-write。
 
-`src/executor/dsh.ts` 的 `readLog`（崩溃续跑时读回复）用的是同一种读法，另开 issue 修。
+`src/executor/dsh.ts` 的 `readLog`（崩溃续跑时读回复）用的是同一种读法，另外修（Izelzzz/Eos-workbench#32）。
