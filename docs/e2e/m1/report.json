@@ -1,0 +1,60 @@
+{
+  "task": "t2611200602129hi",
+  "killed": true,
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个 dsh 会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-d3a6a1213c3b562e50bc0b32485951f1",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "session-5bdcf8020b4f821dba223e30ebf1c0f4",
+      "calls": [
+        "c2",
+        "c4"
+      ],
+      "presets": [
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "session-56a7adf7f0b790cd3f642982031c0e40",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 40590ms",
+    "c2 produce@build 37210ms",
+    "c3 critique@review#1 53850ms",
+    "c4 respond@review#1 20794ms",
+    "c5 critique@review#2 15799ms"
+  ],
+  "commits": "5a4e91a eos: review respond (c4)\n242a7d9 eos: build produce (c2)\n",
+  "npmTest": "表示的小数使用容差比较 (0.090692ms)\n✔ 大数组求和 (0.311487ms)\n✔ 含非数字元素时抛 TypeError (0.615068ms)\n✔ 非数组入参时抛 TypeError (0.264114ms)\n✔ 可迭代的非数组入参也必须抛 TypeError (0.340137ms)\n✔ 稀疏数组的空洞视为非数字并抛 TypeError (0.15114ms)\n✔ NaN 原样参与运算 (0.327042ms)\n✔ Infinity 按 JS 语义参与运算 (0.144354ms)\n✔ 不修改入参数组 (0.85038ms)\n✔ 冻结数组可正常计算 (0.167495ms)\nℹ tests 15\nℹ suites 0\nℹ pass 15\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 79.143114\n"
+}
