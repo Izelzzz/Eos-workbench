@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { describePosition } from './engine/machine.ts'
+import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor } from './executor/dsh.ts'
@@ -138,6 +139,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)
+    say(`\n各阶段耗时\n${formatMetrics(taskMetrics(t, Date.now()))}`)
   },
   abort() {
     const t = taskOf(positionals[1])
