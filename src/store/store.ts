@@ -3,6 +3,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
 import type { Event, Step, Task, TaskStatus } from '../engine/types.ts'
+import type { TraceEvent } from '../trace/types.ts'
 import type { Workflow } from '../workflow/types.ts'
 
 /** 谁发出的事件：命令行、runner 自己、执行器（agent 回复或提问）。 */
@@ -11,6 +12,8 @@ export type Actor = 'cli' | 'runner' | 'executor'
 export type EventRow = { seq: number; at: number; actor: Actor; event: Event | { kind: 'created' }; accepted: boolean; reason?: string }
 
 export type TaskSummary = { id: string; status: TaskStatus; request: string; workflow: string; createdAt: number; updatedAt: number }
+
+export type TraceRow = { call: string; seq: number; event: TraceEvent }
 
 export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string }
 
@@ -35,6 +38,13 @@ CREATE TABLE IF NOT EXISTS events (
   accepted INTEGER NOT NULL,
   reason TEXT,
   PRIMARY KEY (task_id, seq)
+);
+CREATE TABLE IF NOT EXISTS trace (
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  call_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  event TEXT NOT NULL,
+  PRIMARY KEY (task_id, call_id, seq)
 );`
 
 export class Store {
@@ -110,6 +120,25 @@ export class Store {
   list(): TaskSummary[] {
     return (this.db.prepare('SELECT id, status, request, workflow_name, created_at, updated_at FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[])
       .map(r => ({ id: String(r.id), status: r.status as TaskStatus, request: String(r.request), workflow: String(r.workflow_name), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }))
+  }
+
+  /** 追加一次调用的 trace 事件（只追加）。 */
+  appendTrace(id: string, call: string, events: TraceEvent[]): void {
+    if (events.length === 0) return
+    this.tx(() => {
+      let next = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM trace WHERE task_id = ? AND call_id = ?').get(id, call) as { n: number }).n
+      const insert = this.db.prepare('INSERT INTO trace (task_id, call_id, seq, event) VALUES (?, ?, ?, ?)')
+      for (const e of events) insert.run(id, call, ++next, JSON.stringify(e))
+    })
+  }
+
+  hasTrace(id: string, call: string): boolean {
+    return this.db.prepare('SELECT 1 FROM trace WHERE task_id = ? AND call_id = ? LIMIT 1').get(id, call) !== undefined
+  }
+
+  trace(id: string): TraceRow[] {
+    return (this.db.prepare('SELECT call_id, seq, event FROM trace WHERE task_id = ? ORDER BY call_id, seq').all(id) as Record<string, unknown>[])
+      .map(r => ({ call: String(r.call_id), seq: Number(r.seq), event: JSON.parse(String(r.event)) as TraceEvent }))
   }
 
   events(id: string): EventRow[] {

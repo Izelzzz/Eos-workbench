@@ -10,6 +10,7 @@ import type { Usage } from '../engine/types.ts'
 import { zeroUsage } from '../engine/types.ts'
 import type { DeepSeekHarness as Harness, HarnessSession } from '../../vendor/dsh-sdk-client/index.ts'
 import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
+import type { TraceEvent } from '../trace/types.ts'
 import type { AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
@@ -41,6 +42,35 @@ const textOf = (e: LogEvent): string => {
   return content.filter(c => c.type === 'text').map(c => c.text ?? '').join('')
 }
 
+const contentOf = (e: LogEvent) => (e.data?.message?.content ?? e.data?.content ?? []) as { type: string; text?: string; id?: string; name?: string; arguments?: string }[]
+
+/** dsh 事件 → 平台的 TraceEvent。实时推送的事件和磁盘日志里的事件结构相同，都走这里；不关心的类型返回 undefined。 */
+export const normalize = (e: LogEvent): TraceEvent | undefined => {
+  const step = Number(e.data?.step ?? 0)
+  switch (e.type) {
+    case 'step/start':
+      return { kind: 'step_start', t: e.time, step }
+    case 'step/end':
+      return { kind: 'step_end', t: e.time, step }
+    case 'assistant/message': {
+      const c = contentOf(e)
+      const model = e.data?.message?.source?.model
+      return {
+        kind: 'model', t: e.time, step, usage: usageOf([e]), ...(model === undefined ? {} : { model }),
+        reasoning: c.filter(x => x.type === 'reasoning').map(x => x.text ?? '').join(''),
+        text: c.filter(x => x.type === 'text').map(x => x.text ?? '').join(''),
+        toolCalls: c.filter(x => x.type === 'tool-call').map(x => ({ id: String(x.id), name: String(x.name), args: String(x.arguments ?? '') })),
+      }
+    }
+    case 'tool/call':
+      return { kind: 'tool_start', t: e.time, step, id: String(e.data?.callId), name: String(e.data?.name), args: String(e.data?.arguments ?? '') }
+    case 'tool/result':
+      return { kind: 'tool_end', t: e.time, id: String(e.data?.message?.toolCallId), output: contentOf(e).map(x => x.text ?? '').join(''), isError: e.data?.message?.isError === true }
+    default:
+      return undefined
+  }
+}
+
 const modelOf = (events: LogEvent[]): string | undefined =>
   events.filter(e => e.type === 'assistant/message').map(e => e.data?.message?.source?.model).filter(Boolean).at(-1)
 
@@ -50,12 +80,26 @@ const MARKED = /<!-- eos:[^ ]+ -->/
  * 带 nonce 的那条用户消息之后的回复。一次调用可能跨多个 turn（agent 等后台命令时，命令结束会再起一个 turn），
  * 所以一直看到下一条带 nonce 的消息（或日志末尾）为止，并要求最后一个 turn 已经结束；否则说明那次调用没做完。
  */
-export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {
+/** 带 nonce 的那条消息到下一条带 nonce 的消息之间的事件（不含两端）。 */
+const rangeOf = (events: LogEvent[], nonce: string): { start: number; range: LogEvent[] } | undefined => {
   const start = events.findLastIndex(e => e.type === 'user/message' && textOf(e).includes(marker(nonce)))
   if (start < 0) return undefined
   const rest = events.slice(start + 1)
   const next = rest.findIndex(e => e.type === 'user/message' && MARKED.test(textOf(e)))
-  const range = next < 0 ? rest : rest.slice(0, next)
+  return { start, range: next < 0 ? rest : rest.slice(0, next) }
+}
+
+/** 一次调用在会话日志里的 trace（给运行时没有记录事件流的调用回放用）。 */
+export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
+  const found = rangeOf(events, nonce)
+  if (found === undefined) return []
+  return [{ kind: 'call_start', t: events[found.start]!.time }, ...found.range.map(normalize).filter((x): x is TraceEvent => x !== undefined)]
+}
+
+export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {
+  const found = rangeOf(events, nonce)
+  if (found === undefined) return undefined
+  const { start, range } = found
   const end = range.findLastIndex(e => e.type === 'turn/end')
   if (end < 0 || range.slice(end + 1).some(e => e.type === 'turn/start')) return undefined
   const turn = range.slice(0, end + 1)
@@ -143,12 +187,18 @@ export class DshExecutor implements Executor {
     return s
   }
 
-  async send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler }): Promise<Reply> {
+  async send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     const s = await this.session(p.key, p.spec)
     this.asks.set(s.id, p.ask)
     const started = Date.now()
     try {
-      const r = await s.run(`${p.prompt}\n\n${marker(p.nonce)}`)
+      const r = await s.run(`${p.prompt}\n\n${marker(p.nonce)}`, {
+        onNotification: n => {
+          if (n.method !== 'session.event' || n.params.sessionId !== s.id || p.onEvent === undefined) return
+          const e = normalize(n.params.event as LogEvent)
+          if (e !== undefined) p.onEvent(e)
+        },
+      })
       if (r.finishReason === 'error') throw new Error(r.finalResponse || 'dsh 返回错误')
       const events = r.events as unknown as LogEvent[]
       const model = modelOf(events)
@@ -162,6 +212,11 @@ export class DshExecutor implements Executor {
     const id = sessionIdFor(key)
     const events = this.readLog(id)
     return events === undefined ? undefined : replyAfter(events, nonce, id)
+  }
+
+  async traceOf(key: string, nonce: string): Promise<TraceEvent[]> {
+    const events = this.readLog(sessionIdFor(key))
+    return events === undefined ? [] : traceAfter(events, nonce)
   }
 
   async close(): Promise<void> {

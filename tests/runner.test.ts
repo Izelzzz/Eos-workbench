@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import type { Call, Task } from '../src/engine/types.ts'
 import type { AskHandler, Executor, Reply } from '../src/executor/types.ts'
+import type { TraceEvent } from '../src/trace/types.ts'
 import { keyOf, nonceOf, runTask } from '../src/runner/runner.ts'
 import { Store } from '../src/store/store.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
@@ -18,13 +19,18 @@ class FakeExecutor implements Executor {
   sent: string[] = []
   completed = new Map<string, Reply>()
   constructor(private readonly script: Script) {}
-  async send(p: { key: string; prompt: string; nonce: string; ask: AskHandler }): Promise<Reply> {
+  async send(p: { key: string; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     this.sent.push(p.nonce)
+    p.onEvent?.({ kind: 'step_start', t: 10, step: 1 })
     const text = await this.script(p)
+    p.onEvent?.({ kind: 'step_end', t: 20, step: 1 })
     return { sessionId: `s:${p.key}`, text, usage: { input: 100, output: 10, cacheRead: 1000, cacheWrite: 0 }, ms: 50, model: 'deepseek-flash' }
   }
   async findReply(_key: string, nonce: string) {
     return this.completed.get(nonce)
+  }
+  async traceOf() {
+    return [{ kind: 'call_start' as const, t: 1 }, { kind: 'step_start' as const, t: 2, step: 1 }]
   }
   async close() {}
 }
@@ -118,4 +124,16 @@ test('without wait, the runner returns when the loop needs the user', async () =
   const task = await runTask('t', { store, executor: ex, pollMs: 1, wait: false })
   assert.equal(task.status, 'waiting_user')
   assert.equal(task.question?.source, 'loop')
+})
+
+test('every call gets a trace: streamed while it runs, replayed from the session log when recovered', async () => {
+  (reviewOnce as any).n = 0
+  const { store } = setup()
+  const ex = new FakeExecutor(reviewOnce)
+  const first = store.get('t')!.pending as Call
+  ex.completed.set(nonceOf('t', first), { sessionId: 's:t/plan', text: '找回的方案', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1 })
+  await runTask('t', { store, executor: ex, pollMs: 1 })
+  const trace = store.trace('t')
+  assert.deepEqual(trace.filter(r => r.call === 'c1').map(r => r.event.kind), ['call_start', 'step_start'], 'recovered call replayed from the log')
+  assert.deepEqual(trace.filter(r => r.call === 'c2').map(r => r.event.kind), ['call_start', 'step_start', 'step_end'], 'live call streamed')
 })

@@ -53,13 +53,18 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     const key = keyOf(id, call.session)
     const nonce = nonceOf(id, call)
     const recovered = await o.executor.findReply(key, nonce)
-    if (recovered !== undefined) log(`↺ ${label(task, call)}：会话里已有这次调用的回复，直接使用`)
-    else log(`→ ${label(task, call)}`)
+    if (recovered !== undefined) {
+      log(`↺ ${label(task, call)}：会话里已有这次调用的回复，直接使用`)
+      // 崩溃前那次运行的事件流可能没记全：已有的保留，没有就从会话日志回放。
+      if (!o.store.hasTrace(id, call.id)) o.store.appendTrace(id, call.id, await o.executor.traceOf(key, nonce))
+    } else log(`→ ${label(task, call)}`)
     let reply = recovered
     if (reply === undefined) {
+      o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now() }])
       try {
         reply = await o.executor.send({
           key, nonce, prompt: call.prompt,
+          onEvent: e => o.store.appendTrace(id, call.id, [e]),
           spec: { model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: o.store.meta(id).worktree },
           ask: (q, signal) => waitForAnswer(call, q, signal),
         })
