@@ -26,6 +26,8 @@ export class Supervisor {
     store: Store
     executor: Executor
     dataDir: string
+    /** 记在事件里的发起方：命令行或 Web 页面。 */
+    actor?: 'cli' | 'web'
     /** 每个任务的进度行。 */
     log?: (id: string, line: string) => void
     pollMs?: number
@@ -54,7 +56,7 @@ export class Supervisor {
       const msg = String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
-    this.o.store.create({ id, request, context: contextFor(w), workflow: loaded.workflow, workflowSource: loaded.source, meta: w }, Date.now())
+    this.o.store.create({ id, request, context: contextFor(w), workflow: loaded.workflow, workflowSource: loaded.source, meta: w }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
   }
 

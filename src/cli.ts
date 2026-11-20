@@ -143,7 +143,7 @@ const commands: Record<string, () => Promise<void> | void> = {
   async web() {
     const port = Number(values.port)
     const ex = executor()
-    const sup = new Supervisor({ store, executor: ex, dataDir, log: (id, line) => say(`[${id}] ${line}`) })
+    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => say(`[${id}] ${line}`) })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist') })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
     say(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，Ctrl+C 退出）`)

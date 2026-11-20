@@ -54,6 +54,7 @@ test('a created task gets its own branch and worktree under the data directory a
   const meta = s.store.meta(created.id)
   assert.equal(meta.branch, `eos/${created.id}`)
   assert.ok(meta.worktree.startsWith(s.data) && existsSync(meta.worktree))
+  assert.equal(s.store.events(created.id)[0]?.actor, 'cli')
   const started = sup.start(created.id)
   assert.ok(started.ok)
   assert.equal(sup.running(created.id), true)
