@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentEnv, replyAfter, sessionIdFor } from '../src/executor/dsh.ts'
+import { agentEnv, replyAfter, sessionIdFor, traceAfter } from '../src/executor/dsh.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
@@ -51,4 +51,15 @@ test('a call that spans several turns is claimed only after its last turn, with 
   assert.equal(r?.usage.input, 10)
   assert.equal(r?.ms, 8)
   assert.equal(replyAfter(log.slice(0, 6), 'n1', 's'), undefined, 'second turn started but not finished')
+})
+
+test('trace replay starts at the turn, keeping the first step that dsh opens before inserting the message', () => {
+  const log = [
+    user('旧 <!-- eos:n0 -->', 1), end(2),
+    { type: 'turn/start', time: 10 }, { type: 'step/start', time: 11, data: { step: 1 } }, user('m <!-- eos:n1 -->', 12),
+    assistant('', 15), { type: 'tool/call', time: 16, data: { step: 1, callId: 'k1', name: 'bash', arguments: '{"command":"ls"}' } },
+    { type: 'tool/result', time: 18, data: { message: { toolCallId: 'k1', isError: false, content: [{ type: 'text', text: 'a.js' }] } } },
+    { type: 'step/end', time: 19, data: { step: 1 } }, end(20),
+  ]
+  assert.deepEqual(traceAfter(log, 'n1').map(e => [e.kind, e.t]), [['call_start', 10], ['step_start', 11], ['model', 15], ['tool_start', 16], ['tool_end', 18], ['step_end', 19]])
 })

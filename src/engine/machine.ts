@@ -54,7 +54,8 @@ const toUpstream = (task: Task, d: DialogNode, prompt: string): Task =>
   issue(withDialog(task, { phase: 'reconfirm' }), { node: d.id, session: d.escalate!, role: nodeOf(task.workflow, d.escalate!).role, purpose: 'reconfirm', prompt })
 
 const ask = (task: Task, q: Omit<Question, 'id'>, at: number): Task => {
-  const question: Question = { ...q, id: `q${task.log.filter(e => e.type === 'question').length + 1}` }
+  const node = task.dialog?.node ?? task.pending?.node
+  const question: Question = { ...q, ...(node === undefined ? {} : { node }), id: `q${task.log.filter(e => e.type === 'question').length + 1}` }
   return append({ ...task, status: 'waiting_user', question, pending: q.source === 'loop' ? undefined : task.pending }, { type: 'question', at, question })
 }
 
@@ -162,6 +163,13 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
     case 'abort':
       return ok(append({ ...task, status: 'aborted', pending: undefined, question: undefined }, { type: 'note', at, text: '已中止' }))
   }
+}
+
+/** 一次调用发到了哪个会话：完成工作和评审在节点自己的会话里，回应和调整在被评审方的会话里，重新确认在上游的会话里。 */
+export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['purpose'] }): string => {
+  const n = wf.nodes.find(x => x.id === call.node)
+  if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'critique') return call.node
+  return call.purpose === 'reconfirm' ? n.escalate ?? call.node : n.with
 }
 
 /** 当前节点在流程中的位置说明，给命令行和日志用。 */

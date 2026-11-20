@@ -93,7 +93,12 @@ const rangeOf = (events: LogEvent[], nonce: string): { start: number; range: Log
 export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
   const found = rangeOf(events, nonce)
   if (found === undefined) return []
-  return [{ kind: 'call_start', t: events[found.start]!.time }, ...found.range.map(normalize).filter((x): x is TraceEvent => x !== undefined)]
+  // dsh 先开始一轮和第一步，再把这条消息插进去：从这一轮的 turn/start 起算，补上排在消息前面的第一个 step/start。
+  const turn = events.slice(0, found.start).findLastIndex(e => e.type === 'turn/start' || e.type === 'turn/end')
+  const head = turn >= 0 && events[turn]!.type === 'turn/start' ? events.slice(turn, found.start) : []
+  const t = head[0]?.time ?? events[found.start]!.time
+  const lead = head.filter(e => e.type === 'step/start')
+  return [{ kind: 'call_start', t }, ...[...lead, ...found.range].map(normalize).filter((x): x is TraceEvent => x !== undefined)]
 }
 
 export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {

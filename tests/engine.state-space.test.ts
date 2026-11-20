@@ -124,3 +124,23 @@ for (const config of [{ maxRounds: 2, escalate: true }, { maxRounds: 1, escalate
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')
   })
 }
+
+test('sessionOf agrees with the session every reachable pending call was sent to', async () => {
+  const { sessionOf } = await import('../src/engine/machine.ts')
+  for (const config of [{ maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: false }]) {
+    const wf = workflow(config)
+    const seen = new Set<string>()
+    let frontier = [newTask({ id: 't', request: 'r', workflow: wf }, 0)]
+    while (frontier.length > 0) {
+      const next: Task[] = []
+      for (const t of frontier) {
+        if (t.pending !== undefined) assert.equal(sessionOf(wf, t.pending), t.pending.session, `${t.pending.purpose}@${t.pending.node}`)
+        for (const e of eventsFor(t)) {
+          const s = reduce(t, e, 1).task
+          if (!seen.has(key(s))) { seen.add(key(s)); next.push(s) }
+        }
+      }
+      frontier = next
+    }
+  }
+})

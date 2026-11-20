@@ -46,6 +46,8 @@ export type Question = {
   id: string
   /** agent：调用进行中 agent 主动提问，调用挂起等回答；loop：对话循环走到尽头，需要用户指示。 */
   source: QuestionSource
+  /** 提问时所在的节点。 */
+  node?: NodeId
   call?: CallId
   text: string
   options?: string[]

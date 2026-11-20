@@ -13,7 +13,7 @@ export type TraceEvent =
   | { kind: 'step_end'; t: number; step: number }
 
 export type SpanKind = 'task' | 'node' | 'call' | 'model' | 'tool' | 'question' | 'answer' | 'note'
-export type SpanStatus = 'ok' | 'error' | 'running' | 'waiting'
+export type SpanStatus = 'ok' | 'error' | 'running' | 'waiting' | 'pending'
 
 export type Span = {
   id: string
