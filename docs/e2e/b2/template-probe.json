@@ -1,0 +1,534 @@
+{
+  "code": {
+    "commit": "a5d593d",
+    "uncommitted": []
+  },
+  "dsh": "0.2.2-rc.5",
+  "model": "deepseek-flash",
+  "allOk": true,
+  "baseline": {
+    "started": true,
+    "tools": [
+      "ask_user_question",
+      "bash",
+      "create_goal",
+      "edit",
+      "get_goal",
+      "glob",
+      "grep",
+      "job_kill",
+      "job_list",
+      "job_output",
+      "list_agents",
+      "present",
+      "read",
+      "read_image",
+      "schedule_create",
+      "schedule_edit",
+      "schedule_list",
+      "schedule_view",
+      "send_message",
+      "skill",
+      "subagent",
+      "subagent_fork",
+      "todo_write",
+      "update_goal",
+      "wait_agent",
+      "web_fetch",
+      "web_search",
+      "workflow",
+      "working_directory",
+      "write"
+    ]
+  },
+  "groups": [
+    {
+      "group": "web",
+      "rows": [
+        "tool-web"
+      ],
+      "started": true,
+      "expectedGone": [
+        "web_fetch",
+        "web_search"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow",
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "todo_write",
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [],
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "create_goal",
+        "edit",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "update_goal",
+        "wait_agent",
+        "workflow",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    },
+    {
+      "group": "subagent",
+      "rows": [
+        "tool-subagent",
+        "tool-subagent-fork",
+        "tool-subagent-control",
+        "tool-agent-team",
+        "tool-workflow"
+      ],
+      "started": true,
+      "expectedGone": [
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "web_fetch",
+        "web_search",
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "todo_write",
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [
+        "list_subagent_models",
+        "interrupt_agent",
+        "team_task_create",
+        "team_task_get",
+        "team_task_list",
+        "team_task_update"
+      ],
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "create_goal",
+        "edit",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "present",
+        "read",
+        "read_image",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "skill",
+        "todo_write",
+        "update_goal",
+        "web_fetch",
+        "web_search",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    },
+    {
+      "group": "bash",
+      "rows": [
+        "tool-bash",
+        "tool-pwsh",
+        "tool-jobs"
+      ],
+      "started": true,
+      "expectedGone": [
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "web_fetch",
+        "web_search",
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "todo_write",
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [
+        "pwsh"
+      ],
+      "tools": [
+        "ask_user_question",
+        "create_goal",
+        "edit",
+        "get_goal",
+        "glob",
+        "grep",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "update_goal",
+        "wait_agent",
+        "web_fetch",
+        "web_search",
+        "workflow",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    },
+    {
+      "group": "schedule",
+      "rows": [
+        "tool-schedule"
+      ],
+      "started": true,
+      "expectedGone": [
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "web_fetch",
+        "web_search",
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow",
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "todo_write",
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [],
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "create_goal",
+        "edit",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "update_goal",
+        "wait_agent",
+        "web_fetch",
+        "web_search",
+        "workflow",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    },
+    {
+      "group": "todo",
+      "rows": [
+        "tool-todo"
+      ],
+      "started": true,
+      "expectedGone": [
+        "todo_write"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "web_fetch",
+        "web_search",
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow",
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [],
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "create_goal",
+        "edit",
+        "get_goal",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "update_goal",
+        "wait_agent",
+        "web_fetch",
+        "web_search",
+        "workflow",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    },
+    {
+      "group": "goal",
+      "rows": [
+        "tool-goal"
+      ],
+      "started": true,
+      "expectedGone": [
+        "create_goal",
+        "get_goal",
+        "update_goal"
+      ],
+      "stillThere": [],
+      "othersExpected": [
+        "web_fetch",
+        "web_search",
+        "subagent",
+        "subagent_fork",
+        "list_agents",
+        "send_message",
+        "wait_agent",
+        "workflow",
+        "bash",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "todo_write"
+      ],
+      "othersMissing": [],
+      "notInBaseline": [],
+      "tools": [
+        "ask_user_question",
+        "bash",
+        "edit",
+        "glob",
+        "grep",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "list_agents",
+        "present",
+        "read",
+        "read_image",
+        "schedule_create",
+        "schedule_edit",
+        "schedule_list",
+        "schedule_view",
+        "send_message",
+        "skill",
+        "subagent",
+        "subagent_fork",
+        "todo_write",
+        "wait_agent",
+        "web_fetch",
+        "web_search",
+        "workflow",
+        "working_directory",
+        "write"
+      ],
+      "ok": true
+    }
+  ],
+  "combined": {
+    "denied": [
+      "web",
+      "subagent",
+      "bash"
+    ],
+    "checks": [
+      {
+        "name": "技能：模板给的技能真的被用上了（日志里有 skill 调用）",
+        "ok": true
+      },
+      {
+        "name": "技能：口令出现在回复里（技能内容确实到了模型手上）",
+        "ok": true
+      },
+      {
+        "name": "技能隔离：会话里只有模板给的技能，没有 dsh 自带的 Office 技能",
+        "ok": true
+      },
+      {
+        "name": "MCP：工具出现在工具表里",
+        "ok": true
+      },
+      {
+        "name": "MCP：agent 调用了它",
+        "ok": true
+      },
+      {
+        "name": "MCP：返回值原样回来了",
+        "ok": true
+      },
+      {
+        "name": "限制的工具组：工具表里一个都没有",
+        "ok": true
+      },
+      {
+        "name": "限制的工具组：agent 一次也没调到（日志里没有这些工具调用）",
+        "ok": true
+      },
+      {
+        "name": "没限制的工具还在（读写文件、技能、提问）",
+        "ok": true
+      },
+      {
+        "name": "组合这一轮正常跑完（限制之后 dsh 照常启动）",
+        "ok": true
+      }
+    ],
+    "tools": [
+      "ask_user_question",
+      "create_goal",
+      "edit",
+      "get_goal",
+      "glob",
+      "grep",
+      "list_mcp_resource_templates",
+      "list_mcp_resources",
+      "mcp__eosprobe__probe_code",
+      "present",
+      "read",
+      "read_image",
+      "read_mcp_resource",
+      "schedule_create",
+      "schedule_edit",
+      "schedule_list",
+      "schedule_view",
+      "skill",
+      "todo_write",
+      "update_goal",
+      "working_directory",
+      "write"
+    ],
+    "skills": [
+      "eos-probe-skill"
+    ],
+    "calls": [
+      "skill",
+      "mcp__eosprobe__probe_code"
+    ],
+    "results": [
+      {
+        "output": "<skill_content name=\"eos-probe-skill\">\n<skill_resources>\nBase directory for this skill: /home/user/Eos-workbench/.claude/worktrees/agent-a4283965108ae1316/.eos/b2-template-probe/dsh/profiles/d27395a54",
+        "isError": false
+      },
+      {
+        "output": "MCP-OK-5821",
+        "isError": false
+      }
+    ],
+    "reply": "下面按顺序逐条报告。\n\n**1. 探针口令**\n按 `eos-probe-skill` 技能的回答规范，口令原样为：\n\n```\nSKILL-OK-7319\n```\n\n**2. `mcp__eosprobe__probe_code` 的返回内容**\n调用成功，原样返回：\n\n```\nMCP-OK-5821\n```\n\n**3. 尝试调用 web_fetch、subagent、bash**\n这三个工具在本会话中都**不存在**，因此无法真正发起调用（并非调用后报错，而是工具清单里没有它们）：\n\n| 工具 | 是否存在 | 说明 |\n| --- | --- | --- |\n| `web_fetch` | 否 | 本会话未提供任何网页抓取类工具，无法访问网络页面 |\n| `subagent` | 否 | 本会话未提供派生子 agent 的工具；仓库约定也要求写代码只用主 agent |\n| `bash` | 否 | 本会话未提供命令行/终端执行工具，无法执行 shell 命令 |\n\n能替代的只读能力是：`read` / `write` / `edit`（文件读写）、`glob` / `grep`（按路径、内容检索）、`read_image`，以及 MCP 工具 `eosprobe`。\n\n**4. 当前能看到的全部技能名**\n本会话技能目录里只有一项：\n\n```\neos-probe-skill\n```\n\n（目录中只标注了该技能的摘要：回答\"探针口令是什么\"时必须使用它。）"
+  }
+}

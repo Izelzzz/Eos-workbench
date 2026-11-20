@@ -67,6 +67,12 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     let reply = recovered
     let asking: Promise<unknown> = Promise.resolve()
     if (reply === undefined) {
+      const meta = o.store.meta(id)
+      // 这个角色能看到的技能：只有它自己列出来的，内容用任务创建时的快照（平台上之后的修改不影响正在跑的任务）。
+      const skills = (meta.skills ?? []).filter(s => role.skills.includes(s.name)).map(s => ({ name: s.name, content: s.content }))
+      // 角色写了技能名但任务快照里没有：agent 会少一份本该有的说明，结果看着正常却是错的，所以记一行。
+      const missing = role.skills.filter(name => !skills.some(s => s.name === name))
+      if (missing.length > 0) log(`  （警告：角色 ${call.role} 要的技能 ${missing.join('、')} 不在任务快照里，这次调用看不到它们）`)
       o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now(), call: { node: call.node, role: call.role, purpose: call.purpose, prompt: call.prompt } }])
       try {
         reply = await o.executor.send({
@@ -79,7 +85,10 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
               log(`  （trace 记录失败：${(err as Error).message}）`)
             }
           },
-          spec: { model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: o.store.meta(id).worktree },
+          spec: {
+            model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: meta.worktree,
+            profile: { denyTools: role.denyTools, skills, mcp: role.mcp },
+          },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
           ask: (q, signal) => {
             const next = asking.then(() => waitForAnswer(call, q, signal))

@@ -8,19 +8,103 @@
 // - 会话 id 由 key 确定性地算出，进程崩溃后总能找回同一个会话。
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
+import { stringify as stringifyYaml } from 'yaml'
 import type { Usage } from '../engine/types.ts'
 import { zeroUsage } from '../engine/types.ts'
 import type { DeepSeekHarness as Harness, HarnessSession } from '../../vendor/dsh-sdk-client/index.ts'
 import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
 import type { DeepSeekHarnessOptions } from '../../vendor/dsh-sdk-client/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
+import type { ToolGroup } from '../workflow/types.ts'
+import type { AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
 const PRESET: Record<AgentSpec['write'], string> = { none: 'read-only', worktree: 'workspace-write' }
+
+/**
+ * 工具组 → dsh 的插件行 id。dsh 只能整行关掉插件，一个能力常常分散在好几行里
+ * （子 agent 的派发、fork、控制、团队任务和 workflow 各占一行），所以平台按组限制，不按单个工具名。
+ * 每组的映射都由 scripts/template-probe.ts 用真实的 dsh 核对：关掉这些行之后 dsh 还能启动，
+ * 这一组的工具从请求头的工具表里消失，别的组的工具还在。工具名见 dsh 的 docs/tool-catalog.md。
+ */
+export const GROUP_ROWS: Record<ToolGroup, string[]> = {
+  web: ['tool-web'],
+  subagent: ['tool-subagent', 'tool-subagent-fork', 'tool-subagent-control', 'tool-agent-team', 'tool-workflow'],
+  bash: ['tool-bash', 'tool-pwsh', 'tool-jobs'],
+  schedule: ['tool-schedule'],
+  todo: ['tool-todo'],
+  goal: ['tool-goal'],
+}
+
+/**
+ * 每组的那些行提供的工具名。只用来核对映射（探针按它检查工具表），运行时的限制靠 GROUP_ROWS。
+ * 这里列的是 tool-catalog 里这些行能提供的全部工具；当前的 dsh 配置不一定都开着
+ * （例如 pwsh 只在 Windows 上，interrupt_agent 和 team_task_* 要另外的配置），
+ * 探针会把"基线里本来就没有"的工具单独记下来，它们等于没验过。
+ */
+export const GROUP_TOOLS: Record<ToolGroup, string[]> = {
+  web: ['web_fetch', 'web_search'],
+  subagent: [
+    'subagent', 'subagent_fork', 'list_subagent_models', 'list_agents', 'send_message', 'wait_agent', 'interrupt_agent',
+    'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update', 'workflow',
+  ],
+  bash: ['bash', 'pwsh', 'job_kill', 'job_list', 'job_output'],
+  schedule: ['schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view'],
+  todo: ['todo_write'],
+  goal: ['create_goal', 'get_goal', 'update_goal'],
+}
+
+/**
+ * 不管角色怎么配都关掉的行：
+ * tool-plugin-manager——agent 不能自己装插件，否则它能把平台去掉的工具再装回来；
+ * skill-office——sdk profile 自带的 Office 技能，开着的话 agent 会看到模板之外的技能。
+ */
+export const ALWAYS_DISABLED = ['tool-plugin-manager', 'skill-office']
+
+/**
+ * 能力面的指纹。dsh 把工具、技能和 MCP 都按进程配置（profile 补丁），不能按会话配，
+ * 所以指纹进进程的路由键：能力面相同的角色共用一个 dsh 进程，不同的各起一个。
+ * 技能按名字排序（技能目录是个集合，先后无意义）；MCP 保持模板里的顺序。
+ */
+export const profileHash = (p: AgentProfile): string =>
+  createHash('sha256').update(JSON.stringify([
+    [...p.denyTools].sort(),
+    [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    p.mcp.map(m => [m.name, m.command, m.args, Object.entries(m.env).sort()]),
+  ])).digest('hex').slice(0, 16)
+
+/**
+ * 这个能力面的 profile 补丁（cordis.patch.yml 的内容）。值都是数据，由 yaml 包序列化，不做字符串拼接。
+ * skill-filesystem 总是只指向本能力面的技能目录（哪怕一个技能都没有）：includeDefaultRoots 关掉之后，
+ * agent 看不到仓库和用户目录里的技能，只看得到模板给它的。
+ */
+export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): unknown[] => {
+  const disabled = [...new Set([...ALWAYS_DISABLED, ...p.denyTools.flatMap(g => GROUP_ROWS[g])])]
+  return [
+    ...disabled.map(id => ({ id, disabled: true })),
+    { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: [skillsDir] } },
+    ...(p.mcp.length === 0 ? [] : [{
+      insert: p.mcp.map((m, i) => ({
+        id: `eos-mcp-${i}`,
+        name: '@deepseek-ai/dsh-mcp-client',
+        config: {
+          transport: 'stdio', serverName: m.name, command: m.command, args: m.args, env: m.env,
+          // MCP 服务的子进程跑在平台自己的目录里，不是任务的 worktree：它不受 agent 沙箱约束，
+          // 用的是平台进程的权限（能读写 worktree 以外的文件、能联网）。模板里加 MCP 服务等于给平台级信任。
+          cwd: mcpCwd,
+          toolCallTimeoutMs: 60_000, closeTimeoutMs: 5_000,
+          // 配置里的值原样用，不做 ${...} 展开：模板里的值不能变成读环境变量的手段。
+          expandTemplates: false,
+          // 服务起不来就让会话失败，而不是让 agent 少一个工具照常干活。
+          failOnStartupError: true,
+        },
+      })),
+    }]),
+  ]
+}
 
 type LogEvent = { type: string; time: number; data?: Record<string, any> }
 
@@ -176,16 +260,17 @@ export class DshExecutor implements Executor {
   }) {}
 
   private harness(spec: AgentSpec): Harness {
-    const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}`
+    const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
+      const patch = this.materialize(spec.profile)
       const create = this.opts.createHarness ?? (o => {
         mkdirSync(o.processCwd!, { recursive: true })
         return new DeepSeekHarness(o)
       })
       h = create({
         // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
-        cwd: spec.cwd, processCwd: this.processCwd,
+        cwd: spec.cwd, processCwd: this.processCwd, patches: [patch],
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
         env: agentEnv(this.opts.env ?? process.env),
@@ -200,6 +285,51 @@ export class DshExecutor implements Executor {
   /** dsh 进程的工作目录：在 dsh home 里，agent 写不到，里面没有 .env。 */
   get processCwd(): string {
     return join(this.opts.dshHome, 'process-cwd')
+  }
+
+  /** MCP 服务子进程的工作目录：平台自己的目录，不是任务的 worktree（见 patchRows 里的说明）。 */
+  get mcpCwd(): string {
+    return join(this.opts.dshHome, 'mcp-cwd')
+  }
+
+  /** 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。 */
+  profileDir(profile: AgentProfile): string {
+    return join(this.opts.dshHome, 'profiles', profileHash(profile))
+  }
+
+  /** 写出这个能力面的 profile 补丁和技能目录，返回补丁文件路径。 */
+  private materialize(profile: AgentProfile): string {
+    const dir = this.profileDir(profile)
+    const skillsDir = join(dir, 'skills')
+    mkdirSync(skillsDir, { recursive: true })
+    mkdirSync(this.mcpCwd, { recursive: true })
+    for (const s of profile.skills) {
+      // 技能名在边界上已经校验过（只有小写字母、数字和连字符），可以直接当目录名。
+      mkdirSync(join(skillsDir, s.name), { recursive: true })
+      writeFileSync(join(skillsDir, s.name, 'SKILL.md'), s.content)
+    }
+    const file = join(dir, 'cordis.patch.yml')
+    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)))
+    return file
+  }
+
+  /**
+   * 这个会话实际拿到的工具名（从会话日志里最后一个请求头读）。
+   * 核对工具组限制用：以发给模型的工具表为准，不看 agent 自己说它有什么。
+   */
+  toolsOffered(key: string): string[] {
+    const header = this.readLog(sessionIdFor(key))?.findLast(e => e.type === 'request/header')?.data?.header as { tools?: { name?: unknown }[] } | undefined
+    return (header?.tools ?? []).map(t => String(t.name)).sort()
+  }
+
+  /**
+   * 这个会话实际看到的技能名（dsh 把技能目录作为一段 available_skills 注入会话）。
+   * 核对技能隔离用：模板给了哪些就只有哪些，没有仓库、用户目录和 dsh 自带的技能。
+   */
+  skillsOffered(key: string): string[] {
+    const texts = (this.readLog(sessionIdFor(key)) ?? []).filter(e => e.type === 'user/message').map(textOf)
+    const block = texts.map(t => /<available_skills>([\s\S]*?)<\/available_skills>/.exec(t)?.[1]).findLast(b => b !== undefined)
+    return [...(block ?? '').matchAll(/^\s*-\s*`([^`]+)`/gm)].map(m => m[1]!).sort()
   }
 
   /** 会话日志第一行是会话头，里面的 cwd 就是这个会话的工作区（写入边界）。 */
