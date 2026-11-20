@@ -1,5 +1,5 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -8,6 +8,7 @@ import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor } from './executor/dsh.ts'
 import { commitAll, contextFor, createWorktree, diffStat } from './runner/git.ts'
+import { acquire } from './runner/lock.ts'
 import { runTask } from './runner/runner.ts'
 import { Store } from './store/store.ts'
 import { builtinTemplates, loadWorkflow } from './workflow/templates.ts'
@@ -51,27 +52,13 @@ const taskOf = (id: string | undefined): Task => {
   return store.get(id) ?? fail(`没有任务 ${id}`)
 }
 
-/** 同一个任务同一时间只允许一个 runner：锁文件里写着 pid，进程已经不在就接管。 */
 const withLock = async <T>(id: string, fn: () => Promise<T>): Promise<T> => {
-  const dir = join(dataDir, 'locks')
-  mkdirSync(dir, { recursive: true })
-  const file = join(dir, `${id}.pid`)
-  if (existsSync(file)) {
-    const pid = Number(readFileSync(file, 'utf8'))
-    let alive = false
-    try {
-      process.kill(pid, 0)
-      alive = pid !== process.pid
-    } catch {
-      alive = false
-    }
-    if (alive) fail(`任务 ${id} 正在被进程 ${pid} 运行`)
-  }
-  writeFileSync(file, String(process.pid))
+  const lock = acquire(join(dataDir, 'locks'), id)
+  if ('heldBy' in lock) return fail(`任务 ${id} 正在被进程 ${lock.heldBy} 运行`)
   try {
     return await fn()
   } finally {
-    rmSync(file, { force: true })
+    lock.release()
   }
 }
 
