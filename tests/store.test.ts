@@ -56,3 +56,12 @@ test('two connections writing the same task never lose an event', () => {
   assert.equal(b.get('t3')!.status, 'running', 'b sees the answer written through a')
   assert.equal(b.events('t3').length, 3)
 })
+
+test('a task saved before conventions and checks existed loads with defaults', () => {
+  const store = new Store(':memory:')
+  const old = { id: 'old', request: 'r', workflow: { name: 'w', roles: {}, nodes: [] }, status: 'running', cursor: 0, outputs: {}, sessions: {},
+    dialog: { node: 'review', round: 2, escalated: false, phase: 'critique', formatRetries: 0 }, log: [], nextCall: 3 }
+  store.db.prepare("INSERT INTO tasks VALUES ('old', 1, 1, 'running', 'r', 'w', '', '{}', ?)").run(JSON.stringify(old))
+  const t = store.get('old')!
+  assert.deepEqual([t.docs, t.fixes, t.dialog?.review], [[], 0, 'reply'])
+})

@@ -12,7 +12,6 @@ import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import { builtinTemplates, loadWorkflow } from '../workflow/templates.ts'
 import type { ActionResponse, AnswerResponse, CreateResponse, TaskDetail, WorkflowInfo } from './types.ts'
 
 const summaryOf = (t: Task) => ({ id: t.id, status: t.status, workflow: t.workflow.name })
@@ -138,10 +137,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   }
 
   const workflows = (): WorkflowInfo[] =>
-    builtinTemplates().map(name => {
-      const { workflow } = loadWorkflow(name)
-      return { name, ...(workflow.description === undefined ? {} : { description: workflow.description }), nodes: workflow.nodes.map(n => n.id) }
-    })
+    o.supervisor.conventions.list('workflow').map(w => ({ name: w.name, version: w.version, ...(w.description === undefined ? {} : { description: w.description }), nodes: w.nodes }))
 
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {

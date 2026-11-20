@@ -12,7 +12,7 @@ import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
 import { createWebServer } from './web/server.ts'
-import { builtinTemplates, loadWorkflow } from './workflow/templates.ts'
+import { Conventions } from './conventions/conventions.ts'
 
 const HELP = `用法：
   eos run --repo <仓库路径> [--workflow feature] "<需求>"   创建任务并运行
@@ -162,10 +162,11 @@ const commands: Record<string, () => Promise<void> | void> = {
     await new Promise(() => {})
   },
   workflows() {
-    for (const name of builtinTemplates()) {
-      const { workflow } = loadWorkflow(name)
-      say(`${name}：${workflow.description ?? ''}`)
-    }
+    const conventions = new Conventions(store)
+    conventions.seed(Date.now())
+    for (const w of conventions.list('workflow')) say(`${w.name}（第 ${w.version} 版）：${w.description ?? ''}`)
+    const docs = conventions.list('doc')
+    if (docs.length > 0) say(`\n约定文档：${docs.map(d => `${d.name}（第 ${d.version} 版）`).join('、')}`)
   },
 }
 
