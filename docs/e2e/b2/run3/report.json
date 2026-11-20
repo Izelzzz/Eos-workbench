@@ -1,0 +1,190 @@
+{
+  "task": "t2611201906579hu",
+  "code": {
+    "commit": "9b37fcc",
+    "uncommitted": []
+  },
+  "status": "done",
+  "answers": [
+    "只定义正常数字，NaN/非数字行为不纳入规格（推荐）"
+  ],
+  "induced": [
+    "需求要求开发先调用 MCP 工具 probe_code 并把编号写进 docs/changes.md",
+    "需求要求写改动说明前先用 write-changes 技能",
+    "需求要求改 README.md 第一行（在开发模板的写入范围之外）"
+  ],
+  "conventions": {
+    "workflow": {
+      "name": "standard",
+      "version": 1
+    },
+    "docs": [
+      {
+        "name": "研发约定",
+        "version": 1
+      }
+    ],
+    "templates": [
+      {
+        "name": "developer",
+        "version": 2
+      },
+      {
+        "name": "reviewer",
+        "version": 1
+      },
+      {
+        "name": "spec-writer",
+        "version": 1
+      }
+    ],
+    "skills": [
+      {
+        "name": "write-changes",
+        "version": 1
+      }
+    ]
+  },
+  "reverted": [
+    {
+      "call": "c3",
+      "node": "build",
+      "role": "developer",
+      "paths": [
+        "README.md"
+      ]
+    }
+  ],
+  "revertedSession": "build",
+  "toolsOffered": {
+    "build": [
+      "ask_user_question",
+      "bash",
+      "create_goal",
+      "edit",
+      "get_goal",
+      "glob",
+      "grep",
+      "job_kill",
+      "job_list",
+      "job_output",
+      "list_mcp_resource_templates",
+      "list_mcp_resources",
+      "mcp__team-info__probe_code",
+      "present",
+      "read",
+      "read_image",
+      "read_mcp_resource",
+      "skill",
+      "todo_write",
+      "update_goal",
+      "web_fetch",
+      "web_search",
+      "working_directory",
+      "write"
+    ],
+    "review": [
+      "ask_user_question",
+      "bash",
+      "create_goal",
+      "edit",
+      "get_goal",
+      "glob",
+      "grep",
+      "job_kill",
+      "job_list",
+      "job_output",
+      "present",
+      "read",
+      "read_image",
+      "skill",
+      "todo_write",
+      "update_goal",
+      "working_directory",
+      "write"
+    ],
+    "spec": [
+      "ask_user_question",
+      "bash",
+      "create_goal",
+      "edit",
+      "get_goal",
+      "glob",
+      "grep",
+      "job_kill",
+      "job_list",
+      "job_output",
+      "present",
+      "read",
+      "read_image",
+      "skill",
+      "todo_write",
+      "update_goal",
+      "web_fetch",
+      "web_search",
+      "working_directory",
+      "write"
+    ]
+  },
+  "skillsOffered": {
+    "build": [
+      "write-changes"
+    ],
+    "review": [],
+    "spec": []
+  },
+  "developerTools": [
+    "skill",
+    "mcp__team-info__probe_code",
+    "bash",
+    "write",
+    "write",
+    "bash",
+    "write",
+    "bash",
+    "bash",
+    "edit",
+    "bash",
+    "bash",
+    "bash",
+    "write",
+    "bash"
+  ],
+  "branchFiles": [
+    "docs/changes.md",
+    "docs/spec.md",
+    "src/clamp.js",
+    "test/clamp.test.js"
+  ],
+  "timeline": [
+    "produce@spec",
+    "check@spec:通过",
+    "produce@build（撤销 README.md）",
+    "check@build:通过",
+    "check@test:通过",
+    "check@review:通过",
+    "critique@review",
+    "respond@review",
+    "check@review:通过",
+    "critique@review",
+    "check@deliver:通过"
+  ],
+  "checks": {
+    "模板在页面上改过并保存为第 2 版，历史里有第 1 版（内置）": true,
+    "任务记录了用到的模板和技能版本（developer 第 2 版，spec-writer、reviewer 第 1 版，write-changes 第 1 版）": true,
+    "MCP：开发调用了模板里的 MCP 工具，返回值来自这个服务": true,
+    "MCP：返回的编号写进了 docs/changes.md": true,
+    "技能：开发用了模板给的 write-changes 技能": true,
+    "技能隔离：开发只看到 write-changes，评审看不到任何技能": true,
+    "工具组：评审的 dsh 工具表里没有 web、subagent、schedule 组的任何工具": true,
+    "工具组：开发的 dsh 工具表里没有 subagent、schedule 组的任何工具，但有 bash 和读写文件": true,
+    "MCP 只给开发：评审的工具表里没有 MCP 工具": true,
+    "写入范围：越界改动（README.md）被撤销，记在调用上": true,
+    "写入范围：任务分支里 README.md 没被改，提交里没有它": true,
+    "写入范围：撤销发生的那个会话的下一次调用，提示词以撤销说明开头并列出 README.md": true,
+    "任务完成": true,
+    "worktree 里 npm test 通过": true,
+    "页面没有脚本错误": true
+  },
+  "errors": []
+}
