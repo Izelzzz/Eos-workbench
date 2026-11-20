@@ -85,3 +85,16 @@ test('a call still in flight shows as running, with its open step and tool unfin
   assert.equal(step.children.at(-1)!.status, 'running')
   assert.equal(root.end, undefined)
 })
+
+test('a call that was running when the task was aborted stays in its node, marked aborted, with its usage', () => {
+  const c3 = fixture.trace.filter(r => r.call === 'c3').map(r => (r.event.kind === 'call_start'
+    ? { ...r, event: { ...r.event, call: { node: 'review', role: 'reviewer', purpose: 'critique' as const, prompt: '评审' } } } : r))
+  const log = fixture.task.log.filter(e => !(e.type === 'call' && e.call === 'c3') && !(e.type === 'note' && e.node === 'review'))
+  const aborted: Task = { ...fixture.task, status: 'aborted', cursor: 2, log, pending: undefined }
+  const root = buildTrace(aborted, [...fixture.trace.filter(r => r.call !== 'c3'), ...c3])
+  const call = root.children[2]!.children.find(c => c.id === 'c3')!
+  assert.equal(call.status, 'error')
+  assert.match(call.name, /已中止/)
+  assert.ok(call.usage!.input > 0, 'its tokens still count')
+  assert.ok(root.usage!.input >= call.usage!.input)
+})

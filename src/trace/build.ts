@@ -80,11 +80,14 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   const callSpan = (id: string): Span | undefined => {
     const entry = done.get(id)
     const pending = task.pending?.id === id ? task.pending : undefined
-    const info = entry ?? pending
-    if (info === undefined) return undefined
     const events = eventsOf.get(id) ?? []
+    // 既不是已完成的调用、也不是当前的调用：中止时正在跑的那次。用 call_start 里记下的信息放回原处。
+    const abandoned = entry === undefined && pending === undefined ? events.find(e => e.kind === 'call_start')?.call : undefined
+    const info = entry ?? pending ?? abandoned
+    if (info === undefined) return undefined
     const started = events.find(e => e.kind === 'call_start')?.t ?? (entry === undefined ? events[0]?.t : entry.at - entry.ms)
     const status: SpanStatus = entry !== undefined ? 'ok'
+      : abandoned !== undefined ? 'error'
       : task.status === 'failed' ? 'error'
       : task.question?.call === id ? 'waiting'
       : task.status === 'running' ? 'running' : 'error'
@@ -100,12 +103,13 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const usage = entry?.usage ?? sumUsage(children)
     const model = entry?.model ?? children.find(c => c.model !== undefined)?.model
     return {
-      id, kind: 'call', name: `${info.role} · ${PURPOSE[info.purpose]}${round === undefined ? '' : ` · 第 ${round} 轮`}`,
+      id, kind: 'call', name: `${info.role} · ${PURPOSE[info.purpose]}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
       start: started ?? entry?.at ?? 0, ...(entry === undefined ? {} : { end: entry.at }), status, usage,
       ...(model === undefined ? {} : { model }),
       input: info.prompt, ...(entry === undefined ? {} : { output: entry.reply }),
       meta: { 调用: id, 角色: info.role, 用途: PURPOSE[info.purpose], ...(round === undefined ? {} : { 轮次: String(round) }),
-        ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}) },
+        ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}),
+        ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }) },
       children,
     }
   }
@@ -113,7 +117,7 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   const callIds = [...new Set([...done.keys(), ...(task.pending ? [task.pending.id as string] : []), ...eventsOf.keys()])]
     .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
   const calls = callIds.map(callSpan).filter((s): s is Span => s !== undefined)
-  const nodeOfCall = new Map(callIds.map(id => [id, (done.get(id) ?? (task.pending?.id === id ? task.pending : undefined))?.node as string | undefined]))
+  const nodeOfCall = new Map(callIds.map(id => [id, (done.get(id) ?? (task.pending?.id === id ? task.pending : undefined) ?? eventsOf.get(id)?.find(e => e.kind === 'call_start')?.call)?.node as string | undefined]))
 
   const nodes: Span[] = task.workflow.nodes.map((n, i) => {
     const children = calls.filter(c => nodeOfCall.get(c.id) === n.id)

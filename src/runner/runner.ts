@@ -60,7 +60,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     } else log(`→ ${label(task, call)}`)
     let reply = recovered
     if (reply === undefined) {
-      o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now() }])
+      o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now(), call: { node: call.node, role: call.role, purpose: call.purpose, prompt: call.prompt } }])
       try {
         reply = await o.executor.send({
           key, nonce, prompt: call.prompt,
