@@ -79,7 +79,9 @@ export type Question = {
 export type TaskStatus = 'running' | 'waiting_user' | 'done' | 'failed' | 'aborted'
 
 export type Entry =
-  | { type: 'call'; at: number; call: CallId; node: NodeId; role: RoleId; purpose: Purpose; round?: number; prompt: string; reply: string; usage: Usage; ms: number; model?: string }
+  | { type: 'call'; at: number; call: CallId; node: NodeId; role: RoleId; purpose: Purpose; round?: number; prompt: string; reply: string; usage: Usage; ms: number; model?: string;
+      /** 这次调用之后被平台撤销的越界改动（超出角色 writePaths 的路径），没有就不写。 */
+      reverted?: string[] }
   | { type: 'check'; at: number; call: CallId; node: NodeId; round?: number; results: CheckResult[]; ms: number }
   | { type: 'question'; at: number; question: Question }
   | { type: 'answer'; at: number; questionId: string; text: string }
@@ -99,6 +101,11 @@ export type Task = {
   outputs: Partial<Record<string, string>>
   /** 执行器的会话 id，按会话所属的节点记录。 */
   sessions: Partial<Record<string, string>>
+  /**
+   * 还没通知出去的越界撤销（被撤销的路径），按会话记：下一次发到这个会话的调用在提示词最前面带上说明，发出后清除。
+   * 一个会话同时最多一条：要再被撤销一次，就得先往这个会话发一次调用，而那次调用会把它带走。
+   */
+  scopeNotices: Partial<Record<string, string[]>>
   dialog?: DialogState
   /** 当前 agent 节点因检查没通过已自动补齐的次数，进入新节点时清零。 */
   fixes: number
@@ -111,7 +118,8 @@ export type Task = {
 }
 
 export type Event =
-  | { kind: 'replied'; call: CallId; sessionId: string; text: string; usage: Usage; ms: number; model?: string }
+  /** reverted：这次调用之后被平台撤销的越界改动，没有越界就不写或给空数组。 */
+  | { kind: 'replied'; call: CallId; sessionId: string; text: string; usage: Usage; ms: number; model?: string; reverted?: string[] }
   | { kind: 'checked'; call: CallId; results: CheckResult[]; ms: number }
   | { kind: 'call_failed'; call: CallId; error: string }
   | { kind: 'asked'; call: CallId; question: { id: string; text: string; options?: string[] } }

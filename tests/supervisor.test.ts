@@ -7,7 +7,7 @@ import { acquire } from '../src/runner/lock.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
 import { FakeExecutor } from './fake-executor.ts'
-import { PASS } from './helpers.ts'
+import { CHANGES, PASS } from './helpers.ts'
 
 /** 临时目录里的真实 git 仓库，加一个数据目录。 */
 export const sandbox = () => {
@@ -98,6 +98,52 @@ test('resumeAll picks up unfinished tasks that nobody runs and leaves failed and
   assert.equal(s.store.get(running)!.status, 'done')
   assert.equal(s.store.get(failed)!.status, 'failed')
   if ('release' in lock) lock.release()
+})
+
+test('写到可写范围外的改动在提交前被撤销，提交里只有范围内的改动，下一次提示词带上说明', async () => {
+  const s = sandbox()
+  const prompts: string[] = []
+  let reviewed = 0
+  const executor = new FakeExecutor(async ({ key, prompt }) => {
+    prompts.push(prompt)
+    if (key.endsWith('/review')) return reviewed++ === 0 ? CHANGES : PASS
+    const worktree = s.store.meta(key.split('/')[0]!).worktree
+    mkdirSync(join(worktree, 'src'), { recursive: true })
+    writeFileSync(join(worktree, 'src/sum.ts'), 'export const sum = (a: number, b: number) => a + b\n')
+    // 范围外：改掉仓库里原有的文件，再新建一个顶层文件。
+    writeFileSync(join(worktree, 'README.md'), '# 被 agent 改了\n')
+    writeFileSync(join(worktree, 'secrets.txt'), '不该写的东西\n')
+    return '已实现'
+  })
+  const sup = supervisor(s, executor)
+  const wf = `
+name: scoped
+roles:
+  dev: { prompt: 你负责开发, write: worktree, writePaths: [src/**] }
+  rev: { prompt: 你负责评审 }
+nodes:
+  - { id: build, kind: agent, role: dev, task: 实现 sum }
+  - { id: review, kind: dialog, role: rev, with: build, maxRounds: 2, task: 评审 }
+`
+  assert.ok(sup.conventions.save({ kind: 'workflow', name: 'scoped', content: wf, actor: 'web' }, 1).ok)
+  const created = sup.create({ repo: s.repo, workflow: 'scoped', request: '加一个求和函数' })
+  assert.ok(created.ok)
+  const started = sup.start(created.id)
+  assert.ok(started.ok)
+  const task = await started.done
+  assert.equal(task.status, 'done', task.failure)
+
+  const worktree = s.store.meta(created.id).worktree
+  const log = execFileSync('git', ['log', '--name-only', '--format=', `${s.store.meta(created.id).baseSha}..HEAD`], { cwd: worktree, encoding: 'utf8' })
+  assert.deepEqual([...new Set(log.trim().split('\n').filter(l => l !== ''))], ['src/sum.ts'], '提交里只有范围内的改动')
+  assert.equal(readFileSync(join(worktree, 'README.md'), 'utf8'), '# demo\n', '范围外被改过的文件恢复了')
+  assert.equal(existsSync(join(worktree, 'secrets.txt')), false, '范围外新建的文件删掉了')
+  assert.equal(existsSync(join(worktree, 'src/sum.ts')), true)
+  const first = task.log.find(e => e.type === 'call' && e.purpose === 'produce')
+  assert.deepEqual(first?.type === 'call' ? first.reverted : undefined, ['README.md', 'secrets.txt'])
+  const respond = prompts.find(p => /评审意见/.test(p))
+  assert.match(respond ?? '', /有改动被撤销（超出你的可写范围）[\s\S]*- README\.md\n- secrets\.txt/)
+  assert.match(respond ?? '', /你可以改动的路径（任务 worktree 内的 glob）：\n- src\/\*\*/)
 })
 
 test('platform conventions drive a task: docs are injected, versions recorded, and a missing deliverable is sent back and fixed', async () => {

@@ -115,6 +115,8 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
       ...(model === undefined ? {} : { model }),
       input: info.prompt, ...(entry === undefined ? {} : { output: entry.reply }),
       meta: { 调用: id, 角色: info.role, 用途: purposeLabel(info), ...(round === undefined ? {} : { 轮次: String(round) }),
+        // 这次调用写到了可写范围外，平台在提交前撤销了这些路径。
+        ...(entry?.reverted === undefined || entry.reverted.length === 0 ? {} : { 撤销的越界改动: entry.reverted.join('、') }),
         ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}),
         ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }) },
       children,

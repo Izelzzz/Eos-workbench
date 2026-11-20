@@ -123,3 +123,17 @@ test('platform checks show under their node as check spans, one child per check 
   const review = running.children[2]!
   assert.deepEqual(review.children.map(c => [c.kind, c.status]), [['check', 'running']], 'the review round’s tests are running')
 })
+
+test('被撤销的越界改动显示在调用 span 的 meta 上，节点下也有一条说明', async () => {
+  const { Driver, workflow } = await import('./helpers.ts')
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true }))
+  d.reply('方案')
+  const call = d.pending
+  d.send({ kind: 'replied', call: call.id, sessionId: 's-build', text: '实现', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1, reverted: ['README.md', 'secrets.txt'] })
+  const build = buildTrace(d.task, []).children[1]!
+  const span = build.children.find(c => c.kind === 'call')!
+  assert.equal(span.meta['撤销的越界改动'], 'README.md、secrets.txt')
+  assert.deepEqual(build.children.filter(c => c.kind === 'note').map(c => c.name), ['撤销了 2 处越界改动：README.md、secrets.txt'])
+  const clean = buildTrace(new Driver(workflow({ maxRounds: 2, escalate: true })).task, []).children[0]!
+  assert.equal(clean.children.some(c => '撤销的越界改动' in c.meta), false, '没有越界就不显示这一项')
+})
