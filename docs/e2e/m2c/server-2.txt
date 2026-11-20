@@ -1,0 +1,7 @@
+Eos Web：http://127.0.0.1:4320（数据目录 /home/user/Eos-workbench/.eos/web-e2e/data，Ctrl+C 退出）
+接着运行上次没跑完的任务：t261120080518939
+[t261120080518939] → [build] developer · produce
+[t261120080518939]   已提交 76a6784
+[t261120080518939] ✓ [build] developer · produce：77.6s，输入 8791，输出 11937，缓存读 420992
+[t261120080518939] → [review 第 1 轮] reviewer · critique
+[t261120080518939] ✓ [review 第 1 轮] reviewer · critique：208.3s，输入 13585，输出 23295，缓存读 226176
