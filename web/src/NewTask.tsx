@@ -56,9 +56,9 @@ export function NewTask() {
       <label>
         <span>工作流</span>
         <select value={workflow} onChange={e => setWorkflow(e.target.value)}>
-          {(workflows ?? [{ name: 'feature', nodes: [] }]).map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
+          {(workflows ?? [{ name: workflow, version: 0, nodes: [] }]).map(w => <option key={w.name} value={w.name}>{w.version > 0 ? `${w.name} · 第 ${w.version} 版` : w.name}</option>)}
         </select>
-        {chosen && <small className="muted">{chosen.description}{chosen.nodes.length > 0 ? `（${chosen.nodes.join(' → ')}）` : ''}</small>}
+        {chosen && <small className="muted">{chosen.description}{chosen.nodes.length > 0 ? `（${chosen.nodes.join(' → ')}）` : ''} <a href={`#/conventions/workflow/${encodeURIComponent(chosen.name)}`}>查看或修改</a></small>}
       </label>
       <label>
         <span>需求</span>

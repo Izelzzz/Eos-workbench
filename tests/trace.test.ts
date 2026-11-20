@@ -3,11 +3,14 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import type { Task } from '../src/engine/types.ts'
+import { upgradeTask } from '../src/store/store.ts'
 import { bounds, buildTrace } from '../src/trace/build.ts'
 import type { Span, TraceEvent } from '../src/trace/types.ts'
 
 /** 真实任务：LRU 缓存，规划问了两个问题，评审第一轮通过。trace 是从 dsh 会话日志回放的。 */
-const fixture = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'lru-task.json'), 'utf8')) as { task: Task; trace: { call: string; event: TraceEvent }[] }
+// 这份记录来自第 1 块之前的真实任务：和存储一样，读出时补上新字段的默认值。
+const raw = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'lru-task.json'), 'utf8')) as { task: Task; trace: { call: string; event: TraceEvent }[] }
+const fixture = { ...raw, task: upgradeTask(raw.task) }
 
 const all = (s: Span): Span[] => [s, ...s.children.flatMap(all)]
 const count = (call: string, kind: TraceEvent['kind']) => fixture.trace.filter(r => r.call === call && r.event.kind === kind).length
@@ -97,4 +100,26 @@ test('a call that was running when the task was aborted stays in its node, marke
   assert.match(call.name, /已中止/)
   assert.ok(call.usage!.input > 0, 'its tokens still count')
   assert.ok(root.usage!.input >= call.usage!.input)
+})
+
+test('platform checks show under their node as check spans, one child per check with the reason it failed', async () => {
+  const { Driver, workflow } = await import('./helpers.ts')
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true, checks: 'review' }))
+  d.reply('方案')
+  d.reply('实现')
+  d.check(false, '缺少章节：改动')
+  d.reply('补齐了')
+  d.check(true)
+  const running = buildTrace(d.task, [])
+  const build = running.children[1]!
+  const checks = build.children.filter(c => c.kind === 'check')
+  assert.deepEqual(checks.map(c => [c.status, c.meta['结果']]), [['error', '0/1 项通过'], ['ok', '1/1 项通过']])
+  assert.equal(checks[0]!.children[0]!.output, '缺少章节：改动')
+  assert.match(checks[0]!.children[0]!.name, /NOTES\.md 存在并包含章节：改动/)
+  // 测试驱动的时间戳是假的（每步 +1ms，调用耗时 5ms），按开始时间排不出真实顺序；按调用编号看：产出、检查、补齐、检查。
+  const byId = build.children.filter(c => c.kind !== 'note').sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)))
+  assert.deepEqual(byId.map(c => c.kind === 'call' ? c.name.split(' · ')[1] : c.kind), ['完成工作', 'check', '补齐交付物', 'check'])
+  assert.match(build.meta['验收检查']!, /NOTES\.md/)
+  const review = running.children[2]!
+  assert.deepEqual(review.children.map(c => [c.kind, c.status]), [['check', 'running']], 'the review round’s tests are running')
 })

@@ -54,10 +54,15 @@ export class Conventions {
 
   /** 校验并保存为新版本。name 是要保存到的约定名；工作流的名字必须和 YAML 里的 name 一致。 */
   save(p: { kind: ConventionKind; name: string; content: string; note?: string; actor: string }, at: number): SaveResult {
-    const errors = p.kind === 'workflow' ? this.validateWorkflow(p.name, p.content) : this.validateDoc(p.name, p.content)
+    const errors = this.validate(p.kind, p.name, p.content)
     if (errors.length > 0) return { ok: false, errors }
     if (this.store.convention(p.kind, p.name)?.content === p.content) return { ok: false, errors: [{ path: '(内容)', message: '内容和当前版本完全一样，没有保存新版本' }] }
     return { ok: true, row: this.store.saveConvention({ kind: p.kind, name: p.name, content: p.content, note: p.note?.trim() ?? '', actor: p.actor }, at) }
+  }
+
+  /** 只校验不保存：页面上边写边检查用。 */
+  validate(kind: ConventionKind, name: string, content: string): WorkflowError[] {
+    return kind === 'workflow' ? this.validateWorkflow(name, content) : this.validateDoc(name, content)
   }
 
   private validateWorkflow(name: string, content: string): WorkflowError[] {

@@ -1,6 +1,7 @@
 // Web 接口返回的数据类型（纯类型，前端也引用）。
 import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
+import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary } from '../store/types.ts'
 import type { Span } from '../trace/types.ts'
 
 export type TaskDetail = {
@@ -17,6 +18,8 @@ export type TaskDetail = {
   trace: Span
   /** 有 runner 进程正在跑这个任务（看锁文件）。为 false 时回答对话尽头的问题后需要 resume。 */
   runnerAlive: boolean
+  /** 创建任务时用的团队约定版本（第 1 块之前创建的任务没有）。 */
+  conventions?: ConventionsUsed
 }
 
 export type AnswerRequest = { questionId: string; text: string }
@@ -25,3 +28,11 @@ export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; 
 export type CreateResponse = { ok: true; id: string } | { ok: false; error: string }
 export type ActionResponse = { ok: true } | { ok: false; error: string }
 export type WorkflowInfo = { name: string; version: number; description?: string; nodes: string[] }
+
+/** 带位置的错误，例如 { path: 'nodes[2].with', message: '…' }。 */
+export type FieldError = { path: string; message: string }
+
+export type ConventionsResponse = { workflows: WorkflowInfo[]; docs: ConventionSummary[] }
+export type ConventionDetail = { kind: ConventionKind; name: string; versions: ConventionRow[] }
+export type SaveConventionRequest = { content: string; note?: string; validateOnly?: boolean }
+export type SaveConventionResponse = { ok: true; version?: number } | { ok: false; errors: FieldError[] } | { ok: false; error: string }

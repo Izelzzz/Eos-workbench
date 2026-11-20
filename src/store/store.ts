@@ -7,6 +7,7 @@ import { newTask, reduce } from '../engine/machine.ts'
 import type { ConventionDoc, Event, Step, Task, TaskStatus } from '../engine/types.ts'
 import type { Actor, ConventionKind, ConventionRow, ConventionSummary, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
+import { DEFAULT_MAX_FIXES } from '../workflow/parse.ts'
 import type { Workflow } from '../workflow/types.ts'
 
 export type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
@@ -51,9 +52,16 @@ CREATE TABLE IF NOT EXISTS conventions (
   PRIMARY KEY (kind, name, version)
 );`
 
-/** 第 1 块之前保存的任务没有这些字段：读出时补上默认值，引擎内部只信任完整的 Task。 */
-const upgrade = (t: Task): Task => ({
+/**
+ * 第 1 块之前保存的任务没有这些字段（任务的 docs、fixes，对话的 review，工作流快照里节点的 checks、maxFixes 和 docs）：
+ * 读出时补上默认值，引擎内部只信任完整的 Task。
+ */
+export const upgradeTask = (t: Task): Task => ({
   ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0,
+  workflow: {
+    ...t.workflow, docs: t.workflow.docs ?? [],
+    nodes: t.workflow.nodes.map(n => ({ ...n, checks: n.checks ?? [], ...(n.kind === 'agent' ? { maxFixes: n.maxFixes ?? DEFAULT_MAX_FIXES } : {}) })),
+  },
   ...(t.dialog === undefined ? {} : { dialog: { ...t.dialog, review: t.dialog.review ?? (t.dialog.round > 1 ? 'reply' : 'first') } }),
 })
 
@@ -85,7 +93,7 @@ export class Store {
 
   private load(id: string): Task | undefined {
     const row = this.db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string } | undefined
-    return row === undefined ? undefined : upgrade(JSON.parse(row.state) as Task)
+    return row === undefined ? undefined : upgradeTask(JSON.parse(row.state) as Task)
   }
 
   private append(id: string, at: number, actor: Actor, event: EventRow['event'], accepted: boolean, reason?: string): void {
