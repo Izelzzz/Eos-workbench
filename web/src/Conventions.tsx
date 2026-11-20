@@ -75,6 +75,8 @@ type KindSpec = {
   nameOf?: (content: string) => string
   /** 新建时显示在编辑器上方的一行说明。 */
   hint?: string
+  /** 编辑这一类时始终显示的提醒。 */
+  warning?: string
   namePlaceholder?: string
   nameLabel?: string
 }
@@ -88,6 +90,7 @@ const SPEC: Record<ConventionKind, KindSpec> = {
   template: {
     label: 'Agent 模板', group: 'Agent 模板', starter: NEW_TEMPLATE, rows: 28, nameOf: yamlName,
     hint: '模板的名字取 YAML 里的 name（小写字母、数字和连字符）。工作流里写 role: { template: 名字 } 就能用上。',
+    warning: '注意：模板里的 MCP 服务在 agent 沙箱之外运行，拥有平台进程的权限（能读写平台用户能访问的所有文件）。只添加团队信任的服务；env 里不要放密钥。',
   },
   skill: {
     label: '技能', group: '技能', starter: NEW_SKILL, rows: 24, nameOf: frontmatterName,
@@ -193,7 +196,7 @@ function History(props: { detail: ConventionDetail; onRestore: (content: string)
   )
 }
 
-function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; onSaved: (name: string) => void }) {
+function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; savedMessage?: string; onSaved: (name: string, message: string) => void }) {
   const spec = SPEC[props.kind]
   const [detail, setDetail] = useState<ConventionDetail>()
   const [loadError, setLoadError] = useState<string>()
@@ -203,7 +206,8 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; on
   const [errors, setErrors] = useState<FieldError[]>([])
   const [checked, setChecked] = useState<'idle' | 'checking' | 'ok' | 'bad'>('idle')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string>()
+  // 新建保存后会跳到它自己的页面（编辑器重新挂载），保存成功的提示由上层带过来。
+  const [message, setMessage] = useState<string | undefined>(props.savedMessage)
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
@@ -253,9 +257,10 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; on
       return
     }
     setNote('')
-    setMessage(`已保存为第 ${r.version} 版。新建的任务会用这一版；进行中的任务不受影响。`)
+    const saved = `已保存为第 ${r.version} 版。新建的任务会用这一版；进行中的任务不受影响。`
+    setMessage(saved)
     if (!props.isNew) setReload(n => n + 1)
-    props.onSaved(target)
+    props.onSaved(target, saved)
   }
 
   if (loadError) return <p className="error">{loadError}</p>
@@ -273,6 +278,7 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; on
         </label>
       )}
       {props.isNew && spec.hint !== undefined && <p className="muted">{spec.hint}</p>}
+      {spec.warning !== undefined && <p className="notice warn" role="note">{spec.warning}</p>}
       <textarea
         className="conv-editor mono"
         aria-label={`${spec.label}内容`}
@@ -312,6 +318,13 @@ export function Conventions(props: { route: { kind?: ConventionKind; name?: stri
   const [list, setList] = useState<ConventionsResponse>()
   const [error, setError] = useState<string>()
   const [reload, setReload] = useState(0)
+  /** 新建保存后跳到它自己的页面时要继续显示的提示；换到别的约定就清掉。 */
+  const [flash, setFlash] = useState<string>()
+  useEffect(() => {
+    if (flash === undefined) return
+    const t = setTimeout(() => setFlash(undefined), 8000)
+    return () => clearTimeout(t)
+  }, [flash])
   useEffect(() => {
     listConventions().then(l => { setList(l); setError(undefined) }, e => setError((e as Error).message))
   }, [reload])
@@ -338,9 +351,13 @@ export function Conventions(props: { route: { kind?: ConventionKind; name?: stri
           kind={kind}
           {...(name === undefined ? {} : { name })}
           isNew={isNew}
-          onSaved={saved => {
+          {...(flash === undefined ? {} : { savedMessage: flash })}
+          onSaved={(saved, message) => {
             setReload(n => n + 1)
-            if (isNew) location.hash = conventionHref(kind, saved)
+            if (isNew) {
+              setFlash(message)
+              location.hash = conventionHref(kind, saved)
+            }
           }}
         />
       )}
