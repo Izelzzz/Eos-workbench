@@ -3,22 +3,22 @@
   [
    {
     "id": "color",
-    "question": "请选择配色：红色还是绿色？",
-    "header": "配色选择",
+    "question": "配色方案选红色还是绿色？",
+    "header": "选择配色",
     "options": [
      {
       "label": "红色",
-      "description": "将颜色名“红色”写入 color.txt。"
+      "description": "以红色作为主配色。"
      },
      {
       "label": "绿色",
-      "description": "将颜色名“绿色”写入 color.txt。"
+      "description": "以绿色作为主配色。"
      }
     ]
    }
   ]
  ],
  "tools": [],
- "final": "已按你的选择完成。\n\n- 我通过提问确认了配色：你选择了**绿色**。\n- 我已经把颜色名写入 [color.txt](color.txt)，文件内容为「绿色」，并已确认写入成功。\n\n任务结束。",
+ "final": "你已选择 **绿色**，颜色名已写入 [color.txt](color.txt)。任务结束。",
  "file": "绿色\n"
 }

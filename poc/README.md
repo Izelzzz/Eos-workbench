@@ -3,7 +3,7 @@
 **这是一次性的验证代码，不是正式实现。** 它要回答一个问题：Eos 平台能否通过 dsh 的 SDK 驱动 agent，并满足对话循环、主动提问、写入范围和可观测这几项需求。
 
 - 验证对象：`@deepseek-ai/dsh@0.2.2-rc.5`，SDK 客户端取自源码 main 分支 `2e39e704`（2026-11-18）
-- 运行环境：Node 24.22.3，模型 `deepseek-v4-flash`，Linux 容器（未安装 bwrap）
+- 运行环境：Node 24.22.3，模型 `deepseek-flash`（DeepSeek-V4.1-Flash，可用 `EOS_MODEL` 覆盖），Linux 容器（未安装 bwrap）
 - 重跑方法：`./run-all.sh`，日志写入 `logs/`
 
 ## 结论
