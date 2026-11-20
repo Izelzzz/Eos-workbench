@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { newTask, reduce } from '../src/engine/machine.ts'
-import { formatMetrics, taskMetrics } from '../src/engine/metrics.ts'
+import { formatMetrics, secs, taskMetrics } from '../src/engine/metrics.ts'
 import type { Event, Task } from '../src/engine/types.ts'
 import { isCheck, zeroUsage } from '../src/engine/types.ts'
 import { PASS, results, workflow } from './helpers.ts'
@@ -137,4 +137,8 @@ test('the command-line table has a row per stage and a total, and marks the open
   assert.match(lines[1]!, /^plan\s+1\s+0\s+12\.3k/)
   assert.match(lines[2]!, /^build（进行中）/)
   assert.match(lines[3]!, /^合计\s+1/)
+})
+
+test('durations round as a whole, never showing 60 seconds', () => {
+  assert.deepEqual([999, 1000, 59_949, 59_950, 119_600, 3_599_600].map(secs), ['999ms', '1.0s', '59.9s', '1m0s', '2m0s', '60m0s'])
 })

@@ -133,7 +133,12 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
   }
 }
 
-const secs = (ms: number) => (ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`)
+export const secs = (ms: number): string => {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`
+  const s = Math.round(ms / 1000)
+  return `${Math.floor(s / 60)}m${s % 60}s`
+}
 const k = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /** 命令行用的阶段表。 */
