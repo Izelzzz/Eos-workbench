@@ -44,14 +44,21 @@ const textOf = (e: LogEvent): string => {
 const modelOf = (events: LogEvent[]): string | undefined =>
   events.filter(e => e.type === 'assistant/message').map(e => e.data?.message?.source?.model).filter(Boolean).at(-1)
 
-/** 带 nonce 的那条用户消息之后、到 turn/end 为止的回复；没有 turn/end 说明那一轮没做完。 */
+const MARKED = /<!-- eos:[^ ]+ -->/
+
+/**
+ * 带 nonce 的那条用户消息之后的回复。一次调用可能跨多个 turn（agent 等后台命令时，命令结束会再起一个 turn），
+ * 所以一直看到下一条带 nonce 的消息（或日志末尾）为止，并要求最后一个 turn 已经结束；否则说明那次调用没做完。
+ */
 export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {
   const start = events.findLastIndex(e => e.type === 'user/message' && textOf(e).includes(marker(nonce)))
   if (start < 0) return undefined
   const rest = events.slice(start + 1)
-  const end = rest.findIndex(e => e.type === 'turn/end')
-  if (end < 0) return undefined
-  const turn = rest.slice(0, end + 1)
+  const next = rest.findIndex(e => e.type === 'user/message' && MARKED.test(textOf(e)))
+  const range = next < 0 ? rest : rest.slice(0, next)
+  const end = range.findLastIndex(e => e.type === 'turn/end')
+  if (end < 0 || range.slice(end + 1).some(e => e.type === 'turn/start')) return undefined
+  const turn = range.slice(0, end + 1)
   const final = turn.filter(e => e.type === 'assistant/message').map(textOf).filter(t => t.trim() !== '').at(-1)
   if (final === undefined) return undefined
   const model = modelOf(turn)
@@ -127,9 +134,11 @@ export class DshExecutor implements Executor {
     } else {
       s = h.session(id)
       await s.setWorkingDirectory(spec.cwd)
-      const set = await s.run(`/permission ${PRESET[spec.write]}`)
-      if (set.finishReason === 'error') throw new Error(`设置权限档位失败：${set.finalResponse}`)
     }
+    // 新建和续接都要设：会话在设工作目录时就已落盘（默认可写），进程若死在切换档位之前，
+    // 续接回来的只读角色会带着写权限。重复选择当前档位在 dsh 里不产生变化。
+    const set = await s.run(`/permission ${PRESET[spec.write]}`)
+    if (set.finishReason === 'error') throw new Error(`设置权限档位失败：${set.finalResponse}`)
     this.open.set(id, s)
     return s
   }

@@ -38,3 +38,17 @@ test('host-injected git config is dropped as a whole, other variables are kept',
   const env = agentEnv({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.x.insteadOf', GIT_CONFIG_VALUE_0: 'y', GIT_EDITOR: 'true', PATH: '/bin', DEEPSEEK_API_KEY: 'k' })
   assert.deepEqual(env, { GIT_EDITOR: 'true', PATH: '/bin', DEEPSEEK_API_KEY: 'k' })
 })
+
+test('a call that spans several turns is claimed only after its last turn, with all its text and usage', () => {
+  const start = { type: 'turn/start', time: 0 }
+  const log = [
+    user('m <!-- eos:n1 -->', 1), start, assistant('等后台命令跑完', 2), end(3),
+    start, assistant('命令跑完了，这是最终结果', 8), end(9),
+    user('下一次调用 <!-- eos:n2 -->', 20), assistant('别的', 21), end(22),
+  ]
+  const r = replyAfter(log, 'n1', 's')
+  assert.equal(r?.text, '命令跑完了，这是最终结果')
+  assert.equal(r?.usage.input, 10)
+  assert.equal(r?.ms, 8)
+  assert.equal(replyAfter(log.slice(0, 6), 'n1', 's'), undefined, 'second turn started but not finished')
+})
