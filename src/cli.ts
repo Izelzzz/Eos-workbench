@@ -72,7 +72,8 @@ const summary = (t: Task) => {
 
 const executor = () => new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin() })
 
-const run = async (id: string) => {
+/** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
+const run = async (id: string | ((sup: Supervisor) => string)) => {
   const ex = executor()
   const shutdown = () => {
     void ex.close().finally(() => process.exit(130))
@@ -80,8 +81,8 @@ const run = async (id: string) => {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const sup = new Supervisor({ store, executor: ex, dataDir, log: (_id, line) => say(line) })
-    const started = sup.start(id, { wait: !values['no-wait'] })
+    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'cli', log: (_id, line) => say(line) })
+    const started = sup.start(typeof id === 'string' ? id : id(sup), { wait: !values['no-wait'] })
     if (!started.ok) return fail(started.error)
     summary(await started.done)
   } finally {
@@ -92,12 +93,13 @@ const run = async (id: string) => {
 const commands: Record<string, () => Promise<void> | void> = {
   async run() {
     if (values.repo === undefined) fail('需要 --repo <仓库路径>')
-    const sup = new Supervisor({ store, executor: executor(), dataDir })
-    const created = sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
-    if (!created.ok) return fail(created.error)
-    const meta = store.meta(created.id)
-    say(`任务 ${created.id}：工作流 ${store.get(created.id)!.workflow.name}，分支 ${meta.branch}，worktree ${meta.worktree}`)
-    await run(created.id)
+    await run(sup => {
+      const created = sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
+      if (!created.ok) return fail(created.error)
+      const meta = store.meta(created.id)
+      say(`任务 ${created.id}：工作流 ${store.get(created.id)!.workflow.name}，分支 ${meta.branch}，worktree ${meta.worktree}`)
+      return created.id
+    })
   },
   async resume() {
     await run(taskOf(positionals[1]).id)

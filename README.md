@@ -18,7 +18,7 @@ Eos 是一个可以自部署的多 agent 工作流平台。你在 Web 上发起�
 | M4 | 外部执行器：Claude Code、Codex |
 | M5 | Docker Compose 部署（含 bubblewrap）与端到端验收 |
 
-## 试用（M1 + Web 详情页）
+## 试用
 
 需要 Node ≥ 24.9、git，以及环境变量 `DEEPSEEK_API_KEY`。
 
@@ -26,25 +26,25 @@ Eos 是一个可以自部署的多 agent 工作流平台。你在 Web 上发起�
 npm install && npm run build:web
 ```
 
-在一个 git 仓库上发起任务（数据默认在 `~/.eos`）：
+```bash
+npm run eos -- web
+```
+
+打开 http://127.0.0.1:4317 ：
+
+- **新建任务**：填本机 git 仓库的路径、选工作流、写需求。任务在服务里运行，每个任务有自己的分支 `eos/<任务id>` 和 worktree，不会改动你当前的工作目录。
+- **任务页**：trace 树里能看到每一次模型请求和工具调用，以及参数、结果、思考过程、耗时和 token；agent 提问时在页面上点选项或输入回答；任务可以继续、重试、中止。运行中每 2 秒刷新。
+- 服务重启后，没跑完的任务会自动接着跑，已完成的调用不会重发。
+
+命令行也能用，和页面共用同一份数据和任务锁，同一个任务不会被两边同时跑：
 
 ```bash
 npm run eos -- run --repo <仓库路径> "<需求>"
 ```
 
-agent 提问时，另开一个终端回答：
+其他命令：`resume`、`retry`、`answer`、`status`、`log`、`abort`、`workflows`，见 `npm run eos -- --help`。数据默认在 `~/.eos`。
 
-```bash
-npm run eos -- answer <任务id> "<回答>"
-```
-
-打开 Web 界面，看任务列表和每个任务的 trace（每次模型请求、工具调用、参数与结果、耗时、token），运行中的任务每 2 秒刷新：
-
-```bash
-npm run eos -- web
-```
-
-然后访问 http://127.0.0.1:4317 。其他命令：`resume`、`retry`、`status`、`log`、`abort`、`workflows`，见 `npm run eos -- --help`。
+> 安全：Web 服务只监听 `127.0.0.1`，没有登录，只接受本机 Host 和同源请求。它能在本机任何 git 仓库上建分支和 worktree，只适合在自己的机器上单人使用。
 
 ## 开发
 

@@ -37,7 +37,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     const current = step.task.question
     const qid = step.accepted ? current!.id : current?.call === call.id ? current.id : undefined
     if (qid === undefined) throw new Error(`无法记录提问：${step.reason}`)
-    log(`？ agent 提问（${qid}）：${q.text}${q.options ? `（选项：${q.options.join(' / ')}）` : ''}\n  用 eos answer ${id} "<回答>" 回答`)
+    log(`？ agent 提问（${qid}）：${q.text}${q.options ? `（选项：${q.options.join(' / ')}）` : ''}\n  在任务页面上回答，或用 eos answer ${id} "<回答>"`)
     for (;;) {
       if (signal.aborted) throw new Error('提问被取消')
       const t = o.store.get(id)!

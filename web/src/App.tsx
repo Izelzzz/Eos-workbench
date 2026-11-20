@@ -74,6 +74,12 @@ function TaskPage(props: { id: string }) {
   const [now, setNow] = useState(Date.now())
   const [reload, setReload] = useState(0)
   const [notice, setNotice] = useState<string>()
+  // 操作提示只停留几秒，过时的提示（例如"已回答，任务继续"）不会一直挂在页面上。
+  useEffect(() => {
+    if (notice === undefined) return
+    const t = setTimeout(() => setNotice(undefined), 6000)
+    return () => clearTimeout(t)
+  }, [notice])
   const [acting, setActing] = useState(false)
   const ACTION = { resume: '已继续运行。', retry: '已重新开始失败的那一步。', abort: '已中止。' }
   const act = async (action: 'resume' | 'retry' | 'abort') => {
