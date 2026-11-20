@@ -1,6 +1,7 @@
-// runner：反复读取任务状态，执行 pending 的调用，把结果作为事件写回存储。
+// runner：反复读取任务状态，执行 pending 的工作（agent 调用或检查），把结果作为事件写回存储。
 // 状态只在存储里；runner 自己只记"哪个调用正在本进程里执行"。
-import type { Call, Task } from '../engine/types.ts'
+import type { Call, CheckResult, CheckRun, Task } from '../engine/types.ts'
+import { isCheck } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf } from '../workflow/types.ts'
@@ -14,6 +15,8 @@ export type RunnerOptions = {
   wait?: boolean
   /** 写 worktree 的角色每次回复后调用（提交改动）。 */
   afterWrite?: (task: Task, call: Call) => void
+  /** 执行一组检查（在任务的 worktree 里）。结果顺序与 run.checks 一致。 */
+  checker?: (task: Task, run: CheckRun, signal: AbortSignal) => Promise<CheckResult[]>
   log?: (line: string) => void
 }
 
@@ -106,12 +109,41 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     dispatch({ kind: 'replied', call: call.id, sessionId: reply.sessionId, text: reply.text, usage: reply.usage, ms: reply.ms, ...(reply.model === undefined ? {} : { model: reply.model }) })
   }
 
+  /** 检查没有副作用，崩溃后直接重跑即可，不需要像调用那样认领。 */
+  const check = async (task: Task, run: CheckRun): Promise<void> => {
+    const where = `[${run.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] 检查`
+    if (o.checker === undefined) {
+      dispatch({ kind: 'call_failed', call: run.id, error: '没有配置检查执行器' })
+      return
+    }
+    log(`→ ${where}（${run.checks.length} 项）`)
+    const started = now()
+    // 检查进行中任务被中止：结束检查命令，不让它以平台的权限一直跑到超时。
+    const aborter = new AbortController()
+    const watch = setInterval(() => {
+      if (o.store.get(id)?.status === 'aborted') aborter.abort()
+    }, pollMs)
+    let results: CheckResult[]
+    try {
+      results = await o.checker(task, run, aborter.signal)
+    } catch (e) {
+      clearInterval(watch)
+      log(`✗ ${where}：${(e as Error).message}`)
+      dispatch({ kind: 'call_failed', call: run.id, error: `检查无法执行：${(e as Error).message}` })
+      return
+    }
+    clearInterval(watch)
+    log(`${results.every(r => r.passed) ? '✓' : '✗'} ${where}：${results.filter(r => r.passed).length}/${results.length} 项通过`)
+    dispatch({ kind: 'checked', call: run.id, results, ms: now() - started })
+  }
+
   for (;;) {
     const task = o.store.get(id)
     if (task === undefined) throw new Error(`没有任务 ${id}`)
     if (task.status === 'done' || task.status === 'aborted' || task.status === 'failed') return task
     if (task.pending !== undefined) {
-      await execute(task, task.pending)
+      if (isCheck(task.pending)) await check(task, task.pending)
+      else await execute(task, task.pending)
       continue
     }
     // 只剩一种情况：对话尽头在等用户指示。

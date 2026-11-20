@@ -1,6 +1,6 @@
-// 引擎的状态与事件。Task 是任务的唯一状态；pending 就是"下一个要执行的 agent 调用"（outbox），
-// runner 执行它，把结果作为事件交回 reduce。
-import type { NodeId, RoleId, Workflow } from '../workflow/types.ts'
+// 引擎的状态与事件。Task 是任务的唯一状态；pending 就是"下一项要执行的工作"（outbox）：
+// 一次 agent 调用，或一组由平台执行的检查。runner 执行它，把结果作为事件交回 reduce。
+import type { Check, NodeId, RoleId, Workflow } from '../workflow/types.ts'
 
 declare const brand: unique symbol
 export type CallId = string & { readonly [brand]: 'CallId' }
@@ -9,10 +9,10 @@ export type Usage = { input: number; output: number; cacheRead: number; cacheWri
 
 /**
  * 调用的用途：
- * produce 一个 agent 节点完成工作；critique 评审给结论；respond 被评审方回应意见；
+ * produce 一个 agent 节点完成工作；fix 交付物检查没通过，同一个 agent 补齐；critique 评审给结论；respond 被评审方回应意见；
  * reconfirm 上游重新确认做法与需求；reapply 被评审方按修订方案调整；instruct 被评审方按用户指示调整。
  */
-export type Purpose = 'produce' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct'
+export type Purpose = 'produce' | 'fix' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct'
 
 export type Call = {
   id: CallId
@@ -25,7 +25,28 @@ export type Call = {
   prompt: string
 }
 
-export type DialogPhase = 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct' | 'ask'
+/** 平台执行的检查，不是模型调用。和调用共用 outbox：同一时刻只有一项待执行的工作。 */
+export type CheckRun = {
+  id: CallId
+  node: NodeId
+  purpose: 'check'
+  checks: Check[]
+}
+
+export type Work = Call | CheckRun
+
+export const isCheck = (w: Work): w is CheckRun => w.purpose === 'check'
+
+/** detail：没通过时是原因（缺哪些章节、命令输出的最后一段）；通过时可以为空。 */
+export type CheckResult = { check: Check; passed: boolean; detail: string }
+
+/** 任务创建时从平台快照下来的团队约定文档；之后平台上改了也不影响这个任务。 */
+export type ConventionDoc = { name: string; version: number; content: string }
+
+/** 评审方接下来要看的是：第一次的产出、被评审方的回复，还是按新方案调整后的回复。 */
+export type ReviewKind = 'first' | 'reply' | 'revised'
+
+export type DialogPhase = 'check' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct' | 'ask'
 
 export type DialogState = {
   node: NodeId
@@ -36,8 +57,10 @@ export type DialogState = {
   phase: DialogPhase
   /** 当前这一步的回复无法解析时已重新要求的次数。 */
   formatRetries: number
-  /** 最近一次评审意见，交给被评审方或上游时引用。 */
+  /** 最近一次没通过的原因（检查结果或评审意见），交给被评审方或上游时引用。 */
   lastCritique?: string
+  /** 这一轮检查通过后，评审方要看的内容。 */
+  review: ReviewKind
 }
 
 export type QuestionSource = 'agent' | 'loop'
@@ -57,6 +80,7 @@ export type TaskStatus = 'running' | 'waiting_user' | 'done' | 'failed' | 'abort
 
 export type Entry =
   | { type: 'call'; at: number; call: CallId; node: NodeId; role: RoleId; purpose: Purpose; round?: number; prompt: string; reply: string; usage: Usage; ms: number; model?: string }
+  | { type: 'check'; at: number; call: CallId; node: NodeId; round?: number; results: CheckResult[]; ms: number }
   | { type: 'question'; at: number; question: Question }
   | { type: 'answer'; at: number; questionId: string; text: string }
   | { type: 'note'; at: number; node?: NodeId; text: string }
@@ -67,6 +91,7 @@ export type Task = {
   /** 平台提供的环境说明（工作目录、基线提交、查看改动的方法），放进每个节点的上下文。 */
   context?: string
   workflow: Workflow
+  docs: ConventionDoc[]
   status: TaskStatus
   /** 正在进行的节点下标；等于节点数时任务完成。 */
   cursor: number
@@ -75,7 +100,9 @@ export type Task = {
   /** 执行器的会话 id，按会话所属的节点记录。 */
   sessions: Partial<Record<string, string>>
   dialog?: DialogState
-  pending?: Call
+  /** 当前 agent 节点因检查没通过已自动补齐的次数，进入新节点时清零。 */
+  fixes: number
+  pending?: Work
   question?: Question
   failure?: string
   /** 只追加的记录：每次调用、提问、回答和引擎说明。 */
@@ -85,6 +112,7 @@ export type Task = {
 
 export type Event =
   | { kind: 'replied'; call: CallId; sessionId: string; text: string; usage: Usage; ms: number; model?: string }
+  | { kind: 'checked'; call: CallId; results: CheckResult[]; ms: number }
   | { kind: 'call_failed'; call: CallId; error: string }
   | { kind: 'asked'; call: CallId; question: { id: string; text: string; options?: string[] } }
   | { kind: 'answered'; questionId: string; text: string }

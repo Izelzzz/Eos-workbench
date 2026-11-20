@@ -87,7 +87,7 @@ const drive = (args: string[], opts: { killAfter?: RegExp } = {}) => new Promise
 
 setupRepo()
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
-const first = await drive(['run', '--repo', REPO, REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+const first = await drive(['run', '--repo', REPO, '--workflow', 'feature', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
 await drive(['resume', first.id])
 

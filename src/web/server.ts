@@ -12,8 +12,19 @@ import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import { builtinTemplates, loadWorkflow } from '../workflow/templates.ts'
-import type { ActionResponse, AnswerResponse, CreateResponse, TaskDetail, WorkflowInfo } from './types.ts'
+import type { ConventionKind } from '../store/types.ts'
+import type { ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, SaveConventionResponse, TaskDetail, WorkflowInfo } from './types.ts'
+
+/** /api/conventions/<workflow|doc>/<名字>，名字可以是中文（URL 编码）。 */
+const CONVENTION = /^\/api\/conventions\/(workflow|doc)\/([^/]+)$/
+
+const decodeName = (raw: string): string | undefined => {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return undefined
+  }
+}
 
 const summaryOf = (t: Task) => ({ id: t.id, status: t.status, workflow: t.workflow.name })
 
@@ -82,6 +93,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       branch: meta.branch, worktree: meta.worktree, report: report(task), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
+      ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }
   }
 
@@ -113,7 +125,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   const create = (body: Record<string, unknown>): [number, CreateResponse] => {
     const field = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : '')
-    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'feature', request: field('request') })
+    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'standard', request: field('request') })
     if (!created.ok) return [400, created]
     const started = o.supervisor.start(created.id)
     return started.ok ? [201, { ok: true, id: created.id }] : [500, { ok: false, error: started.error }]
@@ -138,10 +150,25 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   }
 
   const workflows = (): WorkflowInfo[] =>
-    builtinTemplates().map(name => {
-      const { workflow } = loadWorkflow(name)
-      return { name, ...(workflow.description === undefined ? {} : { description: workflow.description }), nodes: workflow.nodes.map(n => n.id) }
-    })
+    o.supervisor.conventions.list('workflow').map(w => ({ name: w.name, version: w.version, ...(w.description === undefined ? {} : { description: w.description }), nodes: w.nodes }))
+
+  const conventions = (): ConventionsResponse => ({ workflows: workflows(), docs: o.supervisor.conventions.list('doc') })
+
+  const convention = (kind: ConventionKind, name: string): ConventionDetail | undefined => {
+    const versions = o.store.conventionHistory(kind, name)
+    return versions.length === 0 ? undefined : { kind, name, versions }
+  }
+
+  const saveConvention = (kind: ConventionKind, name: string, body: Record<string, unknown>): [number, SaveConventionResponse] => {
+    if (typeof body.content !== 'string') return [400, { ok: false, error: '需要 content' }]
+    if (body.note !== undefined && typeof body.note !== 'string') return [400, { ok: false, error: 'note 必须是文字' }]
+    if (body.validateOnly === true) {
+      const errors = o.supervisor.conventions.validate(kind, name, body.content)
+      return [200, errors.length === 0 ? { ok: true } : { ok: false, errors }]
+    }
+    const r = o.supervisor.conventions.save({ kind, name, content: body.content, ...(body.note === undefined ? {} : { note: body.note as string }), actor: 'web' }, Date.now())
+    return r.ok ? [201, { ok: true, version: r.row.version }] : [400, { ok: false, errors: r.errors }]
+  }
 
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {
@@ -162,14 +189,26 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'POST') {
         const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
-        if (url.pathname !== '/api/tasks' && action === null) return json(res, 404, { error: '没有这个接口' })
+        const conv = CONVENTION.exec(url.pathname)
+        if (url.pathname !== '/api/tasks' && action === null && conv === null) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (conv !== null) {
+          const name = decodeName(conv[2]!)
+          return name === undefined ? json(res, 400, { ok: false, error: '名字的 URL 编码不对' }) : json(res, ...saveConvention(conv[1] as ConventionKind, name, g.body))
+        }
         if (action === null) return json(res, ...create(g.body))
         return json(res, ...(action[2] === 'answer' ? answer(action[1]!, g.body) : act(action[1]!, action[2]!)))
       }
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
       if (url.pathname === '/api/workflows') return json(res, 200, workflows())
+      if (url.pathname === '/api/conventions') return json(res, 200, conventions())
+      const conv = CONVENTION.exec(url.pathname)
+      if (conv) {
+        const name = decodeName(conv[2]!)
+        const d = name === undefined ? undefined : convention(conv[1] as ConventionKind, name)
+        return d === undefined ? json(res, 404, { error: `没有约定「${name ?? conv[2]}」` }) : json(res, 200, d)
+      }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {

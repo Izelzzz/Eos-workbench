@@ -2,10 +2,11 @@
 // 同一个任务靠锁文件保证只有一个 runner（不管它在哪个进程里）。
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { Conventions } from '../conventions/conventions.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
-import { loadWorkflow } from '../workflow/templates.ts'
+import { runChecks } from './checks.ts'
 import { commitAll, contextFor, createWorktree } from './git.ts'
 import { acquire, holder } from './lock.ts'
 import { runTask } from './runner.ts'
@@ -21,6 +22,7 @@ const isRepo = (path: string): boolean => existsSync(join(path, '.git'))
 export class Supervisor {
   private readonly active = new Map<string, Promise<Task>>()
   readonly locksDir: string
+  readonly conventions: Conventions
 
   constructor(private readonly o: {
     store: Store
@@ -33,6 +35,8 @@ export class Supervisor {
     pollMs?: number
   }) {
     this.locksDir = join(o.dataDir, 'locks')
+    this.conventions = new Conventions(o.store)
+    this.conventions.seed(Date.now())
   }
 
   /** 校验输入、建 worktree、写入存储。所有错误都是给用户看的中文。 */
@@ -42,12 +46,8 @@ export class Supervisor {
     const repo = resolve(input.repo.trim())
     if (input.repo.trim() === '' || !existsSync(repo) || !statSync(repo).isDirectory()) return { ok: false, error: `找不到目录：${input.repo}` }
     if (!isRepo(repo)) return { ok: false, error: `不是 git 仓库：${repo}` }
-    let loaded: ReturnType<typeof loadWorkflow>
-    try {
-      loaded = loadWorkflow(input.workflow)
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
+    const resolved = this.conventions.resolve(input.workflow.trim())
+    if (!resolved.ok) return resolved
     const id = newId()
     let w: ReturnType<typeof createWorktree>
     try {
@@ -56,7 +56,8 @@ export class Supervisor {
       const msg = String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
-    this.o.store.create({ id, request, context: contextFor(w), workflow: loaded.workflow, workflowSource: loaded.source, meta: w }, Date.now(), this.o.actor ?? 'cli')
+    this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
+      meta: { ...w, conventions: resolved.used } }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
   }
 
@@ -75,6 +76,7 @@ export class Supervisor {
     const done = runTask(id, {
       store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
+      checker: (t, run, signal) => runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal),
       afterWrite: (t, call) => {
         const sha = commitAll(this.o.store.meta(t.id).worktree, `eos: ${call.node} ${call.purpose} (${call.id})`)
         if (sha !== undefined) log(`  已提交 ${sha}`)

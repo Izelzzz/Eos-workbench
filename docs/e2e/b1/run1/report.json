@@ -1,0 +1,39 @@
+{
+  "task": "t2611201036066ry",
+  "code": {
+    "commit": "d6fa059",
+    "uncommitted": []
+  },
+  "status": "done",
+  "answers": [],
+  "testFailures": 0,
+  "induced": [
+    "开发节点的任务说明要求先不写 docs/changes.md（让交付物检查先失败一次）",
+    "测试节点改用 worktree 外的验收测试（含 1.5h 小数用例）"
+  ],
+  "timeline": [
+    "produce@spec",
+    "check@spec:通过",
+    "produce@build",
+    "check@build:没通过",
+    "fix@build",
+    "check@build:通过",
+    "check@test:通过",
+    "check@review:通过",
+    "critique@review",
+    "check@deliver:通过"
+  ],
+  "checks": {
+    "工作流在页面上改过并保存为第 2 版，历史里有第 1 版（内置）": true,
+    "页面对写错的 YAML 给出中文错误和位置": true,
+    "任务记录了用到的约定版本（standard 第 2 版、研发约定第 1 版）": true,
+    "约定文档注入到每个会话的第一条提示词": true,
+    "开发的交付物检查没通过 → 同一个 agent 补齐 → 检查通过": true,
+    "测试失败 → 交回开发修改 → 重跑通过": false,
+    "评审这一轮先跑测试，通过后才请评审方": true,
+    "任务完成": true,
+    "worktree 里 npm test 通过": true,
+    "页面没有脚本错误": true
+  },
+  "errors": []
+}

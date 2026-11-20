@@ -263,3 +263,49 @@ test('a failed task is retried from the page and a running one can be aborted', 
     await t.close()
   }
 })
+
+test('team conventions: list, validate without saving, save new versions, read history; tasks record the versions they used', async () => {
+  const s = await serve()
+  try {
+    const list = await (await fetch(`${s.base}/api/conventions`)).json()
+    assert.ok(list.workflows.some((w: { name: string; version: number }) => w.name === 'feature' && w.version === 1))
+    assert.ok(list.docs.some((d: { name: string }) => d.name === '研发约定'))
+    const docUrl = `/api/conventions/doc/${encodeURIComponent('评审约定')}`
+    assert.equal((await fetch(`${s.base}${docUrl}`)).status, 404)
+    const created = await postTo(s.base, docUrl, { content: '# 评审约定\n只报告真实问题', note: '初版' })
+    assert.equal(created.status, 201)
+    assert.deepEqual(await created.json(), { ok: true, version: 1 })
+
+    const wf = `name: team\ndocs: [评审约定]\nroles:\n  dev: { prompt: 写代码, write: worktree }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n`
+    const invalid = await postTo(s.base, '/api/conventions/workflow/team', { content: wf.replace('kind: agent', 'kind: robot'), validateOnly: true })
+    assert.equal(invalid.status, 200)
+    const v = await invalid.json()
+    assert.equal(v.ok, false)
+    assert.equal(v.errors[0].path, 'nodes[0].kind')
+    assert.match(v.errors[0].message, /agent 或 dialog/)
+    assert.equal((await fetch(`${s.base}/api/conventions/workflow/team`)).status, 404, 'validateOnly saved nothing')
+    assert.deepEqual(await (await postTo(s.base, '/api/conventions/workflow/team', { content: wf, validateOnly: true })).json(), { ok: true })
+    assert.equal((await postTo(s.base, '/api/conventions/workflow/team', { content: wf })).status, 201)
+    const rejected = await postTo(s.base, '/api/conventions/workflow/team', { content: wf.replace('评审约定', '没有这个') })
+    assert.equal(rejected.status, 400)
+    assert.equal((await rejected.json()).errors[0].path, 'docs[0]')
+
+    await postTo(s.base, docUrl, { content: '# 评审约定\n只报告真实问题\n给出修改建议' })
+    const history = await (await fetch(`${s.base}${docUrl}`)).json()
+    assert.deepEqual(history.versions.map((r: { version: number; note: string; actor: string }) => [r.version, r.note, r.actor]), [[2, '', 'web'], [1, '初版', 'web']])
+
+    const cross = await fetch(`${s.base}${docUrl}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: JSON.stringify({ content: 'x' }) })
+    assert.equal(cross.status, 403, 'conventions are written only from the page itself')
+
+    const repo = join(s.dir, 'repo')
+    mkdirSync(repo)
+    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    const task = await postTo(s.base, '/api/tasks', { repo, workflow: 'team', request: '加一个函数' })
+    const { id } = await task.json()
+    await s.supervisor.idle()
+    const d = (await (await fetch(`${s.base}/api/tasks/${id}`)).json()) as TaskDetail
+    assert.deepEqual(d.conventions, { workflow: { name: 'team', version: 1 }, docs: [{ name: '评审约定', version: 2 }] })
+  } finally {
+    await s.close()
+  }
+})

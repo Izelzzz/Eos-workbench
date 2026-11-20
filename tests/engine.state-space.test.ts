@@ -3,12 +3,12 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { MAX_FORMAT_RETRIES, newTask, reduce } from '../src/engine/machine.ts'
 import type { Event, Task } from '../src/engine/types.ts'
-import { zeroUsage } from '../src/engine/types.ts'
-import type { DialogNode, Workflow } from '../src/workflow/types.ts'
-import { ASK, CHANGES, GARBAGE, PASS, REVISE, workflow } from './helpers.ts'
+import { isCheck, zeroUsage } from '../src/engine/types.ts'
+import type { AgentNode, DialogNode, Workflow } from '../src/workflow/types.ts'
+import { ASK, CHANGES, GARBAGE, PASS, REVISE, results, workflow } from './helpers.ts'
 
 const replies: Record<string, string[]> = {
-  produce: ['产出'], respond: ['已修改'], reapply: ['已按新方案修改'], instruct: ['已按指示修改'],
+  produce: ['产出'], fix: ['已补齐'], respond: ['已修改'], reapply: ['已按新方案修改'], instruct: ['已按指示修改'],
   critique: [PASS, CHANGES, GARBAGE], reconfirm: [REVISE, ASK, GARBAGE],
 }
 
@@ -16,8 +16,18 @@ const replies: Record<string, string[]> = {
 const eventsFor = (t: Task): Event[] => {
   const out: Event[] = [{ kind: 'retry' }, { kind: 'abort' }]
   out.push({ kind: 'replied', call: 'c0' as never, sessionId: 'stale', text: PASS, usage: zeroUsage(), ms: 1 })
-  if (t.pending !== undefined) {
+  out.push({ kind: 'checked', call: 'c0' as never, results: [], ms: 1 })
+  if (t.pending !== undefined && isCheck(t.pending)) {
+    const run = t.pending
+    out.push({ kind: 'checked', call: run.id, results: results(run, true), ms: 1 })
+    out.push({ kind: 'checked', call: run.id, results: results(run, false), ms: 1 })
+    out.push({ kind: 'checked', call: run.id, results: [], ms: 1 })
+    out.push({ kind: 'replied', call: run.id, sessionId: 'x', text: PASS, usage: zeroUsage(), ms: 1 })
+    out.push({ kind: 'asked', call: run.id, question: { id: 'n', text: '检查不会提问' } })
+    out.push({ kind: 'call_failed', call: run.id, error: '检查无法执行' })
+  } else if (t.pending !== undefined) {
     const call = t.pending
+    out.push({ kind: 'checked', call: call.id, results: [], ms: 1 })
     for (const text of replies[call.purpose]!) out.push({ kind: 'replied', call: call.id, sessionId: `s-${call.session}`, text, usage: zeroUsage(), ms: 1 })
     out.push({ kind: 'call_failed', call: call.id, error: 'boom' })
     out.push({ kind: 'asked', call: call.id, question: { id: 'n', text: '问一下' } })
@@ -35,8 +45,8 @@ const eventsFor = (t: Task): Event[] => {
 
 /** 抽象状态：去掉日志和文本，只保留决定后续行为的字段。 */
 const key = (t: Task): string => JSON.stringify({
-  s: t.status, c: t.cursor, d: t.dialog && { ...t.dialog, lastCritique: undefined },
-  p: t.pending && { u: t.pending.purpose, s: t.pending.session, n: t.pending.node }, q: t.question?.source,
+  s: t.status, c: t.cursor, f: t.fixes, d: t.dialog && { ...t.dialog, lastCritique: undefined },
+  p: t.pending && { u: t.pending.purpose, s: isCheck(t.pending) ? undefined : t.pending.session, n: t.pending.node }, q: t.question?.source,
   sessions: Object.keys(t.sessions).sort(),
 })
 
@@ -61,15 +71,39 @@ const INVARIANTS: Record<string, Check> = {
   },
   '调用发到正确的会话': (_b, _e, a, _acc, wf) => {
     const p = a.pending
-    if (p === undefined) return undefined
+    if (p === undefined || isCheck(p)) return undefined
     const n = wf.nodes.find(x => x.id === p.node)!
-    const expected = p.purpose === 'produce' || p.purpose === 'critique' ? p.node
+    const expected = p.purpose === 'produce' || p.purpose === 'fix' || p.purpose === 'critique' ? p.node
       : p.purpose === 'reconfirm' ? (n as DialogNode).escalate : (n as DialogNode).with
     return p.session === expected ? undefined : `${p.purpose} sent to ${p.session}`
   },
   '调用 id 唯一且递增': (b, _e, a) => {
     if (a.pending === undefined || a.pending === b.pending) return undefined
     return a.pending.id === `c${a.nextCall}` && a.nextCall > b.nextCall ? undefined : `bad id ${a.pending.id}`
+  },
+  '检查跑的是当前节点声明的检查': (_b, _e, a, _acc, wf) => {
+    const p = a.pending
+    if (p === undefined || !isCheck(p)) return undefined
+    const n = wf.nodes[a.cursor]
+    return n?.id === p.node && p.checks === n.checks && p.checks.length > 0 ? undefined : `check for ${p.node} at cursor ${a.cursor}`
+  },
+  '自动补齐不超过 maxFixes，且只在 agent 节点上': (_b, _e, a, _acc, wf) => {
+    if (a.fixes === 0) return undefined
+    const n = wf.nodes[a.cursor]
+    return n?.kind === 'agent' && a.fixes <= n.maxFixes ? undefined : `fixes ${a.fixes} at ${n?.id}`
+  },
+  '评审方只在本轮检查通过后才被请来': (b, e, a) => {
+    if (a.pending?.purpose !== 'critique' || a.pending === b.pending || a.dialog?.phase !== 'critique') return undefined
+    const n = a.workflow.nodes[a.cursor] as DialogNode
+    if (n.checks.length === 0 || e.kind === 'replied' && b.pending?.purpose === 'critique') return undefined // 无检查，或格式不对重新要求
+    return e.kind === 'checked' && e.results.every(r => r.passed) ? undefined : `critique after ${e.kind}`
+  },
+  '有评审方的对话只在评审给出 pass 时通过一轮': (b, e, a) => {
+    const passedNow = a.log.slice(b.log.length).find(x => x.type === 'note' && x.text.endsWith('轮通过'))
+    if (passedNow?.type !== 'note') return undefined
+    const d = a.workflow.nodes.find(n => n.id === passedNow.node) as DialogNode
+    if (d.role === undefined) return e.kind === 'checked' ? undefined : `check-only dialog passed by ${e.kind}`
+    return e.kind === 'replied' && b.pending?.purpose === 'critique' ? undefined : `reviewed dialog passed by ${e.kind}`
   },
   '每个对话节点只自动重新确认一次': (_b, _e, a) => {
     const autos = a.log.filter(e => e.type === 'note' && e.text.includes('重新确认') && e.text.includes('轮未通过')).length
@@ -79,14 +113,22 @@ const INVARIANTS: Record<string, Check> = {
     if (a.status !== 'done') return undefined
     if (a.cursor !== wf.nodes.length) return 'done before the last node'
     const passed = wf.nodes.filter(n => n.kind === 'dialog').every(n => a.log.some(e => e.type === 'note' && e.node === n.id && e.text.endsWith('轮通过')))
-    return passed ? undefined : 'done without every dialog passing'
+    if (!passed) return 'done without every dialog passing'
+    // 有交付物的 agent 节点：最后一次检查必须全部通过（之后不能再有它的产出或补齐）。
+    const unchecked = wf.nodes.filter((n): n is AgentNode => n.kind === 'agent' && n.checks.length > 0).find(n => {
+      const last = a.log.findLast(e => (e.type === 'check' || e.type === 'call') && e.node === n.id)
+      return last?.type !== 'check' || !last.results.every(r => r.passed)
+    })
+    return unchecked === undefined ? undefined : `done while ${unchecked.id} failed its checks`
   },
   '被拒绝的事件不改变任务': (b, _e, a, accepted) => (!accepted && a !== b ? 'rejected event changed the task' : undefined),
   '日志只追加': (b, _e, a) => (a.log.length < b.log.length || b.log.some((e, i) => a.log[i] !== e) ? 'log rewritten' : undefined),
   '空回答被拒绝': (_b, e, _a, accepted) => (e.kind === 'answered' && e.text.trim() === '' && accepted ? 'empty answer accepted' : undefined),
   '过期事件被拒绝：指向别的调用或不存在的问题': (b, e, _a, accepted) => {
     if (!accepted) return undefined
-    if ((e.kind === 'replied' || e.kind === 'call_failed' || e.kind === 'asked') && e.call !== b.pending?.id) return `stale ${e.kind} accepted`
+    if ((e.kind === 'replied' || e.kind === 'call_failed' || e.kind === 'asked' || e.kind === 'checked') && e.call !== b.pending?.id) return `stale ${e.kind} accepted`
+    if ((e.kind === 'replied' || e.kind === 'asked') && b.pending !== undefined && isCheck(b.pending)) return `${e.kind} accepted for a check`
+    if (e.kind === 'checked' && (b.pending === undefined || !isCheck(b.pending) || e.results.length !== b.pending.checks.length)) return 'checked accepted for a call or with wrong results'
     if (e.kind === 'answered' && e.questionId !== b.question?.id) return 'answer to another question accepted'
     return undefined
   },
@@ -97,14 +139,15 @@ const INVARIANTS: Record<string, Check> = {
 }
 
 const explore = (wf: Workflow, maxDepth: number) => {
-  const start = newTask({ id: 't', request: '需求', workflow: wf }, 0)
+  const start = newTask({ id: 't', request: '需求', workflow: wf, docs: [] }, 0)
   const seen = new Set([key(start)])
   let frontier = [start]
   let depth = 0
   let transitions = 0
   const violations: string[] = []
   const stuck: string[] = []
-  while (frontier.length > 0 && depth < maxDepth) {
+  // 一旦有不变量被破坏就停下：被改坏的引擎可能让状态空间不收敛，继续搜只会超时、掩盖真正的原因。
+  while (frontier.length > 0 && depth < maxDepth && violations.length === 0) {
     const next: Task[] = []
     for (const t of frontier) {
       let movable = false
@@ -130,25 +173,34 @@ const explore = (wf: Workflow, maxDepth: number) => {
   return { states: seen.size, transitions, depth, exhausted: frontier.length === 0, violations, stuck }
 }
 
-for (const config of [{ maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: true }, { maxRounds: 2, escalate: false }]) {
+const CONFIGS = [
+  { maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: true }, { maxRounds: 2, escalate: false },
+  { maxRounds: 2, escalate: true, checks: 'review' as const }, { maxRounds: 2, escalate: false, checks: 'only' as const },
+  { maxRounds: 1, escalate: true, checks: 'only' as const, maxFixes: 0 }, { maxRounds: 1, escalate: false, checks: 'review' as const, maxFixes: 2 },
+]
+const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试', only: '有交付物、只有测试' }
+
+for (const config of CONFIGS) {
   const result = explore(workflow(config), 200)
-  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
-    assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
+  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
     assert.deepEqual(result.violations.slice(0, 5), [])
+    assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')
   })
 }
 
 test('sessionOf agrees with the session every reachable pending call was sent to', async () => {
   const { sessionOf } = await import('../src/engine/machine.ts')
-  for (const config of [{ maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: false }]) {
+  for (const config of CONFIGS) {
     const wf = workflow(config)
     const seen = new Set<string>()
-    let frontier = [newTask({ id: 't', request: 'r', workflow: wf }, 0)]
-    while (frontier.length > 0) {
+    let frontier = [newTask({ id: 't', request: 'r', workflow: wf, docs: [] }, 0)]
+    // 和上面的穷举一样限制深度：被改坏的引擎状态空间可能不收敛。
+    for (let depth = 0; frontier.length > 0; depth++) {
+      assert.ok(depth < 200, 'state space did not converge')
       const next: Task[] = []
       for (const t of frontier) {
-        if (t.pending !== undefined) assert.equal(sessionOf(wf, t.pending), t.pending.session, `${t.pending.purpose}@${t.pending.node}`)
+        if (t.pending !== undefined && !isCheck(t.pending)) assert.equal(sessionOf(wf, t.pending), t.pending.session, `${t.pending.purpose}@${t.pending.node}`)
         for (const e of eventsFor(t)) {
           const s = reduce(t, e, 1).task
           if (!seen.has(key(s))) { seen.add(key(s)); next.push(s) }

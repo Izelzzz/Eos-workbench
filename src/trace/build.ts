@@ -1,10 +1,11 @@
 // 把任务状态和 trace 事件整理成 Span 树：任务 → 节点 → 调用 → 模型步骤 → 工具。纯函数，Web 和测试共用。
 import type { Entry, Purpose, Task, Usage } from '../engine/types.ts'
-import { addUsage, zeroUsage } from '../engine/types.ts'
+import { addUsage, isCheck, zeroUsage } from '../engine/types.ts'
+import { describeCheck, describeRequirements } from '../engine/checks.ts'
 import type { Span, SpanStatus, TraceEvent } from './types.ts'
 
 export const PURPOSE: Record<Purpose, string> = {
-  produce: '完成工作', critique: '评审', respond: '回应评审', reconfirm: '重新确认', reapply: '按新方案调整', instruct: '按用户指示调整',
+  produce: '完成工作', fix: '补齐交付物', critique: '评审', respond: '回应评审', reconfirm: '重新确认', reapply: '按新方案调整', instruct: '按用户指示调整',
 }
 
 const ended = (spans: Span[]) => spans.every(s => s.end !== undefined)
@@ -77,9 +78,15 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   for (const r of trace) eventsOf.set(r.call, [...(eventsOf.get(r.call) ?? []), r.event])
   const done = new Map(task.log.filter((e): e is Extract<Entry, { type: 'call' }> => e.type === 'call').map(e => [e.call as string, e]))
 
+  /** 只有检查、没有评审方的对话里，被评审方回应的是检查失败，不是评审意见。 */
+  const purposeLabel = (info: { node: string; purpose: Purpose }): string => {
+    const n = task.workflow.nodes.find(x => x.id === info.node)
+    return info.purpose === 'respond' && n?.kind === 'dialog' && n.role === undefined ? '处理检查失败' : PURPOSE[info.purpose]
+  }
+
   const callSpan = (id: string): Span | undefined => {
     const entry = done.get(id)
-    const pending = task.pending?.id === id ? task.pending : undefined
+    const pending = task.pending?.id === id && !isCheck(task.pending) ? task.pending : undefined
     const events = eventsOf.get(id) ?? []
     // 既不是已完成的调用、也不是当前的调用：中止时正在跑的那次。用 call_start 里记下的信息放回原处。
     const abandoned = entry === undefined && pending === undefined ? events.find(e => e.kind === 'call_start')?.call : undefined
@@ -103,11 +110,11 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const usage = entry?.usage ?? sumUsage(children)
     const model = entry?.model ?? children.find(c => c.model !== undefined)?.model
     return {
-      id, kind: 'call', name: `${info.role} · ${PURPOSE[info.purpose]}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
+      id, kind: 'call', name: `${info.role} · ${purposeLabel(info)}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
       start: started ?? entry?.at ?? 0, ...(entry === undefined ? {} : { end: entry.at }), status, usage,
       ...(model === undefined ? {} : { model }),
       input: info.prompt, ...(entry === undefined ? {} : { output: entry.reply }),
-      meta: { 调用: id, 角色: info.role, 用途: PURPOSE[info.purpose], ...(round === undefined ? {} : { 轮次: String(round) }),
+      meta: { 调用: id, 角色: info.role, 用途: purposeLabel(info), ...(round === undefined ? {} : { 轮次: String(round) }),
         ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}),
         ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }) },
       children,
@@ -119,8 +126,33 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   const calls = callIds.map(callSpan).filter((s): s is Span => s !== undefined)
   const nodeOfCall = new Map(callIds.map(id => [id, (done.get(id) ?? (task.pending?.id === id ? task.pending : undefined) ?? eventsOf.get(id)?.find(e => e.kind === 'call_start')?.call)?.node as string | undefined]))
 
+  /** 平台检查：一次检查是一个 span，每一项检查是它的子 span，带没通过的原因。 */
+  const checkSpans = (node: string): Span[] => {
+    const spans: Span[] = task.log.filter((e): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && e.node === node).map(e => {
+      const passed = e.results.filter(r => r.passed).length
+      return {
+        id: e.call, kind: 'check', name: `平台检查${e.round === undefined ? '' : ` · 第 ${e.round} 轮`} · ${passed === e.results.length ? '通过' : '没有通过'}`,
+        start: e.at - e.ms, end: e.at, status: passed === e.results.length ? 'ok' : 'error',
+        meta: { 检查: e.call, 结果: `${passed}/${e.results.length} 项通过`, 耗时: `${(e.ms / 1000).toFixed(1)}s`, ...(e.round === undefined ? {} : { 轮次: String(e.round) }) },
+        children: e.results.map((r, j) => ({
+          id: `${e.call}.r${j + 1}`, kind: 'check', name: describeCheck(r.check), start: e.at - e.ms, end: e.at, status: r.passed ? 'ok' : 'error',
+          output: r.passed ? '通过' : r.detail, meta: { 结果: r.passed ? '通过' : '没有通过' }, children: [],
+        }) satisfies Span),
+      } satisfies Span
+    })
+    const p = task.pending
+    if (p !== undefined && isCheck(p) && p.node === node) {
+      spans.push({
+        id: p.id, kind: 'check', name: `平台检查${task.dialog === undefined ? '' : ` · 第 ${task.dialog.round} 轮`}`, start: task.log.at(-1)?.at ?? 0,
+        status: task.status === 'failed' ? 'error' : 'running', input: describeRequirements(p.checks),
+        meta: { 检查: p.id, ...(task.status === 'failed' && task.failure !== undefined ? { 失败原因: task.failure } : {}) }, children: [],
+      })
+    }
+    return spans
+  }
+
   const nodes: Span[] = task.workflow.nodes.map((n, i) => {
-    const children = calls.filter(c => nodeOfCall.get(c.id) === n.id)
+    const children = [...calls.filter(c => nodeOfCall.get(c.id) === n.id), ...checkSpans(n.id)]
     const loopQuestions = new Set<string>()
     for (const [k, e] of task.log.entries()) {
       if (e.type === 'note' && e.node === n.id) children.push(instant(`${n.id}.note${k}`, 'note', e.text, e.at))
@@ -139,7 +171,8 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     return {
       id: n.id, kind: 'node', name: n.id, start: start ?? 0, ...(end === undefined ? {} : { end }), status,
       usage: sumUsage(children.filter(c => c.kind === 'call')),
-      meta: { 类型: n.kind === 'agent' ? 'agent 节点' : '对话节点', 角色: n.role, ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}) },
+      meta: { 类型: n.kind === 'agent' ? 'agent 节点' : '对话节点', ...(n.role === undefined ? {} : { 角色: n.role }), ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}),
+        ...(n.checks.length === 0 ? {} : { 验收检查: describeRequirements(n.checks) }), ...(n.kind === 'agent' && n.checks.length > 0 ? { 最多自动补齐: `${n.maxFixes} 次` } : {}) },
       children,
     }
   })

@@ -4,9 +4,10 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
-import type { Event, Step, Task, TaskStatus } from '../engine/types.ts'
-import type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
+import type { ConventionDoc, Event, Step, Task, TaskStatus } from '../engine/types.ts'
+import type { Actor, ConventionKind, ConventionRow, ConventionSummary, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
+import { DEFAULT_MAX_FIXES } from '../workflow/parse.ts'
 import type { Workflow } from '../workflow/types.ts'
 
 export type { Actor, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
@@ -39,7 +40,30 @@ CREATE TABLE IF NOT EXISTS trace (
   seq INTEGER NOT NULL,
   event TEXT NOT NULL,
   PRIMARY KEY (task_id, call_id, seq)
+);
+CREATE TABLE IF NOT EXISTS conventions (
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  note TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (kind, name, version)
 );`
+
+/**
+ * 第 1 块之前保存的任务没有这些字段（任务的 docs、fixes，对话的 review，工作流快照里节点的 checks、maxFixes 和 docs）：
+ * 读出时补上默认值，引擎内部只信任完整的 Task。
+ */
+export const upgradeTask = (t: Task): Task => ({
+  ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0,
+  workflow: {
+    ...t.workflow, docs: t.workflow.docs ?? [],
+    nodes: t.workflow.nodes.map(n => ({ ...n, checks: n.checks ?? [], ...(n.kind === 'agent' ? { maxFixes: n.maxFixes ?? DEFAULT_MAX_FIXES } : {}) })),
+  },
+  ...(t.dialog === undefined ? {} : { dialog: { ...t.dialog, review: t.dialog.review ?? (t.dialog.round > 1 ? 'reply' : 'first') } }),
+})
 
 export class Store {
   readonly db: DatabaseSync
@@ -69,7 +93,7 @@ export class Store {
 
   private load(id: string): Task | undefined {
     const row = this.db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string } | undefined
-    return row === undefined ? undefined : (JSON.parse(row.state) as Task)
+    return row === undefined ? undefined : upgradeTask(JSON.parse(row.state) as Task)
   }
 
   private append(id: string, at: number, actor: Actor, event: EventRow['event'], accepted: boolean, reason?: string): void {
@@ -78,9 +102,9 @@ export class Store {
       .run(id, next, at, actor, JSON.stringify(event), accepted ? 1 : 0, reason ?? null)
   }
 
-  create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; meta: TaskMeta }, at: number, actor: Actor = 'cli'): Task {
+  create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; docs?: ConventionDoc[]; meta: TaskMeta }, at: number, actor: Actor = 'cli'): Task {
     return this.tx(() => {
-      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, ...(p.context === undefined ? {} : { context: p.context }) }, at)
+      const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, docs: p.docs ?? [], ...(p.context === undefined ? {} : { context: p.context }) }, at)
       this.db.prepare('INSERT INTO tasks (id, created_at, updated_at, status, request, workflow_name, workflow_source, meta, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(p.id, at, at, task.status, p.request, p.workflow.name, p.workflowSource, JSON.stringify(p.meta), JSON.stringify(task))
       this.append(p.id, at, actor, { kind: 'created' }, true)
@@ -141,4 +165,48 @@ export class Store {
       .map(r => ({ seq: Number(r.seq), at: Number(r.at), actor: r.actor as Actor, event: JSON.parse(String(r.event)), accepted: r.accepted === 1,
         ...(r.reason === null ? {} : { reason: String(r.reason) }) }))
   }
+
+  /** 团队约定（工作流和文档）：每次保存追加一个新版本，旧版本不改不删。最新版本就是正在使用的版本。 */
+  saveConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): ConventionRow {
+    return this.tx(() => {
+      const version = (this.db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS n FROM conventions WHERE kind = ? AND name = ?').get(p.kind, p.name) as { n: number }).n
+      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(p.kind, p.name, version, p.content, p.note, p.actor, at)
+      return { ...p, version, createdAt: at }
+    })
+  }
+
+  /** 这个名字还没有任何版本时才写入第 1 版（同一个事务里判断，多个进程同时启动也只写一次）。返回是否写入。 */
+  seedConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): boolean {
+    return this.tx(() => {
+      if (this.db.prepare('SELECT 1 FROM conventions WHERE kind = ? AND name = ? LIMIT 1').get(p.kind, p.name) !== undefined) return false
+      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)')
+        .run(p.kind, p.name, p.content, p.note, p.actor, at)
+      return true
+    })
+  }
+
+  /** 某个约定的指定版本；不给版本就是最新版本。 */
+  convention(kind: ConventionKind, name: string, version?: number): ConventionRow | undefined {
+    const row = (version === undefined
+      ? this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? ORDER BY version DESC LIMIT 1').get(kind, name)
+      : this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? AND version = ?').get(kind, name, version)) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : conventionRow(row)
+  }
+
+  /** 所有版本，新的在前。 */
+  conventionHistory(kind: ConventionKind, name: string): ConventionRow[] {
+    return (this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? ORDER BY version DESC').all(kind, name) as Record<string, unknown>[]).map(conventionRow)
+  }
+
+  /** 每个约定一行：最新版本号和更新时间。 */
+  conventions(kind: ConventionKind): ConventionSummary[] {
+    return (this.db.prepare('SELECT name, MAX(version) AS version, MAX(created_at) AS updated_at FROM conventions WHERE kind = ? GROUP BY name ORDER BY name').all(kind) as Record<string, unknown>[])
+      .map(r => ({ kind, name: String(r.name), version: Number(r.version), updatedAt: Number(r.updated_at) }))
+  }
 }
+
+const conventionRow = (r: Record<string, unknown>): ConventionRow => ({
+  kind: r.kind as ConventionKind, name: String(r.name), version: Number(r.version), content: String(r.content),
+  note: String(r.note), actor: String(r.actor), createdAt: Number(r.created_at),
+})

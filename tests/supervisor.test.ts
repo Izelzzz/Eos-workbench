@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { acquire } from '../src/runner/lock.ts'
@@ -36,7 +36,7 @@ test('create refuses bad input in Chinese and creates nothing', () => {
     [{ repo: s.repo, workflow: 'feature', request: '   ' }, /需求不能为空/],
     [{ repo: join(s.dir, 'missing'), workflow: 'feature', request: '需求' }, /找不到目录/],
     [{ repo: join(s.dir, 'not-a-repo'), workflow: 'feature', request: '需求' }, /不是 git 仓库/],
-    [{ repo: s.repo, workflow: 'nope', request: '需求' }, /找不到工作流「nope」/],
+    [{ repo: s.repo, workflow: 'nope', request: '需求' }, /平台上没有工作流「nope」/],
   ]
   for (const [input, error] of cases) {
     const r = sup.create(input)
@@ -97,4 +97,44 @@ test('resumeAll picks up unfinished tasks that nobody runs and leaves failed and
   assert.equal(s.store.get(running)!.status, 'done')
   assert.equal(s.store.get(failed)!.status, 'failed')
   if ('release' in lock) lock.release()
+})
+
+test('platform conventions drive a task: docs are injected, versions recorded, and a missing deliverable is sent back and fixed', async () => {
+  const s = sandbox()
+  const prompts: string[] = []
+  let sup: Supervisor
+  const executor = new FakeExecutor(async ({ key, prompt }) => {
+    prompts.push(prompt)
+    const id = key.split('/')[0]!
+    // 第一次交付故意漏掉"改动"一节；被退回补齐后写全。
+    if (/交付物检查没有通过/.test(prompt)) writeFileSync(join(s.store.meta(id).worktree, 'NOTES.md'), '# 说明\n## 改动\n加了 sum\n')
+    else writeFileSync(join(s.store.meta(id).worktree, 'NOTES.md'), '# 说明\n')
+    return '已完成'
+  })
+  sup = supervisor(s, executor)
+  assert.ok(sup.conventions.save({ kind: 'doc', name: '小组约定', content: '函数要有注释', actor: 'web' }, 1).ok)
+  const wf = `
+name: notes
+docs: [小组约定]
+roles:
+  dev: { prompt: 你负责开发, write: worktree }
+nodes:
+  - { id: build, kind: agent, role: dev, task: 实现并写 NOTES.md, deliverables: [{ path: NOTES.md, sections: [改动] }] }
+`
+  const saved = sup.conventions.save({ kind: 'workflow', name: 'notes', content: wf, actor: 'web' }, 2)
+  assert.ok(saved.ok, JSON.stringify(!saved.ok && saved.errors))
+  const created = sup.create({ repo: s.repo, workflow: 'notes', request: '加一个求和函数' })
+  assert.ok(created.ok)
+  assert.deepEqual(s.store.meta(created.id).conventions, { workflow: { name: 'notes', version: 1 }, docs: [{ name: '小组约定', version: 1 }] })
+  // 任务创建之后再改约定，不影响这个任务。
+  sup.conventions.save({ kind: 'doc', name: '小组约定', content: '改过的约定', actor: 'web' }, 3)
+  const started = sup.start(created.id)
+  assert.ok(started.ok)
+  const task = await started.done
+  assert.equal(task.status, 'done', task.failure)
+  assert.match(prompts[0]!, /团队约定：小组约定（第 1 版）\n\n函数要有注释/)
+  assert.match(prompts[1]!, /交付物检查没有通过[\s\S]*缺少章节：改动/)
+  const checks = task.log.flatMap(e => (e.type === 'check' ? [e.results[0]!.passed] : []))
+  assert.deepEqual(checks, [false, true])
+  assert.match(readFileSync(join(s.store.meta(created.id).worktree, 'NOTES.md'), 'utf8'), /## 改动/)
 })

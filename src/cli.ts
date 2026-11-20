@@ -1,4 +1,5 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
+import { describeCheck } from './engine/checks.ts'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -11,10 +12,10 @@ import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
 import { createWebServer } from './web/server.ts'
-import { builtinTemplates, loadWorkflow } from './workflow/templates.ts'
+import { Conventions } from './conventions/conventions.ts'
 
 const HELP = `用法：
-  eos run --repo <仓库路径> [--workflow feature] "<需求>"   创建任务并运行
+  eos run --repo <仓库路径> [--workflow standard] "<需求>"   创建任务并运行
   eos resume <任务>                                       续跑（进程中断后）
   eos retry <任务>                                        重试失败的任务
   eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
@@ -30,7 +31,7 @@ const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_u
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'feature' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
+  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
 })
 
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
@@ -133,6 +134,7 @@ const commands: Record<string, () => Promise<void> | void> = {
         say(`>>> 提示词\n${e.prompt}\n<<< 回复\n${e.reply}`)
       } else if (e.type === 'question') say(`\n── ${time} 提问（${e.question.source}）：${e.question.text}`)
       else if (e.type === 'answer') say(`\n── ${time} 回答 ${e.questionId}：${e.text}`)
+      else if (e.type === 'check') say(`\n── ${time} [${e.node}${e.round === undefined ? '' : ` 第 ${e.round} 轮`}] 检查 · ${(e.ms / 1000).toFixed(1)}s\n${e.results.map(r => `${r.passed ? '✓' : '✗'} ${describeCheck(r.check)}${r.passed || r.detail === '' ? '' : `\n${r.detail}`}`).join('\n')}`)
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)
@@ -160,10 +162,11 @@ const commands: Record<string, () => Promise<void> | void> = {
     await new Promise(() => {})
   },
   workflows() {
-    for (const name of builtinTemplates()) {
-      const { workflow } = loadWorkflow(name)
-      say(`${name}：${workflow.description ?? ''}`)
-    }
+    const conventions = new Conventions(store)
+    conventions.seed(Date.now())
+    for (const w of conventions.list('workflow')) say(`${w.name}（第 ${w.version} 版）：${w.description ?? ''}`)
+    const docs = conventions.list('doc')
+    if (docs.length > 0) say(`\n约定文档：${docs.map(d => `${d.name}（第 ${d.version} 版）`).join('、')}`)
   },
 }
 

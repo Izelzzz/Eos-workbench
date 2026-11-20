@@ -15,11 +15,11 @@ export const visibleRows = (root: Span, open: Set<string>): Row[] => {
   return rows
 }
 
-/** 默认展开到调用这一层；运行中或等待回答的调用连同它的步骤一起展开。 */
+/** 默认展开到调用这一层；运行中或等待回答的调用连同它的步骤一起展开；没通过的检查展开到每一项。 */
 export const defaultOpen = (root: Span): Set<string> => {
   const open = new Set<string>()
   const walk = (s: Span) => {
-    if (s.kind === 'task' || s.kind === 'node' || (s.kind === 'call' && s.status !== 'ok')) open.add(s.id)
+    if (s.kind === 'task' || s.kind === 'node' || (s.kind === 'call' && s.status !== 'ok') || (s.kind === 'check' && s.status === 'error')) open.add(s.id)
     s.children.forEach(walk)
   }
   walk(root)

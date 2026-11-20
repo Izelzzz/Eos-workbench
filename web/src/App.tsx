@@ -3,6 +3,7 @@ import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
+import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
 import { Detail } from './Detail.tsx'
 import { NewTask } from './NewTask.tsx'
 import { ago, duration, STATUS, statusClass, tokens } from './format.ts'
@@ -150,7 +151,17 @@ function TaskPage(props: { id: string }) {
         </div>
         <p className="request">{task.request}</p>
         <div className="stats">
-          <div><span>工作流</span><b>{task.workflow}</b></div>
+          <div>
+            <span>工作流</span>
+            <b>{task.conventions?.workflow.version === undefined ? task.workflow
+              : <a href={conventionHref('workflow', task.workflow)}>{task.workflow} · 第 {task.conventions.workflow.version} 版</a>}</b>
+          </div>
+          {task.conventions && task.conventions.docs.length > 0 && (
+            <div>
+              <span>团队约定</span>
+              <b>{task.conventions.docs.map((d, i) => <span key={d.name}>{i > 0 && '、'}<a href={conventionHref('doc', d.name)}>{d.name} · 第 {d.version} 版</a></span>)}</b>
+            </div>
+          )}
           <div><span>当前位置</span><b>{task.position}</b></div>
           <div><span>已完成调用</span><b>{r.calls} 次</b></div>
           <div><span>agent 耗时</span><b>{duration(r.ms)}</b></div>
@@ -195,13 +206,19 @@ function TaskPage(props: { id: string }) {
 export function App() {
   const hash = useHash()
   const id = /^#\/tasks\/([\w-]+)/.exec(hash)?.[1]
+  const conv = parseConventionRoute(hash)
   return (
     <>
       <header className="topbar">
         <a href="#/" className="brand">Eos Workbench</a>
-        <span className="muted">多 agent 工作流</span>
+        <nav className="topnav">
+          <a href="#/" className={conv === undefined ? 'active' : ''}>任务</a>
+          <a href="#/conventions" className={conv !== undefined ? 'active' : ''}>团队约定</a>
+        </nav>
       </header>
-      <main>{hash === '#/new' ? <NewTask /> : id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}</main>
+      <main className={conv === undefined ? '' : 'wide'}>
+        {conv !== undefined ? <Conventions route={conv} /> : hash === '#/new' ? <NewTask /> : id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}
+      </main>
     </>
   )
 }

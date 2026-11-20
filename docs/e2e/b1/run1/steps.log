@@ -1,0 +1,9 @@
+[10:36:03] eos web 已启动（pid 28319）
+[10:36:04] 故意写错 kind，页面提示：nodes[2].kind：kind 只能是 agent 或 dialog
+[10:36:06] standard 工作流保存为第 2 版
+[10:36:06] 页面上创建了任务 t2611201036066ry
+[10:36:06] 位置：spec（running）
+[10:38:37] 位置：build（running）
+[10:39:31] 位置：build · 补齐 1/2（running）
+[10:39:39] 位置：review 第 1/5 轮 · critique（running）
+[10:41:02] 位置：已完成（done）

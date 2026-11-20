@@ -1,8 +1,11 @@
 // 与后端接口对应的类型和请求。类型从后端源码只做类型导入，前后端用同一份定义。
 import type { TaskSummary } from '../../src/store/types.ts'
-import type { ActionResponse, AnswerResponse, CreateResponse, TaskDetail, WorkflowInfo } from '../../src/web/types.ts'
+import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
+import type {
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, FieldError, SaveConventionResponse, TaskDetail, WorkflowInfo,
+} from '../../src/web/types.ts'
 
-export type { TaskDetail, TaskSummary, WorkflowInfo }
+export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, TaskDetail, TaskSummary, WorkflowInfo }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -31,3 +34,9 @@ export const answerQuestion = (id: string, questionId: string, text: string) =>
   post<AnswerResponse>(`/api/tasks/${encodeURIComponent(id)}/answer`, { questionId, text })
 export const taskAction = (id: string, action: 'resume' | 'retry' | 'abort') =>
   post<ActionResponse>(`/api/tasks/${encodeURIComponent(id)}/${action}`, {})
+
+export const listConventions = () => get<ConventionsResponse>('/api/conventions')
+const conventionPath = (kind: ConventionKind, name: string) => `/api/conventions/${kind}/${encodeURIComponent(name)}`
+export const getConvention = (kind: ConventionKind, name: string) => get<ConventionDetail>(conventionPath(kind, name))
+export const saveConvention = (kind: ConventionKind, name: string, body: { content: string; note?: string; validateOnly?: boolean }) =>
+  post<SaveConventionResponse>(conventionPath(kind, name), body)
