@@ -72,6 +72,7 @@ note(`页面上创建了任务 ${id}`)
 
 const detail = async () => (await (await fetch(`${base}/api/tasks/${id}`)).json()) as { status: string; position: string; runnerAlive: boolean }
 let killed = false
+const choices: string[] = []
 let leftovers: string[] = ['未检查']
 let answered = 0
 const until = Date.now() + 25 * 60_000
@@ -82,6 +83,7 @@ while (Date.now() < until) {
     if (answered === 0) await snap('question')
     const choice = await form.locator('.options button').first().innerText()
     await form.locator('.options button').first().click()
+    choices.push(choice)
     answered++
     note(`页面回答 #${answered}：${q} → ${choice}`)
     await page.waitForFunction((text: string) => document.querySelector('.question-text')?.textContent !== text, q, { timeout: 15_000 }).catch(() => {})
@@ -165,10 +167,21 @@ const checks = {
   '已完成的调用没有重复': new Set(calls).size === calls.length,
   'worktree 里 npm test 通过': npmTest,
   '页面没有脚本错误': errors.length === 0,
-  'agent 收到的是页面上选中的选项': store.trace(id).some(r => r.event.kind === 'tool_end' && r.event.output.includes('"selected"')),
+  'agent 收到的正是页面上点的那些选项': (() => {
+    // 每个 ask_user_question 工具结果里的 selected 值，必须和页面上点的选项一一对应。
+    const received = store.trace(id).flatMap(r => {
+      if (r.event.kind !== 'tool_end' || !r.event.output.includes('"selected"')) return []
+      try {
+        return (JSON.parse(r.event.output) as { answers: { selected: string[] }[] }).answers.flatMap(a => a.selected)
+      } catch {
+        return []
+      }
+    })
+    return choices.length > 0 && JSON.stringify(received) === JSON.stringify(choices)
+  })(),
   '被杀的进程组在 10 秒内没有活着的进程': killed && leftovers.length === 0,
 }
-const report = { task: id, answered, calls: task.log.filter(e => e.type === 'call').map(e => (e.type === 'call' ? `${e.call} ${e.purpose}@${e.node} ${e.ms}ms` : '')), checks, errors }
+const report = { task: id, answered, choices, calls: task.log.filter(e => e.type === 'call').map(e => (e.type === 'call' ? `${e.call} ${e.purpose}@${e.node} ${e.ms}ms` : '')), checks, errors }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1)
