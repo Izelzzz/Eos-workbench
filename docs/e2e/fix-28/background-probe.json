@@ -1,0 +1,48 @@
+{
+  "code": {
+    "commit": "5035ab6",
+    "uncommitted": []
+  },
+  "allOk": true,
+  "checks": {
+    "工具表里没有 job_* 工具": true,
+    "bash 的 run_in_background 被拒绝": true,
+    "nohup 放到后台的进程在本轮结束时还活着（证明它确实脱离了前台命令）": true,
+    "清理之后这个进程不在了": true,
+    "清理后下一次调用正常（重启 dsh、续接会话）": true
+  },
+  "bgPid": 22031,
+  "killed": [],
+  "cleanupMs": 76,
+  "restartMs": 3851,
+  "toolsOffered": [
+    "ask_user_question",
+    "bash",
+    "create_goal",
+    "edit",
+    "get_goal",
+    "glob",
+    "grep",
+    "list_agents",
+    "present",
+    "read",
+    "read_image",
+    "schedule_create",
+    "schedule_edit",
+    "schedule_list",
+    "schedule_view",
+    "send_message",
+    "skill",
+    "subagent",
+    "subagent_fork",
+    "todo_write",
+    "update_goal",
+    "wait_agent",
+    "web_fetch",
+    "web_search",
+    "workflow",
+    "working_directory",
+    "write"
+  ],
+  "reply": "三步都执行完了，结果如下：\n\n**1. `bash` + `run_in_background: true` 执行 `sleep 300` —— 失败**\n\n调用被平台直接拒绝，错误原文：\n\n```\nError: run_in_background is disabled for this deployment (enableRunInBackground: false)\n```\n\n原因不是参数写错，而是这个部署关掉了后台运行能力（`enableRunInBackground: false`），所以 `sleep 300` 没有真正跑起来，也没有产生任务句柄。\n\n**2. `job_list` 工具 —— 没有**\n\n本会话的工具清单里不存在 `job_list`（也没有任何同义的作业/后台任务查询工具），无法列出后台作业。\n\n**3. `nohup sleep 301 &` 写 PID 文件 —— 成功**\n\n命令返回 `started`，PID 文件已生成。随后做了一次核对：\n\n- `bg.pid` 内容：`22031`\n- `ps` 输出：`22031 S sleep 301`\n\n即进程确实以独立后台进程存活（不受第 1 步限制影响），PID 文件路径为 [bg.pid](.eos/background-probe/wt/bg.pid)（绝对路径 `/home/user/Eos-workbench/.eos/background-probe/wt/bg.pid`）。\n\n补充说明：第 3 步的进程是 shell 自建的脱离进程，平台并不管理它，因此既不出现在任何作业列表里，也不会随会话结束被工具回收；需要时请按 PID `22031` 自行清理。"
+}
