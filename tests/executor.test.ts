@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import { zstdCompressSync } from 'node:zlib'
 import { agentEnv, DshExecutor, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
@@ -104,10 +107,10 @@ test('a live call returns its reply only when the last turn completed, trusting 
 })
 
 /** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
-const fakeHarnesses = () => {
-  const created: { cwd?: string; processCwd?: string; model?: string; closed: boolean }[] = []
+const fakeHarnesses = (closeMs = 0) => {
+  const created: { cwd?: string; processCwd?: string; model?: string; closed: boolean; resumed: string[] }[] = []
   const createHarness = (o: { cwd?: string; processCwd?: string; model?: string }) => {
-    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, closed: false }
+    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, closed: false, resumed: [] as string[] }
     created.push(rec)
     const session = (id: string) => ({
       id,
@@ -115,7 +118,15 @@ const fakeHarnesses = () => {
       run: async (input: string) => ({ finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
         events: [{ type: 'turn/end', time: 1, data: { reason: { kind: 'completed' } } }] }),
     })
-    return { session, resumeSession: async (id: string) => session(id), close: async () => { rec.closed = true } } as never
+    const resumeSession = async (id: string) => {
+      rec.resumed.push(id)
+      return session(id)
+    }
+    const close = async () => {
+      await new Promise(r => setTimeout(r, closeMs))
+      rec.closed = true
+    }
+    return { session, resumeSession, close } as never
   }
   return { created, createHarness }
 }
@@ -128,12 +139,56 @@ test('each worktree gets its own dsh process whose workspace is that worktree; r
   await send('t1/build', '/data/worktrees/t1')
   await send('t1/review', '/data/worktrees/t1', 'none')
   await send('t2/build', '/data/worktrees/t2')
-  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', '/data/worktrees/t1'], ['/data/worktrees/t2', '/data/worktrees/t2']],
-    'the session workspace (write root) is the task worktree, never the platform’s own directory')
+  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', '/data/dsh/process-cwd'], ['/data/worktrees/t2', '/data/dsh/process-cwd']],
+    'the session workspace (write root) is the task worktree; the dsh process itself runs in a platform directory, not in the worktree (no .env from the repo)')
   await ex.release('/data/worktrees/t1')
   assert.deepEqual(created.map(c => c.closed), [true, false])
   await send('t1/build', '/data/worktrees/t1')
-  assert.equal(created.length, 3, 'a later call for that worktree starts a fresh process and resumes its session')
+  assert.equal(created.length, 3, 'a later call for that worktree starts a fresh process')
   await ex.close()
   assert.ok(created.every(c => c.closed))
+})
+
+/** 一个真实的 dsh home，里面有一个会话日志，会话头记着它的工作区。 */
+const homeWithSession = (key: string, workspace: string) => {
+  const home = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-dshhome-'))
+  const dir = join(home, 'sessions', '--slug--', sessionIdFor(key))
+  mkdirSync(dir, { recursive: true })
+  const lines = [{ type: 'session', version: 4, id: sessionIdFor(key), cwd: workspace }, user('之前的消息', 1)]
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(lines.map(l => JSON.stringify(l)).join('\n'))))
+  return home
+}
+
+test('a session whose recorded workspace is not the task worktree is refused, not resumed; a matching one is resumed', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const old = new DshExecutor({ dshHome: homeWithSession('t1/build', '/home/user/Eos-workbench'), dshBin: 'dsh', createHarness })
+  const call = (ex: DshExecutor) => ex.send({ key: 't1/build', nonce: 't1/c9', prompt: '继续', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  await assert.rejects(call(old), /可写范围是 \/home\/user\/Eos-workbench，不是任务的 worktree \/data\/worktrees\/t1[\s\S]*请中止这个任务后重新发起/)
+  assert.deepEqual(created.flatMap(c => c.resumed), [], 'the unsafe session was never resumed')
+  const ok = new DshExecutor({ dshHome: homeWithSession('t1/build', '/data/worktrees/t1'), dshBin: 'dsh', createHarness })
+  await call(ok)
+  assert.deepEqual(created.at(-1)?.resumed, [sessionIdFor('t1/build')])
+})
+
+test('a worktree’s next process starts only after its released process has exited (its session lock is free)', async () => {
+  const { created, createHarness } = fakeHarnesses(50)
+  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
+  const send = () => ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  await send()
+  const releasing = ex.release('/data/worktrees/t1')
+  const again = send()
+  await again
+  assert.equal(created.length, 2)
+  assert.equal(created[0]!.closed, true, 'the old process had exited before the new one was created')
+  await releasing
+  await ex.close()
+})
+
+test('close waits for processes that are still being released', async () => {
+  const { created, createHarness } = fakeHarnesses(50)
+  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
+  await ex.send({ key: 't1/build', nonce: 't1/c1', prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd: '/data/worktrees/t1' }, ask: async () => '' })
+  void ex.release('/data/worktrees/t1')
+  await ex.close()
+  assert.equal(created[0]!.closed, true)
 })
