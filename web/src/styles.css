@@ -67,7 +67,18 @@ main { padding: 16px 20px; }
 .stats { display: flex; flex-wrap: wrap; gap: 8px 28px; }
 .stats div { display: flex; flex-direction: column; }
 .stats span { color: var(--muted); font-size: 12px; }
-.question { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--waiting) 14%, transparent); border: 1px solid color-mix(in srgb, var(--waiting) 40%, transparent); }
+.question { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: color-mix(in srgb, var(--waiting) 12%, transparent); border: 1px solid color-mix(in srgb, var(--waiting) 45%, transparent); }
+.question-head { display: flex; gap: 6px; align-items: baseline; }
+.question-text { margin: 6px 0 10px; white-space: pre-wrap; }
+.options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.options button { padding: 6px 12px; border-color: color-mix(in srgb, var(--waiting) 55%, transparent); }
+.free { display: flex; gap: 8px; align-items: flex-end; }
+.free textarea { flex: 1; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+button.primary { background: var(--running); border-color: var(--running); color: #fff; padding: 6px 16px; }
+button.primary:hover { filter: brightness(1.08); background: var(--running); }
+button:disabled { opacity: 0.55; cursor: default; }
+.notice { margin: 12px 0 0; padding: 8px 12px; border-radius: 6px; background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.notice.warn { background: color-mix(in srgb, var(--error) 10%, transparent); }
 .failure { margin-top: 12px; }
 .live-note { font-size: 12px; }
 

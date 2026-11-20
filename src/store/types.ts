@@ -2,8 +2,8 @@
 import type { Event, TaskStatus } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 
-/** 谁发出的事件：命令行、runner 自己、执行器（agent 回复或提问）。 */
-export type Actor = 'cli' | 'runner' | 'executor'
+/** 谁发出的事件：命令行、Web 页面、runner 自己、执行器（agent 回复或提问）。 */
+export type Actor = 'cli' | 'web' | 'runner' | 'executor'
 
 export type EventRow = { seq: number; at: number; actor: Actor; event: Event | { kind: 'created' }; accepted: boolean; reason?: string }
 

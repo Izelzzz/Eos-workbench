@@ -15,4 +15,9 @@ export type TaskDetail = {
   worktree: string
   report: Report
   trace: Span
+  /** 有 runner 进程正在跑这个任务（看锁文件）。为 false 时回答对话尽头的问题后需要 resume。 */
+  runnerAlive: boolean
 }
+
+export type AnswerRequest = { questionId: string; text: string }
+export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }

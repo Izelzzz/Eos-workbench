@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks } from './api.ts'
+import { Answer } from './Answer.tsx'
 import { Detail } from './Detail.tsx'
 import { ago, duration, STATUS, statusClass, tokens } from './format.ts'
 import { defaultOpen, TraceTree, visibleRows } from './Trace.tsx'
@@ -61,6 +62,8 @@ function TaskPage(props: { id: string }) {
   const [open, setOpen] = useState<Set<string>>()
   const [selected, setSelected] = useState<string>()
   const [now, setNow] = useState(Date.now())
+  const [reload, setReload] = useState(0)
+  const [notice, setNotice] = useState<string>()
   const seen = useRef(new Set<string>())
 
   useEffect(() => {
@@ -88,7 +91,7 @@ function TaskPage(props: { id: string }) {
       stopped = true
       clearTimeout(timer)
     }
-  }, [props.id])
+  }, [props.id, reload])
 
   const rows = useMemo(() => (task && open ? visibleRows(task.trace, open) : []), [task, open])
   const bounds = useMemo(() => (task === undefined ? { start: 0, end: 1 } : boundsOf(task.trace, now)), [task, now])
@@ -128,11 +131,18 @@ function TaskPage(props: { id: string }) {
           <div><span>分支</span><b className="mono">{task.branch}</b></div>
         </div>
         {task.question && (
-          <div className="question">
-            <b>待回答（{task.question.id}）</b>：{task.question.text}
-            {task.question.options && <div className="muted">选项：{task.question.options.join(' / ')}</div>}
-            <div className="muted">回答：<code>npm run eos -- answer {task.id} "&lt;回答&gt;"</code></div>
-          </div>
+          <Answer
+            key={task.question.id}
+            task={task}
+            onAnswered={resumeNeeded => {
+              setNotice(resumeNeeded ? `已回答。没有 runner 在运行这个任务，执行 npm run eos -- resume ${task.id} 让它继续。` : '已回答，任务继续。')
+              setReload(n => n + 1)
+            }}
+          />
+        )}
+        {notice && !task.question && <p className="notice" role="status">{notice}</p>}
+        {LIVE.has(task.status) && !task.runnerAlive && (
+          <p className="notice warn">没有 runner 在运行这个任务{task.question?.source === 'agent' ? '（agent 的提问来自上一次运行，回答后需要续跑）' : ''}。执行 <code>npm run eos -- resume {task.id}</code> 继续。</p>
         )}
         {task.failure && <div className="failure"><b>失败原因</b>：{task.failure}</div>}
       </section>

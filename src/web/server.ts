@@ -1,22 +1,51 @@
 // Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
+// 唯一的写接口是回答提问：要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
+import { holder } from '../runner/lock.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { TaskDetail } from './types.ts'
+import type { AnswerResponse, TaskDetail } from './types.ts'
 
 const summaryOf = (t: Task) => ({ id: t.id, status: t.status, workflow: t.workflow.name })
 
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' }
 
-export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'traceOf'>; staticDir: string }): Server => {
+const MAX_BODY = 64 * 1024
+
+/** 读 JSON 请求体。超过上限的照样读完（只是不保存），这样客户端能收到 413 而不是断开的连接。 */
+const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unknown }> => new Promise(resolve => {
+  let size = 0
+  const chunks: Buffer[] = []
+  req.on('data', (c: Buffer) => {
+    size += c.length
+    if (size <= MAX_BODY) chunks.push(c)
+  })
+  req.on('end', () => {
+    if (size > MAX_BODY) return resolve({ tooBig: true })
+    try {
+      resolve({ value: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
+    } catch {
+      resolve({ value: undefined })
+    }
+  })
+  req.on('error', () => resolve({ value: undefined }))
+})
+
+/** 浏览器发来的同源请求：Origin 必须存在且与 Host 一致。 */
+const sameOrigin = (req: IncomingMessage): boolean => {
+  const origin = req.headers.origin
+  return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
+}
+
+export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'traceOf'>; staticDir: string; locksDir: string }): Server => {
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
 
@@ -42,16 +71,33 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       branch: meta.branch, worktree: meta.worktree, report: report(task), trace: buildTrace(task, await traceRows(task)),
+      runnerAlive: holder(o.locksDir, id) !== undefined,
     }
   }
 
-  const json = (res: import('node:http').ServerResponse, status: number, body: unknown) => {
+  const json = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(JSON.stringify(body))
   }
 
+  const answer = async (id: string, req: IncomingMessage): Promise<[number, AnswerResponse]> => {
+    if (!sameOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
+    if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
+    const read = await readJson(req)
+    if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]
+    const body = read.value as { questionId?: unknown; text?: unknown } | undefined
+    if (typeof body?.questionId !== 'string' || typeof body.text !== 'string') return [400, { ok: false, error: '需要 questionId 和 text' }]
+    const task = o.store.get(id)
+    if (task === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
+    const step = o.store.dispatch(id, { kind: 'answered', questionId: body.questionId, text: body.text }, Date.now(), 'web')
+    if (!step.accepted) return [409, { ok: false, error: step.reason ?? '回答没有被接受' }]
+    // agent 中途的提问由正在等待的 runner 接着处理；对话尽头的问题回答后要有 runner 执行下一步。
+    const resumeNeeded = task.question?.source === 'loop' && holder(o.locksDir, id) === undefined
+    return [200, { ok: true, resumeNeeded }]
+  }
+
   const root = resolve(o.staticDir)
-  const serveStatic = (path: string, res: import('node:http').ServerResponse) => {
+  const serveStatic = (path: string, res: ServerResponse) => {
     const file = normalize(join(root, path))
     const inside = file === root || file.startsWith(root + sep)
     const target = inside && existsSync(file) && statSync(file).isFile() ? file : join(root, 'index.html')
@@ -66,7 +112,9 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', 'http://localhost')
-      if (req.method !== 'GET') return json(res, 405, { error: '只支持 GET' })
+      const answerPath = /^\/api\/tasks\/([\w-]+)\/answer$/.exec(url.pathname)
+      if (req.method === 'POST' && answerPath) return json(res, ...(await answer(answerPath[1]!, req)))
+      if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {

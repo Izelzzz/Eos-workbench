@@ -166,7 +166,7 @@ const commands: Record<string, () => Promise<void> | void> = {
   async web() {
     const port = Number(values.port)
     const server = createWebServer({
-      store, staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
+      store, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), locksDir: join(dataDir, 'locks'),
       replay: new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: '' }),
     })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))

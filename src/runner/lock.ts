@@ -31,3 +31,13 @@ export const acquire = (dir: string, id: string, pid = process.pid): Lock | { he
   }
   return { heldBy: Number(readFileSync(file, 'utf8')) }
 }
+
+/** 当前持有锁、而且还活着的进程 pid；没有就返回 undefined。只读，不清理过期的锁。 */
+export const holder = (dir: string, id: string): number | undefined => {
+  try {
+    const pid = Number(readFileSync(join(dir, `${id}.pid`), 'utf8'))
+    return alive(pid) ? pid : undefined
+  } catch {
+    return undefined
+  }
+}
