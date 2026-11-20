@@ -26,12 +26,15 @@ const matchSegments = (pattern: string[], segments: string[]): boolean => {
   return matchSegment(head, segments[0]!) && matchSegments(rest, segments.slice(1))
 }
 
-/** 去掉开头的 ./、结尾的 /（目录写法等价于它下面的全部内容）和空段。 */
-const segmentsOf = (path: string): string[] => path.replace(/\\/g, '/').split('/').filter(s => s !== '' && s !== '.')
+/**
+ * 去掉开头的 ./、结尾的 /（目录写法等价于它下面的全部内容）和空段。只按 / 分段：
+ * 反斜杠在 Linux 上是文件名里的普通字符（名为 src\\evil.ts 的文件不在 src 目录下），模式里的反斜杠在解析时就被拒绝。
+ */
+const segmentsOf = (path: string): string[] => path.split('/').filter(s => s !== '' && s !== '.')
 
 const patternSegments = (pattern: string): string[] => {
   const segments = segmentsOf(pattern)
-  return pattern.replace(/\\/g, '/').endsWith('/') ? [...segments, '**'] : segments
+  return pattern.endsWith('/') ? [...segments, '**'] : segments
 }
 
 /** 这个 glob 是否匹配这条（worktree 内的相对）路径。 */

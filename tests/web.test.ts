@@ -24,10 +24,13 @@ const serve = async () => {
   mkdirSync(join(dir, 'static-evil'))
   writeFileSync(join(dir, 'static-evil', 'x.txt'), 'sibling secret')
   const store = new Store(join(dir, 'eos.db'))
+  // 和平台一样用真实的 git worktree：平台提交前会核对 worktree 的 .git 还是 git 建的那个文件。
+  const mainRepo = join(dir, 'main-repo')
+  mkdirSync(mainRepo)
+  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: mainRepo })
   const worktree = join(dir, 'wt')
-  mkdirSync(worktree)
-  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: worktree })
-  store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: worktree, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
+  execFileSync('git', ['worktree', 'add', '-q', '-b', 'eos/t1', worktree], { cwd: mainRepo })
+  store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: mainRepo, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
   const replayed: string[] = []
   // c1 跑在事件流之前（只能回放），c2 运行时记录了事件流。
   store.dispatch('t1', { kind: 'replied', call: 'c1' as never, sessionId: 's', text: '方案', usage: zero, ms: 100 }, 1100, 'executor')

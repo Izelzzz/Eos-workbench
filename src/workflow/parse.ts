@@ -26,14 +26,14 @@ const parseRole = (key: string, raw: unknown, lookup: TemplateLookup): { role?: 
   const at = (field: string) => `roles.${key}${field === '' ? '' : `.${field}`}`
   const isRef = typeof raw === 'object' && raw !== null && 'template' in raw
   if (isRef) {
-    const r = templateRef.safeParse(raw)
+    const r = templateRef.safeParse(raw, { reportInput: true })
     if (!r.success) return { errors: r.error.issues.map(i => ({ path: at(pathOf(i.path).replace('(根)', '')), message: zodMessage(i) })) }
     const found = lookup(r.data.template)
     if (found === undefined) return { errors: [{ path: at('template'), message: `平台上没有名为「${r.data.template}」的 Agent 模板` }] }
     const { name, description: _description, ...config } = found.template
     return { role: { id: key as RoleId, ...config, template: { name, version: found.version } }, errors: [] }
   }
-  const r = inlineRole.safeParse(raw)
+  const r = inlineRole.safeParse(raw, { reportInput: true })
   if (!r.success) return { errors: r.error.issues.map(i => ({ path: at(pathOf(i.path).replace('(根)', '')), message: zodMessage(i) })) }
   const errors = agentErrors(r.data, at)
   return errors.length > 0 ? { errors } : { role: { id: key as RoleId, ...toAgentConfig(r.data) }, errors: [] }
@@ -118,7 +118,7 @@ const semantic = (wf: Workflow): WorkflowError[] => {
 export const parseWorkflow = (source: string, lookup: TemplateLookup = () => undefined): ParseResult => {
   const y = yamlOf(source)
   if (!y.ok) return y
-  const parsed = workflowSchema.safeParse(y.value)
+  const parsed = workflowSchema.safeParse(y.value, { reportInput: true })
   // 角色单独解析，和工作流其余部分的错误一起报出来（不因为别处有错就漏报角色的错）。
   const rawRoles = (y.value as { roles?: unknown } | null)?.roles
   const roleEntries = typeof rawRoles === 'object' && rawRoles !== null && !Array.isArray(rawRoles) ? Object.entries(rawRoles) : []

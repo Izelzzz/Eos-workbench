@@ -2,7 +2,7 @@ name: developer
 description: 开发：按规格实现并补测试，只改代码、测试和改动说明。
 model: deepseek-flash
 write: worktree
-writePaths: [src/**, test/**, tests/**, docs/changes.md, package.json]
+writePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]
 tools:
   deny: [subagent, schedule]
 skills: [write-changes]

@@ -135,3 +135,72 @@ test('agent 自己 git add 过的越界改动也会被撤销，不会留在暂�
   assert.deepEqual(committed(git), ['src/a.ts'])
   assert.equal(read(dir, 'docs/design.md'), '# 设计\n')
 })
+
+// —— 独立审查发现的绕过（A1–A4），每条都先复现、再证明已经关上 ——
+
+test('一个文件名不是合法 UTF-8 的越界文件：被按原始字节删掉，不进提交（原来会记成"已撤销"却被提交）', () => {
+  const { dir, git } = repo()
+  writeFileSync(Buffer.concat([Buffer.from(dir + '/'), Buffer.from([0x62, 0xff, 0x2e, 0x74, 0x78, 0x74])]), 'x\n')
+  write(dir, 'src/ok.ts', 'ok\n')
+  const r = commitInScope(dir, ['src/**'], 'm')
+  assert.deepEqual(r.reverted, ['b\\xff.txt'])
+  assert.deepEqual(committed(git), ['src/ok.ts'])
+  assert.equal(git('status', '--porcelain'), '', 'the bad file is gone from the worktree too')
+})
+
+test('已跟踪的非 UTF-8 文件名撤销不了：拒绝提交，而不是悄悄提交', () => {
+  const { dir, git } = repo()
+  const bad = Buffer.concat([Buffer.from(dir + '/'), Buffer.from([0x62, 0xff])])
+  writeFileSync(bad, 'v1\n')
+  git('add', '-A')
+  git('-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'base has a bad name')
+  const before = git('rev-parse', 'HEAD')
+  writeFileSync(bad, 'v2\n')
+  assert.throws(() => commitInScope(dir, ['src/**'], 'm'), /有越界改动撤销不了，没有提交/)
+  assert.equal(git('rev-parse', 'HEAD'), before)
+})
+
+test('文件名里的反斜杠不是目录分隔符：根目录下名为 src\\evil.ts 的文件不在 src/** 里', () => {
+  const { dir, git } = repo()
+  writeFileSync(join(dir, 'src\\evil.ts'), 'evil\n')
+  const r = commitInScope(dir, ['src/**'], 'm')
+  assert.deepEqual(r.reverted, ['src\\evil.ts'])
+  assert.equal(r.sha, undefined, 'nothing in scope to commit')
+  assert.equal(existsSync(join(dir, 'src\\evil.ts')), false)
+})
+
+test('嵌套的 git 仓库（未跟踪目录）一律越界：整个删掉，不报错，也不会以 gitlink 提交', () => {
+  const { dir, git } = repo()
+  for (const where of ['evil', 'src/vendored']) {
+    mkdirSync(join(dir, where), { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: join(dir, where) })
+    writeFileSync(join(dir, where, 'x.txt'), 'x\n')
+  }
+  const r = commitInScope(dir, ['src/**'], 'm')
+  assert.deepEqual(r.reverted, ['evil/', 'src/vendored/'])
+  assert.equal(existsSync(join(dir, 'evil')), false)
+  assert.equal(existsSync(join(dir, 'src/vendored')), false)
+  assert.equal(git('status', '--porcelain'), '')
+})
+
+test('worktree 的 .git 被换成 agent 自己的仓库：平台不执行 git，fsmonitor 和 hooks 都不会被触发', () => {
+  const base = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-gitlink-'))
+  const main = join(base, 'main')
+  mkdirSync(main)
+  const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' })
+  g(main, 'init', '-q', '-b', 'main')
+  g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init')
+  const wt = join(base, 'wt')
+  g(main, 'worktree', 'add', '-q', '-b', 'eos/t', wt)
+  write(wt, 'src/a.ts', 'a\n')
+  assert.equal(commitInScope(wt, ['src/**'], 'ok', main).reverted.length, 0, 'an intact worktree commits normally')
+
+  // agent 的手法：删掉 .git 文件，换成自己的仓库，配置 fsmonitor 让平台的 git status 执行命令。
+  const pwned = join(base, 'PWNED')
+  rmSync(join(wt, '.git'))
+  g(wt, 'init', '-q')
+  g(wt, 'config', 'core.fsmonitor', `touch ${pwned}; false`)
+  write(wt, 'src/b.ts', 'b\n')
+  assert.throws(() => commitInScope(wt, ['src/**'], 'm', main), /worktree 的 \.git 被改动过/)
+  assert.equal(existsSync(pwned), false, 'the agent’s fsmonitor command never ran')
+})

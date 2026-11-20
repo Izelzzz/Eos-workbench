@@ -81,7 +81,7 @@ export class Supervisor {
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)
-        const { sha, reverted } = commitInScope(this.o.store.meta(t.id).worktree, writePaths, `eos: ${call.node} ${call.purpose} (${call.id})`)
+        const { sha, reverted } = commitInScope(this.o.store.meta(t.id).worktree, writePaths, `eos: ${call.node} ${call.purpose} (${call.id})`, this.o.store.meta(t.id).repo)
         if (reverted.length > 0) log(`  已撤销 ${reverted.length} 处越界改动：${reverted.join('、')}`)
         if (sha !== undefined) log(`  已提交 ${sha}`)
         return reverted

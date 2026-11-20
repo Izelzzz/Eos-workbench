@@ -42,7 +42,7 @@ export const scopeNotice = (reverted: string[], allowed: string[]): string =>
   section('有改动被撤销（超出你的可写范围）',
     `上一次回复之后，以下改动不在你的可写范围内，已经被撤销，也没有提交：\n${reverted.map(p => `- ${p}`).join('\n')}\n\n`
     + (allowed.length === 0 ? '你这个角色是只读的，不能改动任何文件。' : `你可以改动的路径（任务 worktree 内的 glob）：\n${allowed.map(p => `- ${p}`).join('\n')}`)
-    + '\n\n需要改范围外的文件时，在回复里说明要改什么、为什么，不要再直接改。')
+    + '\n\n可写范围由团队的 Agent 模板决定，任务里改不了（也不要建议用户在任务里放宽）。需要改范围外的文件时，在回复里说明要改什么、为什么，由用户决定，不要再直接改。')
 
 export const producePrompt = (task: Task, n: WorkflowNode): string =>
   `${intro(task, n.id, task.workflow, n)}${section('任务', n.task)}${context(task, n)}${requirements(n)}完成后，你的最终回复就是这一步的产出。`

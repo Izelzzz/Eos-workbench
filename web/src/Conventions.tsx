@@ -268,7 +268,7 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; sa
   return (
     <div className="conv-main">
       <div className="conv-title">
-        <h1>{props.isNew ? `新建${spec.label}` : props.name}</h1>
+        <h1>{props.isNew ? `新建${/^[A-Za-z]/.test(spec.label) ? ' ' : ''}${spec.label}` : props.name}</h1>
         {current && <span className="muted">{spec.label} · 当前第 {current.version} 版 · {ago(current.createdAt)}更新</span>}
       </div>
       {props.isNew && spec.nameOf === undefined && (

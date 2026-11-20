@@ -1,6 +1,6 @@
 # 第 2 块 T4：团队约定页的 Agent 模板与技能（真实浏览器验证）
 
-`ui-e2e.ts` 用 Playwright 驱动真实 Chromium 走一遍页面，24 项检查全部通过，截图就是下面这些。
+`ui-e2e.ts` 用 Playwright 驱动真实 Chromium 走一遍页面，28 项检查全部通过（运行日志 `run.log`），截图就是下面这些。
 不调用模型：任务页用的那个任务由 `seed-task.ts` 直接写进 store（`resolve()` 算出用了哪些约定版本）。
 
 ## 怎么重跑

@@ -101,3 +101,16 @@ test('built-in templates and skills are valid, and built-in workflows resolve ag
   for (const name of builtinAgentTemplates()) assert.equal(lookup(name)?.version, 1)
   assert.doesNotThrow(() => loadWorkflow('standard'))
 })
+
+test('a value of the wrong type gets the field’s own Chinese message, not “missing field”', () => {
+  const byPath = (src: string) => {
+    const r = parseTemplate(src)
+    assert.equal(r.ok, false)
+    return Object.fromEntries((r.ok ? [] : r.errors).map(e => [e.path, e.message]))
+  }
+  assert.match(byPath('name: dev\nprompt: x\nwrite: worktree\nwritePaths: src/**\n').writePaths!, /必须是路径列表，例如 \[src\/\*\*, tests\/\*\*\]/)
+  assert.match(byPath('name: dev\nprompt: x\ntools: [bash]\n').tools!, /必须是对象，例如 \{ deny: \[web, subagent\] \}/)
+  assert.match(byPath('name: dev\nprompt: x\ntools: { deny: web }\n')['tools.deny']!, /必须是列表/)
+  assert.equal(byPath('name: dev\n').prompt, '缺少这个字段', 'a missing field is still reported as missing')
+  assert.match(byPath('name: dev\nprompt: x\nwrite: worktree\nwritePaths: [src\\\\a.ts]\n')['writePaths[0]']!, /反斜杠/)
+})

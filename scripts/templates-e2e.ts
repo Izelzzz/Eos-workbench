@@ -14,6 +14,7 @@ import { appendFileSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { DshExecutor } from '../src/executor/dsh.ts'
+import { sessionOf } from '../src/engine/machine.ts'
 import { keyOf } from '../src/runner/runner.ts'
 import { Store } from '../src/store/store.ts'
 
@@ -183,7 +184,10 @@ const mcpCall = devTools.find(t => t.name.startsWith('mcp__') && t.name.endsWith
 const skillCall = devTools.find(t => t.name === 'skill' && t.args.includes('write-changes'))
 const reverted = calls.filter(c => (c.reverted?.length ?? 0) > 0)
 const revertedSession = reverted[0] === undefined ? undefined : reverted[0].node
-const noticeDelivered = reverted.length > 0 && calls.some(c => c.at > reverted[0]!.at && c.prompt.includes('README.md') && /撤销|越界|写入范围/.test(c.prompt))
+// 撤销发生在哪个会话，就核对这个会话里紧接着的下一次调用：它的提示词必须以撤销说明开头，并列出 README.md。
+const sessionOfCall = (c: (typeof calls)[number]) => sessionOf(task.workflow, c)
+const nextInSameSession = reverted[0] === undefined ? undefined : calls.find(c => c.at > reverted[0]!.at && sessionOfCall(c) === sessionOfCall(reverted[0]!))
+const noticeDelivered = nextInSameSession !== undefined && /^# 有改动被撤销（超出你的可写范围）\n/.test(nextInSameSession.prompt) && nextInSameSession.prompt.includes('- README.md')
 const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim()
 const readmeInBranch = git(meta.worktree, 'show', `HEAD:README.md`)
 const branchFiles = git(meta.worktree, 'diff', '--name-only', meta.baseSha, 'HEAD').split('\n').filter(Boolean)
@@ -205,6 +209,10 @@ const npmTest = (() => {
     return false
   }
 })()
+// 各工具组在这套 dsh 里实际出现的工具（docs/e2e/b2/template-probe.json 的基线）。
+const WEB = ['web_fetch', 'web_search']
+const SUBAGENT = ['subagent', 'subagent_fork', 'list_agents', 'send_message', 'wait_agent', 'workflow']
+const SCHEDULE = ['schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view']
 const used = meta.conventions
 const checks = {
   '模板在页面上改过并保存为第 2 版，历史里有第 1 版（内置）': store.conventionHistory('template', 'developer').map(r => r.version).join(',') === '2,1',
@@ -215,13 +223,13 @@ const checks = {
   'MCP：返回的编号写进了 docs/changes.md': changes.includes(MCP_CODE),
   '技能：开发用了模板给的 write-changes 技能': skillCall !== undefined,
   '技能隔离：开发只看到 write-changes，评审看不到任何技能': JSON.stringify(skillsSeen('build')) === JSON.stringify(['write-changes']) && skillsSeen('review').length === 0,
-  '工具组：评审的 dsh 工具表里没有 web 和 subagent 组的工具': offered('review').length > 0 && !offered('review').some(t => ['web_fetch', 'web_search', 'subagent', 'subagent_fork', 'workflow'].includes(t)),
-  '工具组：开发的 dsh 工具表里没有 subagent、schedule 组，但有 bash 和读写文件': offered('build').length > 0
-    && !offered('build').some(t => ['subagent', 'subagent_fork', 'workflow', 'schedule_create'].includes(t)) && ['bash', 'write', 'read'].every(t => offered('build').includes(t)),
+  '工具组：评审的 dsh 工具表里没有 web、subagent、schedule 组的任何工具': offered('review').length > 0 && !offered('review').some(t => [...WEB, ...SUBAGENT, ...SCHEDULE].includes(t)),
+  '工具组：开发的 dsh 工具表里没有 subagent、schedule 组的任何工具，但有 bash 和读写文件': offered('build').length > 0
+    && !offered('build').some(t => [...SUBAGENT, ...SCHEDULE].includes(t)) && ['bash', 'write', 'read', 'edit'].every(t => offered('build').includes(t)),
   'MCP 只给开发：评审的工具表里没有 MCP 工具': offered('review').length > 0 && !offered('review').some(t => t.startsWith('mcp__')),
   '写入范围：越界改动（README.md）被撤销，记在调用上': reverted.some(c => c.reverted!.includes('README.md')),
   '写入范围：任务分支里 README.md 没被改，提交里没有它': readmeInBranch === README.trimEnd() && !branchFiles.includes('README.md'),
-  '写入范围：撤销结果在下一次发往同一会话的提示词里告诉了 agent': noticeDelivered,
+  '写入范围：撤销发生的那个会话的下一次调用，提示词以撤销说明开头并列出 README.md': noticeDelivered,
   '任务完成': task.status === 'done',
   'worktree 里 npm test 通过': npmTest,
   '页面没有脚本错误': errors.length === 0,

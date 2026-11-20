@@ -16,8 +16,8 @@ export const text = z.string({ error: '必须是文字' }).trim().min(1, { error
 export const id = z.string({ error: '必须是文字' }).regex(ID, { error: '只能用小写字母、数字和连字符，以字母开头，最长 32 个字符' })
 
 /** worktree 内的相对路径或 glob：不能是绝对路径，也不能用 .. 跳出去。 */
-export const relPath = text.refine(p => !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..'), {
-  error: '必须是 worktree 内的相对路径，不能以 / 开头，也不能包含 ..',
+export const relPath = text.refine(p => !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.includes('\\') && !p.split('/').includes('..'), {
+  error: '必须是 worktree 内的相对路径，用 / 分隔，不能以 / 开头，也不能包含 .. 或反斜杠',
 })
 
 const mcpServer = z.object({
@@ -74,6 +74,7 @@ export const toAgentConfig = (a: AgentFieldsOut): AgentConfig => ({
 export const pathOf = (path: readonly PropertyKey[]): string =>
   path.reduce<string>((acc, p) => (typeof p === 'number' ? `${acc}[${p}]` : acc === '' ? String(p) : `${acc}.${String(p)}`), '') || '(根)'
 
+/** 解析时要带 { reportInput: true }：否则 issue.input 总是空的，类型写错也会被报成"缺少这个字段"。 */
 export const zodMessage = (issue: z.core.$ZodIssue): string => {
   if (issue.code === 'unrecognized_keys') return `不认识的字段：${issue.keys.join('、')}`
   if (issue.code === 'invalid_type' && issue.input === undefined) return '缺少这个字段'
@@ -96,7 +97,7 @@ export type TemplateResult = { ok: true; template: AgentTemplate } | { ok: false
 export const parseTemplate = (source: string): TemplateResult => {
   const y = yamlOf(source)
   if (!y.ok) return y
-  const parsed = templateSchema.safeParse(y.value)
+  const parsed = templateSchema.safeParse(y.value, { reportInput: true })
   if (!parsed.success) return { ok: false, errors: parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) })) }
   const errors = agentErrors(parsed.data, f => f)
   if (errors.length > 0) return { ok: false, errors }
@@ -116,7 +117,7 @@ export const parseSkill = (source: string): SkillResult => {
   if (m === null) return { ok: false, errors: [{ path: '(开头)', message: '技能要以 --- 开头，写上 name 和 description，再用 --- 结束，例如：\n---\nname: write-changes\ndescription: 写改动说明时使用\n---' }] }
   const y = yamlOf(m[1]!)
   if (!y.ok) return y
-  const head = skillHead.safeParse(y.value)
+  const head = skillHead.safeParse(y.value, { reportInput: true })
   if (!head.success) return { ok: false, errors: head.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) })) }
   if (m[2]!.trim() === '') return { ok: false, errors: [{ path: '(正文)', message: '技能正文不能为空' }] }
   return { ok: true, skill: { name: head.data.name, description: head.data.description, body: m[2]! } }
