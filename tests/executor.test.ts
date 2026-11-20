@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentEnv, replyAfter, sessionIdFor, traceAfter } from '../src/executor/dsh.ts'
+import { agentEnv, replyAfter, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
@@ -65,11 +65,26 @@ test('trace replay starts at the turn, keeping the first step that dsh opens bef
 })
 
 test('a turn that ended any other way than completed is not claimed, even if it said something midway', () => {
-  for (const kind of ['interrupted', 'error', 'aborted', 'blocked', 'max-tokens']) {
+  for (const kind of ['interrupted', 'error', 'aborted', 'blocked']) {
     const log = [user('m <!-- eos:n1 -->', 1), assistant('我先看一下目录结构。', 2), end(3, kind)]
     assert.equal(replyAfter(log, 'n1', 's'), undefined, kind)
   }
   // 续接时 dsh 补写 interrupted 收尾，之后重发同一条消息并正常完成：认领重发的那一轮。
   const resent = [user('m <!-- eos:n1 -->', 1), assistant('半截', 2), end(3, 'interrupted'), user('m <!-- eos:n1 -->', 5), assistant('完整的回复', 6), end(7)]
   assert.equal(replyAfter(resent, 'n1', 's')?.text, '完整的回复')
+})
+
+test('a turn that hit the output limit at some step but finished still counts, as dsh itself treats it', () => {
+  const log = [user('m <!-- eos:n1 -->', 1), assistant('写到上限后接着写完的回复', 2), end(3, 'max-tokens')]
+  assert.equal(replyAfter(log, 'n1', 's')?.text, '写到上限后接着写完的回复')
+})
+
+test('the live call and the log claim judge how a turn ended the same way', () => {
+  assert.deepEqual(turnOutcome('completed'), { ok: true })
+  assert.deepEqual(turnOutcome('max-tokens'), { ok: true })
+  assert.deepEqual(turnOutcome('interrupted', '我先看一下目录'), { ok: false, error: '这一轮没有正常完成（被打断）：我先看一下目录' })
+  assert.deepEqual(turnOutcome('error'), { ok: false, error: '这一轮没有正常完成（出错）' })
+  assert.deepEqual(turnOutcome('aborted'), { ok: false, error: '这一轮没有正常完成（被中止）' })
+  assert.deepEqual(turnOutcome('blocked'), { ok: false, error: '这一轮没有正常完成（被拦下）' })
+  assert.deepEqual(turnOutcome(null), { ok: false, error: '这一轮没有正常完成（结束原因为 未知）' })
 })

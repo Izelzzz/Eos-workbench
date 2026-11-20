@@ -101,17 +101,24 @@ export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
   return [{ kind: 'call_start', t }, ...[...lead, ...found.range].map(normalize).filter((x): x is TraceEvent => x !== undefined)]
 }
 
-/** dsh 一轮结束的原因里，只有 completed 是完整的回复；被打断、出错、中止、达到输出上限的都不是。 */
-const COMPLETED = 'completed'
+/**
+ * 一轮结束的原因算不算这次调用完成：completed 算；max-tokens 也算——dsh 只要某一步达到过输出上限就记成 max-tokens，
+ * 即使之后这一轮正常写完了，dsh 的 SDK 默认也把它当成功。被打断、出错、中止、被拦下的都不算。
+ */
+const DONE = new Set(['completed', 'max-tokens'])
 
-const REASON: Record<string, string> = {
-  interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下', 'max-tokens': '输出超过上限', disposed: '会话被释放',
-}
+const REASON: Record<string, string> = { interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下' }
 
 export const describeEnd = (kind: string | null | undefined): string => REASON[kind ?? ''] ?? `结束原因为 ${kind ?? '未知'}`
 
+export type TurnOutcome = { ok: true } | { ok: false; error: string }
+
+/** 实时调用（send）和从日志认领（replyAfter）共用的判断。 */
+export const turnOutcome = (kind: string | null | undefined, finalText = ''): TurnOutcome =>
+  DONE.has(kind ?? '') ? { ok: true } : { ok: false, error: `这一轮没有正常完成（${describeEnd(kind)}）${finalText ? `：${finalText.slice(0, 200)}` : ''}` }
+
 /**
- * 认领一次已完成的调用：最后一轮必须正常完成（reason.kind === completed）。
+ * 认领一次已完成的调用：最后一轮必须正常完成（见 turnOutcome）。
  * 被打断或出错的那一轮里可能有一句中间文本（例如"我先看一下目录"），不能把它当成这次调用的回复。
  */
 export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string): Reply | undefined => {
@@ -120,7 +127,7 @@ export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string)
   const { start, range } = found
   const end = range.findLastIndex(e => e.type === 'turn/end')
   if (end < 0 || range.slice(end + 1).some(e => e.type === 'turn/start')) return undefined
-  if (range[end]!.data?.reason?.kind !== COMPLETED) return undefined
+  if (!turnOutcome(range[end]!.data?.reason?.kind).ok) return undefined
   const turn = range.slice(0, end + 1)
   const final = turn.filter(e => e.type === 'assistant/message').map(textOf).filter(t => t.trim() !== '').at(-1)
   if (final === undefined) return undefined
@@ -218,7 +225,8 @@ export class DshExecutor implements Executor {
           if (e !== undefined) p.onEvent(e)
         },
       })
-      if (r.finishReason !== COMPLETED) throw new Error(`这一轮没有正常完成（${describeEnd(r.finishReason)}）${r.finalResponse ? `：${r.finalResponse.slice(0, 200)}` : ''}`)
+      const outcome = turnOutcome(r.finishReason, r.finalResponse)
+      if (!outcome.ok) throw new Error(outcome.error)
       const events = r.events as unknown as LogEvent[]
       const model = modelOf(events)
       return { sessionId: s.id, text: r.finalResponse, usage: usageOf(events), ms: Date.now() - started, ...(model === undefined ? {} : { model }) }
