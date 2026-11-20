@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { acquire } from '../src/runner/lock.ts'
+import { request } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -153,5 +154,36 @@ test('after answering a loop question, the page is told to resume only when no r
     } finally {
       await s.close()
     }
+  }
+})
+
+/** fetch 不允许改 Host，用 node:http 模拟 DNS 重绑定：请求打到 127.0.0.1，Host 和 Origin 却是攻击者的域名。 */
+const raw = (base: string, method: string, path: string, headers: Record<string, string>, body?: string) =>
+  new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const u = new URL(base)
+    const r = request({ host: u.hostname, port: u.port, method, path, headers }, res => {
+      let b = ''
+      res.on('data', c => (b += c))
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: b }))
+    })
+    r.on('error', reject)
+    r.end(body)
+  })
+
+test('requests whose Host is not a local address are refused, which stops DNS rebinding', async () => {
+  const s = await serve()
+  try {
+    s.store.dispatch('t1', { kind: 'asked', call: 'c2' as never, question: { id: 'n', text: '?' } }, 1250, 'executor')
+    const port = new URL(s.base).port
+    const evil = { host: `evil.example:${port}`, origin: `http://evil.example:${port}` }
+    const read = await raw(s.base, 'GET', '/api/tasks/t1', evil)
+    assert.equal(read.status, 421)
+    assert.doesNotMatch(read.body, /需求/)
+    const write = await raw(s.base, 'POST', '/api/tasks/t1/answer', { ...evil, 'content-type': 'application/json' }, JSON.stringify({ questionId: 'q1', text: 'x' }))
+    assert.equal(write.status, 421)
+    assert.equal(s.store.get('t1')!.status, 'waiting_user')
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`]) assert.equal((await raw(s.base, 'GET', '/api/tasks', { host })).status, 200, host)
+  } finally {
+    await s.close()
   }
 })

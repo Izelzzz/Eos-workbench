@@ -124,7 +124,7 @@ function TaskPage(props: { id: string }) {
         <div className="stats">
           <div><span>工作流</span><b>{task.workflow}</b></div>
           <div><span>当前位置</span><b>{task.position}</b></div>
-          <div><span>调用</span><b>{r.calls} 次</b></div>
+          <div><span>已完成调用</span><b>{r.calls} 次</b></div>
           <div><span>agent 耗时</span><b>{duration(r.ms)}</b></div>
           <div><span>输入 / 输出</span><b>{tokens(r.usage.input)} / {tokens(r.usage.output)}</b></div>
           <div><span>缓存读 / 写</span><b>{tokens(r.usage.cacheRead)} / {tokens(r.usage.cacheWrite)}</b></div>

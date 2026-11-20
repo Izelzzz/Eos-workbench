@@ -39,6 +39,15 @@ const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unk
   req.on('error', () => resolve({ value: undefined }))
 })
 
+/**
+ * Host 必须是本机地址加本服务的端口。挡住 DNS 重绑定：攻击者的域名解析到 127.0.0.1 时，
+ * Origin 和 Host 都是攻击者的域名、彼此一致，只比较两者挡不住，所以先限定 Host 本身。
+ */
+const localHost = (req: IncomingMessage): boolean => {
+  const port = req.socket.localPort
+  return ['127.0.0.1', 'localhost', '[::1]'].some(h => req.headers.host === `${h}:${port}`)
+}
+
 /** 浏览器发来的同源请求：Origin 必须存在且与 Host 一致。 */
 const sameOrigin = (req: IncomingMessage): boolean => {
   const origin = req.headers.origin
@@ -111,6 +120,7 @@ export const createWebServer = (o: { store: Store; replay: Pick<Executor, 'trace
 
   return createServer(async (req, res) => {
     try {
+      if (!localHost(req)) return json(res, 421, { error: '只接受通过本机地址访问' })
       const url = new URL(req.url ?? '/', 'http://localhost')
       const answerPath = /^\/api\/tasks\/([\w-]+)\/answer$/.exec(url.pathname)
       if (req.method === 'POST' && answerPath) return json(res, ...(await answer(answerPath[1]!, req)))
