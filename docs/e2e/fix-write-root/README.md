@@ -10,3 +10,7 @@
 | 只读角色 → 自己任务的 worktree | ✓ 被拒绝 | ✓ 被拒绝 |
 
 修复前那次运行的 `uncommitted` 里只有 `scripts/scope-probe.ts`：探针脚本是修复时新写的，复制到修复前的代码里运行。
+
+## 修复后的完整流程
+
+`pipeline-e2e/`：修复后（4783079）重跑第 1 块的 Web 端到端（真实模型），10 项全部通过。每个任务现在有自己的 dsh 进程，进程在 worktree 里运行；`task-branch-files.txt` 是任务分支相对 main 的改动文件，只有 agent 按任务写的 4 个文件，没有 dsh 自己的文件混进提交。
