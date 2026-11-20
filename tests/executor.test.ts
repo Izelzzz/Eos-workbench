@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agentEnv, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { agentEnv, DshExecutor, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
 const assistant = (text: string, time: number, usage = { inputTokens: 5, outputTokens: 2, cacheReadTokens: 100, cacheWriteTokens: 0 }) =>
@@ -101,4 +101,39 @@ test('a live call returns its reply only when the last turn completed, trusting 
   assert.throws(() => replyFromRun(run('max-tokens', 'completed'), 's', 7), /输出达到上限被截断/)
   assert.throws(() => replyFromRun(run('interrupted', 'interrupted'), 's', 7), /被打断/)
   assert.throws(() => replyFromRun({ finishReason: 'error', finalResponse: '', events: [] }, 's', 7), /出错/)
+})
+
+/** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
+const fakeHarnesses = () => {
+  const created: { cwd?: string; processCwd?: string; model?: string; closed: boolean }[] = []
+  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string }) => {
+    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, closed: false }
+    created.push(rec)
+    const session = (id: string) => ({
+      id,
+      setWorkingDirectory: async () => {},
+      run: async (input: string) => ({ finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
+        events: [{ type: 'turn/end', time: 1, data: { reason: { kind: 'completed' } } }] }),
+    })
+    return { session, resumeSession: async (id: string) => session(id), close: async () => { rec.closed = true } } as never
+  }
+  return { created, createHarness }
+}
+
+test('each worktree gets its own dsh process whose workspace is that worktree; release closes only that one', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: 'dsh', createHarness })
+  const send = (key: string, cwd: string, write: 'none' | 'worktree' = 'worktree') =>
+    ex.send({ key, nonce: `${key}/c1`, prompt: '做事', spec: { model: 'deepseek-flash', write, cwd }, ask: async () => '' })
+  await send('t1/build', '/data/worktrees/t1')
+  await send('t1/review', '/data/worktrees/t1', 'none')
+  await send('t2/build', '/data/worktrees/t2')
+  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', '/data/worktrees/t1'], ['/data/worktrees/t2', '/data/worktrees/t2']],
+    'the session workspace (write root) is the task worktree, never the platform’s own directory')
+  await ex.release('/data/worktrees/t1')
+  assert.deepEqual(created.map(c => c.closed), [true, false])
+  await send('t1/build', '/data/worktrees/t1')
+  assert.equal(created.length, 3, 'a later call for that worktree starts a fresh process and resumes its session')
+  await ex.close()
+  assert.ok(created.every(c => c.closed))
 })

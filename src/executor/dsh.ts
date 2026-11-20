@@ -1,5 +1,7 @@
 // dsh 原生 agent 执行器。唯一引用 dsh 的模块。
-// - 每种模型路由（model + effort）一个 dsh 进程，同一路由的会话共用它。
+// - 每个工作目录（任务的 worktree）和模型路由（model + effort）一个 dsh 进程。dsh 在创建会话时把进程的 cwd
+//   记成会话的工作区，workspace-write 只允许写这个工作区，之后设工作目录也不会改变它；所以必须按 worktree 分进程，
+//   否则可写范围是平台自己的启动目录。任务的 runner 结束时 release 关掉这个 worktree 的进程。
 // - 会话 id 由 key 确定性地算出，进程崩溃后总能找回同一个会话。
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { createHash } from 'node:crypto'
@@ -10,6 +12,7 @@ import type { Usage } from '../engine/types.ts'
 import { zeroUsage } from '../engine/types.ts'
 import type { DeepSeekHarness as Harness, HarnessSession } from '../../vendor/dsh-sdk-client/index.ts'
 import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
+import type { DeepSeekHarnessOptions } from '../../vendor/dsh-sdk-client/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
 
@@ -153,25 +156,35 @@ export const replyFromRun = (r: RunLike, sessionId: string, ms: number): Reply =
 }
 
 export class DshExecutor implements Executor {
-  private readonly harnesses = new Map<string, Harness>()
-  /** 本进程里已经打开（新建或续接）的会话。 */
-  private readonly open = new Map<string, HarnessSession>()
+  /** 按「工作目录 + 模型路由」区分的 dsh 进程。 */
+  private readonly harnesses = new Map<string, { cwd: string; h: Harness }>()
+  /** 本进程里已经打开（新建或续接）的会话，以及它在哪个工作目录的进程里。 */
+  private readonly open = new Map<string, { cwd: string; s: HarnessSession }>()
   private readonly asks = new Map<string, AskHandler>()
 
-  constructor(private readonly opts: { dshHome: string; dshBin: string; env?: NodeJS.ProcessEnv }) {}
+  constructor(private readonly opts: {
+    dshHome: string
+    dshBin: string
+    env?: NodeJS.ProcessEnv
+    /** 测试用：替换真正启动 dsh 进程的构造。 */
+    createHarness?: (options: DeepSeekHarnessOptions) => Harness
+  }) {}
 
   private harness(spec: AgentSpec): Harness {
-    const route = `${spec.model}|${spec.effort ?? ''}`
-    let h = this.harnesses.get(route)
+    const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}`
+    let h = this.harnesses.get(route)?.h
     if (h === undefined) {
-      h = new DeepSeekHarness({
+      const create = this.opts.createHarness ?? (o => new DeepSeekHarness(o))
+      h = create({
+        // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，也放在 worktree。
+        cwd: spec.cwd, processCwd: spec.cwd,
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
         env: agentEnv(this.opts.env ?? process.env),
         initializeTimeoutMs: 60_000,
         onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
       })
-      this.harnesses.set(route, h)
+      this.harnesses.set(route, { cwd: spec.cwd, h })
     }
     return h
   }
@@ -213,7 +226,7 @@ export class DshExecutor implements Executor {
   private async session(key: string, spec: AgentSpec): Promise<HarnessSession> {
     const id = sessionIdFor(key)
     const known = this.open.get(id)
-    if (known !== undefined) return known
+    if (known !== undefined) return known.s
     const h = this.harness(spec)
     let s: HarnessSession
     if (this.logFile(id) !== undefined) {
@@ -226,7 +239,7 @@ export class DshExecutor implements Executor {
     // 续接回来的只读角色会带着写权限。重复选择当前档位在 dsh 里不产生变化。
     const set = await s.run(`/permission ${PRESET[spec.write]}`)
     if (set.finishReason === 'error') throw new Error(`设置权限档位失败：${set.finalResponse}`)
-    this.open.set(id, s)
+    this.open.set(id, { cwd: spec.cwd, s })
     return s
   }
 
@@ -259,8 +272,16 @@ export class DshExecutor implements Executor {
     return events === undefined ? [] : traceAfter(events, nonce)
   }
 
+  /** 关掉这个工作目录的 dsh 进程（任务的 runner 结束时调用）。之后再有调用会重新启动，会话从日志续接。 */
+  async release(cwd: string): Promise<void> {
+    const routes = [...this.harnesses].filter(([, v]) => v.cwd === cwd)
+    for (const [route] of routes) this.harnesses.delete(route)
+    for (const [id, v] of this.open) if (v.cwd === cwd) this.open.delete(id)
+    await Promise.allSettled(routes.map(([, v]) => v.h.close()))
+  }
+
   async close(): Promise<void> {
-    await Promise.allSettled([...this.harnesses.values()].map(h => h.close()))
+    await Promise.allSettled([...this.harnesses.values()].map(v => v.h.close()))
     this.harnesses.clear()
     this.open.clear()
   }

@@ -84,6 +84,8 @@ export class Supervisor {
     }).finally(() => {
       lock.release()
       this.active.delete(id)
+      // 这个任务的 agent 进程不再需要：worktree 各自一个进程，不释放会越积越多。
+      void this.o.executor.release(this.o.store.meta(id).worktree).catch(e => log(`  （关闭 agent 进程失败：${(e as Error).message}）`))
     })
     this.active.set(id, done)
     done.catch(e => log(`✗ runner 出错：${(e as Error).message}`))
