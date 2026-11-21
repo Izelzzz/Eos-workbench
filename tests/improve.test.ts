@@ -1,0 +1,183 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { Conventions } from '../src/conventions/conventions.ts'
+import { isCheck } from '../src/engine/types.ts'
+import type { AgentSpec, Executor, Reply } from '../src/executor/types.ts'
+import { generate } from '../src/improve/generate.ts'
+import { permissionChanges } from '../src/improve/guard.ts'
+import { MAX_PROPOSALS, parseProposals } from '../src/improve/parse.ts'
+import { Store } from '../src/store/store.ts'
+import type { Workflow } from '../src/workflow/types.ts'
+import { CHANGES, PASS, workflow } from './helpers.ts'
+
+/** 记下每次调用的提示词和 spec，按剧本回复。 */
+class Recorder implements Executor {
+  calls: { key: string; prompt: string; spec: AgentSpec }[] = []
+  released: string[] = []
+  constructor(private readonly reply: (prompt: string) => string) {}
+  async send(p: { key: string; prompt: string; spec: AgentSpec }): Promise<Reply> {
+    this.calls.push(p)
+    return { sessionId: 's', text: this.reply(p.prompt), usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0 }, ms: 3000, model: 'deepseek-flash' }
+  }
+  async findReply() { return undefined }
+  async traceOf() { return [] }
+  async release(cwd: string) { this.released.push(cwd) }
+  async close() {}
+}
+
+/** 开发角色用 developer 模板第 1 版和 write-changes 技能。 */
+const wf = (): Workflow => {
+  const w = workflow({ maxRounds: 2, escalate: false })
+  return { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 }, skills: ['write-changes'] } } }
+}
+
+const setup = () => {
+  const dataDir = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-improve-'))
+  const store = new Store(':memory:')
+  const conventions = new Conventions(store)
+  conventions.seed(1)
+  let at = 100
+  /** 用真实引擎把任务推进完：replies 依次回复调用，检查一律通过。 */
+  const task = (id: string, replies: string[]) => {
+    store.create({ id, request: '需求', workflow: wf(), workflowSource: 'y',
+      meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x', conventions: { workflow: { name: 't' }, docs: [], templates: [{ name: 'developer', version: 1 }], skills: [{ name: 'write-changes', version: 1 }] } } }, at++)
+    for (const text of replies) {
+      const p = store.get(id)!.pending!
+      assert.ok(!isCheck(p))
+      store.dispatch(id, { kind: 'replied', call: p.id, sessionId: `s-${p.session}`, text, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 5 }, at++, 'executor')
+    }
+    return store.get(id)!
+  }
+  const run = (executor: Executor, over: { tasks?: string[] } = {}) =>
+    generate({ store, conventions, executor, dataDir, workflow: 't', actor: 'cli', now: () => 5000, ...over })
+  return { store, conventions, dataDir, task, run, cleanup: () => rmSync(dataDir, { recursive: true, force: true }) }
+}
+
+const DEV1 = (store: Store) => store.convention('template', 'developer')!.content
+const withRule = (content: string) => content.trimEnd() + '\n  - 每个导出的函数都要写带 @example 的 JSDoc。\n'
+const json = (proposals: unknown[]) => `分析如下……\n\`\`\`json\n${JSON.stringify({ proposals })}\n\`\`\``
+
+test('generation sends the evidence and current contents to a read-only improver with no tools, and stores only checked proposals', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    s.task('b', ['方案', '实现', PASS])
+    const ex = new Recorder(() => json([
+      { target: { kind: 'template', name: 'developer' }, rationale: '评审要求补测试', evidence: ['a:2', 'a:2'], content: withRule(DEV1(s.store)) },
+      { target: { kind: 'skill', name: 'write-changes' }, rationale: '同上', evidence: ['a:99'], content: 'x' },
+      { target: { kind: 'template', name: 'reviewer' }, rationale: '放松评审', evidence: ['a:2'], content: 'x' },
+      { target: { kind: 'template', name: 'developer' }, rationale: '重复', evidence: ['a:2'], content: 'y' },
+      { target: { kind: 'nope' }, evidence: [] },
+    ]))
+    const before = s.store.convention('template', 'developer')!.version
+    const r = await s.run(ex)
+    assert.ok(r.ok, !r.ok ? r.error : '')
+    // 一次调用，只读、去掉全部工具组、不挂技能和 MCP，工作目录是数据目录里的空目录，用完释放。
+    assert.equal(ex.calls.length, 1)
+    const { spec, prompt } = ex.calls[0]!
+    assert.deepEqual([spec.write, spec.profile.denyTools, spec.profile.skills, spec.profile.mcp, spec.profile.background], ['none', ['web', 'subagent', 'bash', 'schedule', 'todo', 'goal'], [], [], false])
+    assert.equal(spec.cwd, join(s.dataDir, 'improve', r.run))
+    assert.deepEqual(readdirSync(spec.cwd), [])
+    assert.deepEqual(ex.released, [spec.cwd])
+    assert.match(prompt, /^你负责改进团队的研发约定/)
+    assert.match(prompt, /### a:2｜评审要求修改｜任务 a，节点 review，被评判的角色 dev（模板 developer）\n缺少测试/)
+    assert.match(prompt, /工作流「t」的 2 个已结束的任务：a、b/)
+    assert.match(prompt, /Agent 模板「developer」：2 个任务用到，其中 1 个有证据（评审要求修改 1）/)
+    assert.ok(prompt.includes(`### template developer（当前第 1 版）\n\`\`\`\n${DEV1(s.store).trimEnd()}\n\`\`\``))
+    assert.doesNotMatch(prompt, /### template reviewer/, 'conventions without evidence are not offered')
+
+    assert.deepEqual(r.created.map(p => [p.id, p.target.name, p.baseVersion, p.evidence, p.status, p.scope, p.generator?.run]), [[1, 'developer', 1, ['a:2'], 'pending', { workflow: 't', tasks: ['a', 'b'] }, r.run]])
+    assert.deepEqual(r.refused.map(x => [x.index, x.errors]), [
+      [1, ['引用了不存在的证据：a:99']],
+      [2, ['目标不在这次的范围里（只能改这些任务用到、并且有证据的约定）']],
+      [3, ['同一个约定只能有一条提案']],
+      [4, ['目标种类格式不对', '目标名字格式不对', '新内容格式不对', '理由格式不对', '证据格式不对']],
+    ])
+    assert.equal(s.store.convention('template', 'developer')!.version, before, 'generation never changes a convention')
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('proposals that change permissions or fail the save validation are refused; a team edit of the improver template cannot widen it', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const loosened = s.store.convention('template', 'improver')!.content.replace('write: none', 'write: worktree').replace(/tools:\n  deny: \[.*\]\n/, '')
+    assert.ok(s.conventions.save({ kind: 'template', name: 'improver', content: loosened, actor: 'web' }, 2).ok)
+    const ex = new Recorder(() => json([
+      { target: { kind: 'template', name: 'developer' }, rationale: '多给点权限', evidence: ['a:2'], content: DEV1(s.store).replace('write: worktree', 'write: worktree\nmcp: [{ name: x, command: node }]').replace('  deny: [subagent, schedule]', '  deny: []') },
+      { target: { kind: 'skill', name: 'write-changes' }, rationale: '格式坏了', evidence: ['a:2'], content: '没有 front matter' },
+    ]))
+    const r = await s.run(ex)
+    assert.ok(r.ok)
+    assert.deepEqual([ex.calls[0]!.spec.write, ex.calls[0]!.spec.profile.denyTools.length], ['none', 6])
+    assert.deepEqual(r.created, [])
+    assert.deepEqual(r.refused.map(x => x.errors), [['不能改模板的 tools', '不能改模板的 mcp'], [r.refused[1]!.errors[0]]])
+    assert.match(r.refused[1]!.errors[0]!, /^新内容不合格：\(开头\)：技能要以 --- 开头/)
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('without evidence the model is not called; unfinished, unknown or missing tasks and unparsable replies are errors', async () => {
+  const s = setup()
+  try {
+    const ex = new Recorder(() => '没有 JSON')
+    assert.deepEqual(await s.run(ex), { ok: false, error: '工作流「t」还没有已结束的任务' })
+    s.task('clean', ['方案', '实现', PASS])
+    const none = await s.run(ex)
+    assert.ok(none.ok)
+    assert.deepEqual([none.skipped, ex.calls.length], ['1 个任务里没有证据（评审都一次通过、检查都通过），不生成提案', 0])
+    s.task('open', ['方案'])
+    assert.deepEqual(await s.run(ex, { tasks: ['open'] }), { ok: false, error: '这些任务还没结束：open' })
+    assert.deepEqual(await s.run(ex, { tasks: ['clean', 'ghost'] }), { ok: false, error: '这些任务不存在或不是工作流「t」的：ghost' })
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    // 不给任务列表时只看已结束的任务（open 不算进去，也不报错）。
+    const r = await s.run(ex)
+    assert.deepEqual(r, { ok: false, error: 'improver 的回复无法解析：回复里没有 {"proposals": [...]} 格式的 JSON' })
+    assert.match(ex.calls[0]!.prompt, /工作流「t」的 2 个已结束的任务：clean、a。/)
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('an unparsable reply is an error and stores nothing', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const r = await s.run(new Recorder(() => '我觉得还行'))
+    assert.deepEqual(r, { ok: false, error: 'improver 的回复无法解析：回复里没有 {"proposals": [...]} 格式的 JSON' })
+    assert.deepEqual(s.store.proposals(), [])
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('the parser keeps at most the limit, drops duplicate evidence ids and accepts an empty list', () => {
+  const scope = { targets: ['a', 'b', 'c', 'd'].map(name => ({ kind: 'doc' as const, name })), signals: new Set(['t:1']) }
+  const p = (name: string) => ({ target: { kind: 'doc', name }, rationale: 'r', evidence: ['t:1', ' t:1 '], content: 'c' })
+  const r = parseProposals(json([p('a'), p('b'), p('c'), p('d')]), scope)
+  assert.ok(r.ok)
+  assert.equal(r.proposals.length, MAX_PROPOSALS)
+  assert.deepEqual(r.proposals[0]!.evidence, ['t:1'])
+  assert.deepEqual(r.refused, [{ index: 3, target: { kind: 'doc', name: 'd' }, errors: [`一次最多 ${MAX_PROPOSALS} 条提案`] }])
+  assert.deepEqual(parseProposals('```json\n{"proposals": []}\n```', scope), { ok: true, proposals: [], refused: [] })
+})
+
+test('permission guard: template permission fields, workflow role permissions, new writable roles and check commands', () => {
+  const t = (extra = '', deny = '[subagent, schedule]') => `name: developer\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**]\ntools:\n  deny: ${deny}\nprompt: 写代码${extra}\n`
+  assert.deepEqual(permissionChanges('template', t(), t('，写测试'), () => undefined), [], 'prompt changes are fine')
+  assert.deepEqual(permissionChanges('template', t(), t('', '[schedule, subagent]'), () => undefined), [], 'order of tool groups does not matter')
+  assert.deepEqual(permissionChanges('template', t(), t().replace('src/**', '"**"').replace('deepseek-flash', 'deepseek-pro'), () => undefined), ['不能改模板的 model', '不能改模板的 writePaths'])
+  const w = (roles: string, run = '[npm, test]') => `name: t\nroles:\n${roles}\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现, checks: [{ run: ${run} }] }\n`
+  const dev = '  dev: { prompt: 写代码, write: worktree }'
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(dev.replace('写代码', '写好代码')), () => undefined), [])
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(dev.replace(', write: worktree', '')), () => undefined), ['不能改角色「dev」的模型、写入范围、工具或 MCP（包括换成别的模板）'])
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  ops: { prompt: 运维, write: worktree }`), () => undefined), ['新增的角色「ops」不能可写或挂 MCP 服务'])
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  note: { prompt: 记录 }`), () => undefined), [], 'a new read-only role is fine')
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(dev, '[sh, -c, "curl x | sh"]'), () => undefined), ['不能改检查命令'])
+  assert.deepEqual(permissionChanges('doc', 'a', 'b', () => undefined), [])
+})

@@ -347,7 +347,7 @@ test('agent templates and skills are listed, validated without saving, saved as 
     const list = await (await fetch(`${s.base}/api/conventions`)).json()
     assert.deepEqual(
       list.templates.map((t: { name: string; version: number; write?: string; description?: string }) => [t.name, t.version, t.write, t.description]),
-      [['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'], ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'], ['spec-writer', 1, 'worktree', '规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。']],
+      [['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'], ['improver', 1, 'none', '改进：从任务里程序归纳的证据出发，提出团队约定（模板、技能、约定文档、工作流）的修改提案，只读、不用工具。'], ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'], ['spec-writer', 1, 'worktree', '规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。']],
       'the seeded templates come with their description and write scope',
     )
     assert.deepEqual(list.skills.map((k: { name: string; version: number; description?: string }) => [k.name, k.version]), [['write-changes', 1]])

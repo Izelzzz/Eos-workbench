@@ -14,6 +14,8 @@ import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
 import { createWebServer } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
+import { generate } from './improve/generate.ts'
+import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
 
 const HELP = `用法：
   eos run --repo <仓库路径> [--workflow standard] "<需求>"   创建任务并运行
@@ -25,6 +27,10 @@ const HELP = `用法：
   eos abort <任务>                                        中止任务
   eos workflows                                           列出内置工作流
   eos web [--port 4317]                                   打开 Web 界面（任务列表与 trace 详情）
+  eos improve [--workflow standard] [--tasks <id,…>]      从已结束的任务归纳证据，生成改进提案（待审批）
+  eos proposals                                           列出改进提案
+  eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
+  eos reject <提案号> "<理由>"                             拒绝
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）`
 
@@ -32,7 +38,7 @@ const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_u
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' } },
+  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' }, tasks: { type: 'string' } },
 })
 
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
@@ -71,6 +77,8 @@ const summary = (t: Task) => {
   }
   say(`\n${formatReport(report(t))}`)
 }
+
+const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
 
 const executor = () => new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin() })
 
@@ -145,6 +153,37 @@ const commands: Record<string, () => Promise<void> | void> = {
     const t = taskOf(positionals[1])
     const step = store.dispatch(t.id, { kind: 'abort' }, Date.now(), 'cli')
     say(step.accepted ? `任务 ${t.id} 已中止` : step.reason!)
+  },
+  async improve() {
+    if (positionals.length > 1) fail('用法：eos improve [--workflow standard] [--tasks <id,…>]')
+    const ex = executor()
+    try {
+      const conventions = new Conventions(store)
+      conventions.seed(Date.now())
+      const tasks = values.tasks?.split(',').map(x => x.trim()).filter(x => x !== '')
+      const r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow!, ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
+      if (!r.ok) return fail(r.error)
+      if (r.skipped !== undefined) return say(r.skipped)
+      for (const p of r.created) say(`\n提案 #${p.id}：${KIND_NAMES[p.target.kind]}「${p.target.name}」第 ${p.baseVersion} 版 → 新版本\n理由：${p.rationale}\n证据：${p.evidence.join('、')}`)
+      say(r.created.length === 0 ? '\n没有生成提案' : `\n共 ${r.created.length} 条待审批：npm run eos -- approve <提案号>，或在网页上审批`)
+    } finally {
+      await ex.close()
+    }
+  },
+  proposals() {
+    const all = store.proposals()
+    if (all.length === 0) return say('还没有改进提案')
+    for (const p of all) say(`#${p.id}  ${STATUS_NAMES[p.status]}  ${KIND_NAMES[p.target.kind]}「${p.target.name}」第 ${p.baseVersion} 版  ${p.rationale.split('\n')[0]!.slice(0, 50)}`)
+  },
+  approve() {
+    const r = new Proposals(store, new Conventions(store)).approve(proposalId(), Date.now(), 'cli', positionals.slice(2).join(' '))
+    if (!r.ok) return fail(r.error)
+    say(`提案 #${r.row.id} 已批准：${KIND_NAMES[r.row.target.kind]}「${r.row.target.name}」现在是第 ${r.row.events.at(-1)!.version} 版`)
+  },
+  reject() {
+    const r = new Proposals(store, new Conventions(store)).reject(proposalId(), Date.now(), 'cli', positionals.slice(2).join(' '))
+    if (!r.ok) return fail(r.error)
+    say(`提案 #${r.row.id} 已拒绝`)
   },
   async web() {
     const port = Number(values.port)
