@@ -53,6 +53,7 @@ export type GenerateRequest = { workflow: string; tasks?: string[] }
 /** 生成的结果：created 入库的提案，refused 没入库的和原因，skipped 没有证据、没调用模型。 */
 export type GenerateResponse =
   | { ok: true; created: ProposalRow[]; refused: Refused[]; skipped?: string; call?: { model?: string; usage: Usage; ms: number } }
-  | { ok: false; error: string }
+  /** call：调用过模型之后才失败（调用了工具、回复无法解析）时带上用量和回复的开头。 */
+  | { ok: false; error: string; call?: { model?: string; usage: Usage; ms: number; replyHead: string } }
 export type DecideRequest = { note?: string } | { reason: string }
 export type DecideResponse = { ok: true; proposal: ProposalRow } | { ok: false; error: string }

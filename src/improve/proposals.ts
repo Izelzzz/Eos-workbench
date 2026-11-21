@@ -47,6 +47,7 @@ export class Proposals {
     const extra = note.trim()
     const d = this.store.decideProposal(id, {
       status: 'approved',
+      reason: extra,
       note: row => `改进提案 #${row.id}：${oneLine(row.rationale, NOTE_MAX)}${extra === '' ? '' : `；${extra}`}`,
       // 批准时再核对一次权限（失败就关）：生成之后，工作流引用的模板可能被人改过，同一份内容展开出来的权限会变。
       validate: row => [

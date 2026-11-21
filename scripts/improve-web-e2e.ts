@@ -135,6 +135,9 @@ try {
 } finally {
   web.kill('SIGTERM')
 }
-writeFileSync(join(OUT, 'report.json'), JSON.stringify({ checks, facts }, null, 2))
+// 记下跑的是哪一版代码：提交号，以及工作区有没有没提交的改动。
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+const dirty = execFileSync('git', ['status', '--porcelain', '--', 'src', 'web/src', 'scripts'], { cwd: ROOT, encoding: 'utf8' }).trim() !== ''
+writeFileSync(join(OUT, 'report.json'), JSON.stringify({ commit, dirty, checks, facts }, null, 2))
 for (const [k, v] of Object.entries(checks)) console.log(`${v ? '✓' : '✗'} ${k}`)
 process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1

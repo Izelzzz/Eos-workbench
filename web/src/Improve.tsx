@@ -57,9 +57,17 @@ function Generate(props: { onDone: () => void }) {
           <span>任务（可选，空着就是这个工作流所有已结束的任务）</span>
           <input value={tasks} onChange={e => setTasks(e.target.value)} placeholder="t2611…, t2611…" disabled={busy} />
         </label>
-        <button className="primary" onClick={() => void run()} disabled={busy || workflow === ''}>{busy ? '生成中…' : '生成提案'}</button>
+        <button className="primary" onClick={() => void run()} disabled={busy || workflow === ''} aria-busy={busy}>{busy ? '生成中…' : '生成提案'}</button>
       </div>
-      {result !== undefined && (!result.ok ? <p className="notice warn" role="alert">{result.error}</p> : (
+      {result !== undefined && (!result.ok ? (
+        <div className="notice warn" role="alert">
+          {result.error}
+          {result.call !== undefined && <>
+            <span className="muted"> 这次模型调用 {duration(result.call.ms)}，输入 {tokens(result.call.usage.input)}，输出 {tokens(result.call.usage.output)}。回复的开头：</span>
+            <pre className="signal-text">{result.call.replyHead}</pre>
+          </>}
+        </div>
+      ) : (
         <div className="notice" role="status">
           {result.skipped ?? `生成了 ${result.created.length} 条待审批的提案${result.refused.length > 0 ? `，${result.refused.length} 条没有入库` : ''}。`}
           {result.call !== undefined && <span className="muted"> 模型调用 {duration(result.call.ms)}，输入 {tokens(result.call.usage.input)}，输出 {tokens(result.call.usage.output)}。</span>}

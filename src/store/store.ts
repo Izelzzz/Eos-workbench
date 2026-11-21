@@ -265,7 +265,7 @@ export class Store {
    * 批准：目标约定的最新版本不是提案基于的版本时记「已过期」并拒绝批准；再用 validate 校验内容（在同一个事务里，
    * 期间别的进程改不了它引用的约定），不合格就不批准、保持待审批；都通过才写入约定的新版本，记「已批准」和新版本号。
    */
-  decideProposal(id: number, d: { status: 'approved'; note: (row: ProposalRow) => string; validate: (row: ProposalRow) => string[] } | { status: 'rejected'; reason: string }, at: number, actor: string): Decision {
+  decideProposal(id: number, d: { status: 'approved'; note: (row: ProposalRow) => string; reason?: string; validate: (row: ProposalRow) => string[] } | { status: 'rejected'; reason: string }, at: number, actor: string): Decision {
     return this.tx((): Decision => {
       const row = this.proposalRow(id)
       if (row === undefined) return { ok: false, reason: 'missing' }
@@ -282,7 +282,7 @@ export class Store {
       const errors = d.validate(row)
       if (errors.length > 0) return { ok: false, reason: 'invalid', errors, row }
       const saved = this.insertConvention({ kind: row.target.kind, name: row.target.name, content: row.content, note: d.note(row), actor }, at)
-      this.appendProposalEvent(id, { at, status: 'approved', actor, version: saved.version })
+      this.appendProposalEvent(id, { at, status: 'approved', actor, version: saved.version, ...(d.reason === undefined || d.reason === '' ? {} : { reason: d.reason }) })
       return { ok: true, row: this.proposalRow(id)! }
     })
   }

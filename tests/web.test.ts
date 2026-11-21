@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { acquire } from '../src/runner/lock.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { execFileSync } from 'node:child_process'
@@ -484,9 +484,10 @@ test('generating proposals from the page: one run at a time, the detail carries 
     const gen = (body: unknown) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify(body) })
     assert.equal((await gen({})).status, 400)
     const first = gen({ workflow: 't' })
-    await new Promise(r => setTimeout(r, 50))
+    // 等第一个请求拿到锁（不靠固定的等待时间）。
+    for (let i = 0; i < 200 && !existsSync(join(s.dir, 'locks', 'improve.pid')); i++) await new Promise(r => setTimeout(r, 10))
     const second = await gen({ workflow: 't' })
-    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, `已经有一次生成在进行（进程 ${process.pid}），等它结束再试`])
+    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, `已经有一次生成在进行（网页或命令行发起的，进程 ${process.pid}），等它结束再试`])
     release()
     const done = (await (await first).json()) as GenerateResponse
     assert.ok(done.ok)
@@ -507,6 +508,35 @@ test('without an improver executor the generate endpoint says so', async () => {
   try {
     const r = await fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify({ workflow: 't' }) })
     assert.equal(r.status, 503)
+  } finally {
+    await s.close()
+  }
+})
+
+test('generate: a cross-site request is refused; a failed model call is 502 with usage and the reply head, and the lock is released', async () => {
+  let mode: 'throw' | 'tools' = 'throw'
+  const ex: Executor = {
+    async send(p) {
+      if (mode === 'throw') throw new Error('连接被重置')
+      p.onEvent?.({ kind: 'tool_start', t: 1, step: 1, id: 'x', name: 'read', args: '{}' })
+      return { sessionId: 's', text: '我先读一下文件……', usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 }, ms: 9 }
+    },
+    async findReply() { return undefined }, async traceOf() { return [] }, async release() {}, async close() {},
+  }
+  const s = await serve(ex)
+  try {
+    const w = workflow({ maxRounds: 2, escalate: false })
+    s.store.create({ id: 't2', request: '需求', workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } }, workflowSource: 'y', meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 2000)
+    for (const text of ['方案', '实现', CHANGES, '改了', PASS]) s.store.dispatch('t2', { kind: 'replied', call: s.store.get('t2')!.pending!.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
+    const gen = (origin: string) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ workflow: 't' }) })
+    assert.equal((await gen('http://evil.example')).status, 403)
+    const thrown = await gen(s.base)
+    assert.deepEqual([thrown.status, ((await thrown.json()) as { error: string }).error], [502, '调用 improver 失败：连接被重置'])
+    assert.equal(existsSync(join(s.dir, 'locks', 'improve.pid')), false, 'the lock is released after the call failed')
+    mode = 'tools'
+    const tools = (await (await gen(s.base)).json()) as Extract<GenerateResponse, { ok: false }>
+    assert.deepEqual([tools.call?.usage.output, tools.call?.replyHead], [3, '我先读一下文件……'])
+    assert.deepEqual(s.store.proposals(), [])
   } finally {
     await s.close()
   }

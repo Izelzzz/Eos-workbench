@@ -9,6 +9,7 @@ import { generate } from '../src/improve/generate.ts'
 import { acquire } from '../src/runner/lock.ts'
 import { permissionChanges } from '../src/improve/guard.ts'
 import { MAX_PROPOSALS, parseProposals } from '../src/improve/parse.ts'
+import { selectScope } from '../src/improve/prompt.ts'
 import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import type { Workflow } from '../src/workflow/types.ts'
@@ -309,7 +310,7 @@ test('one generation at a time per data directory: a held lock is reported as bu
     const ex = new Recorder(() => json([]))
     try {
       const r = await s.run(ex)
-      assert.deepEqual(r, { ok: false, cause: 'busy', error: '已经有一次生成在进行（进程 1），等它结束再试' })
+      assert.deepEqual(r, { ok: false, cause: 'busy', error: '已经有一次生成在进行（网页或命令行发起的，进程 1），等它结束再试' })
       assert.equal(ex.calls.length, 0)
     } finally {
       if ('release' in lock) lock.release()
@@ -318,4 +319,12 @@ test('one generation at a time per data directory: a held lock is reported as bu
   } finally {
     s.cleanup()
   }
+})
+
+test('candidates are taken from conventions on the platform before the limit: many off-platform targets do not crowd them out', () => {
+  const t = (name: string, n: number) => ({ kind: 'doc' as const, name, versions: [], tasks: 1, affected: 1, counts: {}, signals: Array.from({ length: n }, (_, i) => `${name}:${i}`) })
+  const targets = [...['y1', 'y2', 'y3', 'y4', 'y5', 'y6'].map(n => t(n, 5)), t('team', 1)]
+  const signals = targets.flatMap(x => x.signals).map(id => ({ id, task: 'a', entry: 0, at: 0, kind: 'review_changes' as const, text: '' }))
+  const r = selectScope({ signals, targets }, x => x.name === 'team')
+  assert.deepEqual(r.targets.map(x => x.name), ['team'])
 })

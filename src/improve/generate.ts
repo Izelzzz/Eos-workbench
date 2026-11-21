@@ -71,7 +71,7 @@ export const generate = async (o: {
   const ev = evidence(samples)
   if (ev.signals.length === 0) return { ok: true, run, skipped: `${rows.length} 个任务里没有证据（评审都一次通过、检查都通过），不生成提案`, created: [], refused: [] }
 
-  const scope = selectScope(ev)
+  const scope = selectScope(ev, t => o.store.latestVersion(t.kind, t.name) !== undefined)
   const candidates: Candidate[] = scope.targets.flatMap(t => {
     const row = o.store.convention(t.kind, t.name)
     return row === undefined ? [] : [{ ...t, version: row.version, content: row.content }]
@@ -87,7 +87,7 @@ export const generate = async (o: {
   if (t === undefined) return { ok: false, cause: 'config', error: `平台上没有可用的 Agent 模板「${IMPROVER}」` }
   // 同一个数据目录同一时间只跑一次生成（命令行和网页共用这把锁）：每次是一次模型调用，同时跑两次会重复花钱、对同一个约定提两份提案。
   const lock = acquire(join(o.dataDir, 'locks'), 'improve')
-  if ('heldBy' in lock) return { ok: false, cause: 'busy', error: `已经有一次生成在进行（进程 ${lock.heldBy}），等它结束再试` }
+  if ('heldBy' in lock) return { ok: false, cause: 'busy', error: `已经有一次生成在进行（网页或命令行发起的，进程 ${lock.heldBy}），等它结束再试` }
   try {
     return await callAndStore(o, { run, rows, scope, candidates, prompt, template: t.template, signals: ev.signals.length, say })
   } finally {

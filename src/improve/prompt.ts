@@ -15,10 +15,11 @@ export type Candidate = TargetEvidence & { version: number; content: string }
  * 列出的证据：最多 MAX_SIGNALS 条，按日志顺序；候选约定：在列出的证据里有证据的，按证据条数排，最多 MAX_TARGETS 个
  * （提案只能引用列出的证据，所以证据都没列出的约定不能作为候选）。
  */
-export const selectScope = (ev: Evidence): { targets: TargetEvidence[]; signals: Signal[]; omitted: number } => {
+export const selectScope = (ev: Evidence, onPlatform: (t: TargetEvidence) => boolean = () => true): { targets: TargetEvidence[]; signals: Signal[]; omitted: number } => {
   const signals = ev.signals.slice(0, MAX_SIGNALS)
   const listed = new Set(signals.map(s => s.id))
-  return { targets: ev.targets.filter(t => t.signals.some(id => listed.has(id))).slice(0, MAX_TARGETS), signals, omitted: ev.signals.length - signals.length }
+  // 先去掉平台上没有的约定再截取：否则证据最多的几个都来自 YAML 文件时，平台上的约定会被挤出候选。
+  return { targets: ev.targets.filter(t => onPlatform(t) && t.signals.some(id => listed.has(id))).slice(0, MAX_TARGETS), signals, omitted: ev.signals.length - signals.length }
 }
 
 const fence = (s: string) => {

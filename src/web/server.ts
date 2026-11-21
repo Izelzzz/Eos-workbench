@@ -194,7 +194,8 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const p = o.store.proposal(id)
     if (p === undefined) return undefined
     const base = o.store.convention(p.target.kind, p.target.name, p.baseVersion)
-    // 证据原文：对提案范围里的任务重新归纳（纯函数，结果和生成时一样），只留下提案引用的。
+    // 证据原文：按当前的归纳规则对提案范围里的任务重新归纳，只留下提案引用的。任务日志只追加，id 指向的条目不变；
+    // 但平台升级改了归纳规则（例如截断长度）时，文字可能和模型当时看到的略有不同。
     const cited = new Set(p.evidence)
     const samples = p.scope.tasks.flatMap(id => {
       const task = o.store.get(id)
@@ -215,7 +216,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         store: o.store, conventions: o.supervisor.conventions, executor: o.improve.executor, dataDir: o.improve.dataDir,
         workflow: body.workflow.trim(), ...(tasks === undefined || tasks.length === 0 ? {} : { tasks }), actor: 'web', now: Date.now,
       })
-      if (!r.ok) return [GENERATE_STATUS[r.cause], { ok: false, error: r.error }]
+      if (!r.ok) {
+        const call = r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms, replyHead: r.call.reply.slice(0, 500) } }
+        return [GENERATE_STATUS[r.cause], { ok: false, error: r.error, ...call }]
+      }
       return [200, { ok: true, created: r.created, refused: r.refused, ...(r.skipped === undefined ? {} : { skipped: r.skipped }),
         ...(r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms } }) }]
     }
