@@ -314,7 +314,7 @@ test('team conventions: list, validate without saving, save new versions, read h
     assert.equal(d.metrics.total.wallMs + d.metrics.betweenMs, d.metrics.elapsedMs)
     const ins = (await (await fetch(`${s.base}/api/insights`)).json()) as Insights
     const team = ins.byWorkflow.find(w => w.workflow === 'team')!
-    assert.deepEqual([team.tasks, team.calls], [1, d.report.total.calls], 'the stats page sums the same task')
+    assert.deepEqual([team.tasks, team.calls, team.usage, team.agentMs, team.wallMs], [1, d.report.total.calls, d.metrics.total.usage, d.metrics.total.agentMs, d.metrics.total.wallMs], 'the stats page sums the same task')
     assert.equal(ins.tasks.total, (await (await fetch(`${s.base}/api/tasks`)).json()).length)
   } finally {
     await s.close()

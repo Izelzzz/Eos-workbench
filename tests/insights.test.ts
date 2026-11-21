@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { insights } from '../src/engine/insights.ts'
+import { insights, sampleAt } from '../src/engine/insights.ts'
 import { taskMetrics } from '../src/engine/metrics.ts'
 import type { Workflow } from '../src/workflow/types.ts'
 import { Clock, PASS, workflow } from './helpers.ts'
@@ -54,13 +54,27 @@ test('templates are compared across workflows and versions; roles written in the
 
 test('the bottleneck of each workflow is its slowest stage, with its share and the part that dominates it', () => {
   const r = insights([
-    run('a', wf(1), { plan: 5000, build: 1000, review: 500, wait: 3000 }),
+    run('a', wf(1), { plan: 5000, build: 1000, review: 500, wait: 4000 }),
     run('b', wf(1), { plan: 1000, build: 1000, review: 500 }),
   ])
-  // plan：a 的调用 5000 中等用户 3000（agent 2000），b 1000 → 合计 6000；所有阶段 6000 + 2000 + 1000 = 9000
-  assert.deepEqual(r.bottlenecks.map(b => [b.workflow, b.node, b.wallMs, b.part, b.partMs]), [['t', 'plan', 6000, 'agentMs', 3000]])
+  // plan：a 的调用 5000 中等用户 4000（agent 1000），b 1000 → 合计 6000，其中等用户 4000、agent 2000；所有阶段 6000 + 2000 + 1000 = 9000
+  assert.deepEqual(r.bottlenecks.map(b => [b.workflow, b.node, b.wallMs, b.part, b.partMs]), [['t', 'plan', 6000, 'waitUserMs', 4000]])
   assert.equal(r.bottlenecks[0]!.share, 6000 / 9000)
-  assert.equal(r.byStage[0]!.waitUserMs, 3000)
+  assert.equal(r.byStage[0]!.agentMs, 2000)
+})
+
+test('a failed task nobody has retried is counted up to its failure, not up to now', () => {
+  const c = new Clock('none', wf(1), 'f')
+  c.reply(1000, 1000, '方案')
+  c.send(3000, { kind: 'call_failed', call: c.call, error: '断了' })
+  const day = 86_400_000
+  assert.equal(sampleAt(c.task, day), 3000)
+  const r = insights([{ task: c.task, metrics: taskMetrics(c.task, sampleAt(c.task, day), 0) }, run('ok', wf(1), { plan: 1000, build: 5000, review: 500 })])
+  const build = r.byStage.find(s => s.node === 'build')!
+  assert.deepEqual([build.blockedMs, build.maxMs, build.slowest.task], [0, 5000, 'ok'])
+  assert.equal(r.tasks.failed, 1)
+  const running = new Clock('none', wf(1), 'r')
+  assert.equal(sampleAt(running.task, day), day, 'a running task is counted up to now')
 })
 
 test('no tasks: empty tables and no bottleneck; a task still running is counted at now', () => {

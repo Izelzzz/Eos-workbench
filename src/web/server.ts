@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
-import { insights } from '../engine/insights.ts'
+import { insights, sampleAt } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
@@ -219,7 +219,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         const now = Date.now()
         const samples = o.store.list().flatMap(s => {
           const task = o.store.get(s.id)
-          return task === undefined ? [] : [{ task, metrics: taskMetrics(task, now, s.createdAt) }]
+          return task === undefined ? [] : [{ task, metrics: taskMetrics(task, sampleAt(task, now), s.createdAt) }]
         })
         return json(res, 200, insights(samples))
       }

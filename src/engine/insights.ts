@@ -5,6 +5,12 @@ import { addUsage, zeroUsage } from './types.ts'
 
 export type Sample = { task: Task; metrics: TaskMetrics }
 
+/**
+ * 统计时一个任务算到哪个时刻。进行中的任务算到 now；失败后没人处理的任务算到失败那一刻（它的最后一条记录），
+ * 否则它的阻塞时长会一直涨，跨任务累加后把中位数、最长和瓶颈都拖偏。任务页上单看一个任务时仍然算到 now。
+ */
+export const sampleAt = (task: Task, now: number): number => (task.status === 'failed' ? task.log.at(-1)?.at ?? now : now)
+
 /** 时长的组成部分，和阶段表一致。 */
 export const PART_KEYS = ['agentMs', 'runningMs', 'checkMs', 'waitUserMs', 'blockedMs', 'overheadMs'] as const
 export type PartKey = (typeof PART_KEYS)[number]
@@ -36,7 +42,7 @@ export type TemplateBucket = {
   usage: Usage
   agentMs: number
 }
-/** 一个工作流最耗时的阶段：它占这个工作流所有阶段时长的比例，以及占比最大的组成部分。 */
+/** 一个工作流最耗时的阶段：它占这个工作流所有阶段时长的比例，以及占比最大的组成部分（打平时取 PART_KEYS 里靠前的）。 */
 export type Bottleneck = { workflow: string; node: string; wallMs: number; share: number; part: PartKey; partMs: number }
 
 export type Insights = {
