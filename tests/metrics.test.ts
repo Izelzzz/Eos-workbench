@@ -215,10 +215,10 @@ test('a running call shows as in progress, from the last entry to now; the first
   assert.equal(taskMetrics(c.task, 5000).stages[0]!.wallMs, 0, 'without the creation time the first stage has no start')
   c.send(6000, { kind: 'asked', call: c.call, question: { id: 'q', text: '?' } })
   const waiting = taskMetrics(c.task, 8000, 0).stages[0]!
-  assert.deepEqual([waiting.runningMs, waiting.waitUserMs], [0, 2000], 'waiting for the user is not running')
+  assert.deepEqual([waiting.runningMs, waiting.waitUserMs, waiting.overheadMs], [6000, 2000, 0], 'the call ran 6s before asking; the wait is not running')
   c.send(9000, { kind: 'answered', questionId: c.task.question!.id, text: '好' })
   const again = taskMetrics(c.task, 12_000, 0).stages[0]!
-  assert.deepEqual([again.runningMs, again.waitUserMs, again.wallMs], [3000, 3000, 12_000])
+  assert.deepEqual([again.runningMs, again.waitUserMs, again.wallMs], [9000, 3000, 12_000])
   c.reply(13_000, 13_000, '方案')
   const doneStage = taskMetrics(c.task, 13_000, 0).stages[0]!
   assert.deepEqual([doneStage.agentMs, doneStage.runningMs, doneStage.waitUserMs], [10_000, 0, 3000], 'once the call ends it is agent time')

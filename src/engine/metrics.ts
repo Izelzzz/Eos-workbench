@@ -2,7 +2,7 @@
 //
 // 一个阶段从它的第一项活动开始，到最后一项活动结束（还在进行的阶段算到 now）。这段时间分成：
 // - agent：模型调用的时长，减去调用中途等用户回答的时间；
-// - 进行中：阶段还在进行、有调用或检查正在跑时，从最后一条记录到现在（结束后归到 agent 或检查）；
+// - 进行中：正在跑、还没有结果的调用或检查，扣掉它中途等用户的时间（结束后归到 agent 或检查）；
 // - 检查：平台执行交付物和命令检查的时长；
 // - 等用户：从提问到回答（调用中途 agent 的提问，和流程卡住时的提问）；
 // - 阻塞：从调用失败到人工重试（这段时间任务停着，等人处理）；
@@ -20,7 +20,7 @@ export type StageMetrics = {
   checks: number
   usage: Usage
   agentMs: number
-  /** 进行中的阶段：从最后一条记录到现在，正在跑的调用或检查还没有结果，先单独算，结束后归到 agent 或检查。 */
+  /** 正在跑、还没有结果的调用或检查的时长（扣掉中途等用户），结束后归到 agent 或检查。 */
   runningMs: number
   checkMs: number
   waitUserMs: number
@@ -118,11 +118,15 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
     const checkMs = union(checks.map(c => ({ start: c.at - c.ms, end: c.at })))
     const waitUserMs = union(nodeWaits.map(w => w.span))
     const blockedMs = union(nodeBlocks.map(b => b.span))
-    // 正在跑的调用或检查：任务在运行、有待完成的调用时，最后一条记录之后的时间都属于它。
-    const lastAt = task.log.at(-1)?.at
-    const runningMs = open && task.status === 'running' && task.pending !== undefined && start !== undefined && end !== undefined
-      ? Math.max(0, end - Math.max(start, lastAt ?? start))
-      : 0
+    // 正在跑的调用或检查：从它之前最后一条与它无关的记录（它中途的提问和回答不算）到现在，扣掉中途等用户的时间。
+    let runningMs = 0
+    const p = task.pending
+    if (open && p !== undefined && (task.status === 'running' || task.status === 'waiting_user') && start !== undefined && end !== undefined) {
+      const own = new Set(task.log.flatMap(e => (e.type === 'question' && e.question.call === p.id ? [e.question.id] : [])))
+      const before = task.log.findLast(e => !(e.type === 'question' && e.question.call === p.id) && !(e.type === 'answer' && own.has(e.questionId)))
+      const span = { start: Math.max(start, before?.at ?? start), end }
+      runningMs = Math.max(0, len(span) - union(nodeWaits.filter(w => w.call === p.id).map(w => clip(w.span, span))))
+    }
     stages.push({
       node: n.id, calls: calls.length, checks: checks.length, usage: calls.reduce<Usage>((u, c) => addUsage(u, c.usage), zeroUsage()),
       agentMs, runningMs, checkMs, waitUserMs, blockedMs, overheadMs: Math.max(0, wallMs - agentMs - runningMs - checkMs - waitUserMs - blockedMs), wallMs,
