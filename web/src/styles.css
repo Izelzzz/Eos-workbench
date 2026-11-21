@@ -235,3 +235,12 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .events { margin: 10px 0 0; padding-left: 20px; }
 .events li { margin: 4px 0; }
 .improve .actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* 改进前后对比 */
+.compare table { border-collapse: collapse; width: 100%; max-width: 760px; }
+.compare th, .compare td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.compare .num { text-align: right; white-space: nowrap; }
+.compare .table-wrap { overflow-x: auto; }
+.compare .small { font-size: 12.5px; margin: 6px 0 0; }
+.compare-item + .compare-item { margin-top: 18px; }
+.compare-item h3 { font-size: 14px; margin: 6px 0; font-weight: 600; }
