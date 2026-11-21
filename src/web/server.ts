@@ -9,7 +9,9 @@ import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
+import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
+import { evidence } from '../engine/evidence.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
@@ -17,7 +19,7 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -75,7 +77,8 @@ const sameOrigin = (req: IncomingMessage): boolean => {
   return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
 }
 
-export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string }): Server => {
+/** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
+export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string } }): Server => {
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
 
@@ -191,7 +194,35 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const p = o.store.proposal(id)
     if (p === undefined) return undefined
     const base = o.store.convention(p.target.kind, p.target.name, p.baseVersion)
-    return { ...proposalInfo(p), ...(base === undefined ? {} : { base }) }
+    // 证据原文：对提案范围里的任务重新归纳（纯函数，结果和生成时一样），只留下提案引用的。
+    const cited = new Set(p.evidence)
+    const samples = p.scope.tasks.flatMap(id => {
+      const task = o.store.get(id)
+      return task === undefined ? [] : [{ task, used: o.store.meta(id).conventions }]
+    })
+    const signals = evidence(samples).signals.filter(s => cited.has(s.id))
+    return { ...proposalInfo(p), ...(base === undefined ? {} : { base }), signals }
+  }
+  /** 同一时间只跑一次生成：每次是一次模型调用，重复点按钮不应该花两份钱。 */
+  let generating = false
+  const startGenerate = async (body: Record<string, unknown>): Promise<[number, GenerateResponse]> => {
+    if (o.improve === undefined) return [503, { ok: false, error: '这个服务没有配置生成提案用的执行器' }]
+    if (typeof body.workflow !== 'string' || body.workflow.trim() === '') return [400, { ok: false, error: '需要 workflow' }]
+    if (body.tasks !== undefined && !(Array.isArray(body.tasks) && body.tasks.every(t => typeof t === 'string'))) return [400, { ok: false, error: 'tasks 必须是任务 id 列表' }]
+    if (generating) return [409, { ok: false, error: '已经有一次生成在进行，等它结束再试' }]
+    generating = true
+    try {
+      const tasks = (body.tasks as string[] | undefined)?.map(t => t.trim()).filter(t => t !== '')
+      const r = await generate({
+        store: o.store, conventions: o.supervisor.conventions, executor: o.improve.executor, dataDir: o.improve.dataDir,
+        workflow: body.workflow.trim(), ...(tasks === undefined || tasks.length === 0 ? {} : { tasks }), actor: 'web', now: Date.now,
+      })
+      if (!r.ok) return [r.call === undefined ? 400 : 502, { ok: false, error: r.error }]
+      return [200, { ok: true, created: r.created, refused: r.refused, ...(r.skipped === undefined ? {} : { skipped: r.skipped }),
+        ...(r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms } }) }]
+    } finally {
+      generating = false
+    }
   }
   const decide = (id: number, action: string, body: Record<string, unknown>): [number, DecideResponse] => {
     const text = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : undefined)
@@ -223,9 +254,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
         const conv = CONVENTION.exec(url.pathname)
         const dec = DECIDE.exec(url.pathname)
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null) return json(res, 404, { error: '没有这个接口' })
+        const gen = url.pathname === '/api/improve/generate'
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (gen) return json(res, ...(await startGenerate(g.body)))
         if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
         if (conv !== null) {
           const name = decodeName(conv[2]!)

@@ -149,7 +149,7 @@ function Sidebar(props: { list: ConventionsResponse | undefined; kind?: Conventi
   )
 }
 
-function Diff(props: { before: string; after: string }) {
+export function Diff(props: { before: string; after: string }) {
   const lines = useMemo(() => diffLines(props.before, props.after), [props.before, props.after])
   const stat = diffStat(lines)
   if (stat.add === 0 && stat.del === 0) return <p className="muted">没有改动</p>

@@ -70,6 +70,7 @@ export const generate = async (o: {
     const row = o.store.convention(t.kind, t.name)
     return row === undefined ? [] : [{ ...t, version: row.version, content: row.content }]
   })
+  if (candidates.length === 0) return { ok: true, run, skipped: `证据涉及的约定都不在平台上（例如工作流来自 YAML 文件），没有可以修改的约定，不生成提案`, created: [], refused: [] }
   const latest = samples.at(-1)!.task
   const roleTemplates = Object.fromEntries(Object.entries(latest.workflow.roles).flatMap(([id, r]) => (r.template === undefined ? [] : [[id, r.template.name]])))
   const b = insights(samples.map(s => ({ task: s.task, metrics: taskMetrics(s.task, sampleAt(s.task, o.now()), o.store.createdAt(s.task.id)) }))).bottlenecks[0]

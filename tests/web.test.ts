@@ -14,11 +14,14 @@ import type { Insights } from '../src/engine/insights.ts'
 import { Proposals } from '../src/improve/proposals.ts'
 import type { ProposalDetail, ProposalInfo, TaskDetail } from '../src/web/types.ts'
 import { FakeExecutor } from './fake-executor.ts'
+import type { Executor } from '../src/executor/types.ts'
+import { builtinAgentSource } from '../src/workflow/templates.ts'
+import type { GenerateResponse } from '../src/web/types.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
-const serve = async () => {
+const serve = async (improve?: Executor) => {
   const dir = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-web-'))
   mkdirSync(join(dir, 'static'))
   writeFileSync(join(dir, 'static', 'index.html'), '<html>eos</html>')
@@ -40,7 +43,7 @@ const serve = async () => {
   const replay = { traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => { replayed.push(`${key} ${nonce}`); return [{ kind: 'call_start', t: 1000 }, { kind: 'step_start', t: 1001, step: 1 }, { kind: 'step_end', t: 1090, step: 1 }] } }
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: dir, pollMs: 5 })
   const locksDir = supervisor.locksDir
-  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static') })
+  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static'), ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   return { base, dir, store, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(r)) }
@@ -457,6 +460,53 @@ test('proposals: list and detail with the base version for diffing; approve and 
     assert.equal(invalid.status, 409)
     assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在不能批准：/)
     assert.equal(s.store.proposal(r3.row.id)!.status, 'pending')
+  } finally {
+    await s.close()
+  }
+})
+
+test('generating proposals from the page: one run at a time, the detail carries the cited evidence, and errors are reported', async () => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const reply = () => '```json\n' + JSON.stringify({ proposals: [{ target: { kind: 'template', name: 'developer' }, rationale: '评审要求补测试', evidence: ['t2:2'], content: `${builtinAgentSource('developer').trimEnd()}\n  - 先写测试。\n` }] }) + '\n```'
+  const improver = new FakeExecutor(async () => { await gate; return reply() })
+  const s = await serve(improver)
+  try {
+    // 一个用 developer 模板、评审要求过一次修改的已完成任务。
+    const w = workflow({ maxRounds: 2, escalate: false })
+    const wf = { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } }
+    s.store.create({ id: 't2', request: '需求', workflow: wf, workflowSource: 'y', meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 2000)
+    for (const text of ['方案', '实现', CHANGES, '改了', PASS]) {
+      const p = s.store.get('t2')!.pending!
+      s.store.dispatch('t2', { kind: 'replied', call: p.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
+    }
+    assert.equal(s.store.get('t2')!.status, 'done')
+    const gen = (body: unknown) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify(body) })
+    assert.equal((await gen({})).status, 400)
+    const first = gen({ workflow: 't' })
+    await new Promise(r => setTimeout(r, 50))
+    const second = await gen({ workflow: 't' })
+    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, '已经有一次生成在进行，等它结束再试'])
+    release()
+    const done = (await (await first).json()) as GenerateResponse
+    assert.ok(done.ok)
+    assert.deepEqual(done.created.map(p => [p.id, p.target.name, p.evidence, p.actor]), [[1, 'developer', ['t2:2'], 'web']])
+    assert.equal(done.call?.usage.output, 10)
+    const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
+    assert.deepEqual(d.signals.map(x => [x.id, x.kind, x.role, x.text]), [['t2:2', 'review_changes', 'dev', '缺少测试\n1. [major]：补测试']])
+    const missing = await gen({ workflow: 't', tasks: ['nope'] })
+    assert.deepEqual([missing.status, ((await missing.json()) as { error: string }).error], [400, '这些任务不存在或不是工作流「t」的：nope'])
+  } finally {
+    release()
+    await s.close()
+  }
+})
+
+test('without an improver executor the generate endpoint says so', async () => {
+  const s = await serve()
+  try {
+    const r = await fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify({ workflow: 't' }) })
+    assert.equal(r.status, 503)
   } finally {
     await s.close()
   }

@@ -285,3 +285,17 @@ test('a tool call the model sent counts even without a tool_start event', async 
     s.cleanup()
   }
 })
+
+test('without any candidate convention on the platform the model is not called', async () => {
+  const s = setup()
+  try {
+    // 评审方 rev 直接写在工作流里，工作流 t 不在平台上：格式重试的证据没有可改的约定。
+    s.task('a', ['方案', '实现', '我觉得还行', PASS])
+    const ex = new Recorder(() => json([]))
+    const r = await s.run(ex)
+    assert.ok(r.ok)
+    assert.deepEqual([r.skipped, ex.calls.length], ['证据涉及的约定都不在平台上（例如工作流来自 YAML 文件），没有可以修改的约定，不生成提案', 0])
+  } finally {
+    s.cleanup()
+  }
+})

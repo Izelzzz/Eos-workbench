@@ -1,16 +1,13 @@
 // 改进 agent 的提示词：范围、证据、按约定的汇总、瓶颈、候选约定的当前内容和输出格式。纯函数。
 import type { Evidence, Signal, SignalKind, TargetEvidence, TargetKind } from '../engine/evidence.ts'
 import { MAX_PROPOSALS } from './parse.ts'
+import { SIGNAL_NAMES, TARGET_NAMES } from './labels.ts'
 
 /** 提示词里最多列几条证据、几个候选约定（证据最多的排在前面）。 */
 export const MAX_SIGNALS = 40
 export const MAX_TARGETS = 6
 
-export const SIGNAL_NAMES: Record<SignalKind, string> = {
-  review_changes: '评审要求修改', check_failed: '检查没通过', format_retry: '回复格式无法解析', escalated: '打满轮次，请上游重新确认',
-  stuck: '走到尽头，问用户', scope_reverted: '越界改动被撤销', call_failed: '调用失败',
-}
-export const TARGET_NAMES: Record<TargetKind, string> = { template: 'Agent 模板', skill: '技能', doc: '约定文档', workflow: '工作流' }
+export { SIGNAL_NAMES, TARGET_NAMES } from './labels.ts'
 
 export type Candidate = TargetEvidence & { version: number; content: string }
 
