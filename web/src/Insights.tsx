@@ -34,8 +34,8 @@ export function Insights() {
           <ul className="bottlenecks">
             {data.bottlenecks.map(b => (
               <li key={b.workflow}>
-                工作流 <b>{b.workflow}</b> 最耗时的阶段是 <b>{b.node}</b>：占所有阶段时长的 <b>{pct(b.share)}</b>（{duration(b.wallMs)}），
-                其中「{PART_LABEL[b.part]}」最多，{duration(b.partMs)}（{pct(b.partMs / b.wallMs)}）。
+                工作流 <b>{b.workflow}</b> 最耗时的阶段是 <b>{b.node}</b>：占所有阶段时长的 <b>{pct(b.share)}</b>（{duration(b.wallMs)}），{''
+                }其中「{PART_LABEL[b.part]}」最多，{duration(b.partMs)}（{pct(b.partMs / b.wallMs)}）。
               </li>
             ))}
           </ul>
