@@ -4,6 +4,9 @@ import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
 import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary, ProposalRow } from '../store/types.ts'
 import type { Span } from '../trace/types.ts'
+import type { Signal } from '../engine/evidence.ts'
+import type { Usage } from '../engine/types.ts'
+import type { Refused } from '../improve/parse.ts'
 
 export type TaskDetail = {
   id: string
@@ -44,7 +47,13 @@ export type SaveConventionResponse = { ok: true; version?: number } | { ok: fals
 
 /** 提案列表的一行：latestVersion 是目标约定现在的最新版本（不等于 baseVersion 时批准会过期）。 */
 export type ProposalInfo = ProposalRow & { latestVersion?: number }
-/** 提案详情：带上提案基于的那一版内容，页面用来做新旧对比。 */
-export type ProposalDetail = ProposalInfo & { base?: ConventionRow }
+/** 提案详情：带上提案基于的那一版内容（页面做新旧对比）和引用的证据原文（任务被删了的证据不在里面）。 */
+export type ProposalDetail = ProposalInfo & { base?: ConventionRow; signals: Signal[] }
+export type GenerateRequest = { workflow: string; tasks?: string[] }
+/** 生成的结果：created 入库的提案，refused 没入库的和原因，skipped 没有证据、没调用模型。 */
+export type GenerateResponse =
+  | { ok: true; created: ProposalRow[]; refused: Refused[]; skipped?: string; call?: { model?: string; usage: Usage; ms: number } }
+  /** call：调用过模型之后才失败（调用了工具、回复无法解析）时带上用量和回复的开头。 */
+  | { ok: false; error: string; call?: { model?: string; usage: Usage; ms: number; replyHead: string } }
 export type DecideRequest = { note?: string } | { reason: string }
 export type DecideResponse = { ok: true; proposal: ProposalRow } | { ok: false; error: string }

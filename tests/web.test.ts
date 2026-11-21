@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { acquire } from '../src/runner/lock.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { execFileSync } from 'node:child_process'
@@ -14,11 +14,14 @@ import type { Insights } from '../src/engine/insights.ts'
 import { Proposals } from '../src/improve/proposals.ts'
 import type { ProposalDetail, ProposalInfo, TaskDetail } from '../src/web/types.ts'
 import { FakeExecutor } from './fake-executor.ts'
+import type { Executor } from '../src/executor/types.ts'
+import { builtinAgentSource } from '../src/workflow/templates.ts'
+import type { GenerateResponse } from '../src/web/types.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
-const serve = async () => {
+const serve = async (improve?: Executor) => {
   const dir = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-web-'))
   mkdirSync(join(dir, 'static'))
   writeFileSync(join(dir, 'static', 'index.html'), '<html>eos</html>')
@@ -40,7 +43,7 @@ const serve = async () => {
   const replay = { traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => { replayed.push(`${key} ${nonce}`); return [{ kind: 'call_start', t: 1000 }, { kind: 'step_start', t: 1001, step: 1 }, { kind: 'step_end', t: 1090, step: 1 }] } }
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: dir, pollMs: 5 })
   const locksDir = supervisor.locksDir
-  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static') })
+  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static'), ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   return { base, dir, store, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(r)) }
@@ -457,6 +460,83 @@ test('proposals: list and detail with the base version for diffing; approve and 
     assert.equal(invalid.status, 409)
     assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在不能批准：/)
     assert.equal(s.store.proposal(r3.row.id)!.status, 'pending')
+  } finally {
+    await s.close()
+  }
+})
+
+test('generating proposals from the page: one run at a time, the detail carries the cited evidence, and errors are reported', async () => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const reply = () => '```json\n' + JSON.stringify({ proposals: [{ target: { kind: 'template', name: 'developer' }, rationale: '评审要求补测试', evidence: ['t2:2'], content: `${builtinAgentSource('developer').trimEnd()}\n  - 先写测试。\n` }] }) + '\n```'
+  const improver = new FakeExecutor(async () => { await gate; return reply() })
+  const s = await serve(improver)
+  try {
+    // 一个用 developer 模板、评审要求过一次修改的已完成任务。
+    const w = workflow({ maxRounds: 2, escalate: false })
+    const wf = { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } }
+    s.store.create({ id: 't2', request: '需求', workflow: wf, workflowSource: 'y', meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 2000)
+    for (const text of ['方案', '实现', CHANGES, '改了', PASS]) {
+      const p = s.store.get('t2')!.pending!
+      s.store.dispatch('t2', { kind: 'replied', call: p.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
+    }
+    assert.equal(s.store.get('t2')!.status, 'done')
+    const gen = (body: unknown) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify(body) })
+    assert.equal((await gen({})).status, 400)
+    const first = gen({ workflow: 't' })
+    // 等第一个请求拿到锁（不靠固定的等待时间）。
+    for (let i = 0; i < 200 && !existsSync(join(s.dir, 'locks', 'improve.pid')); i++) await new Promise(r => setTimeout(r, 10))
+    const second = await gen({ workflow: 't' })
+    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, `已经有一次生成在进行（网页或命令行发起的，进程 ${process.pid}），等它结束再试`])
+    release()
+    const done = (await (await first).json()) as GenerateResponse
+    assert.ok(done.ok)
+    assert.deepEqual(done.created.map(p => [p.id, p.target.name, p.evidence, p.actor]), [[1, 'developer', ['t2:2'], 'web']])
+    assert.equal(done.call?.usage.output, 10)
+    const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
+    assert.deepEqual(d.signals.map(x => [x.id, x.kind, x.role, x.text]), [['t2:2', 'review_changes', 'dev', '缺少测试\n1. [major]：补测试']])
+    const missing = await gen({ workflow: 't', tasks: ['nope'] })
+    assert.deepEqual([missing.status, ((await missing.json()) as { error: string }).error], [400, '这些任务不存在或不是工作流「t」的：nope'])
+  } finally {
+    release()
+    await s.close()
+  }
+})
+
+test('without an improver executor the generate endpoint says so', async () => {
+  const s = await serve()
+  try {
+    const r = await fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin: s.base }, body: JSON.stringify({ workflow: 't' }) })
+    assert.equal(r.status, 503)
+  } finally {
+    await s.close()
+  }
+})
+
+test('generate: a cross-site request is refused; a failed model call is 502 with usage and the reply head, and the lock is released', async () => {
+  let mode: 'throw' | 'tools' = 'throw'
+  const ex: Executor = {
+    async send(p) {
+      if (mode === 'throw') throw new Error('连接被重置')
+      p.onEvent?.({ kind: 'tool_start', t: 1, step: 1, id: 'x', name: 'read', args: '{}' })
+      return { sessionId: 's', text: '我先读一下文件……', usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 }, ms: 9 }
+    },
+    async findReply() { return undefined }, async traceOf() { return [] }, async release() {}, async close() {},
+  }
+  const s = await serve(ex)
+  try {
+    const w = workflow({ maxRounds: 2, escalate: false })
+    s.store.create({ id: 't2', request: '需求', workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } }, workflowSource: 'y', meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 2000)
+    for (const text of ['方案', '实现', CHANGES, '改了', PASS]) s.store.dispatch('t2', { kind: 'replied', call: s.store.get('t2')!.pending!.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
+    const gen = (origin: string) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ workflow: 't' }) })
+    assert.equal((await gen('http://evil.example')).status, 403)
+    const thrown = await gen(s.base)
+    assert.deepEqual([thrown.status, ((await thrown.json()) as { error: string }).error], [502, '调用 improver 失败：连接被重置'])
+    assert.equal(existsSync(join(s.dir, 'locks', 'improve.pid')), false, 'the lock is released after the call failed')
+    mode = 'tools'
+    const tools = (await (await gen(s.base)).json()) as Extract<GenerateResponse, { ok: false }>
+    assert.deepEqual([tools.call?.usage.output, tools.call?.replyHead], [3, '我先读一下文件……'])
+    assert.deepEqual(s.store.proposals(), [])
   } finally {
     await s.close()
   }

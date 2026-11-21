@@ -217,3 +217,21 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .insights h2 { font-size: 15px; margin: 0 0 8px; }
 .bottlenecks { margin: 0; padding-left: 18px; }
 .bottlenecks li { margin: 4px 0; }
+
+/* 改进页 */
+.improve .panel { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.improve h2 { font-size: 15px; margin: 0 0 8px; }
+.improve .table-wrap { overflow-x: auto; }
+.generate-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.generate-form label, .improve label.decide { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.generate-form .grow { flex: 1 1 260px; }
+.generate-form input, .generate-form select, .improve textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+.improve textarea { width: 100%; resize: vertical; }
+.improve .refused { margin: 6px 0 0; padding-left: 20px; }
+.proposal .rationale { margin: 0; white-space: pre-wrap; }
+.signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.signal-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.signal-text { margin: 4px 0 0; padding: 8px 10px; background: var(--hover); border-radius: 6px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
+.events { margin: 10px 0 0; padding-left: 20px; }
+.events li { margin: 4px 0; }
+.improve .actions { display: flex; gap: 8px; margin-top: 8px; }

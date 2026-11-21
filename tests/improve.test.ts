@@ -6,8 +6,10 @@ import { Conventions } from '../src/conventions/conventions.ts'
 import { isCheck } from '../src/engine/types.ts'
 import type { AgentSpec, Executor, Reply } from '../src/executor/types.ts'
 import { generate } from '../src/improve/generate.ts'
+import { acquire } from '../src/runner/lock.ts'
 import { permissionChanges } from '../src/improve/guard.ts'
 import { MAX_PROPOSALS, parseProposals } from '../src/improve/parse.ts'
+import { selectScope } from '../src/improve/prompt.ts'
 import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import type { Workflow } from '../src/workflow/types.ts'
@@ -136,14 +138,14 @@ test('without evidence the model is not called; unfinished, unknown or missing t
   const s = setup()
   try {
     const ex = new Recorder(() => '没有 JSON')
-    assert.deepEqual(await s.run(ex), { ok: false, error: '工作流「t」还没有已结束的任务' })
+    assert.deepEqual(await s.run(ex), { ok: false, cause: 'input', error: '工作流「t」还没有已结束的任务' })
     s.task('clean', ['方案', '实现', PASS])
     const none = await s.run(ex)
     assert.ok(none.ok)
     assert.deepEqual([none.skipped, ex.calls.length], ['1 个任务里没有证据（评审都一次通过、检查都通过），不生成提案', 0])
     s.task('open', ['方案'])
-    assert.deepEqual(await s.run(ex, { tasks: ['open'] }), { ok: false, error: '这些任务还没结束：open' })
-    assert.deepEqual(await s.run(ex, { tasks: ['clean', 'ghost'] }), { ok: false, error: '这些任务不存在或不是工作流「t」的：ghost' })
+    assert.deepEqual(await s.run(ex, { tasks: ['open'] }), { ok: false, cause: 'input', error: '这些任务还没结束：open' })
+    assert.deepEqual(await s.run(ex, { tasks: ['clean', 'ghost'] }), { ok: false, cause: 'input', error: '这些任务不存在或不是工作流「t」的：ghost' })
     s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
     // 不给任务列表时只看已结束的任务（open 不算进去，也不报错）。
     const r = await s.run(ex)
@@ -284,4 +286,45 @@ test('a tool call the model sent counts even without a tool_start event', async 
   } finally {
     s.cleanup()
   }
+})
+
+test('without any candidate convention on the platform the model is not called', async () => {
+  const s = setup()
+  try {
+    // 评审方 rev 直接写在工作流里，工作流 t 不在平台上：格式重试的证据没有可改的约定。
+    s.task('a', ['方案', '实现', '我觉得还行', PASS])
+    const ex = new Recorder(() => json([]))
+    const r = await s.run(ex)
+    assert.ok(r.ok)
+    assert.deepEqual([r.skipped, ex.calls.length], ['证据涉及的约定都不在平台上（例如工作流来自 YAML 文件），没有可以修改的约定，不生成提案', 0])
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('one generation at a time per data directory: a held lock is reported as busy and nothing is called', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const lock = acquire(join(s.dataDir, 'locks'), 'improve', 1) // pid 1 一直活着：模拟另一个进程正在生成
+    const ex = new Recorder(() => json([]))
+    try {
+      const r = await s.run(ex)
+      assert.deepEqual(r, { ok: false, cause: 'busy', error: '已经有一次生成在进行（网页或命令行发起的，进程 1），等它结束再试' })
+      assert.equal(ex.calls.length, 0)
+    } finally {
+      if ('release' in lock) lock.release()
+    }
+    assert.ok((await s.run(ex)).ok, 'after the other run ends, generation works again')
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('candidates are taken from conventions on the platform before the limit: many off-platform targets do not crowd them out', () => {
+  const t = (name: string, n: number) => ({ kind: 'doc' as const, name, versions: [], tasks: 1, affected: 1, counts: {}, signals: Array.from({ length: n }, (_, i) => `${name}:${i}`) })
+  const targets = [...['y1', 'y2', 'y3', 'y4', 'y5', 'y6'].map(n => t(n, 5)), t('team', 1)]
+  const signals = targets.flatMap(x => x.signals).map(id => ({ id, task: 'a', entry: 0, at: 0, kind: 'review_changes' as const, text: '' }))
+  const r = selectScope({ signals, targets }, x => x.name === 'team')
+  assert.deepEqual(r.targets.map(x => x.name), ['team'])
 })

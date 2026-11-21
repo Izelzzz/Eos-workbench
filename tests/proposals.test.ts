@@ -51,7 +51,7 @@ test('approving writes the new content as the next version, noting the proposal,
     meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x', conventions: resolved.used } }, 11)
   const r = p.approve(1, 20, 'web', '先在 standard 上试')
   assert.ok(r.ok, !r.ok ? r.error : '')
-  assert.deepEqual(r.row.events.at(-1), { seq: 2, at: 20, status: 'approved', actor: 'web', version: 2 })
+  assert.deepEqual(r.row.events.at(-1), { seq: 2, at: 20, status: 'approved', actor: 'web', version: 2, reason: '先在 standard 上试' }, 'the approval note is kept on the event too')
   const v2 = store.convention('template', 'developer')!
   assert.deepEqual([v2.version, v2.content, v2.actor, v2.note], [2, input().content, 'web', '改进提案 #1：评审两次要求补 @example；先在 standard 上试'])
   // 进行中的任务用创建时的快照；新任务用上新版本。

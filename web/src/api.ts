@@ -3,11 +3,12 @@ import type { Insights } from '../../src/engine/insights.ts'
 import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, FieldError, SaveConventionResponse, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ProposalDetail, ProposalInfo,
+  SaveConventionResponse, TaskDetail, WorkflowInfo,
 } from '../../src/web/types.ts'
 
 export type { Insights }
-export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, TaskDetail, TaskSummary, WorkflowInfo }
+export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -43,3 +44,9 @@ const conventionPath = (kind: ConventionKind, name: string) => `/api/conventions
 export const getConvention = (kind: ConventionKind, name: string) => get<ConventionDetail>(conventionPath(kind, name))
 export const saveConvention = (kind: ConventionKind, name: string, body: { content: string; note?: string; validateOnly?: boolean }) =>
   post<SaveConventionResponse>(conventionPath(kind, name), body)
+
+export const listProposals = () => get<ProposalInfo[]>('/api/improve/proposals')
+export const getProposal = (id: number) => get<ProposalDetail>(`/api/improve/proposals/${id}`)
+export const generateProposals = (workflow: string, tasks: string[]) => post<GenerateResponse>('/api/improve/generate', { workflow, ...(tasks.length === 0 ? {} : { tasks }) })
+export const decideProposal = (id: number, action: 'approve' | 'reject', text: string) =>
+  post<DecideResponse>(`/api/improve/proposals/${id}/${action}`, action === 'approve' ? { note: text } : { reason: text })

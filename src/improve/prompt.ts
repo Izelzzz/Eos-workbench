@@ -1,16 +1,13 @@
 // 改进 agent 的提示词：范围、证据、按约定的汇总、瓶颈、候选约定的当前内容和输出格式。纯函数。
 import type { Evidence, Signal, SignalKind, TargetEvidence, TargetKind } from '../engine/evidence.ts'
 import { MAX_PROPOSALS } from './parse.ts'
+import { SIGNAL_NAMES, TARGET_NAMES } from './labels.ts'
 
 /** 提示词里最多列几条证据、几个候选约定（证据最多的排在前面）。 */
 export const MAX_SIGNALS = 40
 export const MAX_TARGETS = 6
 
-export const SIGNAL_NAMES: Record<SignalKind, string> = {
-  review_changes: '评审要求修改', check_failed: '检查没通过', format_retry: '回复格式无法解析', escalated: '打满轮次，请上游重新确认',
-  stuck: '走到尽头，问用户', scope_reverted: '越界改动被撤销', call_failed: '调用失败',
-}
-export const TARGET_NAMES: Record<TargetKind, string> = { template: 'Agent 模板', skill: '技能', doc: '约定文档', workflow: '工作流' }
+export { SIGNAL_NAMES, TARGET_NAMES } from './labels.ts'
 
 export type Candidate = TargetEvidence & { version: number; content: string }
 
@@ -18,10 +15,11 @@ export type Candidate = TargetEvidence & { version: number; content: string }
  * 列出的证据：最多 MAX_SIGNALS 条，按日志顺序；候选约定：在列出的证据里有证据的，按证据条数排，最多 MAX_TARGETS 个
  * （提案只能引用列出的证据，所以证据都没列出的约定不能作为候选）。
  */
-export const selectScope = (ev: Evidence): { targets: TargetEvidence[]; signals: Signal[]; omitted: number } => {
+export const selectScope = (ev: Evidence, onPlatform: (t: TargetEvidence) => boolean = () => true): { targets: TargetEvidence[]; signals: Signal[]; omitted: number } => {
   const signals = ev.signals.slice(0, MAX_SIGNALS)
   const listed = new Set(signals.map(s => s.id))
-  return { targets: ev.targets.filter(t => t.signals.some(id => listed.has(id))).slice(0, MAX_TARGETS), signals, omitted: ev.signals.length - signals.length }
+  // 先去掉平台上没有的约定再截取：否则证据最多的几个都来自 YAML 文件时，平台上的约定会被挤出候选。
+  return { targets: ev.targets.filter(t => onPlatform(t) && t.signals.some(id => listed.has(id))).slice(0, MAX_TARGETS), signals, omitted: ev.signals.length - signals.length }
 }
 
 const fence = (s: string) => {

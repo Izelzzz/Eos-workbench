@@ -1,6 +1,7 @@
 // 改进提案：入库前校验，审批（批准写回约定的新版本 / 拒绝 / 过期）。提案只追加状态，没有批准就不改任何约定（ADR-004）。
 import type { Conventions } from '../conventions/conventions.ts'
 import { permissionChanges } from './guard.ts'
+import { KIND_NAMES, STATUS_NAMES } from './labels.ts'
 import type { Store } from '../store/store.ts'
 import type { Decision, ProposalInput, ProposalRow } from '../store/types.ts'
 
@@ -46,6 +47,7 @@ export class Proposals {
     const extra = note.trim()
     const d = this.store.decideProposal(id, {
       status: 'approved',
+      reason: extra,
       note: row => `改进提案 #${row.id}：${oneLine(row.rationale, NOTE_MAX)}${extra === '' ? '' : `；${extra}`}`,
       // 批准时再核对一次权限（失败就关）：生成之后，工作流引用的模板可能被人改过，同一份内容展开出来的权限会变。
       validate: row => [
@@ -64,8 +66,7 @@ export class Proposals {
   }
 }
 
-export const KIND_NAMES = { workflow: '工作流', doc: '约定文档', template: 'Agent 模板', skill: '技能' } as const
-export const STATUS_NAMES = { pending: '待审批', approved: '已批准', rejected: '已拒绝', stale: '已过期' } as const
+export { KIND_NAMES, STATUS_NAMES } from './labels.ts'
 
 const describe = (id: number, d: Exclude<Decision, { ok: true }>): string => {
   switch (d.reason) {
