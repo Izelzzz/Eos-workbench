@@ -2,7 +2,7 @@
 // improver 只从模板里取模型、effort 和提示词；权限由平台定死：只读、去掉全部工具组、不挂技能和 MCP，
 // 工作目录是平台数据目录里的一个空目录（团队改了模板也放不开，见 ADR-004）。
 import { randomBytes } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Conventions } from '../conventions/conventions.ts'
 import { evidence } from '../engine/evidence.ts'
@@ -14,7 +14,7 @@ import type { Store } from '../store/store.ts'
 import type { ProposalRow } from '../store/types.ts'
 import { TOOL_GROUPS } from '../workflow/types.ts'
 import { permissionChanges } from './guard.ts'
-import { parseProposals, type Refused } from './parse.ts'
+import { MAX_PROPOSALS, parseProposals, type Refused } from './parse.ts'
 import { improvePrompt, selectScope, TARGET_NAMES, type Candidate } from './prompt.ts'
 import { Proposals } from './proposals.ts'
 
@@ -30,7 +30,8 @@ export type GenerateResult =
     refused: Refused[]
     call?: { model?: string; usage: Usage; ms: number; reply: string }
   }
-  | { ok: false; error: string }
+  /** run、call：调用过模型之后才失败（例如回复无法解析）时带上，用量和原始回复不丢。 */
+  | { ok: false; error: string; run?: string; call?: { model?: string; usage: Usage; ms: number; reply: string } }
 
 const PART_NAMES = { agentMs: 'agent', runningMs: '运行中', checkMs: '检查', waitUserMs: '等用户', blockedMs: '阻塞', overheadMs: '平台开销' } as const
 
@@ -92,16 +93,21 @@ export const generate = async (o: {
     return { ok: false, error: `调用 ${IMPROVER} 失败：${(e as Error).message}` }
   } finally {
     await o.executor.release(cwd)
+    rmSync(cwd, { recursive: true, force: true })
   }
   say(`✓ ${IMPROVER}：${(reply.ms / 1000).toFixed(1)}s，输入 ${reply.usage.input}，输出 ${reply.usage.output}`)
   const call = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reply: reply.text }
 
   const parsed = parseProposals(reply.text, { targets: candidates, signals: new Set(scope.signals.map(s => s.id)) })
-  if (!parsed.ok) return { ok: false, error: `${IMPROVER} 的回复无法解析：${parsed.error}` }
+  if (!parsed.ok) return { ok: false, error: `${IMPROVER} 的回复无法解析：${parsed.error}`, run, call }
   const proposals = new Proposals(o.store, o.conventions)
   const created: ProposalRow[] = []
   const refused: Refused[] = [...parsed.refused]
   for (const p of parsed.proposals) {
+    if (created.length >= MAX_PROPOSALS) {
+      refused.push({ index: p.index, target: p.target, errors: [`一次最多 ${MAX_PROPOSALS} 条提案`] })
+      continue
+    }
     const c = candidates.find(x => x.kind === p.target.kind && x.name === p.target.name)!
     const perms = permissionChanges(p.target.kind, c.content, p.content, o.conventions.lookup())
     if (perms.length > 0) {

@@ -157,17 +157,20 @@ const commands: Record<string, () => Promise<void> | void> = {
   async improve() {
     if (positionals.length > 1) fail('用法：eos improve [--workflow standard] [--tasks <id,…>]')
     const ex = executor()
+    const conventions = new Conventions(store)
+    conventions.seed(Date.now())
+    const tasks = values.tasks?.split(',').map(x => x.trim()).filter(x => x !== '')
+    let r
     try {
-      const conventions = new Conventions(store)
-      conventions.seed(Date.now())
-      const tasks = values.tasks?.split(',').map(x => x.trim()).filter(x => x !== '')
-      const r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow!, ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
-      if (!r.ok) return fail(r.error)
+      r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow!, ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
+    } finally {
+      await ex.close()
+    }
+    if (!r.ok) return fail(r.call === undefined ? r.error : `${r.error}\n回复的开头：\n${r.call.reply.slice(0, 500)}`)
+    {
       if (r.skipped !== undefined) return say(r.skipped)
       for (const p of r.created) say(`\n提案 #${p.id}：${KIND_NAMES[p.target.kind]}「${p.target.name}」第 ${p.baseVersion} 版 → 新版本\n理由：${p.rationale}\n证据：${p.evidence.join('、')}`)
       say(r.created.length === 0 ? '\n没有生成提案' : `\n共 ${r.created.length} 条待审批：npm run eos -- approve <提案号>，或在网页上审批`)
-    } finally {
-      await ex.close()
     }
   },
   proposals() {

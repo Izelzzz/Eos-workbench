@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { extractJson } from '../engine/verdict.ts'
 import { TARGET_KINDS, type TargetKind } from '../engine/evidence.ts'
 
-/** 一次生成最多接受几条提案；多出来的不入库。 */
+/** 一次生成最多入库几条提案（通过全部校验之后才算数，见 generate.ts）。 */
 export const MAX_PROPOSALS = 3
 
 const item = z.object({
@@ -25,8 +25,8 @@ export type ParseResult =
 const FIELD: Record<string, string> = { target: '目标', 'target.kind': '目标种类', 'target.name': '目标名字', content: '新内容', rationale: '理由', evidence: '证据' }
 
 /**
- * 解析回复并做和平台状态无关的核对：结构、目标在 targets 里、证据 id 都在 signals 里、同一个目标只能有一条、最多 MAX_PROPOSALS 条。
- * 和平台状态有关的核对（版本、内容能否保存、权限字段）由调用方再做。
+ * 解析回复并做和平台状态无关的核对：结构、目标在 targets 里、证据 id 都在 signals 里、同一个目标只能有一条。
+ * 和平台状态有关的核对（版本、内容能否保存、权限字段）和条数上限由调用方再做。
  */
 export const parseProposals = (text: string, scope: { targets: { kind: TargetKind; name: string }[]; signals: Set<string> }): ParseResult => {
   const root = z.object({ proposals: z.array(z.unknown()) }).safeParse(extractJson(text))
@@ -49,7 +49,6 @@ export const parseProposals = (text: string, scope: { targets: { kind: TargetKin
     const unknown = p.evidence.filter(id => !scope.signals.has(id))
     if (unknown.length > 0) errors.push(`引用了不存在的证据：${unknown.join('、')}`)
     if (seen.has(key)) errors.push('同一个约定只能有一条提案')
-    if (errors.length === 0 && proposals.length >= MAX_PROPOSALS) errors.push(`一次最多 ${MAX_PROPOSALS} 条提案`)
     if (errors.length > 0) refused.push({ index, target, errors })
     else {
       seen.add(key)
