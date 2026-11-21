@@ -1,0 +1,43 @@
+Eos Web：http://127.0.0.1:4331（数据目录 /home/user/Eos-workbench/.eos/evidence-e2e/data，Ctrl+C 退出）
+[t261121053554z0g] → [spec] spec-writer · produce
+[t2611210535546cq] → [spec] spec-writer · produce
+[t2611210535546cq]   已提交 7836a77
+[t2611210535546cq] ✓ [spec] spec-writer · produce：40.1s，输入 2452，输出 5691，缓存读 61312
+[t2611210535546cq] → [spec] 检查（1 项）
+[t2611210535546cq] ✓ [spec] 检查：1/1 项通过
+[t2611210535546cq] → [build] developer · produce
+[t261121053554z0g]   已提交 1804d4f
+[t261121053554z0g] ✓ [spec] spec-writer · produce：45.0s，输入 2362，输出 6470，缓存读 62464
+[t261121053554z0g] → [spec] 检查（1 项）
+[t261121053554z0g] ✓ [spec] 检查：1/1 项通过
+[t261121053554z0g] → [build] developer · produce
+[t2611210535546cq]   已提交 34144b1
+[t2611210535546cq] ✓ [build] developer · produce：21.3s，输入 4809，输出 2682，缓存读 63104
+[t2611210535546cq] → [build] 检查（1 项）
+[t2611210535546cq] ✓ [build] 检查：1/1 项通过
+[t2611210535546cq] → [test 第 1 轮] 检查（1 项）
+[t2611210535546cq] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t2611210535546cq] → [review 第 1 轮] 检查（1 项）
+[t2611210535546cq] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t2611210535546cq] → [review 第 1 轮] reviewer · critique
+[t261121053554z0g]   已提交 49745fa
+[t261121053554z0g] ✓ [build] developer · produce：19.3s，输入 4423，输出 2118，缓存读 67968
+[t261121053554z0g] → [build] 检查（1 项）
+[t261121053554z0g] ✓ [build] 检查：1/1 项通过
+[t261121053554z0g] → [test 第 1 轮] 检查（1 项）
+[t261121053554z0g] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121053554z0g] → [review 第 1 轮] 检查（1 项）
+[t261121053554z0g] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121053554z0g] → [review 第 1 轮] reviewer · critique
+[t2611210535546cq] ✓ [review 第 1 轮] reviewer · critique：12.0s，输入 4173，输出 1523，缓存读 19072
+[t2611210535546cq] → [deliver 第 1 轮] 检查（1 项）
+[t2611210535546cq] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121053554z0g] ✓ [review 第 1 轮] reviewer · critique：28.0s，输入 4356，输出 3960，缓存读 37376
+[t261121053554z0g] → [deliver 第 1 轮] 检查（1 项）
+[t261121053554z0g] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+✓ 所有任务都完成
+✓ 每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻的条目
+✓ 检查失败的证据 0 条 = 原始事件里没通过的结果 0 条
+✓ 评审要求修改的证据 0 条 = 日志里评审没通过的次数 0 次
+✓ 归到 developer 模板的证据 = 被评判角色用 developer 模板的证据
+✗ 至少一条检查失败的证据提到团队规则

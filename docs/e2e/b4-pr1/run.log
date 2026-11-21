@@ -1,0 +1,58 @@
+Eos Web：http://127.0.0.1:4331（数据目录 /home/user/Eos-workbench/.eos/evidence-e2e/data，Ctrl+C 退出）
+[t261121053839zq4] → [spec] spec-writer · produce
+[t26112105383940g] → [spec] spec-writer · produce
+[t261121053839zq4]   已提交 979983a
+[t261121053839zq4] ✓ [spec] spec-writer · produce：21.2s，输入 1661，输出 2601，缓存读 34048
+[t261121053839zq4] → [spec] 检查（1 项）
+[t261121053839zq4] ✓ [spec] 检查：1/1 项通过
+[t261121053839zq4] → [build] developer · produce
+[t26112105383940g]   已提交 46a45e5
+[t26112105383940g] ✓ [spec] spec-writer · produce：32.2s，输入 1600，输出 4180，缓存读 40960
+[t26112105383940g] → [spec] 检查（1 项）
+[t26112105383940g] ✓ [spec] 检查：1/1 项通过
+[t26112105383940g] → [build] developer · produce
+[t261121053839zq4]   已提交 4d3eaf7
+[t261121053839zq4] ✓ [build] developer · produce：12.9s，输入 3089，输出 1493，缓存读 32512
+[t261121053839zq4] → [build] 检查（1 项）
+[t261121053839zq4] ✓ [build] 检查：1/1 项通过
+[t261121053839zq4] → [test 第 1 轮] 检查（1 项）
+[t261121053839zq4] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121053839zq4] → [review 第 1 轮] 检查（1 项）
+[t261121053839zq4] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121053839zq4] → [review 第 1 轮] reviewer · critique
+[t26112105383940g]   已提交 9f02cbb
+[t26112105383940g] ✓ [build] developer · produce：16.7s，输入 3497，输出 1940，缓存读 48384
+[t26112105383940g] → [build] 检查（1 项）
+[t26112105383940g] ✓ [build] 检查：1/1 项通过
+[t26112105383940g] → [test 第 1 轮] 检查（1 项）
+[t26112105383940g] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t26112105383940g] → [review 第 1 轮] 检查（1 项）
+[t26112105383940g] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t26112105383940g] → [review 第 1 轮] reviewer · critique
+[t261121053839zq4] ✓ [review 第 1 轮] reviewer · critique：13.6s，输入 3235，输出 1850，缓存读 18304
+[t261121053839zq4] → [review 第 1 轮] developer · respond
+[t261121053839zq4]   已提交 dfbb703
+[t261121053839zq4] ✓ [review 第 1 轮] developer · respond：10.2s，输入 1485，输出 827，缓存读 45184
+[t261121053839zq4] → [review 第 2 轮] 检查（1 项）
+[t26112105383940g] ✓ [review 第 1 轮] reviewer · critique：11.7s，输入 3753，输出 1226，缓存读 25856
+[t26112105383940g] → [review 第 1 轮] developer · respond
+[t261121053839zq4] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121053839zq4] → [review 第 2 轮] reviewer · critique
+[t261121053839zq4] ✓ [review 第 2 轮] reviewer · critique：4.2s，输入 1592，输出 373，缓存读 18944
+[t261121053839zq4] → [deliver 第 1 轮] 检查（1 项）
+[t261121053839zq4] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t26112105383940g]   已提交 e01680e
+[t26112105383940g] ✓ [review 第 1 轮] developer · respond：8.9s，输入 1206，输出 983，缓存读 38144
+[t26112105383940g] → [review 第 2 轮] 检查（1 项）
+[t26112105383940g] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t26112105383940g] → [review 第 2 轮] reviewer · critique
+[t26112105383940g] ✓ [review 第 2 轮] reviewer · critique：6.4s，输入 2007，输出 592，缓存读 30080
+[t26112105383940g] → [deliver 第 1 轮] 检查（1 项）
+[t26112105383940g] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+✓ 所有任务都完成
+✓ 每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻的条目
+✓ 检查失败的证据 0 条 = 原始事件里没通过的结果 0 条
+✓ 评审要求修改的证据 2 条 = 日志里评审没通过的次数 2 次
+✓ 归到 developer 模板的证据 = 被评判角色用 developer 模板的证据
+✓ 任务用的是 reviewer 第 2 版
+✓ 至少一条评审要求修改的证据提到团队规则，并归到 developer 模板

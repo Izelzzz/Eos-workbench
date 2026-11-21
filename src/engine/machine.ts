@@ -9,6 +9,12 @@ import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, E
 import { isCheck, isTerminal } from './types.ts'
 import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 
+/** 日志说明：对话打满轮次请上游重新确认、调用失败。证据归纳（evidence.ts）按这两种说明识别，改措辞时一起改。 */
+export const escalationNote = (rounds: number, upstream: string): string => `${rounds} 轮未通过，请「${upstream}」重新确认`
+export const CALL_FAILED_PREFIX = '调用失败：'
+/** 越界撤销的说明以它开头（证据归纳用来跳过这条说明）。 */
+export const REVERTED_NOTE_PREFIX = '撤销了 '
+
 /** 回复格式不对时重新要求的次数；用完后任务失败，等人工重试。 */
 export const MAX_FORMAT_RETRIES = 2
 
@@ -143,7 +149,7 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
   if (t.dialog!.round < d.maxRounds) return toTarget(t, d, 'respond', respondPrompt(t, d, critique))
   if (d.escalate !== undefined && !t.dialog!.escalated) {
     const up = withDialog(t, { escalated: true })
-    return toUpstream(append(up, { type: 'note', at, node: d.id, text: `${d.maxRounds} 轮未通过，请「${d.escalate}」重新确认` }), d, reconfirmPrompt(up, d, { stuck: true }))
+    return toUpstream(append(up, { type: 'note', at, node: d.id, text: escalationNote(d.maxRounds, d.escalate) }), d, reconfirmPrompt(up, d, { stuck: true }))
   }
   return ask(withDialog(t, { phase: 'ask' }), { source: 'loop', text: stuckQuestion(t, d) }, at)
 }
@@ -155,7 +161,7 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
  */
 const noteReverted = (task: Task, call: Call, reverted: string[], at: number): Task =>
   append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },
-    { type: 'note', at, node: call.node, text: `撤销了 ${reverted.length} 处越界改动：${reverted.join('、')}` })
+    { type: 'note', at, node: call.node, text: `${REVERTED_NOTE_PREFIX}${reverted.length} 处越界改动：${reverted.join('、')}` })
 
 const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   switch (call.purpose) {
@@ -241,7 +247,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 
     case 'call_failed':
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
-      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `调用失败：${event.error}` }))
+      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${event.error}` }))
 
     case 'asked': {
       if (task.pending === undefined || isCheck(task.pending) || task.pending.id !== event.call) return ignore(task, '不是当前这次调用')
