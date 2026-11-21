@@ -1,6 +1,8 @@
 // 生成改进提案（手动触发）：归纳证据 → 交给内置的 improver 模板 → 在边界解析回复 → 校验后入库为待审批的提案。
 // improver 只从模板里取模型、effort 和提示词；权限由平台定死：只读、去掉全部工具组、不挂技能和 MCP，
 // 工作目录是平台数据目录里的一个空目录（团队改了模板也放不开，见 ADR-004）。
+// dsh 的读文件、搜索和向用户提问的工具去不掉（只能按组去掉，见 workflow/types.ts 的 TOOL_GROUPS）：
+// 需要的内容都在消息里，所以 improver 只要调用了任何工具，就当作被证据里的文字引导了，整次生成作废、不入库。
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -80,8 +82,12 @@ export const generate = async (o: {
   mkdirSync(cwd, { recursive: true })
   say(`→ ${IMPROVER}：${rows.length} 个任务，${ev.signals.length} 条证据，${candidates.length} 个候选约定`)
   let reply
+  const tools: string[] = []
   try {
     reply = await o.executor.send({
+      onEvent: e => {
+        if (e.kind === 'tool_start') tools.push(e.name)
+      },
       key: `improve/${run}`, nonce: `improve/${run}`, prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
       spec: {
         model: t.template.model, ...(t.template.effort === undefined ? {} : { effort: t.template.effort }), write: 'none', cwd,
@@ -92,18 +98,25 @@ export const generate = async (o: {
   } catch (e) {
     return { ok: false, error: `调用 ${IMPROVER} 失败：${(e as Error).message}` }
   } finally {
-    await o.executor.release(cwd)
     rmSync(cwd, { recursive: true, force: true })
+    await o.executor.release(cwd).catch(() => undefined) // 释放失败不影响结果：进程在执行器关闭时一起结束
   }
   say(`✓ ${IMPROVER}：${(reply.ms / 1000).toFixed(1)}s，输入 ${reply.usage.input}，输出 ${reply.usage.output}`)
   const call = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reply: reply.text }
 
+  if (tools.length > 0) {
+    return { ok: false, error: `${IMPROVER} 调用了工具（${[...new Set(tools)].join('、')}）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库`, run, call }
+  }
   const parsed = parseProposals(reply.text, { targets: candidates, signals: new Set(scope.signals.map(s => s.id)) })
   if (!parsed.ok) return { ok: false, error: `${IMPROVER} 的回复无法解析：${parsed.error}`, run, call }
   const proposals = new Proposals(o.store, o.conventions)
   const created: ProposalRow[] = []
   const refused: Refused[] = [...parsed.refused]
   for (const p of parsed.proposals) {
+    if (created.some(x => x.target.kind === p.target.kind && x.target.name === p.target.name)) {
+      refused.push({ index: p.index, target: p.target, errors: ['同一个约定只能有一条提案'] })
+      continue
+    }
     if (created.length >= MAX_PROPOSALS) {
       refused.push({ index: p.index, target: p.target, errors: [`一次最多 ${MAX_PROPOSALS} 条提案`] })
       continue

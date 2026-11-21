@@ -23,37 +23,68 @@ export type ParseResult =
   | { ok: false; error: string }
 
 const FIELD: Record<string, string> = { target: '目标', 'target.kind': '目标种类', 'target.name': '目标名字', content: '新内容', rationale: '理由', evidence: '证据' }
+/** zod 的出错位置 → 中文字段名：evidence.0 算作「证据」，空路径（整条不是对象）算作「提案」。 */
+const fieldOf = (path: PropertyKey[]): string => FIELD[path.slice(0, 2).join('.')] ?? FIELD[String(path[0])] ?? '提案'
+
+/** 从 start 处的 { 开始做括号匹配（跳过字符串里的内容），返回到配对的 } 为止的文本；不配对返回 undefined。 */
+const balanced = (text: string, start: number): string | undefined => {
+  let depth = 0
+  let inString = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (ch === '\\') i++
+      else if (ch === '"') inString = false
+    } else if (ch === '"') inString = true
+    else if (ch === '{') depth++
+    else if (ch === '}' && --depth === 0) return text.slice(start, i + 1)
+  }
+  return undefined
+}
 
 /**
- * 解析回复并做和平台状态无关的核对：结构、目标在 targets 里、证据 id 都在 signals 里、同一个目标只能有一条。
- * 和平台状态有关的核对（版本、内容能否保存、权限字段）和条数上限由调用方再做。
+ * 回复里最后一个能解析的 {"proposals": …} 对象。不靠 ``` 代码块切分：新内容（技能、文档）里常有代码块，
+ * JSON 字符串里的反引号不转义，按代码块切会在内容中间截断。找不到时退回通用的 extractJson。
+ */
+export const extractProposals = (text: string): unknown => {
+  const starts = [...text.matchAll(/\{\s*"proposals"\s*:/g)].map(m => m.index).reverse()
+  for (const s of starts) {
+    const body = balanced(text, s)
+    if (body === undefined) continue
+    try {
+      return JSON.parse(body)
+    } catch {
+      // 试前一个
+    }
+  }
+  return extractJson(text)
+}
+
+/**
+ * 解析回复并做和平台状态无关的核对：结构、目标在 targets 里、证据 id 都在 signals 里。
+ * 和平台状态有关的核对（版本、内容能否保存、权限字段）、同一个约定只入库一条和条数上限由调用方再做：
+ * 前一条被权限或保存校验拒绝时，同一个约定后面合格的那条仍然可以入库。
  */
 export const parseProposals = (text: string, scope: { targets: { kind: TargetKind; name: string }[]; signals: Set<string> }): ParseResult => {
-  const root = z.object({ proposals: z.array(z.unknown()) }).safeParse(extractJson(text))
+  const root = z.object({ proposals: z.array(z.unknown()) }).safeParse(extractProposals(text))
   if (!root.success) return { ok: false, error: '回复里没有 {"proposals": [...]} 格式的 JSON' }
   const proposals: (ParsedProposal & { index: number })[] = []
   const refused: Refused[] = []
-  const seen = new Set<string>()
   root.data.proposals.forEach((raw, index) => {
     const r = item.safeParse(raw)
     if (!r.success) {
-      const errors = r.error.issues.map(i => `${FIELD[i.path.join('.')] ?? i.path.join('.')}格式不对`)
+      const errors = r.error.issues.map(i => `${fieldOf(i.path)}格式不对`)
       refused.push({ index, errors: [...new Set(errors)] })
       return
     }
     const p = r.data
     const target = { kind: p.target.kind, name: p.target.name }
-    const key = `${target.kind}\u0000${target.name}`
     const errors: string[] = []
     if (!scope.targets.some(t => t.kind === target.kind && t.name === target.name)) errors.push('目标不在这次的范围里（只能改这些任务用到、并且有证据的约定）')
     const unknown = p.evidence.filter(id => !scope.signals.has(id))
     if (unknown.length > 0) errors.push(`引用了不存在的证据：${unknown.join('、')}`)
-    if (seen.has(key)) errors.push('同一个约定只能有一条提案')
     if (errors.length > 0) refused.push({ index, target, errors })
-    else {
-      seen.add(key)
-      proposals.push({ ...p, evidence: [...new Set(p.evidence)], index })
-    }
+    else proposals.push({ ...p, evidence: [...new Set(p.evidence)], index })
   })
   return { ok: true, proposals, refused }
 }

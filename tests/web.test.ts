@@ -455,7 +455,7 @@ test('proposals: list and detail with the base version for diffing; approve and 
     s.store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 3001)
     const invalid = await decide(r3.row.id, 'approve', {})
     assert.equal(invalid.status, 409)
-    assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在无法保存：/)
+    assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在不能批准：/)
     assert.equal(s.store.proposal(r3.row.id)!.status, 'pending')
   } finally {
     await s.close()

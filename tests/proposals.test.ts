@@ -6,6 +6,7 @@ import { Conventions } from '../src/conventions/conventions.ts'
 import { Proposals } from '../src/improve/proposals.ts'
 import { Store } from '../src/store/store.ts'
 import type { ProposalInput } from '../src/store/types.ts'
+import { builtinAgentSource } from '../src/workflow/templates.ts'
 
 const setup = (path = ':memory:') => {
   const store = new Store(path)
@@ -14,7 +15,8 @@ const setup = (path = ':memory:') => {
   return { store, c, p: new Proposals(store, c) }
 }
 
-const DEV = (prompt: string) => `name: developer\nprompt: ${prompt}\nwrite: worktree\nskills: [write-changes]\n`
+/** 内置 developer 模板的提示词末尾加一行：只改提示词，不动权限字段（批准时会再核对权限）。 */
+const DEV = (line: string) => `${builtinAgentSource('developer').trimEnd()}\n  - ${line}\n`
 
 const input = (over: Partial<ProposalInput> = {}): ProposalInput => ({
   target: { kind: 'template', name: 'developer' }, baseVersion: 1, content: DEV('导出函数都写带 @example 的 JSDoc'),
@@ -56,10 +58,11 @@ test('approving writes the new content as the next version, noting the proposal,
   const running = store.get('running')!
   assert.equal(running.workflow.roles.developer!.template!.version, 1)
   assert.match(running.workflow.roles.developer!.prompt, /^你是/)
+  assert.doesNotMatch(running.workflow.roles.developer!.prompt, /@example/)
   assert.equal(store.meta('running').conventions!.templates!.find(t => t.name === 'developer')!.version, 1)
   const next = c.resolve('standard')
   assert.ok(next.ok)
-  assert.deepEqual([next.workflow.roles.developer!.template!.version, next.workflow.roles.developer!.prompt], [2, '导出函数都写带 @example 的 JSDoc'])
+  assert.deepEqual([next.workflow.roles.developer!.template!.version, next.workflow.roles.developer!.prompt.endsWith('\n- 导出函数都写带 @example 的 JSDoc')], [2, true])
   const again = p.approve(1, 21, 'web')
   assert.deepEqual([again.ok, !again.ok && again.error], [false, '提案 #1 已批准，不能再审批'])
   assert.equal(store.conventionHistory('template', 'developer').length, 2, 'approving twice does not write twice')
@@ -101,7 +104,7 @@ test('approval re-validates: content that no longer saves keeps the proposal pen
   store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 11)
   const a = p.approve(r.row.id, 12, 'web')
   assert.ok(!a.ok)
-  assert.match(a.error, /^新内容现在无法保存：.*developer/)
+  assert.match(a.error, /^新内容现在不能批准：.*developer/)
   assert.equal(store.proposal(r.row.id)!.status, 'pending')
   assert.equal(store.convention('workflow', 'standard')!.version, wf.version)
   // 过期优先：目标本身也被改过时记「已过期」，不会因为内容不合格一直停在待审批。
@@ -135,4 +138,14 @@ test('a long rationale is cut by code point in the version note, never inside a 
   const note = store.convention('template', 'developer')!.note
   assert.equal(note, `改进提案 #1：${'字'.repeat(78)}😀…`)
   assert.ok(note.isWellFormed())
+})
+
+test('approval checks permissions again and refuses content that changes them, even if it was stored', () => {
+  const { store, p } = setup()
+  // 绕过 add 的校验直接写库（模拟生成之后权限的展开结果变了）：批准时失败就关。
+  const row = store.addProposal(input({ content: builtinAgentSource('developer').replace('  deny: [subagent, schedule]', '  deny: []') }), 10)
+  const r = p.approve(row.id, 11, 'web')
+  assert.deepEqual(r.ok ? '' : r.error, '新内容现在不能批准：不能改模板的 tools')
+  assert.equal(store.proposal(row.id)!.status, 'pending')
+  assert.equal(store.convention('template', 'developer')!.version, 1)
 })

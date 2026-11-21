@@ -9,6 +9,7 @@ import { generate } from '../src/improve/generate.ts'
 import { permissionChanges } from '../src/improve/guard.ts'
 import { MAX_PROPOSALS, parseProposals } from '../src/improve/parse.ts'
 import { Store } from '../src/store/store.ts'
+import type { TraceEvent } from '../src/trace/types.ts'
 import type { Workflow } from '../src/workflow/types.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
@@ -16,14 +17,18 @@ import { CHANGES, PASS, workflow } from './helpers.ts'
 class Recorder implements Executor {
   calls: { key: string; prompt: string; spec: AgentSpec }[] = []
   released: string[] = []
-  constructor(private readonly reply: (prompt: string) => string) {}
-  async send(p: { key: string; prompt: string; spec: AgentSpec }): Promise<Reply> {
+  constructor(private readonly reply: (prompt: string) => string, private readonly opts: { tools?: string[]; releaseFails?: boolean } = {}) {}
+  async send(p: { key: string; prompt: string; spec: AgentSpec; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     this.calls.push(p)
+    for (const name of this.opts.tools ?? []) p.onEvent?.({ kind: 'tool_start', t: 1, step: 1, id: name, name, args: '{}' })
     return { sessionId: 's', text: this.reply(p.prompt), usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0 }, ms: 3000, model: 'deepseek-flash' }
   }
   async findReply() { return undefined }
   async traceOf() { return [] }
-  async release(cwd: string) { this.released.push(cwd) }
+  async release(cwd: string) {
+    this.released.push(cwd)
+    if (this.opts.releaseFails === true) throw new Error('进程已经不在了')
+  }
   async close() {}
 }
 
@@ -71,6 +76,8 @@ test('generation sends the evidence and current contents to a read-only improver
       { target: { kind: 'template', name: 'reviewer' }, rationale: '放松评审', evidence: ['a:2'], content: 'x' },
       { target: { kind: 'template', name: 'developer' }, rationale: '重复', evidence: ['a:2'], content: 'y' },
       { target: { kind: 'nope' }, evidence: [] },
+      { target: { kind: 'doc', name: 'x' }, rationale: 'r', evidence: [''], content: 'c' },
+      'x',
     ]))
     const before = s.store.convention('template', 'developer')!.version
     const r = await s.run(ex)
@@ -95,6 +102,8 @@ test('generation sends the evidence and current contents to a read-only improver
       [2, ['目标不在这次的范围里（只能改这些任务用到、并且有证据的约定）']],
       [3, ['同一个约定只能有一条提案']],
       [4, ['目标种类格式不对', '目标名字格式不对', '新内容格式不对', '理由格式不对', '证据格式不对']],
+      [5, ['证据格式不对']],
+      [6, ['提案格式不对']],
     ])
     assert.equal(s.store.convention('template', 'developer')!.version, before, 'generation never changes a convention')
   } finally {
@@ -206,4 +215,41 @@ test('permission guard: template permission fields, workflow role permissions, n
   assert.deepEqual(permissionChanges('workflow', 'name: t\nroles: {}\nnodes: []\n', nodes(''), none), ['当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'], 'fails closed')
   assert.deepEqual(permissionChanges('template', '坏的: [', t(), none), ['当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'])
   assert.deepEqual(permissionChanges('doc', 'a', 'b', () => undefined), [])
+})
+
+test('if the improver calls any tool the whole run is void: nothing is stored, the call is kept', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const r = await s.run(new Recorder(() => json([{ target: { kind: 'template', name: 'developer' }, rationale: 'r', evidence: ['a:2'], content: withRule(DEV1(s.store)) }]), { tools: ['read', 'grep', 'read'] }))
+    assert.ok(!r.ok)
+    assert.equal(r.error, 'improver 调用了工具（read、grep）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库')
+    assert.equal(r.call?.usage.output, 200)
+    assert.deepEqual(s.store.proposals(), [])
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('contents with code fences parse; a later valid proposal for a target is kept when the earlier one was refused; a failing release still cleans up', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const skill = s.store.convention('skill', 'write-changes')!.content
+    const withFence = `${skill.trimEnd()}\n\n例子：\n\n\`\`\`md\n## 改动\n- src/sum.js：新增 sum\n\`\`\`\n`
+    const reply = `先说明一下：\n\`\`\`json\n${JSON.stringify({ proposals: [
+      { target: { kind: 'template', name: 'developer' }, rationale: '放开 bash', evidence: ['a:2'], content: DEV1(s.store).replace('  deny: [subagent, schedule]', '  deny: []') },
+      { target: { kind: 'template', name: 'developer' }, rationale: '只加规则', evidence: ['a:2'], content: withRule(DEV1(s.store)) },
+      { target: { kind: 'skill', name: 'write-changes' }, rationale: '加例子', evidence: ['a:2'], content: withFence },
+    ] }, null, 2)}\n\`\`\`\n`
+    const ex = new Recorder(() => reply, { releaseFails: true })
+    const r = await s.run(ex)
+    assert.ok(r.ok, !r.ok ? r.error : '')
+    assert.deepEqual(r.created.map(p => [p.target.name, p.rationale]), [['developer', '只加规则'], ['write-changes', '加例子']])
+    assert.equal(r.created[1]!.content, withFence)
+    assert.deepEqual(r.refused.map(x => [x.index, x.errors]), [[0, ['不能改模板的 tools']]])
+    assert.deepEqual(readdirSync(join(s.dataDir, 'improve')), [])
+  } finally {
+    s.cleanup()
+  }
 })
