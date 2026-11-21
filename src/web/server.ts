@@ -9,16 +9,23 @@ import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
+import { Proposals } from '../improve/proposals.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
-import type { ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, SaveConventionResponse, TaskDetail, WorkflowInfo } from './types.ts'
+import type {
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
+} from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
 const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$/
+
+/** /api/improve/proposals/<id>，以及审批：/api/improve/proposals/<id>/(approve|reject)。 */
+const PROPOSAL = /^\/api\/improve\/proposals\/(\d{1,15})$/
+const DECIDE = /^\/api\/improve\/proposals\/(\d{1,15})\/(approve|reject)$/
 
 const decodeName = (raw: string): string | undefined => {
   try {
@@ -175,6 +182,26 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     return r.ok ? [201, { ok: true, version: r.row.version }] : [400, { ok: false, errors: r.errors }]
   }
 
+  const proposals = new Proposals(o.store, o.supervisor.conventions)
+  const proposalInfo = (p: ProposalInfo): ProposalInfo => {
+    const latest = o.store.latestVersion(p.target.kind, p.target.name)
+    return { ...p, ...(latest === undefined ? {} : { latestVersion: latest }) }
+  }
+  const proposalDetail = (id: number): ProposalDetail | undefined => {
+    const p = o.store.proposal(id)
+    if (p === undefined) return undefined
+    const base = o.store.convention(p.target.kind, p.target.name, p.baseVersion)
+    return { ...proposalInfo(p), ...(base === undefined ? {} : { base }) }
+  }
+  const decide = (id: number, action: string, body: Record<string, unknown>): [number, DecideResponse] => {
+    const text = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : undefined)
+    if (body.note !== undefined && text('note') === undefined) return [400, { ok: false, error: 'note 必须是文字' }]
+    if (action === 'reject' && (text('reason') ?? '').trim() === '') return [400, { ok: false, error: '拒绝需要写理由' }]
+    const r = action === 'approve' ? proposals.approve(id, Date.now(), 'web', text('note')) : proposals.reject(id, Date.now(), 'web', text('reason')!)
+    if (r.ok) return [200, { ok: true, proposal: r.row }]
+    return [r.row === undefined ? 404 : 409, { ok: false, error: r.error }]
+  }
+
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {
     const file = normalize(join(root, path))
@@ -195,9 +222,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       if (req.method === 'POST') {
         const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
         const conv = CONVENTION.exec(url.pathname)
-        if (url.pathname !== '/api/tasks' && action === null && conv === null) return json(res, 404, { error: '没有这个接口' })
+        const dec = DECIDE.exec(url.pathname)
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
         if (conv !== null) {
           const name = decodeName(conv[2]!)
           return name === undefined ? json(res, 400, { ok: false, error: '名字的 URL 编码不对' }) : json(res, ...saveConvention(conv[1] as ConventionKind, name, g.body))
@@ -215,6 +244,12 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         return d === undefined ? json(res, 404, { error: `没有约定「${name ?? conv[2]}」` }) : json(res, 200, d)
       }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
+      if (url.pathname === '/api/improve/proposals') return json(res, 200, o.store.proposals().map(proposalInfo))
+      const prop = PROPOSAL.exec(url.pathname)
+      if (prop) {
+        const d = proposalDetail(Number(prop[1]))
+        return d === undefined ? json(res, 404, { error: `没有提案 #${prop[1]}` }) : json(res, 200, d)
+      }
       if (url.pathname === '/api/insights') {
         const now = Date.now()
         const samples = o.store.list().flatMap(s => {

@@ -11,7 +11,8 @@ import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { createWebServer } from '../src/web/server.ts'
 import type { Insights } from '../src/engine/insights.ts'
-import type { TaskDetail } from '../src/web/types.ts'
+import { Proposals } from '../src/improve/proposals.ts'
+import type { ProposalDetail, ProposalInfo, TaskDetail } from '../src/web/types.ts'
 import { FakeExecutor } from './fake-executor.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
@@ -405,6 +406,57 @@ test('agent templates and skills are listed, validated without saving, saved as 
     const d = (await (await fetch(`${s.base}/api/tasks/${id}`)).json()) as TaskDetail
     assert.deepEqual(d.conventions?.templates, [{ name: 'auditor', version: 2 }])
     assert.deepEqual(d.conventions?.skills, [{ name: 'audit-notes', version: 1 }])
+  } finally {
+    await s.close()
+  }
+})
+
+test('proposals: list and detail with the base version for diffing; approve and reject need same-origin JSON; stale and repeated decisions are 409', async () => {
+  const s = await serve()
+  try {
+    const dev = s.store.convention('template', 'developer')!
+    const add = (rationale: string) => new Proposals(s.store, s.supervisor.conventions).add({
+      target: { kind: 'template', name: 'developer' }, baseVersion: dev.version, content: dev.content.replace(/prompt: \|/, 'prompt: |\n  导出函数要写 @example。'),
+      rationale, evidence: ['t1:9'], scope: { workflow: 'standard', tasks: ['t1'] }, actor: 'cli',
+    }, 2000)
+    assert.ok(add('第一条').ok)
+    assert.ok(add('第二条').ok)
+    const list = (await (await fetch(`${s.base}/api/improve/proposals`)).json()) as ProposalInfo[]
+    assert.deepEqual(list.map(p => [p.id, p.status, p.latestVersion]), [[2, 'pending', 1], [1, 'pending', 1]])
+    const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
+    assert.deepEqual([d.base?.version, d.base?.content === dev.content, d.rationale], [1, true, '第一条'])
+    assert.equal((await fetch(`${s.base}/api/improve/proposals/9`)).status, 404)
+
+    const decide = (id: number, action: string, body: unknown, headers: Record<string, string> = { 'content-type': 'application/json', origin: s.base }) =>
+      fetch(`${s.base}/api/improve/proposals/${id}/${action}`, { method: 'POST', headers, body: JSON.stringify(body) })
+    assert.equal((await decide(1, 'approve', {}, { 'content-type': 'application/json', origin: 'http://evil.example' })).status, 403)
+    assert.equal((await decide(1, 'reject', { reason: '跨站' }, { 'content-type': 'application/json', origin: 'http://evil.example' })).status, 403)
+    assert.equal(s.store.convention('template', 'developer')!.version, 1, 'a cross-site request changes nothing')
+    assert.equal(s.store.proposal(1)!.status, 'pending')
+    assert.equal((await decide(1, 'reject', {})).status, 400)
+    assert.equal((await decide(1, 'reject', { reason: '   ' })).status, 400)
+    const ok = await decide(1, 'approve', { note: '试一下' })
+    assert.equal(ok.status, 200)
+    assert.equal(((await ok.json()) as { proposal: { status: string } }).proposal.status, 'approved')
+    assert.equal(s.store.convention('template', 'developer')!.note, '改进提案 #1：第一条；试一下')
+    assert.equal(s.store.convention('template', 'developer')!.actor, 'web')
+    const twice = await decide(1, 'approve', {})
+    assert.deepEqual([twice.status, ((await twice.json()) as { error: string }).error], [409, '提案 #1 已批准，不能再审批'])
+    const stale = await decide(2, 'approve', {})
+    assert.deepEqual([stale.status, ((await stale.json()) as { error: string }).error], [409, '提案 #2 已过期：目标已是第 2 版，提案基于第 1 版。请重新生成提案'])
+    assert.equal((await decide(9, 'reject', { reason: '无' })).status, 404)
+    const after = (await (await fetch(`${s.base}/api/improve/proposals`)).json()) as ProposalInfo[]
+    assert.deepEqual(after.map(p => [p.id, p.status, p.latestVersion]), [[2, 'stale', 2], [1, 'approved', 2]])
+    // 内容在批准时已无法保存（工作流引用的模板被换成解析不了的版本）：409，保持待审批。
+    const wf = s.store.convention('workflow', 'standard')!
+    const r3 = new Proposals(s.store, s.supervisor.conventions).add({ target: { kind: 'workflow', name: 'standard' }, baseVersion: wf.version, content: wf.content + '\n',
+      rationale: '第三条', evidence: ['t1:9'], scope: { workflow: 'standard', tasks: ['t1'] }, actor: 'cli' }, 3000)
+    assert.ok(r3.ok)
+    s.store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 3001)
+    const invalid = await decide(r3.row.id, 'approve', {})
+    assert.equal(invalid.status, 409)
+    assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在无法保存：/)
+    assert.equal(s.store.proposal(r3.row.id)!.status, 'pending')
   } finally {
     await s.close()
   }

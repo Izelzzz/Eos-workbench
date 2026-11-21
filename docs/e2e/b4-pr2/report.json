@@ -1,0 +1,178 @@
+{
+  "checks": {
+    "写入提案后约定没有任何变化": true,
+    "批准时任务 A 还没结束": true,
+    "批准返回 200，developer 第 2 版的备注写明提案号": true,
+    "基于旧版本的第二条提案批准时返回 409 并过期": true,
+    "拒绝返回 200": true,
+    "提案状态依次是 已批准 / 已过期 / 已拒绝": true,
+    "developer 只有 2 个版本": true,
+    "A、B 都完成": true,
+    "A 用 developer 第 1 版（创建时的快照，批准不影响进行中的任务），提示词里没有规则": true,
+    "B 用 developer 第 2 版，提示词里有规则": true
+  },
+  "facts": {
+    "statusOfAWhenApproved": "running",
+    "responses": {
+      "approved": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "proposal": {
+            "id": 1,
+            "createdAt": 1795240806652,
+            "target": {
+              "kind": "template",
+              "name": "developer"
+            },
+            "baseVersion": 1,
+            "content": "name: developer\ndescription: 开发：按规格实现并补测试，只改代码、测试和改动说明。\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]\ntools:\n  deny: [subagent, schedule]\nskills: [write-changes]\nprompt: |\n  你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。\n  - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。\n  - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。\n  - 每次回复最后简要说明：改了什么、为什么、怎么验证的。\n  - 团队规则：每个导出的函数都要写 JSDoc 注释，并且包含 @example 用法示例。\n",
+            "rationale": "评审反复要求导出函数补 @example，开发模板里没有这条规则",
+            "evidence": [
+              "(E2E 手工写入)"
+            ],
+            "scope": {
+              "workflow": "standard",
+              "tasks": [
+                "t2611210600069oh"
+              ]
+            },
+            "actor": "e2e",
+            "status": "approved",
+            "events": [
+              {
+                "seq": 1,
+                "at": 1795240806652,
+                "status": "pending",
+                "actor": "e2e"
+              },
+              {
+                "seq": 2,
+                "at": 1795240806678,
+                "status": "approved",
+                "actor": "web",
+                "version": 2
+              }
+            ]
+          }
+        }
+      },
+      "stale": {
+        "status": 409,
+        "body": {
+          "ok": false,
+          "error": "提案 #2 已过期：目标已是第 2 版，提案基于第 1 版。请重新生成提案"
+        }
+      },
+      "rejected": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "proposal": {
+            "id": 3,
+            "createdAt": 1795240806669,
+            "target": {
+              "kind": "template",
+              "name": "developer"
+            },
+            "baseVersion": 1,
+            "content": "name: developer\ndescription: 开发：按规格实现并补测试，只改代码、测试和改动说明。\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]\ntools:\n  deny: [subagent, schedule]\nskills: [write-changes]\nprompt: |\n  你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。\n  - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。\n  - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。\n  - 每次回复最后简要说明：改了什么、为什么、怎么验证的。\n  - 团队规则：每个导出的函数都要写 JSDoc 注释，并且包含 @example 用法示例。\n",
+            "rationale": "要被拒绝的提案",
+            "evidence": [
+              "(E2E 手工写入)"
+            ],
+            "scope": {
+              "workflow": "standard",
+              "tasks": [
+                "t2611210600069oh"
+              ]
+            },
+            "actor": "e2e",
+            "status": "rejected",
+            "events": [
+              {
+                "seq": 1,
+                "at": 1795240806669,
+                "status": "pending",
+                "actor": "e2e"
+              },
+              {
+                "seq": 2,
+                "at": 1795240806687,
+                "status": "rejected",
+                "actor": "web",
+                "reason": "和 #1 重复"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reviewChanges": {
+      "t2611210600069oh": 1,
+      "t261121060246bgl": 0
+    },
+    "proposals": [
+      {
+        "id": 3,
+        "status": "rejected",
+        "events": [
+          {
+            "seq": 1,
+            "at": 1795240806669,
+            "status": "pending",
+            "actor": "e2e"
+          },
+          {
+            "seq": 2,
+            "at": 1795240806687,
+            "status": "rejected",
+            "actor": "web",
+            "reason": "和 #1 重复"
+          }
+        ],
+        "latestVersion": 2
+      },
+      {
+        "id": 2,
+        "status": "stale",
+        "events": [
+          {
+            "seq": 1,
+            "at": 1795240806667,
+            "status": "pending",
+            "actor": "e2e"
+          },
+          {
+            "seq": 2,
+            "at": 1795240806684,
+            "status": "stale",
+            "actor": "web",
+            "reason": "目标已是第 2 版，提案基于第 1 版"
+          }
+        ],
+        "latestVersion": 2
+      },
+      {
+        "id": 1,
+        "status": "approved",
+        "events": [
+          {
+            "seq": 1,
+            "at": 1795240806652,
+            "status": "pending",
+            "actor": "e2e"
+          },
+          {
+            "seq": 2,
+            "at": 1795240806678,
+            "status": "approved",
+            "actor": "web",
+            "version": 2
+          }
+        ],
+        "latestVersion": 2
+      }
+    ]
+  }
+}

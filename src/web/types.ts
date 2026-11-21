@@ -2,7 +2,7 @@
 import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
-import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary } from '../store/types.ts'
+import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary, ProposalRow } from '../store/types.ts'
 import type { Span } from '../trace/types.ts'
 
 export type TaskDetail = {
@@ -41,3 +41,10 @@ export type ConventionsResponse = { workflows: WorkflowInfo[]; docs: ConventionS
 export type ConventionDetail = { kind: ConventionKind; name: string; versions: ConventionRow[] }
 export type SaveConventionRequest = { content: string; note?: string; validateOnly?: boolean }
 export type SaveConventionResponse = { ok: true; version?: number } | { ok: false; errors: FieldError[] } | { ok: false; error: string }
+
+/** 提案列表的一行：latestVersion 是目标约定现在的最新版本（不等于 baseVersion 时批准会过期）。 */
+export type ProposalInfo = ProposalRow & { latestVersion?: number }
+/** 提案详情：带上提案基于的那一版内容，页面用来做新旧对比。 */
+export type ProposalDetail = ProposalInfo & { base?: ConventionRow }
+export type DecideRequest = { note?: string } | { reason: string }
+export type DecideResponse = { ok: true; proposal: ProposalRow } | { ok: false; error: string }
