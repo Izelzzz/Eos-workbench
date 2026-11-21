@@ -92,7 +92,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...summaryOf(task), request: task.request, position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
-      branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now()), trace: buildTrace(task, await traceRows(task)),
+      branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }

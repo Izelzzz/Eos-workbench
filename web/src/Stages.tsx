@@ -8,6 +8,7 @@ type Stage = Metrics['stages'][number]
 /** 时长的组成部分：顺序就是横条从左到右的顺序。 */
 const PARTS = [
   { key: 'agentMs', label: 'agent', cls: 'p-agent' },
+  { key: 'runningMs', label: '进行中', cls: 'p-running' },
   { key: 'checkMs', label: '检查', cls: 'p-check' },
   { key: 'waitUserMs', label: '等用户', cls: 'p-wait' },
   { key: 'blockedMs', label: '阻塞', cls: 'p-blocked' },
@@ -71,7 +72,7 @@ export const Stages = (props: { metrics: Metrics }) => {
       <p className="muted stages-note">
         任务总时长 {duration(props.metrics.elapsedMs)}
         {props.metrics.betweenMs > 0 && <>，其中 {duration(props.metrics.betweenMs)} 不在任何阶段里（阶段之间的间隔，例如平台停着或重启续跑）</>}
-        。进行中的阶段里，正在跑的调用先算作平台开销，结束后归到 agent。
+        。「进行中」是正在跑、还没有结果的调用或检查，结束后归到 agent 或检查。
       </p>
     </section>
   )

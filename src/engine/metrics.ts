@@ -2,6 +2,7 @@
 //
 // 一个阶段从它的第一项活动开始，到最后一项活动结束（还在进行的阶段算到 now）。这段时间分成：
 // - agent：模型调用的时长，减去调用中途等用户回答的时间；
+// - 进行中：阶段还在进行、有调用或检查正在跑时，从最后一条记录到现在（结束后归到 agent 或检查）；
 // - 检查：平台执行交付物和命令检查的时长；
 // - 等用户：从提问到回答（调用中途 agent 的提问，和流程卡住时的提问）；
 // - 阻塞：从调用失败到人工重试（这段时间任务停着，等人处理）；
@@ -19,6 +20,8 @@ export type StageMetrics = {
   checks: number
   usage: Usage
   agentMs: number
+  /** 进行中的阶段：从最后一条记录到现在，正在跑的调用或检查还没有结果，先单独算，结束后归到 agent 或检查。 */
+  runningMs: number
   checkMs: number
   waitUserMs: number
   blockedMs: number
@@ -64,7 +67,8 @@ const union = (spans: Span[]): number => {
 const clip = (a: Span, b: Span): Span => ({ start: Math.max(a.start, b.start), end: Math.min(a.end, b.end) })
 
 /** now：还在进行的等待（没回答的提问、没重试的失败）和阶段算到这个时刻。 */
-export const taskMetrics = (task: Task, now: number): TaskMetrics => {
+/** now：进行中的部分算到这个时刻。createdAt：任务创建时刻（第一个阶段还没有任何记录时从这里算起）。 */
+export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMetrics => {
   const finished = task.status === 'done' || task.status === 'aborted'
   const lastAt = task.log.at(-1)?.at ?? now
   const until = finished ? lastAt : now
@@ -102,8 +106,8 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
     ]
     const open = current === n.id
     if (activity.length === 0 && !open) continue
-    // 进行中的阶段从上一个阶段结束时算起：正在跑的调用还没有记录，先算在平台开销里，调用结束后归到 agent。
-    const prevEnd = stages.at(-1)?.end
+    // 进行中的阶段从上一个阶段结束时（第一个阶段从任务创建时）算起。
+    const prevEnd = stages.at(-1)?.end ?? createdAt
     const starts = [...activity.map(s => s.start), ...(open && prevEnd !== undefined ? [prevEnd] : [])]
     const start = starts.length === 0 ? undefined : Math.min(...starts)
     const end = open ? until : activity.length === 0 ? undefined : Math.max(...activity.map(s => s.end))
@@ -114,16 +118,21 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
     const checkMs = union(checks.map(c => ({ start: c.at - c.ms, end: c.at })))
     const waitUserMs = union(nodeWaits.map(w => w.span))
     const blockedMs = union(nodeBlocks.map(b => b.span))
+    // 正在跑的调用或检查：任务在运行、有待完成的调用时，最后一条记录之后的时间都属于它。
+    const lastAt = task.log.at(-1)?.at
+    const runningMs = open && task.status === 'running' && task.pending !== undefined && start !== undefined && end !== undefined
+      ? Math.max(0, end - Math.max(start, lastAt ?? start))
+      : 0
     stages.push({
       node: n.id, calls: calls.length, checks: checks.length, usage: calls.reduce<Usage>((u, c) => addUsage(u, c.usage), zeroUsage()),
-      agentMs, checkMs, waitUserMs, blockedMs, overheadMs: Math.max(0, wallMs - agentMs - checkMs - waitUserMs - blockedMs), wallMs,
+      agentMs, runningMs, checkMs, waitUserMs, blockedMs, overheadMs: Math.max(0, wallMs - agentMs - runningMs - checkMs - waitUserMs - blockedMs), wallMs,
       ...(start === undefined ? {} : { start }), ...(end === undefined ? {} : { end }), open,
     })
   }
   const starts = stages.flatMap(s => (s.start === undefined ? [] : [s.start]))
   const ends = stages.flatMap(s => (s.end === undefined ? [] : [s.end]))
   const elapsedMs = starts.length === 0 ? 0 : Math.max(0, Math.max(...ends) - Math.min(...starts))
-  const sum = (k: 'calls' | 'checks' | 'agentMs' | 'checkMs' | 'waitUserMs' | 'blockedMs' | 'overheadMs' | 'wallMs') => stages.reduce((s, x) => s + x[k], 0)
+  const sum = (k: 'calls' | 'checks' | 'agentMs' | 'runningMs' | 'checkMs' | 'waitUserMs' | 'blockedMs' | 'overheadMs' | 'wallMs') => stages.reduce((s, x) => s + x[k], 0)
   const wallMs = sum('wallMs')
   return {
     stages,
@@ -131,7 +140,7 @@ export const taskMetrics = (task: Task, now: number): TaskMetrics => {
     betweenMs: Math.max(0, elapsedMs - wallMs),
     total: {
       calls: sum('calls'), checks: sum('checks'), usage: stages.reduce<Usage>((u, s) => addUsage(u, s.usage), zeroUsage()),
-      agentMs: sum('agentMs'), checkMs: sum('checkMs'), waitUserMs: sum('waitUserMs'), blockedMs: sum('blockedMs'), overheadMs: sum('overheadMs'), wallMs,
+      agentMs: sum('agentMs'), runningMs: sum('runningMs'), checkMs: sum('checkMs'), waitUserMs: sum('waitUserMs'), blockedMs: sum('blockedMs'), overheadMs: sum('overheadMs'), wallMs,
     },
   }
 }
@@ -146,10 +155,10 @@ const k = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /** 命令行用的阶段表。 */
 export const formatMetrics = (m: TaskMetrics): string => {
-  const head = ['阶段', '调用', '检查', '输入', '输出', '缓存读', 'agent', '检查耗时', '等用户', '阻塞', '平台开销', '总时长']
+  const head = ['阶段', '调用', '检查', '输入', '输出', '缓存读', 'agent', '进行中', '检查耗时', '等用户', '阻塞', '平台开销', '总时长']
   const row = (name: string, x: TaskMetrics['total'], open = false) => [
     open ? `${name}（进行中）` : name, String(x.calls), String(x.checks), k(x.usage.input), k(x.usage.output), k(x.usage.cacheRead),
-    secs(x.agentMs), secs(x.checkMs), secs(x.waitUserMs), secs(x.blockedMs), secs(x.overheadMs), secs(x.wallMs),
+    secs(x.agentMs), secs(x.runningMs), secs(x.checkMs), secs(x.waitUserMs), secs(x.blockedMs), secs(x.overheadMs), secs(x.wallMs),
   ]
   const rows = [head, ...m.stages.map(s => row(s.node, s, s.open)), row('合计', m.total)]
   const widths = head.map((_, i) => Math.max(...rows.map(r => [...r[i]!].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0))))

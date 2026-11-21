@@ -110,18 +110,18 @@ test('stages follow workflow order and skip stages that never ran', () => {
   c.reply(1000, 1000, '方案')
   const m = taskMetrics(c.task, 3000)
   assert.deepEqual(m.stages.map(s => [s.node, s.open]), [['plan', false], ['build', true]])
-  assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one; its running call is overhead until it ends')
-  assert.equal(m.stages[1]!.overheadMs, 2000)
+  assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one')
+  assert.deepEqual([m.stages[1]!.runningMs, m.stages[1]!.overheadMs], [2000, 0], 'its call is running, not platform overhead')
   assert.equal(m.total.calls, 1)
 })
 
 /** 各部分不重复计算：加起来不超过阶段时长，平台开销补齐到正好相等；阶段之间不重叠。 */
 const consistent = (t: Task, now: number) => {
-  const m = taskMetrics(t, now)
+  const m = taskMetrics(t, now, 0)
   for (const s of m.stages) {
     assert.ok(s.agentMs >= 0 && s.checkMs >= 0 && s.waitUserMs >= 0 && s.blockedMs >= 0, JSON.stringify(s))
-    assert.ok(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs <= s.wallMs, JSON.stringify(s))
-    assert.equal(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs, s.wallMs)
+    assert.ok(s.agentMs + s.runningMs + s.checkMs + s.waitUserMs + s.blockedMs <= s.wallMs, JSON.stringify(s))
+    assert.equal(s.agentMs + s.runningMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs, s.wallMs)
   }
   for (let i = 1; i < m.stages.length; i++) assert.ok(m.stages[i]!.start === undefined || m.stages[i]!.start! >= m.stages[i - 1]!.end!, 'stages do not overlap')
   assert.equal(m.total.wallMs + m.betweenMs, m.elapsedMs)
@@ -205,4 +205,22 @@ test('the command-line table has a row per stage and a total, and marks the open
 
 test('durations round as a whole, never showing 60 seconds', () => {
   assert.deepEqual([999, 1000, 59_949, 59_950, 119_600, 3_599_600].map(secs), ['999ms', '1.0s', '59.9s', '1m0s', '2m0s', '60m0s'])
+})
+
+test('a running call shows as in progress, from the last entry to now; the first stage starts when the task was created', () => {
+  const c = new Clock()
+  // 任务 0 创建，plan 的调用正在跑，还没有任何记录
+  const first = taskMetrics(c.task, 5000, 0).stages[0]!
+  assert.deepEqual([first.open, first.wallMs, first.runningMs, first.overheadMs], [true, 5000, 5000, 0])
+  assert.equal(taskMetrics(c.task, 5000).stages[0]!.wallMs, 0, 'without the creation time the first stage has no start')
+  c.send(6000, { kind: 'asked', call: c.call, question: { id: 'q', text: '?' } })
+  const waiting = taskMetrics(c.task, 8000, 0).stages[0]!
+  assert.deepEqual([waiting.runningMs, waiting.waitUserMs], [0, 2000], 'waiting for the user is not running')
+  c.send(9000, { kind: 'answered', questionId: c.task.question!.id, text: '好' })
+  const again = taskMetrics(c.task, 12_000, 0).stages[0]!
+  assert.deepEqual([again.runningMs, again.waitUserMs, again.wallMs], [3000, 3000, 12_000])
+  c.reply(13_000, 13_000, '方案')
+  const doneStage = taskMetrics(c.task, 13_000, 0).stages[0]!
+  assert.deepEqual([doneStage.agentMs, doneStage.runningMs, doneStage.waitUserMs], [10_000, 0, 3000], 'once the call ends it is agent time')
+  consistent(c.task, 20_000)
 })

@@ -204,6 +204,7 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .p-agent { background: var(--k-model); }
+.p-running { background: repeating-linear-gradient(45deg, var(--k-model) 0 4px, color-mix(in srgb, var(--k-model) 45%, transparent) 4px 8px); }
 .p-check { background: var(--k-check); }
 .p-wait { background: var(--waiting); }
 .p-blocked { background: var(--error); }
