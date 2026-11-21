@@ -224,3 +224,26 @@ test('a running call shows as in progress, from the last entry to now; the first
   assert.deepEqual([doneStage.agentMs, doneStage.runningMs, doneStage.waitUserMs], [10_000, 0, 3000], 'once the call ends it is agent time')
   consistent(c.task, 20_000)
 })
+
+test('running time in every engine state: a check, a failure, a retry, a loop question and its answer', () => {
+  const c = new Clock('review')
+  c.reply(1000, 1000, '方案')
+  c.reply(3000, 1000, '实现') // build 的交付物检查正在跑
+  const run = (now: number) => taskMetrics(c.task, now, 0).stages.find(s => s.open)!
+  assert.deepEqual([run(3500).node, run(3500).runningMs], ['build', 500], 'a check in flight runs from the reply before it')
+  c.check(4000, 400, false) // 交付物不全：补齐调用
+  assert.equal(run(5000).runningMs, 1000, 'the fix call runs from the check result')
+  c.send(5500, { kind: 'call_failed', call: c.call, error: '断了' })
+  assert.deepEqual([run(7000).runningMs, run(7000).blockedMs], [0, 1500], 'a failed task runs nothing; it is blocked')
+  c.send(8000, { kind: 'retry' })
+  assert.equal(run(8600).runningMs, 600, 'the resent call runs from the retry')
+  c.reply(9000, 900, '补齐了')
+  c.check(9500, 300, false) // 又不全，补齐次数用完：对话尽头的提问
+  assert.equal(c.task.status, 'waiting_user')
+  assert.equal(c.task.question!.source, 'loop')
+  assert.deepEqual([run(11_000).runningMs, run(11_000).waitUserMs], [0, 1500], 'waiting at the end of the loop runs nothing')
+  c.send(12_000, { kind: 'answered', questionId: c.task.question!.id, text: '继续补' })
+  assert.ok(c.task.pending !== undefined)
+  assert.equal(run(12_700).runningMs, 700, 'after the answer the next call runs from the answer')
+  consistent(c.task, 12_700)
+})

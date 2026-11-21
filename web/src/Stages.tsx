@@ -8,7 +8,7 @@ type Stage = Metrics['stages'][number]
 /** 时长的组成部分：顺序就是横条从左到右的顺序。 */
 const PARTS = [
   { key: 'agentMs', label: 'agent', cls: 'p-agent' },
-  { key: 'runningMs', label: '进行中', cls: 'p-running' },
+  { key: 'runningMs', label: '运行中', cls: 'p-running' },
   { key: 'checkMs', label: '检查', cls: 'p-check' },
   { key: 'waitUserMs', label: '等用户', cls: 'p-wait' },
   { key: 'blockedMs', label: '阻塞', cls: 'p-blocked' },
@@ -23,7 +23,8 @@ const Bar = (props: { stage: Stage; max: number }) => (
   </div>
 )
 
-export const Stages = (props: { metrics: Metrics }) => {
+/** runnerAlive：有程序在跑这个任务；为 false 时「运行中」的时间其实没有东西在跑。 */
+export const Stages = (props: { metrics: Metrics; runnerAlive: boolean }) => {
   const { stages, total } = props.metrics
   if (stages.length === 0) return null
   const max = Math.max(...stages.map(s => s.wallMs))
@@ -69,10 +70,13 @@ export const Stages = (props: { metrics: Metrics }) => {
           </tr>
         </tfoot>
       </table>
+      {!props.runnerAlive && total.runningMs > 0 && (
+        <p className="notice warn">没有程序在运行这个任务：「运行中」的 {duration(total.runningMs)} 里，有一部分其实是在等人点「继续」。</p>
+      )}
       <p className="muted stages-note">
         任务总时长 {duration(props.metrics.elapsedMs)}
         {props.metrics.betweenMs > 0 && <>，其中 {duration(props.metrics.betweenMs)} 不在任何阶段里（阶段之间的间隔，例如平台停着或重启续跑）</>}
-        。「进行中」是正在跑、还没有结果的调用或检查，结束后归到 agent 或检查。
+        。「运行中」是正在跑、还没有结果的调用或检查，结束后归到 agent 或检查。
       </p>
     </section>
   )

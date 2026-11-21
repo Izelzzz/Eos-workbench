@@ -198,7 +198,7 @@ function TaskPage(props: { id: string }) {
           {LIVE.has(task.status) && <button disabled={acting} onClick={() => { if (confirm('中止这个任务？正在进行的这一轮会跑完，之后不再继续。')) void act('abort') }}>中止</button>}
         </div>
       </section>
-      <Stages metrics={task.metrics} />
+      <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />
       <div className="toolbar">
         <button onClick={expandAll}>全部展开</button>
         <button onClick={() => setOpen(defaultOpen(task.trace))}>收起到调用</button>

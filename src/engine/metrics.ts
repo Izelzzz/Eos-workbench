@@ -2,7 +2,7 @@
 //
 // 一个阶段从它的第一项活动开始，到最后一项活动结束（还在进行的阶段算到 now）。这段时间分成：
 // - agent：模型调用的时长，减去调用中途等用户回答的时间；
-// - 进行中：正在跑、还没有结果的调用或检查，扣掉它中途等用户的时间（结束后归到 agent 或检查）；
+// - 运行中：正在跑、还没有结果的调用或检查，扣掉它中途等用户的时间（结束后归到 agent 或检查）；
 // - 检查：平台执行交付物和命令检查的时长；
 // - 等用户：从提问到回答（调用中途 agent 的提问，和流程卡住时的提问）；
 // - 阻塞：从调用失败到人工重试（这段时间任务停着，等人处理）；
@@ -11,6 +11,9 @@
 // 阶段之间的间隔（平台停着、重启续跑、被杀掉没记下来的调用）不属于任何阶段，单独算成 betweenMs。
 // 已知偏差：崩溃后从 dsh 会话日志认领的回复，记录的时刻是认领时、耗时是原来那次运行的，调用区间会落在重启之后，
 // 停机时间算进这个阶段的平台开销；调用失败前已经跑掉的时间没有记录，也算在平台开销里。
+// 日志里没有「调用开始」的记录，运行中只能从上一条记录算起：进入新阶段时的平台时间（提交、启动 dsh）在阶段进行中时
+// 算在运行中，阶段结束后变回阶段之间；runner 没在跑（崩溃、停着、回答后等人点「继续」）时运行中照样增长——
+// 指标是纯函数，不知道 runner 在不在跑，由页面根据 runnerAlive 提示。
 import type { Entry, Task, Usage } from './types.ts'
 import { addUsage, zeroUsage } from './types.ts'
 
@@ -66,7 +69,6 @@ const union = (spans: Span[]): number => {
 /** a 落在 b 里的部分。 */
 const clip = (a: Span, b: Span): Span => ({ start: Math.max(a.start, b.start), end: Math.min(a.end, b.end) })
 
-/** now：还在进行的等待（没回答的提问、没重试的失败）和阶段算到这个时刻。 */
 /** now：进行中的部分算到这个时刻。createdAt：任务创建时刻（第一个阶段还没有任何记录时从这里算起）。 */
 export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMetrics => {
   const finished = task.status === 'done' || task.status === 'aborted'
@@ -159,7 +161,7 @@ const k = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /** 命令行用的阶段表。 */
 export const formatMetrics = (m: TaskMetrics): string => {
-  const head = ['阶段', '调用', '检查', '输入', '输出', '缓存读', 'agent', '进行中', '检查耗时', '等用户', '阻塞', '平台开销', '总时长']
+  const head = ['阶段', '调用', '检查', '输入', '输出', '缓存读', 'agent', '运行中', '检查耗时', '等用户', '阻塞', '平台开销', '总时长']
   const row = (name: string, x: TaskMetrics['total'], open = false) => [
     open ? `${name}（进行中）` : name, String(x.calls), String(x.checks), k(x.usage.input), k(x.usage.output), k(x.usage.cacheRead),
     secs(x.agentMs), secs(x.runningMs), secs(x.checkMs), secs(x.waitUserMs), secs(x.blockedMs), secs(x.overheadMs), secs(x.wallMs),
