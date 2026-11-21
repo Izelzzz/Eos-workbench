@@ -430,7 +430,9 @@ test('proposals: list and detail with the base version for diffing; approve and 
     const decide = (id: number, action: string, body: unknown, headers: Record<string, string> = { 'content-type': 'application/json', origin: s.base }) =>
       fetch(`${s.base}/api/improve/proposals/${id}/${action}`, { method: 'POST', headers, body: JSON.stringify(body) })
     assert.equal((await decide(1, 'approve', {}, { 'content-type': 'application/json', origin: 'http://evil.example' })).status, 403)
+    assert.equal((await decide(1, 'reject', { reason: '跨站' }, { 'content-type': 'application/json', origin: 'http://evil.example' })).status, 403)
     assert.equal(s.store.convention('template', 'developer')!.version, 1, 'a cross-site request changes nothing')
+    assert.equal(s.store.proposal(1)!.status, 'pending')
     assert.equal((await decide(1, 'reject', {})).status, 400)
     assert.equal((await decide(1, 'reject', { reason: '   ' })).status, 400)
     const ok = await decide(1, 'approve', { note: '试一下' })
@@ -445,6 +447,16 @@ test('proposals: list and detail with the base version for diffing; approve and 
     assert.equal((await decide(9, 'reject', { reason: '无' })).status, 404)
     const after = (await (await fetch(`${s.base}/api/improve/proposals`)).json()) as ProposalInfo[]
     assert.deepEqual(after.map(p => [p.id, p.status, p.latestVersion]), [[2, 'stale', 2], [1, 'approved', 2]])
+    // 内容在批准时已无法保存（工作流引用的模板被换成解析不了的版本）：409，保持待审批。
+    const wf = s.store.convention('workflow', 'standard')!
+    const r3 = new Proposals(s.store, s.supervisor.conventions).add({ target: { kind: 'workflow', name: 'standard' }, baseVersion: wf.version, content: wf.content + '\n',
+      rationale: '第三条', evidence: ['t1:9'], scope: { workflow: 'standard', tasks: ['t1'] }, actor: 'cli' }, 3000)
+    assert.ok(r3.ok)
+    s.store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 3001)
+    const invalid = await decide(r3.row.id, 'approve', {})
+    assert.equal(invalid.status, 409)
+    assert.match(((await invalid.json()) as { error: string }).error, /^新内容现在无法保存：/)
+    assert.equal(s.store.proposal(r3.row.id)!.status, 'pending')
   } finally {
     await s.close()
   }

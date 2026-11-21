@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { Conventions } from '../src/conventions/conventions.ts'
@@ -42,16 +42,21 @@ test('a proposal is stored with a pending status and changes no convention until
 test('approving writes the new content as the next version, noting the proposal, and records that version', () => {
   const { store, c, p } = setup()
   p.add(input(), 10)
-  const running = c.resolve('standard') // 批准之前创建的任务
-  assert.ok(running.ok)
+  // 批准之前创建的任务：存进库里，批准后从库里读它的快照。
+  const resolved = c.resolve('standard')
+  assert.ok(resolved.ok)
+  store.create({ id: 'running', request: '需求', workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
+    meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x', conventions: resolved.used } }, 11)
   const r = p.approve(1, 20, 'web', '先在 standard 上试')
   assert.ok(r.ok, !r.ok ? r.error : '')
   assert.deepEqual(r.row.events.at(-1), { seq: 2, at: 20, status: 'approved', actor: 'web', version: 2 })
   const v2 = store.convention('template', 'developer')!
   assert.deepEqual([v2.version, v2.content, v2.actor, v2.note], [2, input().content, 'web', '改进提案 #1：评审两次要求补 @example；先在 standard 上试'])
   // 进行中的任务用创建时的快照；新任务用上新版本。
+  const running = store.get('running')!
   assert.equal(running.workflow.roles.developer!.template!.version, 1)
   assert.match(running.workflow.roles.developer!.prompt, /^你是/)
+  assert.equal(store.meta('running').conventions!.templates!.find(t => t.name === 'developer')!.version, 1)
   const next = c.resolve('standard')
   assert.ok(next.ok)
   assert.deepEqual([next.workflow.roles.developer!.template!.version, next.workflow.roles.developer!.prompt], [2, '导出函数都写带 @example 的 JSDoc'])
@@ -119,6 +124,8 @@ test('rejecting needs a reason; unknown proposals are reported; the list is newe
   const reopened = new Store(join(dir, 'eos.db'))
   assert.deepEqual(reopened.proposals().map(r => [r.id, r.rationale, r.status]), [[2, '第二条', 'pending'], [1, input().rationale, 'pending']])
   assert.deepEqual(reopened.proposal(1)!.generator, input().generator)
+  reopened.close()
+  rmSync(dir, { recursive: true, force: true })
 })
 
 test('a long rationale is cut by code point in the version note, never inside a character', () => {
