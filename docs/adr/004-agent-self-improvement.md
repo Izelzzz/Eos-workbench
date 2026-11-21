@@ -50,7 +50,7 @@
 2. **提案单独存，状态只追加**：新表 `proposals`（目标约定的种类和名字、基于的版本、新内容、理由、引用的证据 id、生成范围、生成调用的模型和用量）和 `proposal_events`（状态变化、时刻、操作者、原因、批准后生成的版本号）。提案的当前状态是最后一条事件。
 3. **批准在一个事务里完成**：读目标约定的最新版本 → 不等于提案基于的版本就记「过期」并拒绝 → 用约定的保存校验再校验一次 → 写新版本（备注 `改进提案 #<id>：<理由摘要>`）→ 记「已批准」和新版本号。手动在团队约定页保存照旧直接生效，不走审批（见「已知限制」）。
 4. **生成提案手动触发**：网页上或 `eos improve --workflow <名> [--tasks <id,…>]`。平台先算证据，把证据、相关的指标和瓶颈、目标约定的当前内容放进提示词，交给内置 `improver` 模板。
-   - `improver`：`write: none`，去掉全部工具组（web、subagent、bash、schedule、todo、goal），不挂技能和 MCP；会话的工作目录是平台数据目录里的一个空目录。只通过现有的执行器接口调用，不改 `src/executor/dsh.ts`。
+   - `improver`：`write: none`，去掉全部工具组（web、subagent、bash、schedule、todo、goal），不挂技能和 MCP；会话的工作目录是平台数据目录里的一个空目录（dsh 仍会读到指令文件，见「安全与已知限制」）。只通过现有的执行器接口调用，不改 `src/executor/dsh.ts`。
      平台只从这个模板里取模型、effort 和提示词，权限按上面写死：团队在约定页改了 improver 模板也放不开它的权限。
      dsh 的文件工具和向用户提问的工具不属于任何工具组，去不掉（ADR-003）：需要的内容都在消息里，
      所以 **improver 只要调用了任何工具，整次生成作废、不入库**（从执行器的事件里看）。
@@ -104,13 +104,17 @@ PR 拆分（依次合并，各自过自检、E2E 和独立审查）：
 - **improver 的会话里仍有文件工具和提问工具**（实测工具表：ask_user_question、edit、glob、grep、present、read、read_image、skill、working_directory、write；
   edit / write 被 `read-only` 档位挡住）。平台不靠它们不被调用，而是一旦调用（执行了的工具，或模型发出的工具调用）就作废这次生成；
   但工具在调用的那一刻已经执行了（读得到、写不了、不能联网），读到的内容只会进这次作废的回复。
-- **dsh 会把指令文件注入 agent 会话，平台保留这个行为（2026-11-21 决定，Izelzzz/Eos-workbench#40）**。dsh 的 `agent-instructions` 插件从三处读 `AGENTS.md` / `CLAUDE.md`：
-  ① 仓库自带的（任务 worktree 有 `.git`，向上查找停在 worktree 根目录）；② 工作目录往上直到第一个含 `.git` 的目录之间各级的（improver 的工作目录在数据目录里，数据目录在某个仓库里时会读到那个仓库的；
-  实测 E2E 的数据目录在本仓库里，本仓库的 CLAUDE.md 被注入了 improver）；③ 全局的 `~/.agents/AGENTS.md`（或 `DSH_AGENTS_HOME`）和 dsh home 里的 `AGENTS.md`。
+- **dsh 会把指令文件注入 agent 会话，平台保留这个行为（2026-11-21 决定，Izelzzz/Eos-workbench#40）**。dsh 的 `agent-instructions` 插件读这些文件：
+  ① 从会话的工作目录往上，找到第一个含 `.git` 的目录（找不到就只看工作目录本身），这之间每一级的 `AGENTS.md`、`CLAUDE.md`、`AGENTS.local.md`、`CLAUDE.local.md`。
+     任务会话的工作目录是 worktree 根，worktree 的 `.git` 是文件也算，所以只读仓库自带的（agent 把 worktree 的 `.git` 删掉时，会继续往上找到数据目录所在的仓库）；
+     improver 的工作目录在数据目录里，数据目录在某个仓库里时会读到那个仓库的（实测 E2E 的数据目录在本仓库里，本仓库的 CLAUDE.md 被注入了 improver），否则什么都读不到。
+  ② 会话中途 agent 的文件工具碰到工作目录下某个子目录里的文件时，补读工作目录到那个子目录之间各级的同名文件。
+  ③ 全局的 `AGENTS.md`（只有这个文件名）：平台用户的 `~/.agents/AGENTS.md`（或 `DSH_AGENTS_HOME` 指的目录，完全在平台之外），以及 dsh home `<数据目录>/dsh/AGENTS.md`（在平台目录里，但没有版本记录）。
   评估过整行关掉或只读仓库自带的，最终决定都读、不改：仓库自带的说明对任务有用，部署方也可以用全局文件统一补充说明。
-  代价：② ③ 不在平台的约定版本里，任务记录不下它们用了哪一版；agent 写进 worktree 的 `AGENTS.md` / `CLAUDE.md`（在写入范围内时）会被同一任务后面的会话读到；
-  improver 的"需要的内容都在消息里"不完全成立。部署时不要把数据目录放在别的仓库里，也不要在平台用户的 `~/.agents/AGENTS.md` 里放不想让 agent 看到的内容。
-  要关掉时，在 `src/executor/dsh.ts` 的 `patchRows` 里加一行 `{ id: 'agent-instructions', disabled: true }`（需要用真实 dsh 验证）。
+  代价：这些文件不在平台的约定版本里，任务记录不下它们用了哪一版；dsh 每一步都会重新比对，**agent 写进 worktree 的这些文件（包括子目录里的、`.local` 的）在同一会话的下一步就会生效**，
+  超出写入范围的也一样，直到调用结束被平台撤销（ADR-003：越界的写在调用进行中是真实存在的）；在写入范围内的还会被同一任务后面的会话读到；
+  improver 的"需要的内容都在消息里"不完全成立（决定 4）。部署时不要把数据目录放在别的仓库里，也不要在平台用户的 `~/.agents/AGENTS.md` 里放不想让 agent 看到的内容。
+  要关掉时，在 `src/executor/dsh.ts` 的 `patchRows` 里加一行 `{ id: 'agent-instructions', disabled: true }`（和关掉 `tool-plugin-manager` 的方式一样；需要用真实 dsh 验证）。
 - 权限核对不管"放松评审"：工作流提案可以删掉没有检查命令的评审节点。由提示词约束和审批的人判断。
 - 证据只核对"在本次列出的证据里"，不核对"和目标约定有关"：一条提案可以引用只和别的角色有关的证据。
 - 同一次生成的提案共用一次模型调用，提案上记的用量和时长是整次调用的（`generator.run` 相同）。
