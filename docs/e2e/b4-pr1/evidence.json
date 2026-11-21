@@ -1,0 +1,112 @@
+{
+  "signals": [
+    {
+      "id": "t26112105383940g:9",
+      "task": "t26112105383940g",
+      "entry": 9,
+      "at": 1795239591345,
+      "kind": "review_changes",
+      "node": "review",
+      "role": "developer",
+      "text": "实现、测试与规格验收标准全部符合（6 个用例通过，npm test 退出码 0，未改 package.json），但唯一的导出函数 max 的 JSDoc 缺少团队强制要求的 @example 用法示例。\n1. [major] src/max.js：导出函数 max 的 JSDoc 缺少 @example 用法示例（src/max.js:1-7）。团队规则要求每个导出函数的 JSDoc 必须包含 @example，请在现有 @param/@returns/@throws 之后补充类似 /`@example\\n * import { max } from './max.js';\\n * max([1, 5, 2]); // => 5\\n * @example\\n * max([]); // throws RangeError/` 的示例，覆盖正常取值与空数组异常两种用法。"
+    },
+    {
+      "id": "t261121053839zq4:9",
+      "task": "t261121053839zq4",
+      "entry": 9,
+      "at": 1795239577452,
+      "kind": "review_changes",
+      "node": "review",
+      "role": "developer",
+      "text": "实现与测试符合 docs/spec.md 的验收标准，``npm test`` 实跑 7 个用例全部通过、退出码 0；但导出的 sum 函数缺少团队规则强制要求的 @example 用法示例，需补上后即可通过。\n1. [major] src/sum.js：具名导出函数 sum 虽有 JSDoc 描述、@param 和 @returns，但缺少团队规则强制要求的 @example 用法示例（规则：每个导出函数都必须有 JSDoc 且包含 @example，缺失一律按 major 处理）。请在 JSDoc 中补一个可运行的示例，例如：\n/**\n * 返回数字数组所有元素的和。\n * 空数组返回 0；不修改传入的数组。\n * @param {number[]} numbers\n * @returns {number}\n * @example\n * sum([1, 2, 3]); // 6\n * sum([]);        // 0\n */"
+    }
+  ],
+  "targets": [
+    {
+      "kind": "template",
+      "name": "developer",
+      "versions": [
+        1
+      ],
+      "tasks": 2,
+      "affected": 2,
+      "counts": {
+        "review_changes": 2
+      },
+      "signals": [
+        "t26112105383940g:9",
+        "t261121053839zq4:9"
+      ]
+    },
+    {
+      "kind": "skill",
+      "name": "write-changes",
+      "versions": [
+        1
+      ],
+      "tasks": 2,
+      "affected": 2,
+      "counts": {
+        "review_changes": 2
+      },
+      "signals": [
+        "t26112105383940g:9",
+        "t261121053839zq4:9"
+      ]
+    },
+    {
+      "kind": "doc",
+      "name": "研发约定",
+      "versions": [
+        1
+      ],
+      "tasks": 2,
+      "affected": 2,
+      "counts": {
+        "review_changes": 2
+      },
+      "signals": [
+        "t26112105383940g:9",
+        "t261121053839zq4:9"
+      ]
+    },
+    {
+      "kind": "workflow",
+      "name": "standard",
+      "versions": [
+        1
+      ],
+      "tasks": 2,
+      "affected": 2,
+      "counts": {
+        "review_changes": 2
+      },
+      "signals": [
+        "t26112105383940g:9",
+        "t261121053839zq4:9"
+      ]
+    },
+    {
+      "kind": "template",
+      "name": "reviewer",
+      "versions": [
+        2
+      ],
+      "tasks": 2,
+      "affected": 0,
+      "counts": {},
+      "signals": []
+    },
+    {
+      "kind": "template",
+      "name": "spec-writer",
+      "versions": [
+        1
+      ],
+      "tasks": 2,
+      "affected": 0,
+      "counts": {},
+      "signals": []
+    }
+  ]
+}

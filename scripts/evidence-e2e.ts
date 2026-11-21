@@ -1,7 +1,9 @@
 // 证据归纳端到端验证（第 4 块 PR1）：用真实模型跑几个任务，再从真实的任务日志里归纳证据，和原始事件记录独立核对。
-// 1. 在 .eos/evidence-e2e 建示例仓库：`npm test` 除了跑测试，还检查一条没写进约定文档的团队规则
-//    （src 下每个文件第一行必须是「// 作者：…」注释），开发 agent 第一次多半不知道，测试阶段会失败、交回开发修；
-// 2. 启动 eos web，发起 2 个 standard 任务，提问自动回答，失败自动重试；
+// 1. 在 .eos/evidence-e2e 建示例仓库，启动 eos web；把一条团队规则只写进 reviewer 模板（新存一版）：
+//    「每个导出的函数都要有带 @example 的 JSDoc，没有就要求修改」。开发看不到评审的提示词，第一次多半不知道这条规则，
+//    评审会要求修改（这正是后面几个 PR 要让改进提案发现、写进 developer 模板或约定文档的情形）。
+//    （试过把规则写进仓库里的检查脚本，明文或 base64 编码，agent 都会先读懂、一次就照做，测不出证据。）
+// 2. 发起 2 个 standard 任务，提问自动回答，失败自动重试；
 // 3. 全部结束后直接读数据库，对每个任务算证据，核对：
 //    - 每条证据的 id 指向日志里同一时刻的条目；
 //    - 检查失败的条数 = 原始 events 表里 checked 事件中没通过的结果数；
@@ -26,21 +28,14 @@ const verifyOnly = process.argv.includes('--verify')
 const port = Number(process.argv.slice(2).find(a => /^\d+$/.test(a)) ?? 4331)
 const base = `http://127.0.0.1:${port}`
 
-// 规则写成编码后的脚本：模拟"CI 里有、约定文档里没写"的团队规则（明文写在仓库里时 agent 会先读到、一次就照做，测不出证据）。
-const RULE = `import { readdirSync, readFileSync, existsSync } from 'node:fs'
-const bad = existsSync('src') ? readdirSync('src').filter(f => f.endsWith('.js') && !readFileSync('src/' + f, 'utf8').startsWith('// 作者：')) : []
-for (const f of bad) console.error('src/' + f + ' 第一行必须是「// 作者：<名字>」注释（团队规则）')
-process.exit(bad.length === 0 ? 0 : 1)
-`
-const LINT = `// 内部 CI 检查（自动生成，请勿修改）\nawait import('data:text/javascript;base64,${Buffer.from(RULE).toString('base64')}')\n`
+const RULE = '\n  - 团队规则（必须执行）：每个导出的函数都要有 JSDoc 注释，并且包含 @example 用法示例；缺少的一律给出 changes（severity: major），在 issues 里写明哪个函数缺。\n'
 
 if (!verifyOnly) await runTasks()
 
 async function runTasks() {
   rmSync(OUT, { recursive: true, force: true })
-  mkdirSync(join(REPO, 'scripts'), { recursive: true })
-  writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test && node scripts/lint.js' } }, null, 2))
-  writeFileSync(join(REPO, 'scripts', 'lint.js'), LINT)
+  mkdirSync(REPO, { recursive: true })
+  writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
   for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
 
   const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
@@ -57,6 +52,10 @@ async function runTasks() {
 
   try {
     for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+    // 团队规则只写进 reviewer 模板：在内置第 1 版的提示词末尾加上，存成第 2 版。
+    const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
+    const saved = await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' }) as { ok: boolean; version?: number }
+    if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
     const ids: string[] = []
     for (const request of REQUESTS) {
       const r = await post('/api/tasks', { repo: REPO, workflow: 'standard', request }) as { ok: boolean; id?: string; error?: string }
@@ -107,7 +106,8 @@ const devSignals = ev.signals.filter(sig => {
   return sig.role !== undefined && task.workflow.roles[sig.role]?.template?.name === 'developer'
 }).map(s => s.id)
 checks['归到 developer 模板的证据 = 被评判角色用 developer 模板的证据'] = JSON.stringify(dev?.signals ?? []) === JSON.stringify(devSignals)
-checks['至少一条检查失败的证据提到团队规则'] = ev.signals.some(s => s.kind === 'check_failed' && s.text.includes('作者'))
+checks['任务用的是 reviewer 第 2 版'] = samples.every(s => s.task.workflow.roles.reviewer?.template?.version === 2)
+checks['至少一条评审要求修改的证据提到团队规则，并归到 developer 模板'] = ev.signals.some(s => s.kind === 'review_changes' && s.text.includes('@example') && (dev?.signals ?? []).includes(s.id))
 
 const report = {
   tasks: samples.map(s => ({ id: s.task.id, status: s.task.status, calls: s.task.log.filter(e => e.type === 'call').length, used: s.used })),
