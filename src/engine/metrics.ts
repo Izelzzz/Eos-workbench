@@ -36,8 +36,20 @@ export type StageMetrics = {
   open: boolean
 }
 
+/** 按角色汇总的模型调用：用来跨任务比较 Agent 模板。 */
+export type RoleMetrics = {
+  role: string
+  /** 角色来自哪个模板；直接写在工作流里的角色没有。 */
+  template?: { name: string; version: number }
+  calls: number
+  usage: Usage
+  agentMs: number
+}
+
 export type TaskMetrics = {
   stages: StageMetrics[]
+  /** 按调用的角色汇总，按工作流里角色的顺序；没有调用的角色不列。 */
+  roles: RoleMetrics[]
   total: Omit<StageMetrics, 'node' | 'open' | 'start' | 'end'>
   /** 从第一个阶段开始到最后一个阶段结束（或 now）。 */
   elapsedMs: number
@@ -95,6 +107,7 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
   if (failedAt !== undefined) blocks.push({ node: failedAt.node, span: { start: failedAt.at, end: until } })
 
   const stages: StageMetrics[] = []
+  const byRole = new Map<string, Omit<RoleMetrics, 'role' | 'template'>>()
   for (const n of task.workflow.nodes) {
     const calls = task.log.filter((e): e is Extract<Entry, { type: 'call' }> => e.type === 'call' && e.node === n.id)
     const checks = task.log.filter((e): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && e.node === n.id)
@@ -116,7 +129,12 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
     const wallMs = start === undefined || end === undefined ? 0 : Math.max(0, end - start)
     // 调用中途的提问：等回答的时间不算 agent 工作时间。
     const callSpans = calls.map(c => ({ id: c.call as string, span: { start: c.at - c.ms, end: c.at } }))
-    const agentMs = callSpans.reduce((sum, c) => sum + len(c.span) - union(nodeWaits.filter(w => w.call === c.id).map(w => clip(w.span, c.span))), 0)
+    const callAgent = callSpans.map(c => len(c.span) - union(nodeWaits.filter(w => w.call === c.id).map(w => clip(w.span, c.span))))
+    const agentMs = callAgent.reduce((a, b) => a + b, 0)
+    calls.forEach((c, i) => {
+      const r = byRole.get(c.role) ?? { calls: 0, usage: zeroUsage(), agentMs: 0 }
+      byRole.set(c.role, { calls: r.calls + 1, usage: addUsage(r.usage, c.usage), agentMs: r.agentMs + callAgent[i]! })
+    })
     const checkMs = union(checks.map(c => ({ start: c.at - c.ms, end: c.at })))
     const waitUserMs = union(nodeWaits.map(w => w.span))
     const blockedMs = union(nodeBlocks.map(b => b.span))
@@ -140,8 +158,14 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
   const elapsedMs = starts.length === 0 ? 0 : Math.max(0, Math.max(...ends) - Math.min(...starts))
   const sum = (k: 'calls' | 'checks' | 'agentMs' | 'runningMs' | 'checkMs' | 'waitUserMs' | 'blockedMs' | 'overheadMs' | 'wallMs') => stages.reduce((s, x) => s + x[k], 0)
   const wallMs = sum('wallMs')
+  const roles = Object.keys(task.workflow.roles).flatMap(id => {
+    const r = byRole.get(id)
+    const template = task.workflow.roles[id]?.template
+    return r === undefined ? [] : [{ role: id, ...(template === undefined ? {} : { template }), ...r }]
+  })
   return {
     stages,
+    roles,
     elapsedMs,
     betweenMs: Math.max(0, elapsedMs - wallMs),
     total: {

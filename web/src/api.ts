@@ -1,10 +1,12 @@
 // 与后端接口对应的类型和请求。类型从后端源码只做类型导入，前后端用同一份定义。
+import type { Insights } from '../../src/engine/insights.ts'
 import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
   ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, FieldError, SaveConventionResponse, TaskDetail, WorkflowInfo,
 } from '../../src/web/types.ts'
 
+export type { Insights }
 export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, TaskDetail, TaskSummary, WorkflowInfo }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
@@ -17,6 +19,7 @@ const get = async <T,>(path: string): Promise<T> => {
 
 export const listTasks = () => get<TaskSummary[]>('/api/tasks')
 export const getTask = (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`)
+export const getInsights = () => get<Insights>('/api/insights')
 
 /** 写接口统一走这里：JSON 请求体，浏览器自动带上同源 Origin。网络或服务端错误都变成 { ok: false, error }。 */
 const post = async <T extends { ok: boolean }>(path: string, body: unknown): Promise<T | { ok: false; error: string }> => {

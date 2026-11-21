@@ -1,0 +1,414 @@
+{
+  "tasks": [
+    {
+      "id": "t261121044052mtp",
+      "workflow": "standard",
+      "status": "done",
+      "calls": 3,
+      "wallMs": 79489
+    },
+    {
+      "id": "t261121044052g7l",
+      "workflow": "standard",
+      "status": "done",
+      "calls": 3,
+      "wallMs": 49828
+    },
+    {
+      "id": "t2611210440520j2",
+      "workflow": "feature",
+      "status": "done",
+      "calls": 3,
+      "wallMs": 135862
+    }
+  ],
+  "checks": {
+    "所有任务都完成": true,
+    "任务数一致": true,
+    "每个阶段的时长、agent 时长、调用数等于各任务之和": true,
+    "每个工作流的 token 等于各任务之和": true,
+    "按模板：standard 的三个内置模板都在，调用数等于各任务里这个角色的调用之和": true,
+    "每个工作流都有瓶颈，且是它最耗时的阶段": true,
+    "页面没有脚本错误": true,
+    "手机宽度页面不横向滚动": true
+  },
+  "bottleneckText": [
+    "工作流 feature 最耗时的阶段是 plan：占所有阶段时长的 62%（1m24s）， 其中「agent」最多，1m22s（98%）。",
+    "工作流 standard 最耗时的阶段是 review：占所有阶段时长的 38%（49.5s）， 其中「agent」最多，44.3s（90%）。"
+  ],
+  "errors": [],
+  "insights": {
+    "tasks": {
+      "total": 3,
+      "running": 0,
+      "waiting_user": 0,
+      "done": 3,
+      "failed": 0,
+      "aborted": 0
+    },
+    "byWorkflow": [
+      {
+        "workflow": "feature",
+        "betweenMs": 5571,
+        "agentMs": 133950,
+        "runningMs": 0,
+        "checkMs": 0,
+        "waitUserMs": 1912,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 1,
+        "calls": 3,
+        "usage": {
+          "input": 17942,
+          "output": 20144,
+          "cacheRead": 301312,
+          "cacheWrite": 0
+        },
+        "wallMs": 135862,
+        "medianMs": 135862,
+        "maxMs": 135862,
+        "slowest": {
+          "task": "t2611210440520j2",
+          "ms": 135862
+        }
+      },
+      {
+        "workflow": "standard",
+        "betweenMs": 5296,
+        "agentMs": 123646,
+        "runningMs": 0,
+        "checkMs": 892,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 4779,
+        "tasks": 2,
+        "calls": 6,
+        "usage": {
+          "input": 21875,
+          "output": 17485,
+          "cacheRead": 210432,
+          "cacheWrite": 0
+        },
+        "wallMs": 129317,
+        "medianMs": 64659,
+        "maxMs": 79489,
+        "slowest": {
+          "task": "t261121044052mtp",
+          "ms": 79489
+        }
+      }
+    ],
+    "byStage": [
+      {
+        "workflow": "feature",
+        "node": "plan",
+        "agentMs": 81705,
+        "runningMs": 0,
+        "checkMs": 0,
+        "waitUserMs": 1912,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 3662,
+          "output": 13247,
+          "cacheRead": 97408,
+          "cacheWrite": 0
+        },
+        "wallMs": 83617,
+        "medianMs": 83617,
+        "maxMs": 83617,
+        "slowest": {
+          "task": "t2611210440520j2",
+          "ms": 83617
+        }
+      },
+      {
+        "workflow": "standard",
+        "node": "review",
+        "agentMs": 44349,
+        "runningMs": 0,
+        "checkMs": 428,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 4769,
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 10875,
+          "output": 6920,
+          "cacheRead": 48384,
+          "cacheWrite": 0
+        },
+        "wallMs": 49546,
+        "medianMs": 24773,
+        "maxMs": 40291,
+        "slowest": {
+          "task": "t261121044052mtp",
+          "ms": 40291
+        }
+      },
+      {
+        "workflow": "standard",
+        "node": "spec",
+        "agentMs": 46501,
+        "runningMs": 0,
+        "checkMs": 2,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 4,
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 3016,
+          "output": 6680,
+          "cacheRead": 62592,
+          "cacheWrite": 0
+        },
+        "wallMs": 46507,
+        "medianMs": 23254,
+        "maxMs": 26356,
+        "slowest": {
+          "task": "t261121044052g7l",
+          "ms": 26356
+        }
+      },
+      {
+        "workflow": "standard",
+        "node": "build",
+        "agentMs": 32796,
+        "runningMs": 0,
+        "checkMs": 0,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 6,
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 7984,
+          "output": 3885,
+          "cacheRead": 99456,
+          "cacheWrite": 0
+        },
+        "wallMs": 32802,
+        "medianMs": 16401,
+        "maxMs": 18805,
+        "slowest": {
+          "task": "t261121044052mtp",
+          "ms": 18805
+        }
+      },
+      {
+        "workflow": "feature",
+        "node": "review",
+        "agentMs": 31154,
+        "runningMs": 0,
+        "checkMs": 0,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 8312,
+          "output": 4551,
+          "cacheRead": 103424,
+          "cacheWrite": 0
+        },
+        "wallMs": 31154,
+        "medianMs": 31154,
+        "maxMs": 31154,
+        "slowest": {
+          "task": "t2611210440520j2",
+          "ms": 31154
+        }
+      },
+      {
+        "workflow": "feature",
+        "node": "build",
+        "agentMs": 21091,
+        "runningMs": 0,
+        "checkMs": 0,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 5968,
+          "output": 2346,
+          "cacheRead": 100480,
+          "cacheWrite": 0
+        },
+        "wallMs": 21091,
+        "medianMs": 21091,
+        "maxMs": 21091,
+        "slowest": {
+          "task": "t2611210440520j2",
+          "ms": 21091
+        }
+      },
+      {
+        "workflow": "standard",
+        "node": "test",
+        "agentMs": 0,
+        "runningMs": 0,
+        "checkMs": 456,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 2,
+        "calls": 0,
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "wallMs": 456,
+        "medianMs": 228,
+        "maxMs": 239,
+        "slowest": {
+          "task": "t261121044052mtp",
+          "ms": 239
+        }
+      },
+      {
+        "workflow": "standard",
+        "node": "deliver",
+        "agentMs": 0,
+        "runningMs": 0,
+        "checkMs": 6,
+        "waitUserMs": 0,
+        "blockedMs": 0,
+        "overheadMs": 0,
+        "tasks": 2,
+        "calls": 0,
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0
+        },
+        "wallMs": 6,
+        "medianMs": 3,
+        "maxMs": 3,
+        "slowest": {
+          "task": "t261121044052g7l",
+          "ms": 3
+        }
+      }
+    ],
+    "byTemplate": [
+      {
+        "name": "feature/planner",
+        "template": false,
+        "versions": [],
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 3662,
+          "output": 13247,
+          "cacheRead": 97408,
+          "cacheWrite": 0
+        },
+        "agentMs": 81705
+      },
+      {
+        "name": "spec-writer",
+        "template": true,
+        "versions": [
+          1
+        ],
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 3016,
+          "output": 6680,
+          "cacheRead": 62592,
+          "cacheWrite": 0
+        },
+        "agentMs": 46501
+      },
+      {
+        "name": "reviewer",
+        "template": true,
+        "versions": [
+          1
+        ],
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 10875,
+          "output": 6920,
+          "cacheRead": 48384,
+          "cacheWrite": 0
+        },
+        "agentMs": 44349
+      },
+      {
+        "name": "developer",
+        "template": true,
+        "versions": [
+          1
+        ],
+        "tasks": 2,
+        "calls": 2,
+        "usage": {
+          "input": 7984,
+          "output": 3885,
+          "cacheRead": 99456,
+          "cacheWrite": 0
+        },
+        "agentMs": 32796
+      },
+      {
+        "name": "feature/reviewer",
+        "template": false,
+        "versions": [],
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 8312,
+          "output": 4551,
+          "cacheRead": 103424,
+          "cacheWrite": 0
+        },
+        "agentMs": 31154
+      },
+      {
+        "name": "feature/developer",
+        "template": false,
+        "versions": [],
+        "tasks": 1,
+        "calls": 1,
+        "usage": {
+          "input": 5968,
+          "output": 2346,
+          "cacheRead": 100480,
+          "cacheWrite": 0
+        },
+        "agentMs": 21091
+      }
+    ],
+    "bottlenecks": [
+      {
+        "workflow": "feature",
+        "node": "plan",
+        "wallMs": 83617,
+        "share": 0.6154553885560348,
+        "part": "agentMs",
+        "partMs": 81705
+      },
+      {
+        "workflow": "standard",
+        "node": "review",
+        "wallMs": 49546,
+        "share": 0.3831360145997819,
+        "part": "agentMs",
+        "partMs": 44349
+      }
+    ]
+  }
+}

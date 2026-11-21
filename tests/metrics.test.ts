@@ -1,37 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { newTask, reduce } from '../src/engine/machine.ts'
 import { formatMetrics, secs, taskMetrics } from '../src/engine/metrics.ts'
-import type { Event, Task } from '../src/engine/types.ts'
-import { isCheck, zeroUsage } from '../src/engine/types.ts'
-import { PASS, results, workflow } from './helpers.ts'
-
-/** 用真实的引擎推进任务，时间由测试指定：日志里的说明文字和字段都来自引擎本身。 */
-class Clock {
-  task: Task
-  constructor(checks: 'none' | 'review' = 'none') {
-    this.task = newTask({ id: 't1', request: '加一个求和函数', workflow: workflow({ maxRounds: 2, escalate: false, checks }), docs: [] }, 0)
-  }
-  send(at: number, event: Event) {
-    const step = reduce(this.task, event, at)
-    assert.ok(step.accepted, `${JSON.stringify(event)}: ${step.reason}`)
-    this.task = step.task
-  }
-  /** 当前调用在 at 时回复，耗时 ms。 */
-  reply(at: number, ms: number, text: string, input = 100) {
-    const p = this.task.pending!
-    assert.ok(!isCheck(p))
-    this.send(at, { kind: 'replied', call: p.id, sessionId: `s-${p.session}`, text, usage: { ...zeroUsage(), input, output: 10 }, ms })
-  }
-  check(at: number, ms: number, passed = true) {
-    const p = this.task.pending!
-    assert.ok(isCheck(p))
-    this.send(at, { kind: 'checked', call: p.id, results: results(p, passed), ms })
-  }
-  get call() {
-    return this.task.pending!.id
-  }
-}
+import type { Task } from '../src/engine/types.ts'
+import { isCheck } from '../src/engine/types.ts'
+import { Clock, PASS } from './helpers.ts'
 
 const stage = (t: Task, node: string, now = 1e9) => taskMetrics(t, now).stages.find(s => s.node === node)!
 
