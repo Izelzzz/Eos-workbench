@@ -1,0 +1,124 @@
+{
+  "tasks": [
+    "t261121062346ewy",
+    "t2611210623471et",
+    "t261121062347ked"
+  ],
+  "signals": [
+    {
+      "id": "t261121062346ewy:13",
+      "kind": "review_changes",
+      "role": "developer",
+      "text": "功能与测试均符合 docs/spec.md 的 AC1–AC6，npm test 本地退出码 0、4/4 通过；但导出的 sum 缺少团队规则强制要求的 JSDoc @example 用法示例，需补齐。\n1. [major] src/sum.js：导出的函数 sum 缺少团队规则强制要求的 JSDoc @example 用法示例（当前只有说明、@param、@returns）。请按约定在 src/sum.js 中为 sum 的 JSDoc 补上 @example 块，给出可运行的使用示例，例如：\n * @example\n * sum([]); // 0\n * @example\n * sum(["
+    },
+    {
+      "id": "t2611210623471et:9",
+      "kind": "review_changes",
+      "role": "developer",
+      "text": "功能实现与测试覆盖了 docs/spec.md 的全部验收场景，npm test 实际运行 8 个用例且全部通过（exit 0）；但导出函数 max 的 JSDoc 缺少团队规则强制要求的 @example，需补充后再通过。\n1. [major] src/max.js：导出的 max 函数 JSDoc 只有 @param/@returns，缺少团队约定要求的 @example 用法示例（规则：每个导出函数必须包含 @example，缺失一律 changes）。建议补充，例如：@example\nimport { max } from './max.js';\nmax([1, 2, 3]); // "
+    },
+    {
+      "id": "t261121062347ked:9",
+      "kind": "review_changes",
+      "role": "developer",
+      "text": "实现、测试与 npm test 均符合 docs/spec.md 的验收标准（6 个用例全部通过，package.json 未改动），但导出的 avg 缺少团队强制要求的 @example JSDoc 示例。\n1. [major] src/avg.js：导出的函数 avg 缺少 @example 用法示例。团队规则要求每个导出函数都必须有 JSDoc 注释并包含 @example；当前 JSDoc 只有说明、@param 和 @returns。请在 src/avg.js 的 avg 注释中补充 @example（例如展示 avg([1, 2, 3]) 返回 2 以及 avg([]) 返回 0）"
+    }
+  ],
+  "improve": "→ improver：3 个任务，3 条证据，4 个候选约定\n✓ improver：13.0s，输入 3466，输出 2396\n\n提案 #1：Agent 模板「developer」第 1 版 → 新版本\n理由：三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开发方；写进提示词后，开发在提交前就会补齐，减少评审轮次。\n证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9\n\n提案 #2：约定文档「研发约定」第 1 版 → 新版本\n理由：评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有角色可见、可核对，避免开发遗漏而评审反复指出。\n证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9\n\n提案 #3：技能「write-changes」第 1 版 → 新版本\n理由：证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件；在改动说明模板里明确要列全文件并说明工作流要求的例外，可避免同类评审意见。\n证据：t2611210623471et:9\n\n共 3 条待审批：npm run eos -- approve <提案号>，或在网页上审批\n",
+  "approve": "提案 #2 已批准：约定文档「研发约定」现在是第 2 版\n",
+  "proposalsList": "#3  待审批  技能「write-changes」第 1 版  证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件\n#2  已批准  约定文档「研发约定」第 1 版  评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有\n#1  待审批  Agent 模板「developer」第 1 版  三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开\n",
+  "proposals": [
+    {
+      "id": 3,
+      "target": {
+        "kind": "skill",
+        "name": "write-changes"
+      },
+      "baseVersion": 1,
+      "status": "pending",
+      "rationale": "证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件；在改动说明模板里明确要列全文件并说明工作流要求的例外，可避免同类评审意见。",
+      "evidence": [
+        "t2611210623471et:9"
+      ],
+      "generator": {
+        "model": "deepseek-flash",
+        "usage": {
+          "input": 3466,
+          "output": 2396,
+          "cacheRead": 2688,
+          "cacheWrite": 0
+        },
+        "ms": 13001,
+        "run": "imwq0xhzq351c6e"
+      },
+      "content": "---\nname: write-changes\ndescription: 写 docs/changes.md（改动说明）时使用：团队约定的改动说明格式。\n---\n# 改动说明的写法\n\ndocs/changes.md 用下面这几个二级标题，按顺序写：\n\n## 改动\n逐条列出改了哪些文件、做了什么，一条一行。\n所有改动的文件都要列出，包括 docs/changes.md 本身。\n如果为满足工作流要求改了规格允许范围之外的文件（如 docs/changes.md），在这一节显式说明这是工作流要求的交付物。\n\n## 验证\n写清楚怎么验证的：跑了哪些命令、结果如何。没跑的写\"没跑\"和原因。\n只写实际执行过的命令和真实结果，不要写与实际不符的结论。\n\n## 风险\n可能影响的地方、没覆盖到的情况。没有就写\"无\"。\n"
+    },
+    {
+      "id": 2,
+      "target": {
+        "kind": "doc",
+        "name": "研发约定"
+      },
+      "baseVersion": 1,
+      "status": "approved",
+      "rationale": "评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有角色可见、可核对，避免开发遗漏而评审反复指出。",
+      "evidence": [
+        "t261121062346ewy:13",
+        "t2611210623471et:9",
+        "t261121062347ked:9"
+      ],
+      "generator": {
+        "model": "deepseek-flash",
+        "usage": {
+          "input": 3466,
+          "output": 2396,
+          "cacheRead": 2688,
+          "cacheWrite": 0
+        },
+        "ms": 13001,
+        "run": "imwq0xhzq351c6e"
+      },
+      "content": "# 研发约定\n\n团队所有 agent 都遵守这份约定。它由平台注入到每个会话的开头，修改后对新任务生效。\n\n## 交付物\n\n- 每个阶段的交付物写在仓库里约定的位置，用 Markdown，章节标题和工作流里要求的一致。\n- 交付物写给下一个阶段的人看：结论在前，细节在后，不写空话。\n\n## 代码\n\n- 只做需求和规格里要求的改动；发现别的问题记在交付说明里，不顺手修。\n- 新增或改动的逻辑要有测试，提交前在本地跑通。\n- 每个导出的函数都要有 JSDoc 注释，并包含 @example 用法示例（示例要能直接运行）。\n- 不执行 git commit、push、merge、rebase：提交由平台负责。\n\n## 沟通\n\n- 需求有歧义且会影响做法时，向用户提问，不要猜。\n- 收到评审意见或检查失败时逐条处理：修改，或者带着理由说明为什么不改。\n"
+    },
+    {
+      "id": 1,
+      "target": {
+        "kind": "template",
+        "name": "developer"
+      },
+      "baseVersion": 1,
+      "status": "pending",
+      "rationale": "三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开发方；写进提示词后，开发在提交前就会补齐，减少评审轮次。",
+      "evidence": [
+        "t261121062346ewy:13",
+        "t2611210623471et:9",
+        "t261121062347ked:9"
+      ],
+      "generator": {
+        "model": "deepseek-flash",
+        "usage": {
+          "input": 3466,
+          "output": 2396,
+          "cacheRead": 2688,
+          "cacheWrite": 0
+        },
+        "ms": 13001,
+        "run": "imwq0xhzq351c6e"
+      },
+      "content": "name: developer\ndescription: 开发：按规格实现并补测试，只改代码、测试和改动说明。\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]\ntools:\n  deny: [subagent, schedule]\nskills: [write-changes]\nprompt: |\n  你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。\n  - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。\n  - 每个导出的函数都要有 JSDoc 注释，并包含 @example 用法示例（示例要能直接运行，覆盖典型输入和边界情况）。\n  - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。\n  - 每次回复最后简要说明：改了什么、为什么、怎么验证的。\n"
+    }
+  ],
+  "checks": {
+    "3 个任务都完成": true,
+    "任务里有证据": true,
+    "eos improve 成功并生成了至少 1 条提案": true,
+    "生成提案没有改任何约定": true,
+    "每条提案引用的证据都是程序归纳出的证据": true,
+    "每条提案的目标都是有证据的约定，基于当前版本": true,
+    "每条提案的内容能通过保存校验，不改权限": true,
+    "每条提案记下了生成它的模型调用": true,
+    "至少一条提案把 @example 规则写进 developer 模板或约定文档": true,
+    "eos approve 生成了新版本，备注写明提案号": true,
+    "eos proposals 显示已批准": true
+  }
+}
