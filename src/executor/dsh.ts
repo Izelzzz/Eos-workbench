@@ -110,7 +110,69 @@ export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): u
   ]
 }
 
-type LogEvent = { type: string; time: number; data?: Record<string, any> }
+export type LogEvent = { type: string; time: number; data?: Record<string, any> }
+
+const ZSTD_MAGIC = 0xfd2fb528
+
+/**
+ * 一个 zstd 帧在 buf 里从 at 开始有多长；帧不完整（文件写到一半）或不是 zstd 帧时返回 undefined。
+ * 按帧头和块头算长度（RFC 8878），不靠搜索魔数：压缩数据里也可能碰巧出现魔数。
+ */
+const frameLength = (buf: Buffer, at: number): number | undefined => {
+  if (at + 5 > buf.length) return undefined
+  const magic = buf.readUInt32LE(at)
+  // 可跳过帧：魔数 0x184D2A50–0x184D2A5F，后面 4 字节是内容长度。
+  if ((magic & 0xfffffff0) === 0x184d2a50) return at + 8 <= buf.length && at + 8 + buf.readUInt32LE(at + 4) <= buf.length ? 8 + buf.readUInt32LE(at + 4) : undefined
+  if (magic !== ZSTD_MAGIC) return undefined
+  const fhd = buf[at + 4]!
+  const single = (fhd >> 5) & 1
+  const fcsFlag = fhd >> 6
+  let pos = at + 5 + (single ? 0 : 1) + [0, 1, 2, 4][fhd & 3]! + (fcsFlag === 0 ? single : [0, 2, 4, 8][fcsFlag]!)
+  for (;;) {
+    if (pos + 3 > buf.length) return undefined
+    const h = buf[pos]! | (buf[pos + 1]! << 8) | (buf[pos + 2]! << 16)
+    const type = (h >> 1) & 3
+    if (type === 3) return undefined
+    pos += 3 + (type === 1 ? 1 : h >>> 3)
+    if (pos > buf.length) return undefined
+    if (h & 1) break
+  }
+  pos += (fhd >> 2) & 1 ? 4 : 0
+  return pos <= buf.length ? pos - at : undefined
+}
+
+/**
+ * 解析 dsh 的会话日志（session.v4.jsonl.zstd）。dsh 每次追加写一个新的 zstd 帧；Node 的 zstdDecompressSync
+ * 只解第一帧，所以逐帧解压再拼起来。最后一帧不完整（进程写到一半被杀）时丢掉它，前面的照常用；
+ * 最后一行不是完整的 JSON 时也丢掉。一帧都解不出时返回 undefined。
+ */
+export const parseSessionLog = (buf: Buffer): LogEvent[] | undefined => {
+  const parts: Buffer[] = []
+  for (let at = 0; at < buf.length;) {
+    const n = frameLength(buf, at)
+    if (n === undefined) break
+    if (buf.readUInt32LE(at) === ZSTD_MAGIC) {
+      try {
+        parts.push(zstdDecompressSync(buf.subarray(at, at + n)))
+      } catch {
+        break
+      }
+    }
+    at += n
+  }
+  if (parts.length === 0) return undefined
+  const lines = Buffer.concat(parts).toString('utf8').split('\n').filter(l => l.trim() !== '')
+  const events: LogEvent[] = []
+  for (const [i, l] of lines.entries()) {
+    try {
+      events.push(JSON.parse(l) as LogEvent)
+    } catch (e) {
+      if (i === lines.length - 1) break
+      throw e
+    }
+  }
+  return events
+}
 
 const marker = (nonce: string) => `<!-- eos:${nonce} -->`
 
@@ -367,13 +429,7 @@ export class DshExecutor implements Executor {
 
   private readLog(sessionId: string): LogEvent[] | undefined {
     const file = this.logFile(sessionId)
-    if (file === undefined) return undefined
-    try {
-      return zstdDecompressSync(readFileSync(file)).toString('utf8').split('\n').filter(l => l.trim() !== '').map(l => JSON.parse(l) as LogEvent)
-    } catch {
-      // 进程被杀在写入中途：日志尾部不完整，按"没有回复"处理，重发这一轮。
-      return undefined
-    }
+    return file === undefined ? undefined : parseSessionLog(readFileSync(file))
   }
 
   private async session(key: string, spec: AgentSpec): Promise<HarnessSession> {
