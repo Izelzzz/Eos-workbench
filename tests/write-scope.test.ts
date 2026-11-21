@@ -377,3 +377,37 @@ test('范围内的已跟踪文件被换成指向目录的链接：算越界，�
   assert.equal(readFileSync(join(wt, 'src/a.ts'), 'utf8'), 'a\n')
   assert.equal(g(wt, 'status', '--porcelain'), '')
 })
+
+// —— Izelzzz/Eos-workbench#28：撤销时的删除不会被并发换上的链接引到外面 ——
+
+test('撤销时上级目录已经被换成指向外面的链接：拒绝删除，外面的文件还在', async () => {
+  const { safeRemove, OutsideWorktree } = await import('../src/runner/git.ts')
+  const { base, wt } = twoWorktrees()
+  const outside = join(base, 'OUTSIDE')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'x'), 'keep me\n')
+  execFileSync('ln', ['-s', outside, join(wt, 'd')])
+  assert.throws(() => safeRemove(wt, 'd/x'), OutsideWorktree)
+  assert.equal(readFileSync(join(outside, 'x'), 'utf8'), 'keep me\n')
+  safeRemove(wt, 'd')
+  assert.equal(existsSync(join(wt, 'd')), false, 'removing the link itself is fine and does not follow it')
+  assert.equal(readFileSync(join(outside, 'x'), 'utf8'), 'keep me\n')
+})
+
+test('写回在核对过的目录里进行：可执行权限、符号链接和被删掉的上级目录都按 HEAD 恢复', () => {
+  const { main, wt, g } = twoWorktrees()
+  write(main, 'tools/run.sh', '#!/bin/sh\necho hi\n')
+  execFileSync('chmod', ['755', join(main, 'tools/run.sh')])
+  execFileSync('ln', ['-s', 'run.sh', join(main, 'tools/latest')])
+  g(main, 'add', '-A')
+  g(main, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'tools')
+  g(wt, 'merge', '-q', '--ff-only', 'main')
+  rmSync(join(wt, 'tools'), { recursive: true })
+  write(wt, 'src/a.ts', 'mine\n')
+  const r = commitInScope(wt, ['src/**'], 'm', main)
+  assert.deepEqual(r.reverted, ['tools/latest', 'tools/run.sh'])
+  assert.equal(readFileSync(join(wt, 'tools/run.sh'), 'utf8'), '#!/bin/sh\necho hi\n')
+  assert.equal(lstatSync(join(wt, 'tools/run.sh')).mode & 0o777, 0o755)
+  assert.ok(lstatSync(join(wt, 'tools/latest')).isSymbolicLink())
+  assert.equal(g(wt, 'status', '--porcelain'), '')
+})

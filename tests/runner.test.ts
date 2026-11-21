@@ -248,3 +248,17 @@ test('aborting the task while a check runs signals the checker, and the runner s
   assert.equal(task.status, 'aborted')
   assert.equal(aborted, true, 'the check was told to stop')
 })
+
+test('before reverting a writer’s changes the runner first ends the agent’s processes; readers skip both (Izelzzz/Eos-workbench#28)', async () => {
+  const { store } = setup()
+  const order: string[] = []
+  await runTask('t', {
+    store, executor: new FakeExecutor(reviewOnce), pollMs: 5,
+    beforeRevert: async (_t, call) => { order.push(`end processes ${call.role}`) },
+    afterWrite: (_t, call) => { order.push(`revert ${call.role}`) },
+  })
+  // 开发的每次调用（包括在评审对话里回应）都是先结束进程、再撤销。
+  assert.ok(order.length >= 4, order.join(' / '))
+  for (let i = 0; i < order.length; i += 2) assert.deepEqual(order.slice(i, i + 2), ['end processes dev', 'revert dev'])
+  assert.ok(!order.some(o => / (planner|rev)$/.test(o)), 'read-only roles neither end processes nor revert')
+})

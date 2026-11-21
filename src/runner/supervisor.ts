@@ -8,6 +8,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
+import { killProcessesIn } from './procs.ts'
 import { commitInScope, contextFor, createWorktree } from './git.ts'
 import { acquire, holder } from './lock.ts'
 import { runTask } from './runner.ts'
@@ -77,6 +78,14 @@ export class Supervisor {
     const done = runTask(id, {
       store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
+      // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
+      // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。
+      beforeRevert: async t => {
+        const worktree = this.o.store.meta(t.id).worktree
+        await this.o.executor.release(worktree)
+        const killed = await killProcessesIn(worktree)
+        if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
+      },
       checker: (t, run, signal) => runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal),
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。

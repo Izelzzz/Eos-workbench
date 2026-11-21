@@ -64,6 +64,9 @@ test('a created task gets its own branch and worktree under the data directory a
   assert.equal(task.status, 'done')
   assert.equal(sup.running(created.id), false, 'lock released when the runner ends')
   assert.deepEqual(happy.released.slice(-1), [meta.worktree], 'the task’s agent processes are released when its runner ends')
+  const writerCalls = task.log.filter(e => e.type === 'call' && task.workflow.roles[e.role]?.write === 'worktree').length
+  assert.ok(writerCalls > 0)
+  assert.ok(happy.released.filter(w => w === meta.worktree).length >= writerCalls + 1, 'and before every revert of a writer’s changes (Izelzzz/Eos-workbench#28)')
 })
 
 test('a task held by another live process is not started here', () => {
