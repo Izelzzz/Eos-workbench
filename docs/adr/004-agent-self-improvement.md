@@ -104,9 +104,13 @@ PR 拆分（依次合并，各自过自检、E2E 和独立审查）：
 - **improver 的会话里仍有文件工具和提问工具**（实测工具表：ask_user_question、edit、glob、grep、present、read、read_image、skill、working_directory、write；
   edit / write 被 `read-only` 档位挡住）。平台不靠它们不被调用，而是一旦调用（执行了的工具，或模型发出的工具调用）就作废这次生成；
   但工具在调用的那一刻已经执行了（读得到、写不了、不能联网），读到的内容只会进这次作废的回复。
-- **dsh 会把 improver 工作目录往上各级目录里的 CLAUDE.md、AGENTS.md 注入会话**（实测：E2E 的数据目录在仓库里，仓库的 CLAUDE.md 被注入；
-  默认部署时数据目录是 `~/.eos`，`~/CLAUDE.md` 之类也会被注入）。这些文件不在平台控制内，是一个额外的提示词来源。
-  关掉它需要改 `src/executor/dsh.ts` 的 dsh 配置，按本块的并行约定留到 Izelzzz/Eos-workbench#32 合并之后另开 PR；任务 worktree 也有同样的问题。
+- **dsh 会把指令文件注入 agent 会话，平台保留这个行为（2026-11-21 决定，Izelzzz/Eos-workbench#40）**。dsh 的 `agent-instructions` 插件从三处读 `AGENTS.md` / `CLAUDE.md`：
+  ① 仓库自带的（任务 worktree 有 `.git`，向上查找停在 worktree 根目录）；② 工作目录往上直到第一个含 `.git` 的目录之间各级的（improver 的工作目录在数据目录里，数据目录在某个仓库里时会读到那个仓库的；
+  实测 E2E 的数据目录在本仓库里，本仓库的 CLAUDE.md 被注入了 improver）；③ 全局的 `~/.agents/AGENTS.md`（或 `DSH_AGENTS_HOME`）和 dsh home 里的 `AGENTS.md`。
+  评估过整行关掉或只读仓库自带的，最终决定都读、不改：仓库自带的说明对任务有用，部署方也可以用全局文件统一补充说明。
+  代价：② ③ 不在平台的约定版本里，任务记录不下它们用了哪一版；agent 写进 worktree 的 `AGENTS.md` / `CLAUDE.md`（在写入范围内时）会被同一任务后面的会话读到；
+  improver 的"需要的内容都在消息里"不完全成立。部署时不要把数据目录放在别的仓库里，也不要在平台用户的 `~/.agents/AGENTS.md` 里放不想让 agent 看到的内容。
+  要关掉时，在 `src/executor/dsh.ts` 的 `patchRows` 里加一行 `{ id: 'agent-instructions', disabled: true }`（需要用真实 dsh 验证）。
 - 权限核对不管"放松评审"：工作流提案可以删掉没有检查命令的评审节点。由提示词约束和审批的人判断。
 - 证据只核对"在本次列出的证据里"，不核对"和目标约定有关"：一条提案可以引用只和别的角色有关的证据。
 - 同一次生成的提案共用一次模型调用，提案上记的用量和时长是整次调用的（`generator.run` 相同）。
