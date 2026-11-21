@@ -1,0 +1,44 @@
+{
+  "task": "t261120213243xas",
+  "killed": true,
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个 dsh 会话里": false,
+    "规划和评审是只读档位，开发是 workspace-write": false,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-41d780d7f8d01d8054d3184063df9da0",
+      "calls": [],
+      "presets": [],
+      "asks": 0
+    },
+    "build": {
+      "sid": "session-97cb0098e09200dc34c490472cf6d63c",
+      "calls": [],
+      "presets": [],
+      "asks": 0
+    },
+    "review": {
+      "sid": "session-2efeda9f6698e92ebe11beeaa25c5dc8",
+      "calls": [],
+      "presets": [],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 54015ms",
+    "c2 produce@build 7725ms",
+    "c3 critique@review#1 44222ms",
+    "c4 respond@review#1 13505ms",
+    "c5 critique@review#2 9994ms"
+  ],
+  "commits": "2a317ac eos: review respond (c4)\n4c83f0f eos: build produce (c2)\n",
+  "npmTest": " ...\n# Subtest: 不修改入参数组\nok 17 - 不修改入参数组\n  ---\n  duration_ms: 0.542323\n  type: 'test'\n  ...\n# Subtest: 较大数组求和\nok 18 - 较大数组求和\n  ---\n  duration_ms: 0.14362\n  type: 'test'\n  ...\n# Subtest: 累加结果溢出返回 Infinity（不检测溢出）\nok 19 - 累加结果溢出返回 Infinity（不检测溢出）\n  ---\n  duration_ms: 0.049636\n  type: 'test'\n  ...\n1..19\n# tests 19\n# suites 0\n# pass 19\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 73.151764\n"
+}
