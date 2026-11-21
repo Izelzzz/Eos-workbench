@@ -145,7 +145,7 @@ after(() => {
 })
 
 /** 不限制任何东西的能力面：不涉及工具组、技能和 MCP 的用例用它。 */
-const bare: AgentProfile = { denyTools: [], skills: [], mcp: [] }
+const bare: AgentProfile = { denyTools: [], skills: [], mcp: [], background: true }
 
 test('each worktree gets its own dsh process whose workspace is that worktree; release closes only that one', async () => {
   const { created, createHarness } = fakeHarnesses()
@@ -227,7 +227,7 @@ const launch = async (ex: DshExecutor, created: { patches?: string[] }[], key: s
 test('the profile patch disables the denied groups’ rows, and always the plugin manager and the bundled office skills', async () => {
   const { created, createHarness } = fakeHarnesses()
   const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
-  const patch = await launch(ex, created, 't1/plan', { denyTools: ['bash', 'web'], skills: [], mcp: [] })
+  const patch = await launch(ex, created, 't1/plan', { denyTools: ['bash', 'web'], skills: [], mcp: [], background: true })
   assert.deepEqual(disabledIn(patch).sort(), [...ALWAYS_DISABLED, ...GROUP_ROWS.bash, ...GROUP_ROWS.web].sort())
   // 没限制的组一行都不关：工具组之间互不牵连。
   for (const g of ['subagent', 'schedule', 'todo', 'goal'] as const) {
@@ -239,7 +239,7 @@ test('an agent only sees its own skills: the skills dir holds exactly their SKIL
   const { created, createHarness } = fakeHarnesses()
   const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
   const skills = [skillOf('write-changes', '写改动说明的步骤'), skillOf('review', '评审要点')]
-  const profile: AgentProfile = { denyTools: [], skills, mcp: [] }
+  const profile: AgentProfile = { denyTools: [], skills, mcp: [], background: true }
   const patch = await launch(ex, created, 't1/plan', profile)
   const skillsDir = join(ex.profileDir(profile), 'skills')
   assert.deepEqual(rowById(patch, 'skill-filesystem')!.config, { includeDefaultRoots: false, customSkillDirs: [skillsDir] },
@@ -251,7 +251,7 @@ test('an agent only sees its own skills: the skills dir holds exactly their SKIL
 test('a role with no skills still gets an empty skills dir, not dsh’s defaults', async () => {
   const { created, createHarness } = fakeHarnesses()
   const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
-  const profile: AgentProfile = { denyTools: [], skills: [], mcp: [] }
+  const profile: AgentProfile = { denyTools: [], skills: [], mcp: [], background: true }
   const patch = await launch(ex, created, 't1/plan', profile)
   const skillsDir = join(ex.profileDir(profile), 'skills')
   assert.deepEqual(rowById(patch, 'skill-filesystem')!.config, { includeDefaultRoots: false, customSkillDirs: [skillsDir] })
@@ -264,7 +264,7 @@ test('each MCP server becomes an inserted mcp-client row whose child runs in a p
   const home = tmpHome()
   const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', createHarness })
   const mcp = [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { DOCS_ROOT: '/srv/docs' } }]
-  const inserted = insertedIn(await launch(ex, created, 't1/plan', { denyTools: [], skills: [], mcp }))
+  const inserted = insertedIn(await launch(ex, created, 't1/plan', { denyTools: [], skills: [], mcp, background: true }))
   assert.equal(inserted.length, 1)
   assert.equal(inserted[0]!.name, '@deepseek-ai/dsh-mcp-client')
   assert.deepEqual(inserted[0]!.config, {
@@ -278,15 +278,15 @@ test('each MCP server becomes an inserted mcp-client row whose child runs in a p
 test('the same worktree runs one dsh process per capability profile, and roles with the same profile share one', async () => {
   const { created, createHarness } = fakeHarnesses()
   const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness })
-  const plan: AgentProfile = { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [] }
+  const plan: AgentProfile = { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [], background: true }
   await launch(ex, created, 't1/plan', plan)
   // 同一个能力面（另建的等值对象）：共用进程，不再起新的。
-  await launch(ex, created, 't1/plan2', { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [] })
+  await launch(ex, created, 't1/plan2', { denyTools: ['bash'], skills: [skillOf('review', '评审要点')], mcp: [], background: true })
   assert.equal(created.length, 1, '相同能力面共用一个 dsh 进程')
   // 工具组不同、技能内容不同、MCP 不同：各起一个进程。
   await launch(ex, created, 't1/build', { ...plan, denyTools: [] })
   await launch(ex, created, 't1/doc', { ...plan, skills: [skillOf('review', '改过的评审要点')] })
-  await launch(ex, created, 't1/mcp', { ...plan, mcp: [{ name: 'docs', command: 'node', args: [], env: {} }] })
+  await launch(ex, created, 't1/mcp', { ...plan, mcp: [{ name: 'docs', command: 'node', args: [], env: {} }], background: true })
   assert.equal(created.length, 4)
   assert.equal(new Set(created.map(c => c.patches![0])).size, 4, '每个能力面有自己的补丁文件')
   await ex.close()
@@ -294,13 +294,26 @@ test('the same worktree runs one dsh process per capability profile, and roles w
 
 test('the profile fingerprint ignores skill order but not skill content', () => {
   const a = skillOf('a', 'A'), b = skillOf('b', 'B')
-  assert.equal(profileHash({ denyTools: ['web', 'bash'], skills: [a, b], mcp: [] }), profileHash({ denyTools: ['bash', 'web'], skills: [b, a], mcp: [] }))
-  assert.notEqual(profileHash({ denyTools: [], skills: [a], mcp: [] }), profileHash({ denyTools: [], skills: [{ ...a, content: '改了' }], mcp: [] }))
+  assert.equal(profileHash({ denyTools: ['web', 'bash'], skills: [a, b], mcp: [], background: true }), profileHash({ denyTools: ['bash', 'web'], skills: [b, a], mcp: [], background: true }))
+  assert.notEqual(profileHash({ denyTools: [], skills: [a], mcp: [], background: true }), profileHash({ denyTools: [], skills: [{ ...a, content: '改了' }], mcp: [], background: true }))
 })
 
 test('patch rows carry user values as data, never as interpolated yaml', () => {
-  const rows = patchRows({ denyTools: [], skills: [], mcp: [{ name: 'docs', command: 'node', args: ['--eval', 'x: 1\n- y'], env: { A: '*' } }] }, '/p/skills', '/p/mcp-cwd')
+  const rows = patchRows({ denyTools: [], skills: [], mcp: [{ name: 'docs', command: 'node', args: ['--eval', 'x: 1\n- y'], env: { A: '*' } }], background: true }, '/p/skills', '/p/mcp-cwd')
   const insert = (rows as { insert?: { config: Record<string, any> }[] }[]).find(r => r.insert !== undefined)!.insert!
   assert.deepEqual(insert[0]!.config.args, ['--eval', 'x: 1\n- y'], '像 yaml 的值仍然是一个字符串')
   assert.equal(insert[0]!.config.expandTemplates, false)
+})
+
+test('writable roles cannot start background jobs: job tools are removed and bash refuses run_in_background (Izelzzz/Eos-workbench#28)', () => {
+  const rowsFor = (background: boolean, denyTools: ('bash' | 'web')[] = []) => patchRows({ denyTools, skills: [], mcp: [], background }, '/p/skills', '/p/mcp-cwd') as { id?: string; disabled?: boolean; config?: Record<string, unknown> }[]
+  const writer = rowsFor(false)
+  assert.ok(writer.some(r => r.id === 'tool-jobs' && r.disabled === true))
+  assert.ok(writer.some(r => r.id === 'tool-workflow' && r.disabled === true), 'the workflow tool has its own background mode')
+  assert.deepEqual(writer.find(r => r.id === 'tool-bash')?.config, { enableRunInBackground: false, promoteOnTimeout: false })
+  const reader = rowsFor(true)
+  assert.ok(!reader.some(r => r.id === 'tool-jobs'), 'read-only roles keep background jobs: the sandbox already stops them writing')
+  assert.ok(!reader.some(r => r.id === 'tool-bash'))
+  assert.ok(!rowsFor(false, ['bash']).some(r => r.id === 'tool-bash' && r.config !== undefined), 'no config for a bash row that is disabled anyway')
+  assert.notEqual(profileHash({ denyTools: [], skills: [], mcp: [], background: true }), profileHash({ denyTools: [], skills: [], mcp: [], background: false }))
 })

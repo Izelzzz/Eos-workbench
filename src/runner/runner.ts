@@ -15,6 +15,8 @@ export type RunnerOptions = {
   wait?: boolean
   /** 写 worktree 的角色每次回复后调用（撤销越界改动并提交剩下的）。返回被撤销的越界路径。 */
   afterWrite?: (task: Task, call: Call) => string[] | void
+  /** 写 worktree 的角色每次回复后、afterWrite 之前调用：结束这一轮留下的 agent 进程，撤销越界改动时不能有人在改 worktree。 */
+  beforeRevert?: (task: Task, call: Call) => Promise<void>
   /** 执行一组检查（在任务的 worktree 里）。结果顺序与 run.checks 一致。 */
   checker?: (task: Task, run: CheckRun, signal: AbortSignal) => Promise<CheckResult[]>
   log?: (line: string) => void
@@ -87,7 +89,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
           },
           spec: {
             model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: meta.worktree,
-            profile: { denyTools: role.denyTools, skills, mcp: role.mcp },
+            profile: { denyTools: role.denyTools, skills, mcp: role.mcp, background: role.write !== 'worktree' },
           },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
           ask: (q, signal) => {
@@ -105,6 +107,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     let reverted: string[] = []
     if (role.write === 'worktree') {
       try {
+        await o.beforeRevert?.(task, call)
         reverted = o.afterWrite?.(task, call) ?? []
       } catch (e) {
         // 改动没提交上（例如 worktree 被删了）：这次调用记为失败，任务停下等人工处理，而不是让 runner 悄悄退出。

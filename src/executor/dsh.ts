@@ -74,6 +74,7 @@ export const profileHash = (p: AgentProfile): string =>
     [...p.denyTools].sort(),
     [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
     p.mcp.map(m => [m.name, m.command, m.args, Object.entries(m.env).sort()]),
+    p.background,
   ])).digest('hex').slice(0, 16)
 
 /**
@@ -82,9 +83,12 @@ export const profileHash = (p: AgentProfile): string =>
  * agent 看不到仓库和用户目录里的技能，只看得到模板给它的。
  */
 export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): unknown[] => {
-  const disabled = [...new Set([...ALWAYS_DISABLED, ...p.denyTools.flatMap(g => GROUP_ROWS[g])])]
+  // 不能起后台作业时：去掉 job_* 工具（tool-jobs）和自带后台运行的 workflow 工具（tool-workflow），bash 不接受 run_in_background；
+  // 这时前台命令到了超时直接被杀，不会转成后台作业（dsh 的 promoteOnTimeout 只在能起后台作业时生效）。
+  const disabled = [...new Set([...ALWAYS_DISABLED, ...p.denyTools.flatMap(g => GROUP_ROWS[g]), ...(p.background ? [] : ['tool-jobs', 'tool-workflow'])])]
   return [
     ...disabled.map(id => ({ id, disabled: true })),
+    ...(p.background || p.denyTools.includes('bash') ? [] : [{ id: 'tool-bash', config: { enableRunInBackground: false, promoteOnTimeout: false } }]),
     { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: [skillsDir] } },
     ...(p.mcp.length === 0 ? [] : [{
       insert: p.mcp.map((m, i) => ({
