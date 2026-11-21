@@ -74,7 +74,12 @@ const partsOf = (s: Parts): Parts => Object.fromEntries(PART_KEYS.map(k => [k, s
 
 const groupBy = <T>(xs: T[], key: (x: T) => string): Map<string, T[]> => {
   const m = new Map<string, T[]>()
-  for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x])
+  for (const x of xs) {
+    const k = key(x)
+    const g = m.get(k)
+    if (g === undefined) m.set(k, [x])
+    else g.push(x)
+  }
   return m
 }
 
