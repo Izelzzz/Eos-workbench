@@ -43,21 +43,28 @@ const balanced = (text: string, start: number): string | undefined => {
 }
 
 /**
- * 回复里最后一个能解析的 {"proposals": …} 对象。不靠 ``` 代码块切分：新内容（技能、文档）里常有代码块，
- * JSON 字符串里的反引号不转义，按代码块切会在内容中间截断。找不到时退回通用的 extractJson。
+ * 回复里的 {"proposals": …} 对象。不靠 ``` 代码块切分：新内容（技能、文档）里常有代码块，JSON 字符串里的反引号不转义，
+ * 按代码块切会在内容中间截断。做法：从每个不在其他候选里面的 { 开始做括号匹配，留下能解析、带 proposals 数组的对象；
+ * 优先取紧跟在 ```json 开头之后的（模型在正文里复述格式示例，例如「没有就给 {"proposals": []}」，不会顶替真正的答案），
+ * 同样位置的取最后一个。一个都没有时退回通用的 extractJson。
  */
 export const extractProposals = (text: string): unknown => {
-  const starts = [...text.matchAll(/\{\s*"proposals"\s*:/g)].map(m => m.index).reverse()
-  for (const s of starts) {
-    const body = balanced(text, s)
+  const found: { value: unknown; fenced: boolean }[] = []
+  for (let i = text.indexOf('{'); i !== -1; i = text.indexOf('{', i + 1)) {
+    const body = balanced(text, i)
     if (body === undefined) continue
+    let value: unknown
     try {
-      return JSON.parse(body)
+      value = JSON.parse(body)
     } catch {
-      // 试前一个
+      continue
     }
+    if (typeof value !== 'object' || value === null || !Array.isArray((value as { proposals?: unknown }).proposals)) continue
+    found.push({ value, fenced: /```json\s*$/.test(text.slice(0, i)) })
+    i += body.length - 1 // 这个对象里面的 { 不再单独当作起点
   }
-  return extractJson(text)
+  const pick = found.filter(f => f.fenced).at(-1) ?? found.at(-1)
+  return pick === undefined ? extractJson(text) : pick.value
 }
 
 /**

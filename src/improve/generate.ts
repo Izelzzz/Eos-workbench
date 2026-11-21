@@ -1,7 +1,7 @@
 // 生成改进提案（手动触发）：归纳证据 → 交给内置的 improver 模板 → 在边界解析回复 → 校验后入库为待审批的提案。
 // improver 只从模板里取模型、effort 和提示词；权限由平台定死：只读、去掉全部工具组、不挂技能和 MCP，
 // 工作目录是平台数据目录里的一个空目录（团队改了模板也放不开，见 ADR-004）。
-// dsh 的读文件、搜索和向用户提问的工具去不掉（只能按组去掉，见 workflow/types.ts 的 TOOL_GROUPS）：
+// dsh 的文件工具（read、grep、glob、edit、write 等，写入被只读档位挡住）和向用户提问的工具去不掉（只能按组去掉，见 workflow/types.ts 的 TOOL_GROUPS）：
 // 需要的内容都在消息里，所以 improver 只要调用了任何工具，就当作被证据里的文字引导了，整次生成作废、不入库。
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -86,7 +86,9 @@ export const generate = async (o: {
   try {
     reply = await o.executor.send({
       onEvent: e => {
+        // 失败就关：执行了的工具（tool_start），和模型发出了但不一定执行的工具调用（model.toolCalls）都算。
         if (e.kind === 'tool_start') tools.push(e.name)
+        else if (e.kind === 'model') tools.push(...e.toolCalls.map(c => c.name))
       },
       key: `improve/${run}`, nonce: `improve/${run}`, prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
       spec: {
@@ -98,8 +100,13 @@ export const generate = async (o: {
   } catch (e) {
     return { ok: false, error: `调用 ${IMPROVER} 失败：${(e as Error).message}` }
   } finally {
-    rmSync(cwd, { recursive: true, force: true })
-    await o.executor.release(cwd).catch(() => undefined) // 释放失败不影响结果：进程在执行器关闭时一起结束
+    // 清理失败都不影响结果：目录是空的，进程在执行器关闭时一起结束。
+    try {
+      rmSync(cwd, { recursive: true, force: true })
+    } catch {
+      // 留下一个空目录
+    }
+    await o.executor.release(cwd).catch(() => undefined)
   }
   say(`✓ ${IMPROVER}：${(reply.ms / 1000).toFixed(1)}s，输入 ${reply.usage.input}，输出 ${reply.usage.output}`)
   const call = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reply: reply.text }

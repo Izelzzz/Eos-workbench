@@ -253,3 +253,35 @@ test('contents with code fences parse; a later valid proposal for a target is ke
     s.cleanup()
   }
 })
+
+test('a format example repeated in the prose does not replace the real answer; proposals need not be the first key', () => {
+  const scope = { targets: [{ kind: 'doc' as const, name: 'a' }], signals: new Set(['t:1']) }
+  const real = { proposals: [{ target: { kind: 'doc', name: 'a' }, rationale: 'r', evidence: ['t:1'], content: '# a\n\n```md\n例子\n```\n' }] }
+  const echo = parseProposals(`\`\`\`json\n${JSON.stringify(real)}\n\`\`\`\n如果没有值得改的，就给 {"proposals": []}。`, scope)
+  assert.ok(echo.ok)
+  assert.equal(echo.proposals.length, 1, 'the fenced answer wins over an example in the prose')
+  const later = parseProposals(`先举个格式例子 {"proposals": []}，下面是答案：\n${JSON.stringify(real)}`, scope)
+  assert.ok(later.ok)
+  assert.equal(later.proposals.length, 1, 'without a fence the last object wins')
+  const notFirst = parseProposals(`\`\`\`json\n${JSON.stringify({ note: '说明', ...real })}\n\`\`\``, scope)
+  assert.ok(notFirst.ok)
+  assert.equal(notFirst.proposals[0]!.content, real.proposals[0]!.content)
+})
+
+test('a tool call the model sent counts even without a tool_start event', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const ex = new Recorder(() => json([]))
+    const send = ex.send.bind(ex)
+    ex.send = async p => {
+      p.onEvent?.({ kind: 'model', t: 1, step: 1, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, reasoning: '', text: '', toolCalls: [{ id: 'x', name: 'read', args: '{}' }] })
+      return send(p)
+    }
+    const r = await s.run(ex)
+    assert.ok(!r.ok)
+    assert.match(r.error, /^improver 调用了工具（read）/)
+  } finally {
+    s.cleanup()
+  }
+})
