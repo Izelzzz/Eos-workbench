@@ -1,5 +1,5 @@
 // 存储层对外的数据类型（纯类型，前端也引用）。
-import type { Event, TaskStatus } from '../engine/types.ts'
+import type { Event, TaskStatus, Usage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 
 /** 谁发出的事件：命令行、Web 页面、runner 自己、执行器（agent 回复或提问）。 */
@@ -29,3 +29,34 @@ export type ConventionKind = 'workflow' | 'doc' | 'template' | 'skill'
 export type ConventionRow = { kind: ConventionKind; name: string; version: number; content: string; note: string; actor: string; createdAt: number }
 
 export type ConventionSummary = { kind: ConventionKind; name: string; version: number; updatedAt: number }
+
+/** 改进提案的状态：待审批、已批准（生成了约定的新版本）、已拒绝、已过期（目标约定在提案之后被改过）。 */
+export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'stale'
+
+/** 提案的状态变化，只追加。version：批准后生成的约定版本号。 */
+export type ProposalEvent = { seq: number; at: number; status: ProposalStatus; actor: string; reason?: string; version?: number }
+
+/** 生成这条提案的模型调用（第 3 块之前手工写入的提案没有）。 */
+export type ProposalGenerator = { model?: string; usage: Usage; ms: number }
+
+export type ProposalInput = {
+  target: { kind: ConventionKind; name: string }
+  /** 提案基于目标约定的第几版。批准时目标已经不是这一版就过期。 */
+  baseVersion: number
+  /** 目标约定的完整新内容。 */
+  content: string
+  rationale: string
+  /** 依据的证据 id（见 engine/evidence.ts）。 */
+  evidence: string[]
+  /** 生成提案时看的范围：工作流和任务。 */
+  scope: { workflow: string; tasks: string[] }
+  generator?: ProposalGenerator
+  actor: string
+}
+
+export type ProposalRow = ProposalInput & { id: number; createdAt: number; status: ProposalStatus; events: ProposalEvent[] }
+
+export type Decision =
+  | { ok: true; row: ProposalRow }
+  | { ok: false; reason: 'missing' | 'not_pending' | 'stale'; row?: ProposalRow }
+  | { ok: false; reason: 'invalid'; errors: string[]; row: ProposalRow }

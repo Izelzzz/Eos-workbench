@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
 import type { ConventionDoc, Event, Step, Task, TaskStatus } from '../engine/types.ts'
-import type { Actor, ConventionKind, ConventionRow, ConventionSummary, EventRow, TaskMeta, TaskSummary, TraceRow } from './types.ts'
+import type { Actor, ConventionKind, ConventionRow, ConventionSummary, Decision, EventRow, ProposalEvent, ProposalInput, ProposalRow, ProposalStatus, TaskMeta, TaskSummary, TraceRow } from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import { DEFAULT_MAX_FIXES } from '../workflow/parse.ts'
 import type { Workflow } from '../workflow/types.ts'
@@ -50,6 +50,29 @@ CREATE TABLE IF NOT EXISTS conventions (
   actor TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (kind, name, version)
+);
+CREATE TABLE IF NOT EXISTS proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  target_kind TEXT NOT NULL,
+  target_name TEXT NOT NULL,
+  base_version INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  generator TEXT,
+  actor TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proposal_events (
+  proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+  seq INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  reason TEXT,
+  version INTEGER,
+  PRIMARY KEY (proposal_id, seq)
 );`
 
 /**
@@ -180,11 +203,87 @@ export class Store {
 
   /** 团队约定（工作流和文档）：每次保存追加一个新版本，旧版本不改不删。最新版本就是正在使用的版本。 */
   saveConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): ConventionRow {
+    return this.tx(() => this.insertConvention(p, at))
+  }
+
+  private insertConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): ConventionRow {
+    const version = (this.db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS n FROM conventions WHERE kind = ? AND name = ?').get(p.kind, p.name) as { n: number }).n
+    this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(p.kind, p.name, version, p.content, p.note, p.actor, at)
+    return { ...p, version, createdAt: at }
+  }
+
+  /** 某个约定的最新版本号（只查版本号，不读内容）。 */
+  latestVersion(kind: ConventionKind, name: string): number | undefined {
+    const r = this.db.prepare('SELECT MAX(version) AS v FROM conventions WHERE kind = ? AND name = ?').get(kind, name) as { v: number | null }
+    return r.v === null ? undefined : Number(r.v)
+  }
+
+  /** 改进提案：写入提案和第一条「待审批」状态。提案本身不改任何约定。 */
+  addProposal(p: ProposalInput, at: number): ProposalRow {
     return this.tx(() => {
-      const version = (this.db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS n FROM conventions WHERE kind = ? AND name = ?').get(p.kind, p.name) as { n: number }).n
-      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(p.kind, p.name, version, p.content, p.note, p.actor, at)
-      return { ...p, version, createdAt: at }
+      const r = this.db.prepare('INSERT INTO proposals (created_at, target_kind, target_name, base_version, content, rationale, evidence, scope, generator, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(at, p.target.kind, p.target.name, p.baseVersion, p.content, p.rationale, JSON.stringify(p.evidence), JSON.stringify(p.scope), p.generator === undefined ? null : JSON.stringify(p.generator), p.actor)
+      const id = Number(r.lastInsertRowid)
+      this.appendProposalEvent(id, { at, status: 'pending', actor: p.actor })
+      return this.proposalRow(id)!
+    })
+  }
+
+  private appendProposalEvent(id: number, e: Omit<ProposalEvent, 'seq'>): void {
+    const seq = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM proposal_events WHERE proposal_id = ?').get(id) as { n: number }).n
+    this.db.prepare('INSERT INTO proposal_events (proposal_id, seq, at, status, actor, reason, version) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, seq, e.at, e.status, e.actor, e.reason ?? null, e.version ?? null)
+  }
+
+  private proposalRow(id: number): ProposalRow | undefined {
+    const r = this.db.prepare('SELECT * FROM proposals WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    if (r === undefined) return undefined
+    const events = (this.db.prepare('SELECT * FROM proposal_events WHERE proposal_id = ? ORDER BY seq').all(id) as Record<string, unknown>[]).map(e => ({
+      seq: Number(e.seq), at: Number(e.at), status: e.status as ProposalStatus, actor: String(e.actor),
+      ...(e.reason === null ? {} : { reason: String(e.reason) }), ...(e.version === null ? {} : { version: Number(e.version) }),
+    }))
+    return {
+      id, createdAt: Number(r.created_at), target: { kind: r.target_kind as ConventionKind, name: String(r.target_name) }, baseVersion: Number(r.base_version),
+      content: String(r.content), rationale: String(r.rationale), evidence: JSON.parse(String(r.evidence)) as string[],
+      scope: JSON.parse(String(r.scope)) as ProposalRow['scope'], ...(r.generator === null ? {} : { generator: JSON.parse(String(r.generator)) as ProposalRow['generator'] }),
+      actor: String(r.actor), status: events.at(-1)!.status, events,
+    }
+  }
+
+  proposal(id: number): ProposalRow | undefined {
+    return this.proposalRow(id)
+  }
+
+  /** 所有提案，新的在前。 */
+  proposals(): ProposalRow[] {
+    return (this.db.prepare('SELECT id FROM proposals ORDER BY id DESC').all() as { id: number }[]).map(r => this.proposalRow(Number(r.id))!)
+  }
+
+  /**
+   * 审批提案（一个事务）：只有待审批的提案能审批。
+   * 批准：目标约定的最新版本不是提案基于的版本时记「已过期」并拒绝批准；再用 validate 校验内容（在同一个事务里，
+   * 期间别的进程改不了它引用的约定），不合格就不批准、保持待审批；都通过才写入约定的新版本，记「已批准」和新版本号。
+   */
+  decideProposal(id: number, d: { status: 'approved'; note: (row: ProposalRow) => string; validate: (row: ProposalRow) => string[] } | { status: 'rejected'; reason: string }, at: number, actor: string): Decision {
+    return this.tx((): Decision => {
+      const row = this.proposalRow(id)
+      if (row === undefined) return { ok: false, reason: 'missing' }
+      if (row.status !== 'pending') return { ok: false, reason: 'not_pending', row }
+      if (d.status === 'rejected') {
+        this.appendProposalEvent(id, { at, status: 'rejected', actor, reason: d.reason })
+        return { ok: true, row: this.proposalRow(id)! }
+      }
+      const latest = this.latestVersion(row.target.kind, row.target.name)
+      if (latest !== row.baseVersion) {
+        this.appendProposalEvent(id, { at, status: 'stale', actor, reason: `目标已是第 ${latest ?? 0} 版，提案基于第 ${row.baseVersion} 版` })
+        return { ok: false, reason: 'stale', row: this.proposalRow(id)! }
+      }
+      const errors = d.validate(row)
+      if (errors.length > 0) return { ok: false, reason: 'invalid', errors, row }
+      const saved = this.insertConvention({ kind: row.target.kind, name: row.target.name, content: row.content, note: d.note(row), actor }, at)
+      this.appendProposalEvent(id, { at, status: 'approved', actor, version: saved.version })
+      return { ok: true, row: this.proposalRow(id)! }
     })
   }
 
