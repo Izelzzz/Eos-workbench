@@ -1,0 +1,88 @@
+Eos Web：http://127.0.0.1:4334（数据目录 /home/user/Eos-workbench/.eos/improve-web-e2e/data，Ctrl+C 退出）
+[t261121073147ga5] → [spec] spec-writer · produce
+[t261121073147wbd] → [spec] spec-writer · produce
+[t261121073147js8] → [spec] spec-writer · produce
+[t261121073147js8]   已提交 e1b7c6c
+[t261121073147js8] ✓ [spec] spec-writer · produce：20.3s，输入 1617，输出 2783，缓存读 29056
+[t261121073147js8] → [spec] 检查（1 项）
+[t261121073147js8] ✓ [spec] 检查：1/1 项通过
+[t261121073147js8] → [build] developer · produce
+[t261121073147wbd]   已提交 c1e03b6
+[t261121073147wbd] ✓ [spec] spec-writer · produce：31.6s，输入 2434，输出 4560，缓存读 46976
+[t261121073147wbd] → [spec] 检查（1 项）
+[t261121073147wbd] ✓ [spec] 检查：1/1 项通过
+[t261121073147wbd] → [build] developer · produce
+[t261121073147ga5]   已提交 89242de
+[t261121073147ga5] ✓ [spec] spec-writer · produce：32.7s，输入 1792，输出 4486，缓存读 50560
+[t261121073147ga5] → [spec] 检查（1 项）
+[t261121073147ga5] ✓ [spec] 检查：1/1 项通过
+[t261121073147ga5] → [build] developer · produce
+[t261121073147js8]   已提交 7294da0
+[t261121073147js8] ✓ [build] developer · produce：21.9s，输入 3857，输出 2583，缓存读 58496
+[t261121073147js8] → [build] 检查（1 项）
+[t261121073147js8] ✓ [build] 检查：1/1 项通过
+[t261121073147js8] → [test 第 1 轮] 检查（1 项）
+[t261121073147js8] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121073147js8] → [review 第 1 轮] 检查（1 项）
+[t261121073147js8] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121073147js8] → [review 第 1 轮] reviewer · critique
+[t261121073147ga5]   已提交 b509ead
+[t261121073147ga5] ✓ [build] developer · produce：16.1s，输入 3263，输出 2175，缓存读 39424
+[t261121073147ga5] → [build] 检查（1 项）
+[t261121073147ga5] ✓ [build] 检查：1/1 项通过
+[t261121073147ga5] → [test 第 1 轮] 检查（1 项）
+[t261121073147ga5] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121073147ga5] → [review 第 1 轮] 检查（1 项）
+[t261121073147ga5] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121073147ga5] → [review 第 1 轮] reviewer · critique
+[t261121073147wbd]   已提交 2f54e5a
+[t261121073147wbd] ✓ [build] developer · produce：18.3s，输入 3459，输出 2328，缓存读 49920
+[t261121073147wbd] → [build] 检查（1 项）
+[t261121073147wbd] ✓ [build] 检查：1/1 项通过
+[t261121073147wbd] → [test 第 1 轮] 检查（1 项）
+[t261121073147wbd] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121073147wbd] → [review 第 1 轮] 检查（1 项）
+[t261121073147wbd] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121073147wbd] → [review 第 1 轮] reviewer · critique
+[t261121073147js8] ✓ [review 第 1 轮] reviewer · critique：14.4s，输入 4865，输出 1721，缓存读 26880
+[t261121073147js8] → [review 第 1 轮] developer · respond
+[t261121073147ga5] ✓ [review 第 1 轮] reviewer · critique：10.8s，输入 5926，输出 1266，缓存读 28416
+[t261121073147ga5] → [review 第 1 轮] developer · respond
+[t261121073147wbd] ✓ [review 第 1 轮] reviewer · critique：19.7s，输入 3925，输出 2760，缓存读 27392
+[t261121073147wbd] → [review 第 1 轮] developer · respond
+[t261121073147js8]   已提交 2379e0b
+[t261121073147js8] ✓ [review 第 1 轮] developer · respond：11.2s，输入 1384，输出 954，缓存读 63104
+[t261121073147js8] → [review 第 2 轮] 检查（1 项）
+[t261121073147js8] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121073147js8] → [review 第 2 轮] reviewer · critique
+[t261121073147ga5]   已提交 8566bf9
+[t261121073147ga5] ✓ [review 第 1 轮] developer · respond：10.7s，输入 1326，输出 1033，缓存读 48384
+[t261121073147ga5] → [review 第 2 轮] 检查（1 项）
+[t261121073147ga5] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121073147ga5] → [review 第 2 轮] reviewer · critique
+[t261121073147js8] ✓ [review 第 2 轮] reviewer · critique：7.1s，输入 2702，输出 659，缓存读 35968
+[t261121073147js8] → [deliver 第 1 轮] 检查（1 项）
+[t261121073147js8] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121073147ga5] ✓ [review 第 2 轮] reviewer · critique：4.8s，输入 1684，输出 407，缓存读 23808
+[t261121073147ga5] → [deliver 第 1 轮] 检查（1 项）
+[t261121073147ga5] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121073147wbd]   已提交 b93e804
+[t261121073147wbd] ✓ [review 第 1 轮] developer · respond：15.4s，输入 1031，输出 1846，缓存读 41984
+[t261121073147wbd] → [review 第 2 轮] 检查（1 项）
+[t261121073147wbd] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121073147wbd] → [review 第 2 轮] reviewer · critique
+[t261121073147wbd] ✓ [review 第 2 轮] reviewer · critique：21.1s，输入 3607，输出 2782，缓存读 81792
+[t261121073147wbd] → [deliver 第 1 轮] 检查（1 项）
+[t261121073147wbd] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+✓ 3 个任务都完成
+✓ 页面显示生成了待审批的提案
+✓ 列表里的提案数和接口一致
+✓ 每条证据都显示出来并链到它的任务
+✓ 改动里有新增的行
+✓ 批准后页面提示新版本，平台上多了一个版本，备注写明提案号和审批备注
+✓ 批准后状态显示已批准，审批按钮消失
+✓ 空理由拒绝被页面挡住
+✓ 填理由后拒绝成功，记下理由
+✓ 390 宽列表页和详情页都不横向滚动
+✓ 页面没有脚本错误
+exit 0

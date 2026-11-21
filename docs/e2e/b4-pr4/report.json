@@ -1,4 +1,6 @@
 {
+  "commit": "ec1ad4ed7818ae94e2e6bc5cedfd5a3c611a8130",
+  "dirty": false,
   "checks": {
     "3 个任务都完成": true,
     "页面显示生成了待审批的提案": true,
@@ -13,33 +15,35 @@
     "页面没有脚本错误": true
   },
   "facts": {
-    "generateText": "生成了 2 条待审批的提案。 模型调用 1m51s，输入 3,481，输出 18.5k。",
+    "generateText": "生成了 2 条待审批的提案。 模型调用 7.0s，输入 3,394，输出 1,229。",
     "overflowDetail390": 0,
-    "approveText": "已批准：Agent 模板「developer」现在是第 2 版。之后创建的任务会用上它，进行中的任务不受影响。",
+    "approveText": "已批准：约定文档「研发约定」现在是第 2 版。之后创建的任务会用上它，进行中的任务不受影响。",
     "overflowList390": 0,
     "errors": [],
     "proposals": [
       {
         "id": 2,
         "target": {
-          "kind": "workflow",
-          "name": "standard"
+          "kind": "template",
+          "name": "developer"
         },
         "status": "rejected",
-        "rationale": "wbd 中规格的「范围」未包含工作流要求的 docs/changes.md，导致开发按流程写改动说明却被判超范围；在规格任务中要求范围包含该交付物，消除规格与工作流的冲突。",
+        "rationale": "三次评审退回都是同一个可预防的疏漏：开发在写导出函数时没补 @example JSDoc。在开发模板的提示词里直接写明这条硬性要求，让开发在提交前自查，减少评审轮次。",
         "evidence": [
-          "t261121073147wbd:9"
+          "t261121074119hoy:9",
+          "t261121074119cmb:9",
+          "t26112107411924y:9"
         ],
         "events": [
           {
             "seq": 1,
-            "at": 1795246549823,
+            "at": 1795247007462,
             "status": "pending",
             "actor": "web"
           },
           {
             "seq": 2,
-            "at": 1795246551308,
+            "at": 1795247008853,
             "status": "rejected",
             "actor": "web",
             "reason": "E2E：先只改一处，看效果再说"
@@ -49,37 +53,38 @@
       {
         "id": 1,
         "target": {
-          "kind": "template",
-          "name": "developer"
+          "kind": "doc",
+          "name": "研发约定"
         },
         "status": "approved",
-        "rationale": "三个任务的评审都因导出函数缺少 @example 被判 major；在 developer 模板中明确要求导出函数的 JSDoc 必须包含 @example，避免后续再遗漏。",
+        "rationale": "评审在三个任务里都以“导出函数缺少 @example JSDoc”为由要求修改，但现行约定里并没有写这条规则，开发方无从遵守。把规则明确写进“代码”一节，让做事的一方在实现时就能满足，避免评审反复退回。",
         "evidence": [
-          "t261121073147ga5:9",
-          "t261121073147wbd:9",
-          "t261121073147js8:9"
+          "t261121074119hoy:9",
+          "t261121074119cmb:9",
+          "t26112107411924y:9"
         ],
         "events": [
           {
             "seq": 1,
-            "at": 1795246549805,
+            "at": 1795247007459,
             "status": "pending",
             "actor": "web"
           },
           {
             "seq": 2,
-            "at": 1795246550894,
+            "at": 1795247008492,
             "status": "approved",
             "actor": "web",
+            "reason": "E2E：网页上批准",
             "version": 2
           }
         ]
       }
     ],
     "tasks": [
-      "t261121073147ga5",
-      "t261121073147wbd",
-      "t261121073147js8"
+      "t261121074119hoy",
+      "t261121074119cmb",
+      "t26112107411924y"
     ]
   }
 }

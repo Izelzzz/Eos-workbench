@@ -1,79 +1,79 @@
 Eos Web：http://127.0.0.1:4334（数据目录 /home/user/Eos-workbench/.eos/improve-web-e2e/data，Ctrl+C 退出）
-[t261121073147ga5] → [spec] spec-writer · produce
-[t261121073147wbd] → [spec] spec-writer · produce
-[t261121073147js8] → [spec] spec-writer · produce
-[t261121073147js8]   已提交 e1b7c6c
-[t261121073147js8] ✓ [spec] spec-writer · produce：20.3s，输入 1617，输出 2783，缓存读 29056
-[t261121073147js8] → [spec] 检查（1 项）
-[t261121073147js8] ✓ [spec] 检查：1/1 项通过
-[t261121073147js8] → [build] developer · produce
-[t261121073147wbd]   已提交 c1e03b6
-[t261121073147wbd] ✓ [spec] spec-writer · produce：31.6s，输入 2434，输出 4560，缓存读 46976
-[t261121073147wbd] → [spec] 检查（1 项）
-[t261121073147wbd] ✓ [spec] 检查：1/1 项通过
-[t261121073147wbd] → [build] developer · produce
-[t261121073147ga5]   已提交 89242de
-[t261121073147ga5] ✓ [spec] spec-writer · produce：32.7s，输入 1792，输出 4486，缓存读 50560
-[t261121073147ga5] → [spec] 检查（1 项）
-[t261121073147ga5] ✓ [spec] 检查：1/1 项通过
-[t261121073147ga5] → [build] developer · produce
-[t261121073147js8]   已提交 7294da0
-[t261121073147js8] ✓ [build] developer · produce：21.9s，输入 3857，输出 2583，缓存读 58496
-[t261121073147js8] → [build] 检查（1 项）
-[t261121073147js8] ✓ [build] 检查：1/1 项通过
-[t261121073147js8] → [test 第 1 轮] 检查（1 项）
-[t261121073147js8] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t261121073147js8] → [review 第 1 轮] 检查（1 项）
-[t261121073147js8] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t261121073147js8] → [review 第 1 轮] reviewer · critique
-[t261121073147ga5]   已提交 b509ead
-[t261121073147ga5] ✓ [build] developer · produce：16.1s，输入 3263，输出 2175，缓存读 39424
-[t261121073147ga5] → [build] 检查（1 项）
-[t261121073147ga5] ✓ [build] 检查：1/1 项通过
-[t261121073147ga5] → [test 第 1 轮] 检查（1 项）
-[t261121073147ga5] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t261121073147ga5] → [review 第 1 轮] 检查（1 项）
-[t261121073147ga5] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t261121073147ga5] → [review 第 1 轮] reviewer · critique
-[t261121073147wbd]   已提交 2f54e5a
-[t261121073147wbd] ✓ [build] developer · produce：18.3s，输入 3459，输出 2328，缓存读 49920
-[t261121073147wbd] → [build] 检查（1 项）
-[t261121073147wbd] ✓ [build] 检查：1/1 项通过
-[t261121073147wbd] → [test 第 1 轮] 检查（1 项）
-[t261121073147wbd] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t261121073147wbd] → [review 第 1 轮] 检查（1 项）
-[t261121073147wbd] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t261121073147wbd] → [review 第 1 轮] reviewer · critique
-[t261121073147js8] ✓ [review 第 1 轮] reviewer · critique：14.4s，输入 4865，输出 1721，缓存读 26880
-[t261121073147js8] → [review 第 1 轮] developer · respond
-[t261121073147ga5] ✓ [review 第 1 轮] reviewer · critique：10.8s，输入 5926，输出 1266，缓存读 28416
-[t261121073147ga5] → [review 第 1 轮] developer · respond
-[t261121073147wbd] ✓ [review 第 1 轮] reviewer · critique：19.7s，输入 3925，输出 2760，缓存读 27392
-[t261121073147wbd] → [review 第 1 轮] developer · respond
-[t261121073147js8]   已提交 2379e0b
-[t261121073147js8] ✓ [review 第 1 轮] developer · respond：11.2s，输入 1384，输出 954，缓存读 63104
-[t261121073147js8] → [review 第 2 轮] 检查（1 项）
-[t261121073147js8] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t261121073147js8] → [review 第 2 轮] reviewer · critique
-[t261121073147ga5]   已提交 8566bf9
-[t261121073147ga5] ✓ [review 第 1 轮] developer · respond：10.7s，输入 1326，输出 1033，缓存读 48384
-[t261121073147ga5] → [review 第 2 轮] 检查（1 项）
-[t261121073147ga5] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t261121073147ga5] → [review 第 2 轮] reviewer · critique
-[t261121073147js8] ✓ [review 第 2 轮] reviewer · critique：7.1s，输入 2702，输出 659，缓存读 35968
-[t261121073147js8] → [deliver 第 1 轮] 检查（1 项）
-[t261121073147js8] ✓ [deliver 第 1 轮] 检查：1/1 项通过
-[t261121073147ga5] ✓ [review 第 2 轮] reviewer · critique：4.8s，输入 1684，输出 407，缓存读 23808
-[t261121073147ga5] → [deliver 第 1 轮] 检查（1 项）
-[t261121073147ga5] ✓ [deliver 第 1 轮] 检查：1/1 项通过
-[t261121073147wbd]   已提交 b93e804
-[t261121073147wbd] ✓ [review 第 1 轮] developer · respond：15.4s，输入 1031，输出 1846，缓存读 41984
-[t261121073147wbd] → [review 第 2 轮] 检查（1 项）
-[t261121073147wbd] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t261121073147wbd] → [review 第 2 轮] reviewer · critique
-[t261121073147wbd] ✓ [review 第 2 轮] reviewer · critique：21.1s，输入 3607，输出 2782，缓存读 81792
-[t261121073147wbd] → [deliver 第 1 轮] 检查（1 项）
-[t261121073147wbd] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121074119hoy] → [spec] spec-writer · produce
+[t261121074119cmb] → [spec] spec-writer · produce
+[t26112107411924y] → [spec] spec-writer · produce
+[t261121074119hoy]   已提交 9d9d032
+[t261121074119hoy] ✓ [spec] spec-writer · produce：32.7s，输入 1606，输出 4643，缓存读 40704
+[t261121074119hoy] → [spec] 检查（1 项）
+[t261121074119hoy] ✓ [spec] 检查：1/1 项通过
+[t261121074119hoy] → [build] developer · produce
+[t261121074119cmb]   已提交 5dcd994
+[t261121074119cmb] ✓ [spec] spec-writer · produce：32.7s，输入 3977，输出 4563，缓存读 53120
+[t261121074119cmb] → [spec] 检查（1 项）
+[t261121074119cmb] ✓ [spec] 检查：1/1 项通过
+[t261121074119cmb] → [build] developer · produce
+[t26112107411924y]   已提交 649a0f7
+[t26112107411924y] ✓ [spec] spec-writer · produce：37.9s，输入 2031，输出 4895，缓存读 48512
+[t26112107411924y] → [spec] 检查（1 项）
+[t26112107411924y] ✓ [spec] 检查：1/1 项通过
+[t26112107411924y] → [build] developer · produce
+[t261121074119cmb]   已提交 42d1ee4
+[t261121074119cmb] ✓ [build] developer · produce：17.7s，输入 3470，输出 2209，缓存读 48768
+[t261121074119cmb] → [build] 检查（1 项）
+[t261121074119cmb] ✓ [build] 检查：1/1 项通过
+[t261121074119cmb] → [test 第 1 轮] 检查（1 项）
+[t261121074119cmb] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121074119cmb] → [review 第 1 轮] 检查（1 项）
+[t261121074119cmb] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121074119cmb] → [review 第 1 轮] reviewer · critique
+[t261121074119hoy]   已提交 c893724
+[t261121074119hoy] ✓ [build] developer · produce：23.3s，输入 3827，输出 2908，缓存读 61696
+[t261121074119hoy] → [build] 检查（1 项）
+[t261121074119hoy] ✓ [build] 检查：1/1 项通过
+[t261121074119hoy] → [test 第 1 轮] 检查（1 项）
+[t261121074119hoy] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121074119hoy] → [review 第 1 轮] 检查（1 项）
+[t261121074119hoy] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121074119hoy] → [review 第 1 轮] reviewer · critique
+[t26112107411924y]   已提交 4f3c39c
+[t26112107411924y] ✓ [build] developer · produce：24.3s，输入 4809，输出 3387，缓存读 72960
+[t26112107411924y] → [build] 检查（1 项）
+[t26112107411924y] ✓ [build] 检查：1/1 项通过
+[t26112107411924y] → [test 第 1 轮] 检查（1 项）
+[t26112107411924y] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t26112107411924y] → [review 第 1 轮] 检查（1 项）
+[t26112107411924y] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t26112107411924y] → [review 第 1 轮] reviewer · critique
+[t261121074119cmb] ✓ [review 第 1 轮] reviewer · critique：12.9s，输入 4042，输出 1322，缓存读 26240
+[t261121074119cmb] → [review 第 1 轮] developer · respond
+[t261121074119hoy] ✓ [review 第 1 轮] reviewer · critique：15.6s，输入 4284，输出 1775，缓存读 36608
+[t261121074119hoy] → [review 第 1 轮] developer · respond
+[t261121074119cmb]   已提交 2cd13dd
+[t261121074119cmb] ✓ [review 第 1 轮] developer · respond：12.7s，输入 1871，输出 1256，缓存读 70528
+[t261121074119cmb] → [review 第 2 轮] 检查（1 项）
+[t261121074119cmb] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121074119cmb] → [review 第 2 轮] reviewer · critique
+[t26112107411924y] ✓ [review 第 1 轮] reviewer · critique：19.1s，输入 5394，输出 2733，缓存读 21504
+[t26112107411924y] → [review 第 1 轮] developer · respond
+[t261121074119hoy]   已提交 f57c71c
+[t261121074119hoy] ✓ [review 第 1 轮] developer · respond：10.4s，输入 1271，输出 1084，缓存读 55168
+[t261121074119hoy] → [review 第 2 轮] 检查（1 项）
+[t261121074119hoy] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121074119hoy] → [review 第 2 轮] reviewer · critique
+[t261121074119cmb] ✓ [review 第 2 轮] reviewer · critique：4.3s，输入 2028，输出 390，缓存读 20096
+[t261121074119cmb] → [deliver 第 1 轮] 检查（1 项）
+[t261121074119cmb] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t26112107411924y]   已提交 8a36ee2
+[t26112107411924y] ✓ [review 第 1 轮] developer · respond：11.9s，输入 1244，输出 1319，缓存读 62336
+[t26112107411924y] → [review 第 2 轮] 检查（1 项）
+[t261121074119hoy] ✓ [review 第 2 轮] reviewer · critique：8.2s，输入 1614，输出 534，缓存读 33792
+[t261121074119hoy] → [deliver 第 1 轮] 检查（1 项）
+[t261121074119hoy] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t26112107411924y] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t26112107411924y] → [review 第 2 轮] reviewer · critique
+[t26112107411924y] ✓ [review 第 2 轮] reviewer · critique：4.5s，输入 3221，输出 405，缓存读 25728
+[t26112107411924y] → [deliver 第 1 轮] 检查（1 项）
+[t26112107411924y] ✓ [deliver 第 1 轮] 检查：1/1 项通过
 ✓ 3 个任务都完成
 ✓ 页面显示生成了待审批的提案
 ✓ 列表里的提案数和接口一致
