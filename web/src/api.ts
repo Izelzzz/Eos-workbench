@@ -3,12 +3,12 @@ import type { Insights } from '../../src/engine/insights.ts'
 import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ProposalDetail, ProposalInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
   SaveConventionResponse, TaskDetail, WorkflowInfo,
 } from '../../src/web/types.ts'
 
 export type { Insights }
-export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
+export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -50,3 +50,4 @@ export const getProposal = (id: number) => get<ProposalDetail>(`/api/improve/pro
 export const generateProposals = (workflow: string, tasks: string[]) => post<GenerateResponse>('/api/improve/generate', { workflow, ...(tasks.length === 0 ? {} : { tasks }) })
 export const decideProposal = (id: number, action: 'approve' | 'reject', text: string) =>
   post<DecideResponse>(`/api/improve/proposals/${id}/${action}`, action === 'approve' ? { note: text } : { reason: text })
+export const listComparisons = () => get<ImprovementComparison[]>('/api/improve/comparisons')

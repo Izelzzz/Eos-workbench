@@ -1,7 +1,9 @@
 // 统计页：跨任务按工作流、阶段、Agent 模板汇总 token 和时长，标出每个工作流最耗时的阶段。
 import { useEffect, useState } from 'react'
-import type { Insights as Data } from './api.ts'
-import { getInsights } from './api.ts'
+import type { ImprovementComparison, Insights as Data } from './api.ts'
+import { getInsights, listComparisons } from './api.ts'
+import { ComparisonTable } from './Compare.tsx'
+import { KIND_NAMES } from '../../src/improve/labels.ts'
 import { conventionHref } from './Conventions.tsx'
 import { duration, tokens } from './format.ts'
 import { Bar, PARTS } from './Stages.tsx'
@@ -13,7 +15,9 @@ const taskLink = (id: string, ms: number) => <a href={`#/tasks/${id}`}>{duration
 export function Insights() {
   const [data, setData] = useState<Data>()
   const [error, setError] = useState<string>()
+  const [comparisons, setComparisons] = useState<ImprovementComparison[]>([])
   useEffect(() => { getInsights().then(setData, e => setError((e as Error).message)) }, [])
+  useEffect(() => { listComparisons().then(setComparisons, () => setComparisons([])) }, [])
   if (error) return <p className="error">{error}</p>
   if (data === undefined) return <p className="muted">加载中…</p>
   const t = data.tasks
@@ -39,6 +43,22 @@ export function Insights() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {comparisons.length > 0 && (
+        <section className="panel">
+          <h2>改进前后对比</h2>
+          <p className="muted">每条已批准的改进提案：用了这份约定的已结束任务，按任务创建时用的版本分成改进前、改进后两组。</p>
+          {comparisons.map(x => (
+            <div key={x.proposal.id} className="compare-item">
+              <h3>
+                <a href={`#/improve/${x.proposal.id}`}>提案 #{x.proposal.id}</a>：<a href={conventionHref(x.proposal.target.kind, x.proposal.target.name)}>{KIND_NAMES[x.proposal.target.kind]}「{x.proposal.target.name}」</a>{''
+                } 第 {x.comparison.version} 版 <span className="muted">· {x.proposal.rationale.trim().split('\n')[0]}</span>
+              </h3>
+              <ComparisonTable c={x.comparison} />
+            </div>
+          ))}
         </section>
       )}
 

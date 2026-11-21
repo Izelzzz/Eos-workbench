@@ -16,7 +16,7 @@ import type { ProposalDetail, ProposalInfo, TaskDetail } from '../src/web/types.
 import { FakeExecutor } from './fake-executor.ts'
 import type { Executor } from '../src/executor/types.ts'
 import { builtinAgentSource } from '../src/workflow/templates.ts'
-import type { GenerateResponse } from '../src/web/types.ts'
+import type { GenerateResponse, ImprovementComparison } from '../src/web/types.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -537,6 +537,38 @@ test('generate: a cross-site request is refused; a failed model call is 502 with
     const tools = (await (await gen(s.base)).json()) as Extract<GenerateResponse, { ok: false }>
     assert.deepEqual([tools.call?.usage.output, tools.call?.replyHead], [3, '我先读一下文件……'])
     assert.deepEqual(s.store.proposals(), [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('comparisons: each approved proposal compares the tasks before and after its version; the detail carries it too', async () => {
+  const s = await serve()
+  try {
+    const dev = s.store.convention('template', 'developer')!
+    const p = new Proposals(s.store, s.supervisor.conventions)
+    const added = p.add({ target: { kind: 'template', name: 'developer' }, baseVersion: dev.version, content: `${dev.content.trimEnd()}\n  - 写 @example。\n`,
+      rationale: '补规则', evidence: ['x:1'], scope: { workflow: 't', tasks: [] }, actor: 'cli' }, 2000)
+    assert.ok(added.ok)
+    const pending = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
+    assert.equal(pending.comparison, undefined, 'no comparison before approval')
+    assert.ok(p.approve(1, 2001, 'web').ok)
+    const run = (id: string, version: number, replies: string[]) => {
+      const w = workflow({ maxRounds: 2, escalate: false })
+      s.store.create({ id, request: '需求', workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version } } } }, workflowSource: 'y',
+        meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 3000)
+      for (const text of replies) s.store.dispatch(id, { kind: 'replied', call: s.store.get(id)!.pending!.id, sessionId: 's', text, usage: { ...zero, input: 10, output: 5 }, ms: 5 }, 3001, 'executor')
+    }
+    for (const id of ['b1', 'b2', 'b3']) run(id, 1, ['方案', '实现', CHANGES, '改了', PASS])
+    for (const id of ['a1', 'a2']) run(id, 2, ['方案', '实现', PASS])
+    const list = (await (await fetch(`${s.base}/api/improve/comparisons`)).json()) as ImprovementComparison[]
+    assert.equal(list.length, 1)
+    const c = list[0]!.comparison
+    assert.deepEqual([list[0]!.proposal.id, c.version, c.before.tasks, c.after.tasks, c.enough], [1, 2, 3, 2, false])
+    assert.deepEqual([c.before.mean.reviews, c.after.mean.reviews], [2, 1])
+    run('a3', 2, ['方案', '实现', PASS])
+    const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
+    assert.deepEqual([d.comparison?.after.tasks, d.comparison?.enough], [3, true])
   } finally {
     await s.close()
   }

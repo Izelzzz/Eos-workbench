@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { KIND_NAMES, SIGNAL_NAMES, STATUS_NAMES } from '../../src/improve/labels.ts'
 import type { GenerateResponse, ProposalDetail, ProposalInfo, WorkflowInfo } from './api.ts'
 import { decideProposal, generateProposals, getProposal, listProposals, listTasks, listWorkflows } from './api.ts'
+import { ComparisonTable } from './Compare.tsx'
 import { conventionHref, Diff } from './Conventions.tsx'
 import { ago, duration, tokens } from './format.ts'
 
@@ -181,6 +182,13 @@ function Page(props: { id: number }) {
           {p.evidence.filter(id => !p.signals.some(s => s.id === id)).map(id => <li key={id} className="muted">{id}：找不到这条证据（任务可能已经不在了）</li>)}
         </ul>
       </section>
+
+      {p.comparison !== undefined && (
+        <section className="panel">
+          <h2>改进前后（{KIND_NAMES[p.target.kind]}「{p.target.name}」第 {p.comparison.version} 版）</h2>
+          <ComparisonTable c={p.comparison} />
+        </section>
+      )}
 
       <section className="panel">
         <h2>改动（第 {p.baseVersion} 版 → 新内容）</h2>

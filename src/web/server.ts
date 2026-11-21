@@ -12,6 +12,7 @@ import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
 import { evidence } from '../engine/evidence.ts'
+import { compare, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
@@ -19,7 +20,7 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -202,7 +203,24 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       return task === undefined ? [] : [{ task, used: o.store.meta(id).conventions }]
     })
     const signals = evidence(samples).signals.filter(s => cited.has(s.id))
-    return { ...proposalInfo(p), ...(base === undefined ? {} : { base }), signals }
+    const approved = p.events.find(e => e.status === 'approved')?.version
+    const comparison = approved === undefined ? undefined : compare(compareSamples(Date.now()), p.target, approved)
+    return { ...proposalInfo(p), ...(base === undefined ? {} : { base }), signals, ...(comparison === undefined ? {} : { comparison }) }
+  }
+  /** 前后对比用的样本：所有任务的指标（和统计页一样，失败后没人处理的只算到失败那一刻）和用到的约定版本。 */
+  const compareSamples = (now: number): CompareSample[] => o.store.list().flatMap(s => {
+    const task = o.store.get(s.id)
+    if (task === undefined) return []
+    const used = o.store.meta(s.id).conventions
+    return [{ task, metrics: taskMetrics(task, sampleAt(task, now), s.createdAt), ...(used === undefined ? {} : { used }) }]
+  })
+  /** 每条已批准的提案：它生成的版本的前后对比，新的在前。 */
+  const comparisons = (): ImprovementComparison[] => {
+    const samples = compareSamples(Date.now())
+    return o.store.proposals().flatMap(p => {
+      const e = p.events.find(x => x.status === 'approved')
+      return e?.version === undefined ? [] : [{ proposal: { id: p.id, target: p.target, rationale: p.rationale, approvedAt: e.at }, comparison: compare(samples, p.target, e.version) }]
+    })
   }
   /** 失败原因 → 状态码。同一时间只跑一次生成由 generate 里的锁保证（命令行和网页共用）。 */
   const GENERATE_STATUS = { input: 400, busy: 409, config: 500, upstream: 502 } as const
@@ -278,6 +296,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
       if (url.pathname === '/api/improve/proposals') return json(res, 200, o.store.proposals().map(proposalInfo))
+      if (url.pathname === '/api/improve/comparisons') return json(res, 200, comparisons())
       const prop = PROPOSAL.exec(url.pathname)
       if (prop) {
         const d = proposalDetail(Number(prop[1]))
