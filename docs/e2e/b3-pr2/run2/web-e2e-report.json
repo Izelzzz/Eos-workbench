@@ -1,0 +1,32 @@
+{
+  "task": "t261121041826vc2",
+  "code": {
+    "commit": "bdd6091",
+    "uncommitted": []
+  },
+  "answered": 4,
+  "choices": [
+    "原样保留中文（推荐）",
+    "删除 emoji（推荐）",
+    "默认 80，按码点、优先单词边界（推荐）",
+    "返回空字符串 \"\"（推荐）"
+  ],
+  "calls": [
+    "c1 produce@plan 160568ms",
+    "c2 produce@build 45450ms",
+    "c3 critique@review 81624ms"
+  ],
+  "checks": {
+    "任务在页面上创建（created 由 web 发出）": true,
+    "提问全部在页面上回答（answered 都由 web 发出）": true,
+    "Web 服务被杀时开发正在进行": true,
+    "重启后自动续跑这个任务": true,
+    "任务完成": true,
+    "已完成的调用没有重复": true,
+    "worktree 里 npm test 通过": true,
+    "页面没有脚本错误": true,
+    "agent 收到的正是页面上点的那些选项": true,
+    "被杀的进程组在 10 秒内没有活着的进程": true
+  },
+  "errors": []
+}

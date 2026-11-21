@@ -139,7 +139,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)
-    say(`\n各阶段耗时\n${formatMetrics(taskMetrics(t, Date.now()))}`)
+    say(`\n各阶段耗时\n${formatMetrics(taskMetrics(t, Date.now(), store.createdAt(t.id)))}`)
   },
   abort() {
     const t = taskOf(positionals[1])

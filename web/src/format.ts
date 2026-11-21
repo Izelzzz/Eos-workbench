@@ -3,8 +3,9 @@ import type { SpanKind, SpanStatus } from './api.ts'
 export const duration = (ms: number | undefined): string => {
   if (ms === undefined || !Number.isFinite(ms)) return ''
   if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`
+  const s = Math.round(ms / 1000)
+  return `${Math.floor(s / 60)}m${s % 60}s`
 }
 
 export const tokens = (n: number | undefined): string => {

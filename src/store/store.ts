@@ -135,6 +135,13 @@ export class Store {
     return this.load(id)
   }
 
+  /** 任务创建的时刻。 */
+  createdAt(id: string): number {
+    const row = this.db.prepare('SELECT created_at FROM tasks WHERE id = ?').get(id) as { created_at: number } | undefined
+    if (row === undefined) throw new Error(`没有任务 ${id}`)
+    return Number(row.created_at)
+  }
+
   meta(id: string): TaskMeta {
     const row = this.db.prepare('SELECT meta FROM tasks WHERE id = ?').get(id) as { meta: string } | undefined
     if (row === undefined) throw new Error(`没有任务 ${id}`)

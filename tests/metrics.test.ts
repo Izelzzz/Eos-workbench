@@ -110,18 +110,18 @@ test('stages follow workflow order and skip stages that never ran', () => {
   c.reply(1000, 1000, '方案')
   const m = taskMetrics(c.task, 3000)
   assert.deepEqual(m.stages.map(s => [s.node, s.open]), [['plan', false], ['build', true]])
-  assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one; its running call is overhead until it ends')
-  assert.equal(m.stages[1]!.overheadMs, 2000)
+  assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one')
+  assert.deepEqual([m.stages[1]!.runningMs, m.stages[1]!.overheadMs], [2000, 0], 'its call is running, not platform overhead')
   assert.equal(m.total.calls, 1)
 })
 
 /** 各部分不重复计算：加起来不超过阶段时长，平台开销补齐到正好相等；阶段之间不重叠。 */
 const consistent = (t: Task, now: number) => {
-  const m = taskMetrics(t, now)
+  const m = taskMetrics(t, now, 0)
   for (const s of m.stages) {
     assert.ok(s.agentMs >= 0 && s.checkMs >= 0 && s.waitUserMs >= 0 && s.blockedMs >= 0, JSON.stringify(s))
-    assert.ok(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs <= s.wallMs, JSON.stringify(s))
-    assert.equal(s.agentMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs, s.wallMs)
+    assert.ok(s.agentMs + s.runningMs + s.checkMs + s.waitUserMs + s.blockedMs <= s.wallMs, JSON.stringify(s))
+    assert.equal(s.agentMs + s.runningMs + s.checkMs + s.waitUserMs + s.blockedMs + s.overheadMs, s.wallMs)
   }
   for (let i = 1; i < m.stages.length; i++) assert.ok(m.stages[i]!.start === undefined || m.stages[i]!.start! >= m.stages[i - 1]!.end!, 'stages do not overlap')
   assert.equal(m.total.wallMs + m.betweenMs, m.elapsedMs)
@@ -205,4 +205,45 @@ test('the command-line table has a row per stage and a total, and marks the open
 
 test('durations round as a whole, never showing 60 seconds', () => {
   assert.deepEqual([999, 1000, 59_949, 59_950, 119_600, 3_599_600].map(secs), ['999ms', '1.0s', '59.9s', '1m0s', '2m0s', '60m0s'])
+})
+
+test('a running call shows as in progress, from the last entry to now; the first stage starts when the task was created', () => {
+  const c = new Clock()
+  // 任务 0 创建，plan 的调用正在跑，还没有任何记录
+  const first = taskMetrics(c.task, 5000, 0).stages[0]!
+  assert.deepEqual([first.open, first.wallMs, first.runningMs, first.overheadMs], [true, 5000, 5000, 0])
+  assert.equal(taskMetrics(c.task, 5000).stages[0]!.wallMs, 0, 'without the creation time the first stage has no start')
+  c.send(6000, { kind: 'asked', call: c.call, question: { id: 'q', text: '?' } })
+  const waiting = taskMetrics(c.task, 8000, 0).stages[0]!
+  assert.deepEqual([waiting.runningMs, waiting.waitUserMs, waiting.overheadMs], [6000, 2000, 0], 'the call ran 6s before asking; the wait is not running')
+  c.send(9000, { kind: 'answered', questionId: c.task.question!.id, text: '好' })
+  const again = taskMetrics(c.task, 12_000, 0).stages[0]!
+  assert.deepEqual([again.runningMs, again.waitUserMs, again.wallMs], [9000, 3000, 12_000])
+  c.reply(13_000, 13_000, '方案')
+  const doneStage = taskMetrics(c.task, 13_000, 0).stages[0]!
+  assert.deepEqual([doneStage.agentMs, doneStage.runningMs, doneStage.waitUserMs], [10_000, 0, 3000], 'once the call ends it is agent time')
+  consistent(c.task, 20_000)
+})
+
+test('running time in every engine state: a check, a failure, a retry, a loop question and its answer', () => {
+  const c = new Clock('review')
+  c.reply(1000, 1000, '方案')
+  c.reply(3000, 1000, '实现') // build 的交付物检查正在跑
+  const run = (now: number) => taskMetrics(c.task, now, 0).stages.find(s => s.open)!
+  assert.deepEqual([run(3500).node, run(3500).runningMs], ['build', 500], 'a check in flight runs from the reply before it')
+  c.check(4000, 400, false) // 交付物不全：补齐调用
+  assert.equal(run(5000).runningMs, 1000, 'the fix call runs from the check result')
+  c.send(5500, { kind: 'call_failed', call: c.call, error: '断了' })
+  assert.deepEqual([run(7000).runningMs, run(7000).blockedMs], [0, 1500], 'a failed task runs nothing; it is blocked')
+  c.send(8000, { kind: 'retry' })
+  assert.equal(run(8600).runningMs, 600, 'the resent call runs from the retry')
+  c.reply(9000, 900, '补齐了')
+  c.check(9500, 300, false) // 又不全，补齐次数用完：对话尽头的提问
+  assert.equal(c.task.status, 'waiting_user')
+  assert.equal(c.task.question!.source, 'loop')
+  assert.deepEqual([run(11_000).runningMs, run(11_000).waitUserMs], [0, 1500], 'waiting at the end of the loop runs nothing')
+  c.send(12_000, { kind: 'answered', questionId: c.task.question!.id, text: '继续补' })
+  assert.ok(c.task.pending !== undefined)
+  assert.equal(run(12_700).runningMs, 700, 'after the answer the next call runs from the answer')
+  consistent(c.task, 12_700)
 })
