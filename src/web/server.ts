@@ -12,7 +12,7 @@ import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
 import { evidence } from '../engine/evidence.ts'
-import { compare, type CompareSample } from '../engine/compare.ts'
+import { compare, versionUsed, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
@@ -204,22 +204,30 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     })
     const signals = evidence(samples).signals.filter(s => cited.has(s.id))
     const approved = p.events.find(e => e.status === 'approved')?.version
-    const comparison = approved === undefined ? undefined : compare(compareSamples(Date.now()), p.target, approved)
+    const comparison = approved === undefined ? undefined : compare(compareSamples(p.target, approved, Date.now(), new Map()), p.target, approved)
     return { ...proposalInfo(p), ...(base === undefined ? {} : { base }), signals, ...(comparison === undefined ? {} : { comparison }) }
   }
   /** 前后对比用的样本：所有任务的指标（和统计页一样，失败后没人处理的只算到失败那一刻）和用到的约定版本。 */
-  const compareSamples = (now: number): CompareSample[] => o.store.list().flatMap(s => {
-    const task = o.store.get(s.id)
-    if (task === undefined) return []
-    const used = o.store.meta(s.id).conventions
-    return [{ task, metrics: taskMetrics(task, sampleAt(task, now), s.createdAt), ...(used === undefined ? {} : { used }) }]
-  })
+  // 只为用到这个约定第 v-1 或 v 版的任务算指标（指标要重放整个日志）；metrics 按任务缓存，同一个请求里多条提案共用。
+  const compareSamples = (target: ProposalInfo['target'], version: number, now: number, metrics: Map<string, CompareSample['metrics']>): CompareSample[] =>
+    o.store.list().flatMap(s => {
+      const task = o.store.get(s.id)
+      if (task === undefined) return []
+      const conventions = o.store.meta(s.id).conventions
+      const used = conventions === undefined ? {} : { used: conventions }
+      const v = versionUsed({ task, ...used }, target.kind, target.name)
+      if (v === null || (v !== undefined && v !== version && v !== version - 1)) return []
+      if (!metrics.has(s.id)) metrics.set(s.id, taskMetrics(task, sampleAt(task, now), s.createdAt))
+      return [{ task, metrics: metrics.get(s.id)!, ...used }]
+    })
   /** 每条已批准的提案：它生成的版本的前后对比，新的在前。 */
   const comparisons = (): ImprovementComparison[] => {
-    const samples = compareSamples(Date.now())
+    const now = Date.now()
+    const metrics = new Map<string, CompareSample['metrics']>()
     return o.store.proposals().flatMap(p => {
       const e = p.events.find(x => x.status === 'approved')
-      return e?.version === undefined ? [] : [{ proposal: { id: p.id, target: p.target, rationale: p.rationale, approvedAt: e.at }, comparison: compare(samples, p.target, e.version) }]
+      if (e?.version === undefined) return []
+      return [{ proposal: { id: p.id, target: p.target, rationale: p.rationale, approvedAt: e.at }, comparison: compare(compareSamples(p.target, e.version, now, metrics), p.target, e.version) }]
     })
   }
   /** 失败原因 → 状态码。同一时间只跑一次生成由 generate 里的锁保证（命令行和网页共用）。 */

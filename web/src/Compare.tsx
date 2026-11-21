@@ -3,7 +3,7 @@ import type { Comparison, OutcomeKey } from '../../src/engine/compare.ts'
 import { duration, tokens } from './format.ts'
 
 const ROWS: { key: OutcomeKey; label: string; fmt: (n: number) => string }[] = [
-  { key: 'reviews', label: '评审轮次', fmt: n => n.toFixed(1) },
+  { key: 'reviews', label: '评审轮次（有效结论）', fmt: n => n.toFixed(1) },
   { key: 'checkFailures', label: '检查失败', fmt: n => n.toFixed(1) },
   { key: 'fixes', label: '补齐次数', fmt: n => n.toFixed(1) },
   { key: 'signals', label: '证据条数', fmt: n => n.toFixed(1) },
@@ -22,7 +22,7 @@ export function ComparisonTable(props: { c: Comparison }) {
       {!enough && <p className="notice warn">样本不足：每组至少要 {props.c.min} 个已结束的任务（现在改进前 {b.tasks} 个、改进后 {a.tasks} 个），只列数字，不算变化。</p>}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>每个任务平均</th><th className="num">改进前（第 {props.c.version} 版之前）</th><th className="num">改进后（第 {props.c.version} 版起）</th><th className="num">变化</th></tr></thead>
+          <thead><tr><th>每个任务平均</th><th className="num">改进前（第 {props.c.version - 1} 版）</th><th className="num">改进后（第 {props.c.version} 版）</th><th className="num">变化</th></tr></thead>
           <tbody>
             <tr><td>任务数</td><td className="num">{b.tasks}</td><td className="num">{a.tasks}</td><td className="num muted">—</td></tr>
             <tr>
@@ -41,7 +41,9 @@ export function ComparisonTable(props: { c: Comparison }) {
         </table>
       </div>
       <p className="muted small">改进前：{taskLinks(b.outcomes.map(o => o.task))}。改进后：{taskLinks(a.outcomes.map(o => o.task))}。{''
+        }{props.c.failed.length > 0 && <>失败后还没处理、不计入（重试后可能继续）：{taskLinks(props.c.failed)}。</>}{''
         }{props.c.unknown.length > 0 && <>版本未知、不计入：{taskLinks(props.c.unknown)}。</>}{''
+        }只比相邻两版，更早或之后再改出的版本不算在内。{''
         }两组任务的需求不同、模型有随机性，差异不一定是这次修改带来的。</p>
     </div>
   )

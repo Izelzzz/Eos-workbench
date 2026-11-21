@@ -3,7 +3,7 @@
 // 2. 第一轮：并行跑 sum、max、avg 3 个 standard 任务（改进前）；
 // 3. 通过接口生成提案（真实 improver），批准把 @example 规则写进 developer 模板（没有就用研发约定）的那一条；
 // 4. 第二轮：同样 3 个需求再跑一遍（改进后）；
-// 5. 核对：第二轮任务用的是新版本；对比接口里改进前、改进后各 3 个任务、样本足够；两组的评审轮次和证据条数等于直接从数据库独立复算的值；
+// 5. 核对：第二轮任务用的是新版本；对比接口里改进前、改进后各 3 个任务、样本足够；两组的评审轮次和检查失败等于直接从数据库独立复算的值；
 //    统计页和提案页显示对比区，390 宽不横向滚动，没有脚本错误；
 // 6. 结果（含两组的数字和提交号）写到 report.json，截图在同一目录。
 // 用法：node --import tsx scripts/improve-full-e2e.ts [端口]
@@ -92,10 +92,11 @@ try {
   const c = list.find(x => x.proposal.id === chosen.id)?.comparison
   checks['对比接口：改进前、改进后各 3 个任务，样本足够'] = c !== undefined && c.before.tasks === 3 && c.after.tasks === 3 && c.enough
   // 独立复算：直接从数据库里的任务状态数评审调用和没通过的检查结果。
+  // 评审轮次按「回复里有 verdict 字段」数，不用 parseVerdict，作为独立的口径。
   const raw = (ids: string[]) => {
     const per = ids.map(id => {
       const log = (JSON.parse(String((db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string }).state)) as { log: { type: string; purpose?: string; results?: { passed: boolean }[] }[] }).log
-      return { reviews: log.filter(e => e.type === 'call' && e.purpose === 'critique').length, checkFailures: log.reduce((n, e) => n + (e.type === 'check' ? e.results!.filter(r => !r.passed).length : 0), 0) }
+      return { reviews: log.filter(e => e.type === 'call' && e.purpose === 'critique' && /"verdict"\s*:\s*"(pass|changes)"/.test(String((e as { reply?: string }).reply))).length, checkFailures: log.reduce((n, e) => n + (e.type === 'check' ? e.results!.filter(r => !r.passed).length : 0), 0) }
     })
     return { reviews: per.reduce((s, x) => s + x.reviews, 0) / ids.length, checkFailures: per.reduce((s, x) => s + x.checkFailures, 0) / ids.length, per }
   }
@@ -136,6 +137,8 @@ try {
   checks['390 宽提案页和统计页不横向滚动'] = facts.overflow390 === 0 && facts.overflowInsights390 === 0
   checks['页面没有脚本错误'] = errors.length === 0
   facts.errors = errors
+} catch (e) {
+  checks[`运行出错：${(e as Error).message}`] = false
 } finally {
   web.kill('SIGTERM')
 }

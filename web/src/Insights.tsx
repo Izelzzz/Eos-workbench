@@ -16,8 +16,9 @@ export function Insights() {
   const [data, setData] = useState<Data>()
   const [error, setError] = useState<string>()
   const [comparisons, setComparisons] = useState<ImprovementComparison[]>([])
+  const [compareError, setCompareError] = useState<string>()
   useEffect(() => { getInsights().then(setData, e => setError((e as Error).message)) }, [])
-  useEffect(() => { listComparisons().then(setComparisons, () => setComparisons([])) }, [])
+  useEffect(() => { listComparisons().then(setComparisons, e => setCompareError((e as Error).message)) }, [])
   if (error) return <p className="error">{error}</p>
   if (data === undefined) return <p className="muted">加载中…</p>
   const t = data.tasks
@@ -46,10 +47,11 @@ export function Insights() {
         </section>
       )}
 
+      {compareError !== undefined && <p className="notice warn" role="alert">改进前后对比加载失败：{compareError}</p>}
       {comparisons.length > 0 && (
         <section className="panel">
           <h2>改进前后对比</h2>
-          <p className="muted">每条已批准的改进提案：用了这份约定的已结束任务，按任务创建时用的版本分成改进前、改进后两组。</p>
+          <p className="muted">每条已批准的改进提案：用了这份约定、已结束的任务，按任务创建时用的版本分成两组——改进前（批准前的那一版）和改进后（批准生成的那一版）。</p>
           {comparisons.map(x => (
             <div key={x.proposal.id} className="compare-item">
               <h3>
