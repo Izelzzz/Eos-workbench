@@ -6,7 +6,7 @@ type Metrics = TaskDetail['metrics']
 type Stage = Metrics['stages'][number]
 
 /** 时长的组成部分：顺序就是横条从左到右的顺序。 */
-const PARTS = [
+export const PARTS = [
   { key: 'agentMs', label: 'agent', cls: 'p-agent' },
   { key: 'runningMs', label: '运行中', cls: 'p-running' },
   { key: 'checkMs', label: '检查', cls: 'p-check' },
@@ -15,7 +15,8 @@ const PARTS = [
   { key: 'overheadMs', label: '平台开销', cls: 'p-overhead' },
 ] as const
 
-const Bar = (props: { stage: Stage; max: number }) => (
+/** 时长构成横条：宽度按 max 等比例。 */
+export const Bar = (props: { stage: Pick<Stage, (typeof PARTS)[number]['key'] | 'wallMs'>; max: number }) => (
   <div className="stage-bar" style={{ width: `${props.max === 0 ? 0 : (props.stage.wallMs / props.max) * 100}%` }}>
     {PARTS.map(p => props.stage[p.key] > 0 && (
       <span key={p.key} className={p.cls} style={{ flexGrow: props.stage[p.key] }} title={`${p.label} ${duration(props.stage[p.key])}`} />

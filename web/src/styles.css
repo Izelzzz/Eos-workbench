@@ -210,3 +210,10 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .p-blocked { background: var(--error); }
 .p-overhead { background: var(--pending); }
 .stages-note { margin: 8px 0 0; font-size: 12px; }
+
+/* 统计页 */
+.insights h1 { font-size: 20px; margin: 4px 0 6px; }
+.insights .panel { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.insights h2 { font-size: 15px; margin: 0 0 8px; }
+.bottlenecks { margin: 0; padding-left: 18px; }
+.bottlenecks li { margin: 4px 0; }

@@ -10,6 +10,7 @@ import { test } from 'node:test'
 import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { createWebServer } from '../src/web/server.ts'
+import type { Insights } from '../src/engine/insights.ts'
 import type { TaskDetail } from '../src/web/types.ts'
 import { FakeExecutor } from './fake-executor.ts'
 import { CHANGES, PASS, workflow } from './helpers.ts'
@@ -311,6 +312,10 @@ test('team conventions: list, validate without saving, save new versions, read h
     assert.ok(d.metrics.stages.length >= 1, 'the task page gets per-stage metrics')
     assert.equal(d.metrics.total.calls, d.report.total.calls, 'stage metrics count the same calls as the report')
     assert.equal(d.metrics.total.wallMs + d.metrics.betweenMs, d.metrics.elapsedMs)
+    const ins = (await (await fetch(`${s.base}/api/insights`)).json()) as Insights
+    const team = ins.byWorkflow.find(w => w.workflow === 'team')!
+    assert.deepEqual([team.tasks, team.calls], [1, d.report.total.calls], 'the stats page sums the same task')
+    assert.equal(ins.tasks.total, (await (await fetch(`${s.base}/api/tasks`)).json()).length)
   } finally {
     await s.close()
   }

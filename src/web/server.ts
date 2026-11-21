@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
+import { insights } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
@@ -214,6 +215,14 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         return d === undefined ? json(res, 404, { error: `没有约定「${name ?? conv[2]}」` }) : json(res, 200, d)
       }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
+      if (url.pathname === '/api/insights') {
+        const now = Date.now()
+        const samples = o.store.list().flatMap(s => {
+          const task = o.store.get(s.id)
+          return task === undefined ? [] : [{ task, metrics: taskMetrics(task, now, s.createdAt) }]
+        })
+        return json(res, 200, insights(samples))
+      }
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {
         const d = await detail(m[1]!)
