@@ -39,6 +39,18 @@ const bumpy = (id = 'a', version = 1): Task => {
   return d.task
 }
 
+/** 每条证据的 id 是 任务:下标[:子项]，并且指向类型对得上的日志条目（同一次 reduce 追加的几条日志时刻相同，只比时刻不够）。 */
+const ENTRY_TYPE = { review_changes: 'call', format_retry: 'call', scope_reverted: 'call', check_failed: 'check', escalated: 'note', call_failed: 'note', stuck: 'question' } as const
+const assertPointsAtLog = (task: Task, s: ReturnType<typeof signalsOf>) => {
+  for (const x of s) {
+    const e = task.log[x.entry]!
+    assert.match(x.id, new RegExp(`^${task.id}:${x.entry}(:(\\d+|r))?$`))
+    assert.equal(e.type, ENTRY_TYPE[x.kind], `${x.id} points at a ${e.type} entry`)
+    assert.equal(x.at, e.at)
+    if (e.type === 'call' || e.type === 'check' || e.type === 'note') assert.equal(x.node, e.node)
+  }
+}
+
 const clean = (id: string, version = 1): Task => {
   const d = driver(id, wf(version))
   d.reply('方案')
@@ -60,11 +72,7 @@ test('signals come from the engine log in order, each judged against the right r
     ['escalated', 'review', 'dev'],
     ['format_retry', 'review', 'planner'],
   ])
-  for (const x of s) {
-    const e = task.log[x.entry]!
-    assert.equal(x.at, e.at, `${x.id} points at its log entry`)
-    assert.ok(x.id.startsWith(`a:${x.entry}`))
-  }
+  assertPointsAtLog(task, s)
   assert.equal(new Set(s.map(x => x.id)).size, s.length, 'ids are unique')
   assert.match(s[0]!.text, /NOTES\.md.*没有通过\n缺少章节：改动/s)
   assert.match(s[1]!.text, /缺少测试\n1\. \[major\]：补测试/)
@@ -105,6 +113,7 @@ test('questions at the end of the loop, reverted writes, unparsable reviews and 
     ['review_changes', 'review', 'dev'],
     ['stuck', 'review', 'dev'],
   ])
+  assertPointsAtLog(d.task, s)
   assert.equal(s[0]!.text, '越界改动被撤销：package.json')
   assert.equal(s[2]!.text, '调用失败：网络断了')
 })
@@ -137,6 +146,32 @@ test('when the upstream decides to ask the user after reconfirming, the question
   d.reply(ASK)
   assert.equal(d.task.status, 'waiting_user')
   assert.deepEqual(signalsOf(d.task).map(x => [x.kind, x.role]), [['review_changes', 'dev'], ['escalated', 'dev'], ['stuck', 'planner']])
+  assertPointsAtLog(d.task, signalsOf(d.task))
+})
+
+test('when an agent node runs out of fixes, the question is judged against that node’s role', () => {
+  const d = driver('f', wf(1, { maxRounds: 1, escalate: false, checks: 'review', maxFixes: 1 }))
+  d.reply('方案')
+  d.reply('实现')
+  d.check(false)
+  d.reply('补了')
+  d.check(false)
+  assert.equal(d.task.status, 'waiting_user')
+  assert.deepEqual(signalsOf(d.task).map(x => [x.kind, x.node, x.role]), [['check_failed', 'build', 'dev'], ['check_failed', 'build', 'dev'], ['stuck', 'build', 'dev']])
+})
+
+test('signals about another role go to that role’s own template, not the developer’s; a task given twice is rejected', () => {
+  const base = wf(1, { maxRounds: 1, escalate: false })
+  const w = { ...base, roles: { ...base.roles, rev: { ...base.roles.rev!, template: { name: 'reviewer', version: 7 } } } }
+  const d = driver('v', w)
+  d.reply('方案')
+  d.reply('实现')
+  d.reply(GARBAGE)
+  const r = evidence([{ task: d.task }])
+  const t = (name: string) => r.targets.find(x => x.kind === 'template' && x.name === name)!
+  assert.deepEqual([t('reviewer').versions, t('reviewer').counts], [[7], { format_retry: 1 }])
+  assert.deepEqual(t('developer').signals, [])
+  assert.throws(() => evidence([{ task: d.task }, { task: d.task }]), /出现了两次/)
 })
 
 test('signals are attributed to the judged role’s template and skills, and to the workflow and docs; tasks without problems still count', () => {

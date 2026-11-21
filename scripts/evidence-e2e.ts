@@ -9,7 +9,7 @@
 //    - 检查失败的条数 = 原始 events 表里 checked 事件中没通过的结果数；
 //    - 评审要求修改的条数 = 评审调用之后没有紧跟「第 N 轮通过」、也不是格式重试的次数；
 //    - 归到 developer 模板的证据 = 被评判角色用 developer 模板的证据；
-//    - 至少有一条检查失败的证据提到这条团队规则；
+//    - 任务用的是 reviewer 第 2 版；至少有一条评审要求修改的证据提到这条团队规则，并归到 developer 模板；
 // 4. 结果写到 report.json 和 evidence.json。
 // 用法：node --import tsx scripts/evidence-e2e.ts [端口] [--verify]（--verify：不重新跑任务，只对上次的数据库重新核对）
 import { execFileSync, spawn } from 'node:child_process'
@@ -82,9 +82,10 @@ const samples = store.list().map(s => ({ task: store.get(s.id)!, used: store.met
 const ev = evidence(samples)
 const checks: Record<string, boolean> = {}
 checks['所有任务都完成'] = samples.every(s => s.task.status === 'done')
-checks['每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻的条目'] = new Set(ev.signals.map(s => s.id)).size === ev.signals.length && ev.signals.every(sig => {
+checks['每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻、类型对得上的条目'] = new Set(ev.signals.map(s => s.id)).size === ev.signals.length && ev.signals.every(sig => {
   const task = samples.find(s => s.task.id === sig.task)!.task
-  return new RegExp(`^${sig.task}:${sig.entry}(:(\\d+|r))?$`).test(sig.id) && task.log[sig.entry]?.at === sig.at
+  const type = { review_changes: 'call', format_retry: 'call', scope_reverted: 'call', check_failed: 'check', escalated: 'note', call_failed: 'note', stuck: 'question' }[sig.kind]
+  return new RegExp(`^${sig.task}:${sig.entry}(:(\\d+|r))?$`).test(sig.id) && task.log[sig.entry]?.at === sig.at && task.log[sig.entry]?.type === type
 })
 // 独立核对：从原始 events 表数没通过的检查结果。
 const rawFailed = samples.reduce((n, s) => n + store.events(s.task.id).filter(r => r.accepted && r.event.kind === 'checked')

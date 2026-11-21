@@ -9,7 +9,7 @@
 // agent 在调用中途主动提问是正常的澄清，不算证据。
 import type { NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { describeCheck } from './checks.ts'
-import { CALL_FAILED_PREFIX, escalationNote } from './machine.ts'
+import { CALL_FAILED_PREFIX, escalationNote, REVERTED_NOTE_PREFIX } from './machine.ts'
 import type { Entry, Task } from './types.ts'
 import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 
@@ -109,7 +109,7 @@ export const signalsOf = (task: Task): Signal[] => {
       case 'question': {
         if (e.question.source !== 'loop') return
         // 紧跟在上游重新确认的回复之后：是上游决定问用户（中间可能隔着这次调用的越界撤销说明）。
-        const prev = task.log.slice(0, i).findLast(x => !(x.type === 'note' && x.text.startsWith('撤销了 ')))
+        const prev = task.log.slice(0, i).findLast(x => !(x.type === 'note' && x.text.startsWith(REVERTED_NOTE_PREFIX)))
         const role = prev?.type === 'call' && prev.purpose === 'reconfirm' ? prev.role : subjectOf(task.workflow, e.question.node)
         add(i, e, { kind: 'stuck', node: e.question.node, role, text: e.question.text })
         return
@@ -146,8 +146,14 @@ const refsOf = (s: EvidenceSample): { all: Ref[]; byRole: Map<string, Ref[]> } =
   return { all: [...shared, ...[...byRole.values()].flat()], byRole: new Map([...byRole].map(([id, rs]) => [id, [...shared, ...rs]])) }
 }
 
-/** 跨任务的证据，按约定汇总。约定按证据条数从多到少排，同样多时按种类（模板、技能、文档、工作流）和名字。 */
+/** 按码点比较：排序结果不依赖运行环境的 locale。 */
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+/** 跨任务的证据，按约定汇总。约定按证据条数从多到少排，同样多时按种类（模板、技能、文档、工作流）和名字。同一个任务不能出现两次（证据 id 会重复）。 */
 export const evidence = (samples: EvidenceSample[]): Evidence => {
+  const ids = samples.map(s => s.task.id)
+  const dup = ids.find((id, i) => ids.indexOf(id) !== i)
+  if (dup !== undefined) throw new Error(`任务 ${dup} 出现了两次`)
   const signals: Signal[] = []
   const targets = new Map<string, { kind: TargetKind; name: string; versions: Set<number>; tasks: Set<string>; affected: Set<string>; signals: Signal[] }>()
   const target = (r: Ref) => {
@@ -187,6 +193,6 @@ export const evidence = (samples: EvidenceSample[]): Evidence => {
         return n === 0 ? [] : [[k, n]]
       })),
       signals: t.signals.map(x => x.id),
-    })).sort((a, b) => b.signals.length - a.signals.length || order(a.kind) - order(b.kind) || a.name.localeCompare(b.name)),
+    })).sort((a, b) => b.signals.length - a.signals.length || order(a.kind) - order(b.kind) || byCodePoint(a.name, b.name)),
   }
 }

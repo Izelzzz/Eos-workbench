@@ -12,6 +12,8 @@ import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 /** 日志说明：对话打满轮次请上游重新确认、调用失败。证据归纳（evidence.ts）按这两种说明识别，改措辞时一起改。 */
 export const escalationNote = (rounds: number, upstream: string): string => `${rounds} 轮未通过，请「${upstream}」重新确认`
 export const CALL_FAILED_PREFIX = '调用失败：'
+/** 越界撤销的说明以它开头（证据归纳用来跳过这条说明）。 */
+export const REVERTED_NOTE_PREFIX = '撤销了 '
 
 /** 回复格式不对时重新要求的次数；用完后任务失败，等人工重试。 */
 export const MAX_FORMAT_RETRIES = 2
@@ -159,7 +161,7 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
  */
 const noteReverted = (task: Task, call: Call, reverted: string[], at: number): Task =>
   append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },
-    { type: 'note', at, node: call.node, text: `撤销了 ${reverted.length} 处越界改动：${reverted.join('、')}` })
+    { type: 'note', at, node: call.node, text: `${REVERTED_NOTE_PREFIX}${reverted.length} 处越界改动：${reverted.join('、')}` })
 
 const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   switch (call.purpose) {
