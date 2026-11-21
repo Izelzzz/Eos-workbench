@@ -1,4 +1,5 @@
 // Web 接口返回的数据类型（纯类型，前端也引用）。
+import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
 import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary } from '../store/types.ts'
@@ -15,6 +16,8 @@ export type TaskDetail = {
   branch: string
   worktree: string
   report: Report
+  /** 按阶段的 token 和时长构成，进行中的部分算到服务端处理请求的时刻。 */
+  metrics: TaskMetrics
   trace: Span
   /** 有 runner 进程正在跑这个任务（看锁文件）。为 false 时回答对话尽头的问题后需要 resume。 */
   runnerAlive: boolean

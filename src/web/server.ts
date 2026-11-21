@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
+import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
@@ -91,7 +92,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...summaryOf(task), request: task.request, position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
-      branch: meta.branch, worktree: meta.worktree, report: report(task), trace: buildTrace(task, await traceRows(task)),
+      branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now()), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }

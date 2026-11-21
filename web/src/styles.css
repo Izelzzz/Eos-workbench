@@ -185,3 +185,27 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
   .conv-side { position: static; }
   .conv-save { flex-direction: column; }
 }
+
+/* 阶段表 */
+.stages { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; overflow-x: auto; }
+.stages-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.stages h2 { font-size: 15px; margin: 0 0 8px; }
+.stages table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stages th, .stages td { padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: left; }
+.stages th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.stages tfoot td { border-bottom: none; color: var(--muted); }
+.stages .num { text-align: right; font-variant-numeric: tabular-nums; }
+.stages .bar-col { width: 28%; min-width: 140px; }
+.stages tr.slowest td { background: color-mix(in srgb, var(--waiting) 8%, transparent); }
+.stages .tag { margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); }
+.stages .tag.running { color: var(--running); border-color: var(--running); }
+.stage-bar { display: flex; height: 10px; border-radius: 3px; overflow: hidden; min-width: 2px; }
+.stage-bar span { min-width: 1px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.p-agent { background: var(--k-model); }
+.p-check { background: var(--k-check); }
+.p-wait { background: var(--waiting); }
+.p-blocked { background: var(--error); }
+.p-overhead { background: var(--pending); }
+.stages-note { margin: 8px 0 0; font-size: 12px; }

@@ -308,6 +308,9 @@ test('team conventions: list, validate without saving, save new versions, read h
     await s.supervisor.idle()
     const d = (await (await fetch(`${s.base}/api/tasks/${id}`)).json()) as TaskDetail
     assert.deepEqual(d.conventions, { workflow: { name: 'team', version: 1 }, docs: [{ name: '评审约定', version: 2 }], templates: [], skills: [] })
+    assert.ok(d.metrics.stages.length >= 1, 'the task page gets per-stage metrics')
+    assert.equal(d.metrics.total.calls, d.report.total.calls, 'stage metrics count the same calls as the report')
+    assert.equal(d.metrics.total.wallMs + d.metrics.betweenMs, d.metrics.elapsedMs)
   } finally {
     await s.close()
   }
