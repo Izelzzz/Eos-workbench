@@ -203,25 +203,21 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const signals = evidence(samples).signals.filter(s => cited.has(s.id))
     return { ...proposalInfo(p), ...(base === undefined ? {} : { base }), signals }
   }
-  /** 同一时间只跑一次生成：每次是一次模型调用，重复点按钮不应该花两份钱。 */
-  let generating = false
+  /** 失败原因 → 状态码。同一时间只跑一次生成由 generate 里的锁保证（命令行和网页共用）。 */
+  const GENERATE_STATUS = { input: 400, busy: 409, config: 500, upstream: 502 } as const
   const startGenerate = async (body: Record<string, unknown>): Promise<[number, GenerateResponse]> => {
     if (o.improve === undefined) return [503, { ok: false, error: '这个服务没有配置生成提案用的执行器' }]
     if (typeof body.workflow !== 'string' || body.workflow.trim() === '') return [400, { ok: false, error: '需要 workflow' }]
     if (body.tasks !== undefined && !(Array.isArray(body.tasks) && body.tasks.every(t => typeof t === 'string'))) return [400, { ok: false, error: 'tasks 必须是任务 id 列表' }]
-    if (generating) return [409, { ok: false, error: '已经有一次生成在进行，等它结束再试' }]
-    generating = true
-    try {
+    {
       const tasks = (body.tasks as string[] | undefined)?.map(t => t.trim()).filter(t => t !== '')
       const r = await generate({
         store: o.store, conventions: o.supervisor.conventions, executor: o.improve.executor, dataDir: o.improve.dataDir,
         workflow: body.workflow.trim(), ...(tasks === undefined || tasks.length === 0 ? {} : { tasks }), actor: 'web', now: Date.now,
       })
-      if (!r.ok) return [r.call === undefined ? 400 : 502, { ok: false, error: r.error }]
+      if (!r.ok) return [GENERATE_STATUS[r.cause], { ok: false, error: r.error }]
       return [200, { ok: true, created: r.created, refused: r.refused, ...(r.skipped === undefined ? {} : { skipped: r.skipped }),
         ...(r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms } }) }]
-    } finally {
-      generating = false
     }
   }
   const decide = (id: number, action: string, body: Record<string, unknown>): [number, DecideResponse] => {

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { KIND_NAMES, SIGNAL_NAMES, STATUS_NAMES } from '../../src/improve/labels.ts'
 import type { GenerateResponse, ProposalDetail, ProposalInfo, WorkflowInfo } from './api.ts'
-import { decideProposal, generateProposals, getProposal, listProposals, listWorkflows } from './api.ts'
+import { decideProposal, generateProposals, getProposal, listProposals, listTasks, listWorkflows } from './api.ts'
 import { conventionHref, Diff } from './Conventions.tsx'
 import { ago, duration, tokens } from './format.ts'
 
@@ -17,12 +17,20 @@ export const parseImproveRoute = (hash: string): { id?: number } | undefined => 
 const firstLine = (s: string) => s.trim().split('\n')[0]!
 
 function Generate(props: { onDone: () => void }) {
-  const [workflows, setWorkflows] = useState<WorkflowInfo[]>()
-  const [workflow, setWorkflow] = useState('standard')
+  const [workflows, setWorkflows] = useState<string[]>()
+  const [workflow, setWorkflow] = useState('')
   const [tasks, setTasks] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<GenerateResponse>()
-  useEffect(() => { listWorkflows().then(setWorkflows, () => setWorkflows([])) }, [])
+  // 选项：平台上的工作流，加上已结束的任务用过、但不在平台上的（例如来自 YAML 文件；它们的角色仍可能用平台上的模板）。
+  useEffect(() => {
+    const done = new Set(['done', 'failed', 'aborted'])
+    void Promise.all([listWorkflows().catch((): WorkflowInfo[] => []), listTasks().catch(() => [])]).then(([ws, ts]) => {
+      const names = [...new Set([...ws.map(w => w.name), ...ts.filter(t => done.has(t.status)).map(t => t.workflow)])]
+      setWorkflows(names)
+      setWorkflow(cur => (names.includes(cur) ? cur : names.includes('standard') ? 'standard' : names[0] ?? ''))
+    })
+  }, [])
   const run = async () => {
     setBusy(true)
     setResult(undefined)
@@ -41,15 +49,15 @@ function Generate(props: { onDone: () => void }) {
       <div className="generate-form">
         <label>
           <span>工作流</span>
-          <select value={workflow} onChange={e => setWorkflow(e.target.value)} disabled={busy}>
-            {(workflows ?? [{ name: 'standard' }]).map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
+          <select value={workflow} onChange={e => setWorkflow(e.target.value)} disabled={busy || workflows === undefined}>
+            {(workflows ?? []).map(w => <option key={w} value={w}>{w}</option>)}
           </select>
         </label>
         <label className="grow">
           <span>任务（可选，空着就是这个工作流所有已结束的任务）</span>
           <input value={tasks} onChange={e => setTasks(e.target.value)} placeholder="t2611…, t2611…" disabled={busy} />
         </label>
-        <button className="primary" onClick={() => void run()} disabled={busy}>{busy ? '生成中…' : '生成提案'}</button>
+        <button className="primary" onClick={() => void run()} disabled={busy || workflow === ''}>{busy ? '生成中…' : '生成提案'}</button>
       </div>
       {result !== undefined && (!result.ok ? <p className="notice warn" role="alert">{result.error}</p> : (
         <div className="notice" role="status">
@@ -112,7 +120,7 @@ function Page(props: { id: number }) {
   useEffect(() => { void load() }, [props.id])
   if (error) return <p className="error">{error}</p>
   if (p === undefined) return <p className="muted">加载中…</p>
-  const outdated = p.status === 'pending' && p.latestVersion !== p.baseVersion
+  const outdated = p.status === 'pending' && p.latestVersion !== undefined && p.latestVersion !== p.baseVersion
   const decide = async (action: 'approve' | 'reject') => {
     if (action === 'reject' && text.trim() === '') return setNotice({ ok: false, text: '拒绝需要写理由。' })
     setBusy(true)
@@ -120,7 +128,7 @@ function Page(props: { id: number }) {
     setBusy(false)
     if (r.ok) {
       const v = r.proposal.events.at(-1)?.version
-      setNotice({ ok: true, text: action === 'approve' ? `已批准：${KIND_NAMES[p.target.kind]}「${p.target.name}」现在是第 ${v} 版。之后创建的任务会用上它，进行中的任务不受影响。` : '已拒绝。' })
+      setNotice({ ok: true, text: action === 'approve' ? `已批准：${KIND_NAMES[p.target.kind]}「${p.target.name}」${v === undefined ? '有了新版本' : `现在是第 ${v} 版`}。之后创建的任务会用上它，进行中的任务不受影响。` : '已拒绝。' })
       setText('')
     } else setNotice({ ok: false, text: r.error })
     void load()

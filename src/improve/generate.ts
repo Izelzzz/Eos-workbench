@@ -12,9 +12,10 @@ import { insights, sampleAt } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
 import type { Usage } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
+import { acquire } from '../runner/lock.ts'
 import type { Store } from '../store/store.ts'
 import type { ProposalRow } from '../store/types.ts'
-import { TOOL_GROUPS } from '../workflow/types.ts'
+import { TOOL_GROUPS, type AgentTemplate } from '../workflow/types.ts'
 import { permissionChanges } from './guard.ts'
 import { MAX_PROPOSALS, parseProposals, type Refused } from './parse.ts'
 import { improvePrompt, selectScope, TARGET_NAMES, type Candidate } from './prompt.ts'
@@ -32,8 +33,13 @@ export type GenerateResult =
     refused: Refused[]
     call?: { model?: string; usage: Usage; ms: number; reply: string }
   }
-  /** run、call：调用过模型之后才失败（例如回复无法解析）时带上，用量和原始回复不丢。 */
-  | { ok: false; error: string; run?: string; call?: { model?: string; usage: Usage; ms: number; reply: string } }
+  /**
+   * cause：input 请求本身有问题（任务不存在、没结束……）；busy 已经有一次生成在进行；config 平台上没有可用的 improver 模板；
+   * upstream 调用模型失败或回复不可用。run、call：调用过模型之后才失败时带上，用量和原始回复不丢。
+   */
+  | { ok: false; cause: FailureCause; error: string; run?: string; call?: { model?: string; usage: Usage; ms: number; reply: string } }
+
+export type FailureCause = 'input' | 'busy' | 'config' | 'upstream'
 
 const PART_NAMES = { agentMs: 'agent', runningMs: '运行中', checkMs: '检查', waitUserMs: '等用户', blockedMs: '阻塞', overheadMs: '平台开销' } as const
 
@@ -55,10 +61,10 @@ export const generate = async (o: {
   const rows = o.store.list().filter(t => t.workflow === o.workflow && (o.tasks === undefined ? finished(t.status) : o.tasks.includes(t.id)))
     .sort((a, b) => a.createdAt - b.createdAt)
   const missing = (o.tasks ?? []).filter(id => !rows.some(r => r.id === id))
-  if (missing.length > 0) return { ok: false, error: `这些任务不存在或不是工作流「${o.workflow}」的：${missing.join('、')}` }
+  if (missing.length > 0) return { ok: false, cause: 'input', error: `这些任务不存在或不是工作流「${o.workflow}」的：${missing.join('、')}` }
   const running = rows.filter(r => !finished(r.status))
-  if (running.length > 0) return { ok: false, error: `这些任务还没结束：${running.map(r => r.id).join('、')}` }
-  if (rows.length === 0) return { ok: false, error: `工作流「${o.workflow}」还没有已结束的任务` }
+  if (running.length > 0) return { ok: false, cause: 'input', error: `这些任务还没结束：${running.map(r => r.id).join('、')}` }
+  if (rows.length === 0) return { ok: false, cause: 'input', error: `工作流「${o.workflow}」还没有已结束的任务` }
 
   const samples = rows.map(r => ({ task: o.store.get(r.id)!, used: o.store.meta(r.id).conventions }))
   const run = `i${o.now().toString(36)}${randomBytes(3).toString('hex')}`
@@ -78,10 +84,27 @@ export const generate = async (o: {
   const prompt = improvePrompt({ workflow: o.workflow, tasks: rows.map(r => r.id), signals: scope.signals, omitted: scope.omitted, candidates, roleTemplates, ...(bottleneck === undefined ? {} : { bottleneck }) })
 
   const t = o.conventions.lookup()(IMPROVER)
-  if (t === undefined) return { ok: false, error: `平台上没有可用的 Agent 模板「${IMPROVER}」` }
+  if (t === undefined) return { ok: false, cause: 'config', error: `平台上没有可用的 Agent 模板「${IMPROVER}」` }
+  // 同一个数据目录同一时间只跑一次生成（命令行和网页共用这把锁）：每次是一次模型调用，同时跑两次会重复花钱、对同一个约定提两份提案。
+  const lock = acquire(join(o.dataDir, 'locks'), 'improve')
+  if ('heldBy' in lock) return { ok: false, cause: 'busy', error: `已经有一次生成在进行（进程 ${lock.heldBy}），等它结束再试` }
+  try {
+    return await callAndStore(o, { run, rows, scope, candidates, prompt, template: t.template, signals: ev.signals.length, say })
+  } finally {
+    lock.release()
+  }
+}
+
+/** 调用 improver、解析、校验并入库。调用方已经拿到锁。 */
+const callAndStore = async (
+  o: Parameters<typeof generate>[0],
+  x: { run: string; rows: { id: string }[]; scope: ReturnType<typeof selectScope>; candidates: Candidate[]; prompt: string; template: AgentTemplate; signals: number; say: (line: string) => void },
+): Promise<GenerateResult> => {
+  const { run, rows, scope, candidates, prompt, say } = x
+  const t = { template: x.template }
   const cwd = join(o.dataDir, 'improve', run)
   mkdirSync(cwd, { recursive: true })
-  say(`→ ${IMPROVER}：${rows.length} 个任务，${ev.signals.length} 条证据，${candidates.length} 个候选约定`)
+  say(`→ ${IMPROVER}：${rows.length} 个任务，${x.signals} 条证据，${candidates.length} 个候选约定`)
   let reply
   const tools: string[] = []
   try {
@@ -99,7 +122,7 @@ export const generate = async (o: {
       ask: async () => '不回答提问：请只根据消息里的证据和约定内容给出提案。',
     })
   } catch (e) {
-    return { ok: false, error: `调用 ${IMPROVER} 失败：${(e as Error).message}` }
+    return { ok: false, cause: 'upstream', error: `调用 ${IMPROVER} 失败：${(e as Error).message}` }
   } finally {
     // 清理失败都不影响结果：目录是空的，进程在执行器关闭时一起结束。
     try {
@@ -113,10 +136,10 @@ export const generate = async (o: {
   const call = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reply: reply.text }
 
   if (tools.length > 0) {
-    return { ok: false, error: `${IMPROVER} 调用了工具（${[...new Set(tools)].join('、')}）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库`, run, call }
+    return { ok: false, cause: 'upstream', error: `${IMPROVER} 调用了工具（${[...new Set(tools)].join('、')}）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库`, run, call }
   }
   const parsed = parseProposals(reply.text, { targets: candidates, signals: new Set(scope.signals.map(s => s.id)) })
-  if (!parsed.ok) return { ok: false, error: `${IMPROVER} 的回复无法解析：${parsed.error}`, run, call }
+  if (!parsed.ok) return { ok: false, cause: 'upstream', error: `${IMPROVER} 的回复无法解析：${parsed.error}`, run, call }
   const proposals = new Proposals(o.store, o.conventions)
   const created: ProposalRow[] = []
   const refused: Refused[] = [...parsed.refused]

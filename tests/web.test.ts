@@ -486,7 +486,7 @@ test('generating proposals from the page: one run at a time, the detail carries 
     const first = gen({ workflow: 't' })
     await new Promise(r => setTimeout(r, 50))
     const second = await gen({ workflow: 't' })
-    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, '已经有一次生成在进行，等它结束再试'])
+    assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [409, `已经有一次生成在进行（进程 ${process.pid}），等它结束再试`])
     release()
     const done = (await (await first).json()) as GenerateResponse
     assert.ok(done.ok)
