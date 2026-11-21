@@ -22,7 +22,7 @@ export type Verdict = z.infer<typeof verdictSchema>
 export type Decision = z.infer<typeof decisionSchema>
 
 /** 取最后一个 ```json 代码块；没有代码块时取第一个 { 到最后一个 } 之间的内容。 */
-const extractJson = (text: string): unknown => {
+export const extractJson = (text: string): unknown => {
   const blocks = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)]
   const candidates = blocks.length > 0 ? blocks.map(b => b[1] ?? '').reverse() : [text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)]
   for (const c of candidates) {

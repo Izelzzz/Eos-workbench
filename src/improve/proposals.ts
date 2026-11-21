@@ -1,5 +1,6 @@
 // 改进提案：入库前校验，审批（批准写回约定的新版本 / 拒绝 / 过期）。提案只追加状态，没有批准就不改任何约定（ADR-004）。
 import type { Conventions } from '../conventions/conventions.ts'
+import { permissionChanges } from './guard.ts'
 import type { Store } from '../store/store.ts'
 import type { Decision, ProposalInput, ProposalRow } from '../store/types.ts'
 
@@ -46,7 +47,11 @@ export class Proposals {
     const d = this.store.decideProposal(id, {
       status: 'approved',
       note: row => `改进提案 #${row.id}：${oneLine(row.rationale, NOTE_MAX)}${extra === '' ? '' : `；${extra}`}`,
-      validate: row => this.conventions.validate(row.target.kind, row.target.name, row.content).map(e => `${e.path}：${e.message}`),
+      // 批准时再核对一次权限（失败就关）：生成之后，工作流引用的模板可能被人改过，同一份内容展开出来的权限会变。
+      validate: row => [
+        ...this.conventions.validate(row.target.kind, row.target.name, row.content).map(e => `${e.path}：${e.message}`),
+        ...permissionChanges(row.target.kind, this.store.convention(row.target.kind, row.target.name, row.baseVersion)!.content, row.content, this.conventions.lookup()),
+      ],
     }, at, actor)
     return d.ok ? d : { ok: false, error: describe(id, d), ...(d.row === undefined ? {} : { row: d.row }) }
   }
@@ -67,6 +72,6 @@ const describe = (id: number, d: Exclude<Decision, { ok: true }>): string => {
     case 'missing': return `没有提案 #${id}`
     case 'not_pending': return `提案 #${id} ${STATUS_NAMES[d.row!.status]}，不能再审批`
     case 'stale': return `提案 #${id} 已过期：${d.row!.events.at(-1)!.reason}。请重新生成提案`
-    case 'invalid': return `新内容现在无法保存：${d.errors.join('；')}`
+    case 'invalid': return `新内容现在不能批准：${d.errors.join('；')}`
   }
 }

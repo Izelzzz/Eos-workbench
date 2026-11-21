@@ -37,7 +37,8 @@ export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'stale'
 export type ProposalEvent = { seq: number; at: number; status: ProposalStatus; actor: string; reason?: string; version?: number }
 
 /** 生成这条提案的模型调用（第 3 块之前手工写入的提案没有）。 */
-export type ProposalGenerator = { model?: string; usage: Usage; ms: number }
+/** run：同一次生成的提案共用这次调用（usage、ms 是整次调用的，不是每条提案的）。 */
+export type ProposalGenerator = { model?: string; usage: Usage; ms: number; run?: string }
 
 export type ProposalInput = {
   target: { kind: ConventionKind; name: string }

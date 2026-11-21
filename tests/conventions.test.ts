@@ -91,7 +91,7 @@ test('two processes seeding the same database write each built-in only once', ()
 
 test('templates and skills are seeded, validated against each other, and snapshotted into tasks with their versions', () => {
   const { store, c } = setup()
-  assert.deepEqual(c.list('template').map(t => [t.name, t.version, t.write]), [['developer', 1, 'worktree'], ['reviewer', 1, 'none'], ['spec-writer', 1, 'worktree']])
+  assert.deepEqual(c.list('template').map(t => [t.name, t.version, t.write]), [['developer', 1, 'worktree'], ['improver', 1, 'none'], ['reviewer', 1, 'none'], ['spec-writer', 1, 'worktree']])
   assert.deepEqual(c.list('skill').map(k => k.name), ['write-changes'])
 
   const missingSkill = c.save({ kind: 'template', name: 'helper', content: 'name: helper\nprompt: 帮忙\nskills: [no-such-skill]\n', actor: 'web' }, 2)
