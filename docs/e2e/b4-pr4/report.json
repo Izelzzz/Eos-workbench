@@ -1,0 +1,85 @@
+{
+  "checks": {
+    "3 个任务都完成": true,
+    "页面显示生成了待审批的提案": true,
+    "列表里的提案数和接口一致": true,
+    "每条证据都显示出来并链到它的任务": true,
+    "改动里有新增的行": true,
+    "批准后页面提示新版本，平台上多了一个版本，备注写明提案号和审批备注": true,
+    "批准后状态显示已批准，审批按钮消失": true,
+    "空理由拒绝被页面挡住": true,
+    "填理由后拒绝成功，记下理由": true,
+    "390 宽列表页和详情页都不横向滚动": true,
+    "页面没有脚本错误": true
+  },
+  "facts": {
+    "generateText": "生成了 2 条待审批的提案。 模型调用 1m51s，输入 3,481，输出 18.5k。",
+    "overflowDetail390": 0,
+    "approveText": "已批准：Agent 模板「developer」现在是第 2 版。之后创建的任务会用上它，进行中的任务不受影响。",
+    "overflowList390": 0,
+    "errors": [],
+    "proposals": [
+      {
+        "id": 2,
+        "target": {
+          "kind": "workflow",
+          "name": "standard"
+        },
+        "status": "rejected",
+        "rationale": "wbd 中规格的「范围」未包含工作流要求的 docs/changes.md，导致开发按流程写改动说明却被判超范围；在规格任务中要求范围包含该交付物，消除规格与工作流的冲突。",
+        "evidence": [
+          "t261121073147wbd:9"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": 1795246549823,
+            "status": "pending",
+            "actor": "web"
+          },
+          {
+            "seq": 2,
+            "at": 1795246551308,
+            "status": "rejected",
+            "actor": "web",
+            "reason": "E2E：先只改一处，看效果再说"
+          }
+        ]
+      },
+      {
+        "id": 1,
+        "target": {
+          "kind": "template",
+          "name": "developer"
+        },
+        "status": "approved",
+        "rationale": "三个任务的评审都因导出函数缺少 @example 被判 major；在 developer 模板中明确要求导出函数的 JSDoc 必须包含 @example，避免后续再遗漏。",
+        "evidence": [
+          "t261121073147ga5:9",
+          "t261121073147wbd:9",
+          "t261121073147js8:9"
+        ],
+        "events": [
+          {
+            "seq": 1,
+            "at": 1795246549805,
+            "status": "pending",
+            "actor": "web"
+          },
+          {
+            "seq": 2,
+            "at": 1795246550894,
+            "status": "approved",
+            "actor": "web",
+            "version": 2
+          }
+        ]
+      }
+    ],
+    "tasks": [
+      "t261121073147ga5",
+      "t261121073147wbd",
+      "t261121073147js8"
+    ]
+  }
+}
