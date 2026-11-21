@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { zstdCompressSync } from 'node:zlib'
+import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
-import { agentEnv, ALWAYS_DISABLED, DshExecutor, GROUP_ROWS, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { agentEnv, ALWAYS_DISABLED, DshExecutor, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 import type { AgentProfile } from '../src/executor/types.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
@@ -316,4 +316,61 @@ test('writable roles cannot start background jobs: job tools are removed and bas
   assert.ok(!reader.some(r => r.id === 'tool-bash'))
   assert.ok(!rowsFor(false, ['bash']).some(r => r.id === 'tool-bash' && r.config !== undefined), 'no config for a bash row that is disabled anyway')
   assert.notEqual(profileHash({ denyTools: [], skills: [], mcp: [], background: true }), profileHash({ denyTools: [], skills: [], mcp: [], background: false }))
+})
+
+/** dsh 的写法：每次追加一个 zstd 帧，每帧是若干行 JSON。 */
+const frames = (...groups: object[][]) => Buffer.concat(groups.map(g => zstdCompressSync(Buffer.from(g.map(l => `${JSON.stringify(l)}\n`).join('')))))
+/** 和真实 dsh 一样的帧：带内容校验和、不是单段帧、不写内容长度（帧头描述符 00000100）。 */
+const dshFrames = (...groups: object[][]) => Buffer.concat(groups.map(g => zstdCompressSync(Buffer.from(g.map(l => `${JSON.stringify(l)}\n`).join('')), { params: { [zlib.constants.ZSTD_c_checksumFlag]: 1, [zlib.constants.ZSTD_c_contentSizeFlag]: 0 } })))
+
+test('a session log written as several zstd frames is read whole, not just its first frame', () => {
+  const head = { type: 'session', version: 4, id: 's', cwd: '/w' }
+  const buf = frames([head], [user('做事 <!-- eos:n1 -->', 1)], [assistant('做完了', 2), end(3)])
+  assert.deepEqual(parseSessionLog(buf)?.map(e => e.type), ['session', 'user/message', 'assistant/message', 'turn/end'])
+  assert.equal(replyAfter(parseSessionLog(buf)!, 'n1', 's')?.text, '做完了', 'the reply in the last frame is found')
+})
+
+test('a last frame cut off mid-write is dropped and the frames before it are kept; so is a broken last line', () => {
+  const whole = frames([{ type: 'session', version: 4 }], [user('a', 1)], [assistant('b', 2), end(3)])
+  for (let cut = 1; cut < 40; cut++) {
+    const events = parseSessionLog(whole.subarray(0, whole.length - cut))
+    assert.deepEqual(events?.map(e => e.type), ['session', 'user/message'], `cut ${cut} bytes`)
+  }
+  const skippable = Buffer.alloc(12)
+  skippable.writeUInt32LE(0x184d2a50, 0)
+  skippable.writeUInt32LE(4, 4)
+  assert.deepEqual(parseSessionLog(Buffer.concat([frames([user('a', 1)]), skippable, frames([user('b', 2)])]))?.length, 2, 'skippable frames are skipped')
+  const brokenLine = zstdCompressSync(Buffer.from(`${JSON.stringify(user('a', 1))}\n{"type":"assis`))
+  assert.deepEqual(parseSessionLog(brokenLine)?.map(e => e.type), ['user/message'])
+  assert.equal(parseSessionLog(Buffer.from('not zstd')), undefined)
+  assert.equal(parseSessionLog(Buffer.alloc(0)), undefined)
+})
+
+test('after a crash, a reply that dsh wrote in a later frame is claimed instead of resending the call', async () => {
+  const home = tmpHome()
+  const dir = join(home, 'sessions', '--slug--', sessionIdFor('t1/build'))
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), frames([{ type: 'session', version: 4, id: sessionIdFor('t1/build'), cwd: '/w' }], [user('做事 <!-- eos:t1/c2 -->', 1)], [assistant('做完了', 2), end(3)]))
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh' })
+  assert.equal((await ex.findReply('t1/build', 't1/c2'))?.text, '做完了')
+})
+
+test('frames like dsh writes (checksum, no content size) are read; a frame cut off before more frames were appended, or a corrupt one, is skipped and reading resumes at the next frame', () => {
+  const [a, b, c] = [dshFrames([user('a', 1)]), dshFrames([user('b', 2)]), dshFrames([assistant('c', 3), end(4)])]
+  assert.equal(a[4], 0b00000100)
+  assert.deepEqual(parseSessionLog(Buffer.concat([a, b, c]))?.map(e => e.time), [1, 2, 3, 4])
+  for (const cut of [1, 5, 10]) {
+    assert.deepEqual(parseSessionLog(Buffer.concat([a, b.subarray(0, b.length - cut), c]))?.map(e => e.time), [1, 3, 4], `b cut by ${cut} bytes, then c appended`)
+  }
+  const corrupt = Buffer.from(b)
+  corrupt[corrupt.length - 6]! ^= 0xff
+  assert.deepEqual(parseSessionLog(Buffer.concat([a, corrupt, c]))?.map(e => e.time), [1, 3, 4], 'a frame failing its checksum is skipped')
+  const badMagic = Buffer.from(b)
+  badMagic[0] = 0
+  assert.deepEqual(parseSessionLog(Buffer.concat([a, badMagic, c]))?.map(e => e.time), [1, 3, 4])
+})
+
+test('a broken or non-event line in the middle is skipped instead of throwing', () => {
+  const buf = Buffer.concat([frames([user('a', 1)]), zstdCompressSync(Buffer.from('{"type":"x\nnull\n42\n')), frames([user('b', 2)])])
+  assert.deepEqual(parseSessionLog(buf)?.map(e => e.time), [1, 2])
 })

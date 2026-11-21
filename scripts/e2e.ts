@@ -6,8 +6,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { zstdDecompressSync } from 'node:zlib'
-import { sessionIdFor } from '../src/executor/dsh.ts'
+import { parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
 import { keyOf } from '../src/runner/runner.ts'
 import { Store } from '../src/store/store.ts'
 
@@ -108,7 +107,7 @@ const sessionLog = (session: string) => {
   const sid = sessionIdFor(keyOf(first.id, session))
   const root = join(DATA, 'dsh', 'sessions')
   const dir = readdirSync(root).find(d => existsSync(join(root, d, sid)))!
-  const events = zstdDecompressSync(readFileSync(join(root, dir, sid, 'session.v4.jsonl.zstd'))).toString().trim().split('\n').map(l => JSON.parse(l))
+  const events = parseSessionLog(readFileSync(join(root, dir, sid, 'session.v4.jsonl.zstd'))) ?? []
   const calls = events.filter(e => e.type === 'user/message').map(e => /eos:[^/]+\/(c\d+) -->/.exec(JSON.stringify(e.data))?.[1]).filter(Boolean)
   const presets = events.filter(e => e.type === 'permission/preset').map(e => e.data?.preset ?? e.data?.name)
   const asks = events.filter(e => e.type === 'tool/call' && e.data?.name === 'ask_user_question').length
