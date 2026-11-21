@@ -1,97 +1,97 @@
 Eos Web：http://127.0.0.1:4333（数据目录 /home/user/Eos-workbench/.eos/improve-e2e/data，Ctrl+C 退出）
-[t261121062346ewy] → [spec] spec-writer · produce
-[t2611210623471et] → [spec] spec-writer · produce
-[t261121062347ked] → [spec] spec-writer · produce
-[t261121062346ewy] ？ agent 提问（q1）：sum(numbers) 收到非数组（如 null、数字）或含非数字元素时，期望什么行为？（选项：不做校验，调用方保证输入合法（推荐） / 抛 TypeError / 忽略非数字元素）
-  在任务页面上回答，或用 eos answer t261121062346ewy "<回答>"
-[t261121062346ewy] ？ agent 提问（q2）：src/sum.js 的导出形式用哪种？（选项：仅具名导出 sum（推荐） / 具名导出 + 默认导出）
-  在任务页面上回答，或用 eos answer t261121062346ewy "<回答>"
-[t2611210623471et]   已提交 069637e
-[t2611210623471et] ✓ [spec] spec-writer · produce：23.7s，输入 1818，输出 3015，缓存读 41984
-[t2611210623471et] → [spec] 检查（1 项）
-[t2611210623471et] ✓ [spec] 检查：1/1 项通过
-[t2611210623471et] → [build] developer · produce
-[t261121062346ewy]   已提交 e63bc00
-[t261121062346ewy] ✓ [spec] spec-writer · produce：32.5s，输入 1995，输出 3941，缓存读 55168
-[t261121062346ewy] → [spec] 检查（1 项）
-[t261121062346ewy] ✓ [spec] 检查：1/1 项通过
-[t261121062346ewy] → [build] developer · produce
-[t261121062347ked]   已提交 9679afa
-[t261121062347ked] ✓ [spec] spec-writer · produce：32.7s，输入 1722，输出 4849，缓存读 39808
-[t261121062347ked] → [spec] 检查（1 项）
-[t261121062347ked] ✓ [spec] 检查：1/1 项通过
-[t261121062347ked] → [build] developer · produce
-[t2611210623471et]   已提交 c000b7f
-[t2611210623471et] ✓ [build] developer · produce：18.7s，输入 3890，输出 2327，缓存读 59136
-[t2611210623471et] → [build] 检查（1 项）
-[t2611210623471et] ✓ [build] 检查：1/1 项通过
-[t2611210623471et] → [test 第 1 轮] 检查（1 项）
-[t2611210623471et] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t2611210623471et] → [review 第 1 轮] 检查（1 项）
-[t2611210623471et] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t2611210623471et] → [review 第 1 轮] reviewer · critique
-[t261121062347ked]   已提交 e676af0
-[t261121062347ked] ✓ [build] developer · produce：14.2s，输入 3810，输出 1809，缓存读 42624
-[t261121062347ked] → [build] 检查（1 项）
-[t261121062347ked] ✓ [build] 检查：1/1 项通过
-[t261121062347ked] → [test 第 1 轮] 检查（1 项）
-[t261121062347ked] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t261121062347ked] → [review 第 1 轮] 检查（1 项）
-[t261121062347ked] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t261121062347ked] → [review 第 1 轮] reviewer · critique
-[t261121062346ewy]   已提交 8593e36
-[t261121062346ewy] ✓ [build] developer · produce：15.8s，输入 3296，输出 1699，缓存读 46720
-[t261121062346ewy] → [build] 检查（1 项）
-[t261121062346ewy] ✓ [build] 检查：1/1 项通过
-[t261121062346ewy] → [test 第 1 轮] 检查（1 项）
-[t261121062346ewy] ✓ [test 第 1 轮] 检查：1/1 项通过
-[t261121062346ewy] → [review 第 1 轮] 检查（1 项）
-[t261121062346ewy] ✓ [review 第 1 轮] 检查：1/1 项通过
-[t261121062346ewy] → [review 第 1 轮] reviewer · critique
-[t261121062346ewy] ✓ [review 第 1 轮] reviewer · critique：9.0s，输入 3664，输出 888，缓存读 24832
-[t261121062346ewy] → [review 第 1 轮] developer · respond
-[t261121062347ked] ✓ [review 第 1 轮] reviewer · critique：10.1s，输入 4497，输出 1248，缓存读 27520
-[t261121062347ked] → [review 第 1 轮] developer · respond
-[t2611210623471et] ✓ [review 第 1 轮] reviewer · critique：16.6s，输入 6027，输出 2415，缓存读 26624
-[t2611210623471et] → [review 第 1 轮] developer · respond
-[t261121062346ewy]   已提交 0de1642
-[t261121062346ewy] ✓ [review 第 1 轮] developer · respond：9.7s，输入 1327，输出 993，缓存读 46592
-[t261121062346ewy] → [review 第 2 轮] 检查（1 项）
-[t261121062346ewy] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t261121062346ewy] → [review 第 2 轮] reviewer · critique
-[t261121062347ked]   已提交 4a45f7c
-[t261121062347ked] ✓ [review 第 1 轮] developer · respond：14.2s，输入 2327，输出 1261，缓存读 83456
-[t261121062347ked] → [review 第 2 轮] 检查（1 项）
-[t261121062347ked] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t261121062347ked] → [review 第 2 轮] reviewer · critique
-[t2611210623471et]   已提交 c923fb8
-[t2611210623471et] ✓ [review 第 1 轮] developer · respond：12.8s，输入 1539，输出 1844，缓存读 43904
-[t2611210623471et] → [review 第 2 轮] 检查（1 项）
-[t2611210623471et] ✓ [review 第 2 轮] 检查：1/1 项通过
-[t2611210623471et] → [review 第 2 轮] reviewer · critique
-[t261121062346ewy] ✓ [review 第 2 轮] reviewer · critique：6.7s，输入 3432，输出 597，缓存读 28800
-[t261121062346ewy] → [deliver 第 1 轮] 检查（1 项）
-[t261121062346ewy] ✓ [deliver 第 1 轮] 检查：1/1 项通过
-[t261121062347ked] ✓ [review 第 2 轮] reviewer · critique：5.1s，输入 2116，输出 485，缓存读 33024
-[t261121062347ked] → [deliver 第 1 轮] 检查（1 项）
-[t261121062347ked] ✓ [deliver 第 1 轮] 检查：1/1 项通过
-[t2611210623471et] ✓ [review 第 2 轮] reviewer · critique：6.1s，输入 2530，输出 609，缓存读 40576
-[t2611210623471et] → [deliver 第 1 轮] 检查（1 项）
-[t2611210623471et] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121063535jju] → [spec] spec-writer · produce
+[t261121063535sn8] → [spec] spec-writer · produce
+[t261121063535pyq] → [spec] spec-writer · produce
+[t261121063535sn8] ？ agent 提问（q1）：需求只明确了“空数组抛 RangeError”。对非数组入参、元素含非数字/NaN 的行为，规格该怎么约定？（选项：只约定空数组，其余不定义（推荐） / 严格校验：非数组/非数字抛 TypeError / 非数组/非数字也抛 RangeError）
+  在任务页面上回答，或用 eos answer t261121063535sn8 "<回答>"
+[t261121063535pyq] ？ agent 提问（q1）：需求只规定了「数组为空返回 0」，没有说明非数组、或数组中含非 number 元素时的行为。这会影响实现和测试用例，请确认按哪种处理？（选项：不做额外校验，行为未定义（推荐） / 严格校验，非法输入抛 TypeError / 忽略非数字元素，只对数字取平均）
+  在任务页面上回答，或用 eos answer t261121063535pyq "<回答>"
+[t261121063535sn8]   已提交 9e405ba
+[t261121063535sn8] ✓ [spec] spec-writer · produce：24.3s，输入 2250，输出 2736，缓存读 34816
+[t261121063535sn8] → [spec] 检查（1 项）
+[t261121063535sn8] ✓ [spec] 检查：1/1 项通过
+[t261121063535sn8] → [build] developer · produce
+[t261121063535pyq]   已提交 e2a272b
+[t261121063535pyq] ✓ [spec] spec-writer · produce：35.9s，输入 4245，输出 4857，缓存读 57856
+[t261121063535pyq] → [spec] 检查（1 项）
+[t261121063535pyq] ✓ [spec] 检查：1/1 项通过
+[t261121063535pyq] → [build] developer · produce
+[t261121063535jju]   已提交 2ee02f4
+[t261121063535jju] ✓ [spec] spec-writer · produce：40.5s，输入 1462，输出 6154，缓存读 46592
+[t261121063535jju] → [spec] 检查（1 项）
+[t261121063535jju] ✓ [spec] 检查：1/1 项通过
+[t261121063535jju] → [build] developer · produce
+[t261121063535sn8]   已提交 c419bda
+[t261121063535sn8] ✓ [build] developer · produce：15.4s，输入 3497，输出 2043，缓存读 40448
+[t261121063535sn8] → [build] 检查（1 项）
+[t261121063535sn8] ✓ [build] 检查：1/1 项通过
+[t261121063535sn8] → [test 第 1 轮] 检查（1 项）
+[t261121063535sn8] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121063535sn8] → [review 第 1 轮] 检查（1 项）
+[t261121063535sn8] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121063535sn8] → [review 第 1 轮] reviewer · critique
+[t261121063535pyq]   已提交 214121d
+[t261121063535pyq] ✓ [build] developer · produce：15.7s，输入 3329，输出 1760，缓存读 40320
+[t261121063535pyq] → [build] 检查（1 项）
+[t261121063535pyq] ✓ [build] 检查：1/1 项通过
+[t261121063535pyq] → [test 第 1 轮] 检查（1 项）
+[t261121063535pyq] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121063535pyq] → [review 第 1 轮] 检查（1 项）
+[t261121063535pyq] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121063535pyq] → [review 第 1 轮] reviewer · critique
+[t261121063535jju]   已提交 16ed31c
+[t261121063535jju] ✓ [build] developer · produce：17.9s，输入 3746，输出 2301，缓存读 51072
+[t261121063535jju] → [build] 检查（1 项）
+[t261121063535jju] ✓ [build] 检查：1/1 项通过
+[t261121063535jju] → [test 第 1 轮] 检查（1 项）
+[t261121063535jju] ✓ [test 第 1 轮] 检查：1/1 项通过
+[t261121063535jju] → [review 第 1 轮] 检查（1 项）
+[t261121063535jju] ✓ [review 第 1 轮] 检查：1/1 项通过
+[t261121063535jju] → [review 第 1 轮] reviewer · critique
+[t261121063535sn8] ✓ [review 第 1 轮] reviewer · critique：18.0s，输入 4355，输出 2470，缓存读 27648
+[t261121063535sn8] → [review 第 1 轮] developer · respond
+[t261121063535pyq] ✓ [review 第 1 轮] reviewer · critique：11.8s，输入 4439，输出 1238，缓存读 28928
+[t261121063535pyq] → [review 第 1 轮] developer · respond
+[t261121063535jju] ✓ [review 第 1 轮] reviewer · critique：14.8s，输入 5400，输出 1898，缓存读 27264
+[t261121063535jju] → [review 第 1 轮] developer · respond
+[t261121063535pyq]   已提交 4236c49
+[t261121063535pyq] ✓ [review 第 1 轮] developer · respond：9.1s，输入 1112，输出 905，缓存读 37376
+[t261121063535pyq] → [review 第 2 轮] 检查（1 项）
+[t261121063535sn8]   已提交 4d64c4d
+[t261121063535sn8] ✓ [review 第 1 轮] developer · respond：15.2s，输入 2312，输出 1522，缓存读 73472
+[t261121063535sn8] → [review 第 2 轮] 检查（1 项）
+[t261121063535pyq] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121063535pyq] → [review 第 2 轮] reviewer · critique
+[t261121063535sn8] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121063535sn8] → [review 第 2 轮] reviewer · critique
+[t261121063535sn8] ✓ [review 第 2 轮] reviewer · critique：4.3s，输入 2296，输出 465，缓存读 23040
+[t261121063535sn8] → [deliver 第 1 轮] 检查（1 项）
+[t261121063535sn8] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121063535pyq] ✓ [review 第 2 轮] reviewer · critique：7.4s，输入 2002，输出 653，缓存读 32128
+[t261121063535pyq] → [deliver 第 1 轮] 检查（1 项）
+[t261121063535pyq] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+[t261121063535jju]   已提交 5e31fac
+[t261121063535jju] ✓ [review 第 1 轮] developer · respond：14.6s，输入 1996，输出 1298，缓存读 74752
+[t261121063535jju] → [review 第 2 轮] 检查（1 项）
+[t261121063535jju] ✓ [review 第 2 轮] 检查：1/1 项通过
+[t261121063535jju] → [review 第 2 轮] reviewer · critique
+[t261121063535jju] ✓ [review 第 2 轮] reviewer · critique：7.5s，输入 1919，输出 582，缓存读 37632
+[t261121063535jju] → [deliver 第 1 轮] 检查（1 项）
+[t261121063535jju] ✓ [deliver 第 1 轮] 检查：1/1 项通过
 → improver：3 个任务，3 条证据，4 个候选约定
-✓ improver：13.0s，输入 3466，输出 2396
+✓ improver：16.3s，输入 3680，输出 3101
 
 提案 #1：Agent 模板「developer」第 1 版 → 新版本
-理由：三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开发方；写进提示词后，开发在提交前就会补齐，减少评审轮次。
-证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9
+理由：三个任务的导出函数都缺少 @example 而被评审驳回，说明开发提示词里没有可执行的硬性规则；写进模板让开发在提交前自查，避免同一问题重复出现在评审阶段。
+证据：t261121063535jju:9、t261121063535sn8:11、t261121063535pyq:11
 
 提案 #2：约定文档「研发约定」第 1 版 → 新版本
-理由：评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有角色可见、可核对，避免开发遗漏而评审反复指出。
-证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9
+理由：评审三次都以“团队规则要求导出函数 JSDoc 含 @example”为由驳回，但约定文档里没有这条，导致开发和评审口径不一致；把规则写进共享约定，让开发事前就知道、评审有据可依。
+证据：t261121063535jju:9、t261121063535sn8:11、t261121063535pyq:11
 
-提案 #3：技能「write-changes」第 1 版 → 新版本
-理由：证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件；在改动说明模板里明确要列全文件并说明工作流要求的例外，可避免同类评审意见。
-证据：t2611210623471et:9
+提案 #3：工作流「standard」第 1 版 → 新版本
+理由：有一个任务因规格验收标准列出的允许改动文件清单未包含工作流要求的 docs/changes.md，开发新增该文件被判为规格外改动；在规格阶段提示作者把它算进清单，可消除这种口径冲突。
+证据：t261121063535sn8:11
 
 共 3 条待审批：npm run eos -- approve <提案号>，或在网页上审批
 

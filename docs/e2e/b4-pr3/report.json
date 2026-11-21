@@ -1,57 +1,57 @@
 {
   "tasks": [
-    "t261121062346ewy",
-    "t2611210623471et",
-    "t261121062347ked"
+    "t261121063535jju",
+    "t261121063535sn8",
+    "t261121063535pyq"
   ],
   "signals": [
     {
-      "id": "t261121062346ewy:13",
+      "id": "t261121063535jju:9",
       "kind": "review_changes",
       "role": "developer",
-      "text": "功能与测试均符合 docs/spec.md 的 AC1–AC6，npm test 本地退出码 0、4/4 通过；但导出的 sum 缺少团队规则强制要求的 JSDoc @example 用法示例，需补齐。\n1. [major] src/sum.js：导出的函数 sum 缺少团队规则强制要求的 JSDoc @example 用法示例（当前只有说明、@param、@returns）。请按约定在 src/sum.js 中为 sum 的 JSDoc 补上 @example 块，给出可运行的使用示例，例如：\n * @example\n * sum([]); // 0\n * @example\n * sum(["
+      "text": "sum 的实现与全部功能验收标准相符，npm test 实测 5 个用例通过、退出码 0；但团队强制规则要求导出函数必须有含 @example 的 JSDoc，src/sum.js 的 sum 缺少 @example。\n1. [major] src/sum.js：导出的函数 sum 缺少 @example 用法示例，违反团队规则“每个导出的函数都要有 JSDoc 注释，并且包含 @example 用法示例”。现有注释只有描述、@param 和 @returns。请在 src/sum.js 中为 sum 的 JSDoc 补充 @example，例如 `@example\\n * import { "
     },
     {
-      "id": "t2611210623471et:9",
+      "id": "t261121063535sn8:11",
       "kind": "review_changes",
       "role": "developer",
-      "text": "功能实现与测试覆盖了 docs/spec.md 的全部验收场景，npm test 实际运行 8 个用例且全部通过（exit 0）；但导出函数 max 的 JSDoc 缺少团队规则强制要求的 @example，需补充后再通过。\n1. [major] src/max.js：导出的 max 函数 JSDoc 只有 @param/@returns，缺少团队约定要求的 @example 用法示例（规则：每个导出函数必须包含 @example，缺失一律 changes）。建议补充，例如：@example\nimport { max } from './max.js';\nmax([1, 2, 3]); // "
+      "text": "实现与 9 类测试均符合规格，npm test 10/10 通过；但导出的 max 缺少团队要求 JSDoc @example，且提交多出规格验收第 7 条清单外的 docs/changes.md。\n1. [major] src/max.js：团队规则要求每个导出函数都有 JSDoc 且必须包含 @example 用法示例。当前 src/max.js 中导出的 max(numbers) 只有 @param/@returns/@throws，缺少 @example 块。请在 JSDoc 中补充 @example（例如 max([1, 5, 3]) => 5，以及 max([]) 抛 RangeE"
     },
     {
-      "id": "t261121062347ked:9",
+      "id": "t261121063535pyq:11",
       "kind": "review_changes",
       "role": "developer",
-      "text": "实现、测试与 npm test 均符合 docs/spec.md 的验收标准（6 个用例全部通过，package.json 未改动），但导出的 avg 缺少团队强制要求的 @example JSDoc 示例。\n1. [major] src/avg.js：导出的函数 avg 缺少 @example 用法示例。团队规则要求每个导出函数都必须有 JSDoc 注释并包含 @example；当前 JSDoc 只有说明、@param 和 @returns。请在 src/avg.js 的 avg 注释中补充 @example（例如展示 avg([1, 2, 3]) 返回 2 以及 avg([]) 返回 0）"
+      "text": "功能实现与规格验收标准基本吻合，`npm test` 5 个测试通过且退出码为 0；唯一问题是团队强制规则要求每个导出函数的 JSDoc 包含 @example，而导出的 avg 缺少该示例，需补齐后重新提交。\n1. [major] src/avg.js：导出函数 avg 的 JSDoc 只有 @param 和 @returns，缺少团队规则强制要求的 @example 用法示例。请在 src/avg.js 中为 avg 补充 @example 块，例如：\n * @example\n * import { avg } from './avg.js';\n * avg([1, 2, 3]); // "
     }
   ],
-  "improve": "→ improver：3 个任务，3 条证据，4 个候选约定\n✓ improver：13.0s，输入 3466，输出 2396\n\n提案 #1：Agent 模板「developer」第 1 版 → 新版本\n理由：三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开发方；写进提示词后，开发在提交前就会补齐，减少评审轮次。\n证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9\n\n提案 #2：约定文档「研发约定」第 1 版 → 新版本\n理由：评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有角色可见、可核对，避免开发遗漏而评审反复指出。\n证据：t261121062346ewy:13、t2611210623471et:9、t261121062347ked:9\n\n提案 #3：技能「write-changes」第 1 版 → 新版本\n理由：证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件；在改动说明模板里明确要列全文件并说明工作流要求的例外，可避免同类评审意见。\n证据：t2611210623471et:9\n\n共 3 条待审批：npm run eos -- approve <提案号>，或在网页上审批\n",
+  "improve": "→ improver：3 个任务，3 条证据，4 个候选约定\n✓ improver：16.3s，输入 3680，输出 3101\n\n提案 #1：Agent 模板「developer」第 1 版 → 新版本\n理由：三个任务的导出函数都缺少 @example 而被评审驳回，说明开发提示词里没有可执行的硬性规则；写进模板让开发在提交前自查，避免同一问题重复出现在评审阶段。\n证据：t261121063535jju:9、t261121063535sn8:11、t261121063535pyq:11\n\n提案 #2：约定文档「研发约定」第 1 版 → 新版本\n理由：评审三次都以“团队规则要求导出函数 JSDoc 含 @example”为由驳回，但约定文档里没有这条，导致开发和评审口径不一致；把规则写进共享约定，让开发事前就知道、评审有据可依。\n证据：t261121063535jju:9、t261121063535sn8:11、t261121063535pyq:11\n\n提案 #3：工作流「standard」第 1 版 → 新版本\n理由：有一个任务因规格验收标准列出的允许改动文件清单未包含工作流要求的 docs/changes.md，开发新增该文件被判为规格外改动；在规格阶段提示作者把它算进清单，可消除这种口径冲突。\n证据：t261121063535sn8:11\n\n共 3 条待审批：npm run eos -- approve <提案号>，或在网页上审批\n",
   "approve": "提案 #2 已批准：约定文档「研发约定」现在是第 2 版\n",
-  "proposalsList": "#3  待审批  技能「write-changes」第 1 版  证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件\n#2  已批准  约定文档「研发约定」第 1 版  评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有\n#1  待审批  Agent 模板「developer」第 1 版  三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开\n",
+  "proposalsList": "#3  待审批  工作流「standard」第 1 版  有一个任务因规格验收标准列出的允许改动文件清单未包含工作流要求的 docs/changes.md，开\n#2  已批准  约定文档「研发约定」第 1 版  评审三次都以“团队规则要求导出函数 JSDoc 含 @example”为由驳回，但约定文档里没有这条\n#1  待审批  Agent 模板「developer」第 1 版  三个任务的导出函数都缺少 @example 而被评审驳回，说明开发提示词里没有可执行的硬性规则；写进\n",
   "proposals": [
     {
       "id": 3,
       "target": {
-        "kind": "skill",
-        "name": "write-changes"
+        "kind": "workflow",
+        "name": "standard"
       },
       "baseVersion": 1,
       "status": "pending",
-      "rationale": "证据中评审指出 docs/changes.md 的改动清单与实际不符、且未说明超出规格允许范围的文件；在改动说明模板里明确要列全文件并说明工作流要求的例外，可避免同类评审意见。",
+      "rationale": "有一个任务因规格验收标准列出的允许改动文件清单未包含工作流要求的 docs/changes.md，开发新增该文件被判为规格外改动；在规格阶段提示作者把它算进清单，可消除这种口径冲突。",
       "evidence": [
-        "t2611210623471et:9"
+        "t261121063535sn8:11"
       ],
       "generator": {
         "model": "deepseek-flash",
         "usage": {
-          "input": 3466,
-          "output": 2396,
-          "cacheRead": 2688,
+          "input": 3680,
+          "output": 3101,
+          "cacheRead": 2560,
           "cacheWrite": 0
         },
-        "ms": 13001,
-        "run": "imwq0xhzq351c6e"
+        "ms": 16332,
+        "run": "imwq1d0bz30523c"
       },
-      "content": "---\nname: write-changes\ndescription: 写 docs/changes.md（改动说明）时使用：团队约定的改动说明格式。\n---\n# 改动说明的写法\n\ndocs/changes.md 用下面这几个二级标题，按顺序写：\n\n## 改动\n逐条列出改了哪些文件、做了什么，一条一行。\n所有改动的文件都要列出，包括 docs/changes.md 本身。\n如果为满足工作流要求改了规格允许范围之外的文件（如 docs/changes.md），在这一节显式说明这是工作流要求的交付物。\n\n## 验证\n写清楚怎么验证的：跑了哪些命令、结果如何。没跑的写\"没跑\"和原因。\n只写实际执行过的命令和真实结果，不要写与实际不符的结论。\n\n## 风险\n可能影响的地方、没覆盖到的情况。没有就写\"无\"。\n"
+      "content": "name: standard\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付。每个阶段的交付物由平台检查。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  developer: { template: developer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。验收标准里如果限定允许改动的文件，要把工作流要求的 docs/changes.md（开发阶段的改动说明）包含进清单，避免和开发阶段的交付物冲突。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  - id: build\n    kind: agent\n    role: developer\n    inputs: [spec]\n    task: 按 docs/spec.md 实现需求，并把改动说明写到 docs/changes.md。\n    maxFixes: 2\n    deliverables:\n      - { path: docs/changes.md, sections: [改动, 验证] }\n\n  # 测试：平台跑测试命令，失败就把输出交回开发修改，再跑，最多 5 轮。按仓库把命令换成你们的测试命令。\n  - id: test\n    kind: dialog\n    with: build\n    task: 运行测试，失败时交回开发修复。\n    maxRounds: 5\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: build\n    escalate: spec\n    maxRounds: 5\n    inputs: [spec]\n    task: 评审开发的改动是否满足 docs/spec.md 的验收标准。\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  # 交付：占位命令。在团队约定页把它换成你们的发布或开 PR 命令；命令失败会交回开发处理。\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 执行交付命令。\n    maxRounds: 2\n    checks:\n      - { run: [sh, -c, \"echo 交付占位：在团队约定页把这条命令换成你们的发布或开 PR 命令\"], timeoutSec: 60 }\n"
     },
     {
       "id": 2,
@@ -61,24 +61,24 @@
       },
       "baseVersion": 1,
       "status": "approved",
-      "rationale": "评审引用的“导出函数必须有 @example”规则在当前研发约定里没有明文，补进代码约定后规则对所有角色可见、可核对，避免开发遗漏而评审反复指出。",
+      "rationale": "评审三次都以“团队规则要求导出函数 JSDoc 含 @example”为由驳回，但约定文档里没有这条，导致开发和评审口径不一致；把规则写进共享约定，让开发事前就知道、评审有据可依。",
       "evidence": [
-        "t261121062346ewy:13",
-        "t2611210623471et:9",
-        "t261121062347ked:9"
+        "t261121063535jju:9",
+        "t261121063535sn8:11",
+        "t261121063535pyq:11"
       ],
       "generator": {
         "model": "deepseek-flash",
         "usage": {
-          "input": 3466,
-          "output": 2396,
-          "cacheRead": 2688,
+          "input": 3680,
+          "output": 3101,
+          "cacheRead": 2560,
           "cacheWrite": 0
         },
-        "ms": 13001,
-        "run": "imwq0xhzq351c6e"
+        "ms": 16332,
+        "run": "imwq1d0bz30523c"
       },
-      "content": "# 研发约定\n\n团队所有 agent 都遵守这份约定。它由平台注入到每个会话的开头，修改后对新任务生效。\n\n## 交付物\n\n- 每个阶段的交付物写在仓库里约定的位置，用 Markdown，章节标题和工作流里要求的一致。\n- 交付物写给下一个阶段的人看：结论在前，细节在后，不写空话。\n\n## 代码\n\n- 只做需求和规格里要求的改动；发现别的问题记在交付说明里，不顺手修。\n- 新增或改动的逻辑要有测试，提交前在本地跑通。\n- 每个导出的函数都要有 JSDoc 注释，并包含 @example 用法示例（示例要能直接运行）。\n- 不执行 git commit、push、merge、rebase：提交由平台负责。\n\n## 沟通\n\n- 需求有歧义且会影响做法时，向用户提问，不要猜。\n- 收到评审意见或检查失败时逐条处理：修改，或者带着理由说明为什么不改。\n"
+      "content": "# 研发约定\n\n团队所有 agent 都遵守这份约定。它由平台注入到每个会话的开头，修改后对新任务生效。\n\n## 交付物\n\n- 每个阶段的交付物写在仓库里约定的位置，用 Markdown，章节标题和工作流里要求的一致。\n- 交付物写给下一个阶段的人看：结论在前，细节在后，不写空话。\n\n## 代码\n\n- 只做需求和规格里要求的改动；发现别的问题记在交付说明里，不顺手修。\n- 新增或改动的逻辑要有测试，提交前在本地跑通。\n- 每个导出的函数都要有 JSDoc，并且必须包含 @example 用法示例（正常用法和空输入/边界各一例），不能只写 @param 和 @returns。\n- 不执行 git commit、push、merge、rebase：提交由平台负责。\n\n## 沟通\n\n- 需求有歧义且会影响做法时，向用户提问，不要猜。\n- 收到评审意见或检查失败时逐条处理：修改，或者带着理由说明为什么不改。\n"
     },
     {
       "id": 1,
@@ -88,24 +88,24 @@
       },
       "baseVersion": 1,
       "status": "pending",
-      "rationale": "三次评审都因导出函数缺少 JSDoc @example 被退回，说明开发模板没有把这条团队规则交给开发方；写进提示词后，开发在提交前就会补齐，减少评审轮次。",
+      "rationale": "三个任务的导出函数都缺少 @example 而被评审驳回，说明开发提示词里没有可执行的硬性规则；写进模板让开发在提交前自查，避免同一问题重复出现在评审阶段。",
       "evidence": [
-        "t261121062346ewy:13",
-        "t2611210623471et:9",
-        "t261121062347ked:9"
+        "t261121063535jju:9",
+        "t261121063535sn8:11",
+        "t261121063535pyq:11"
       ],
       "generator": {
         "model": "deepseek-flash",
         "usage": {
-          "input": 3466,
-          "output": 2396,
-          "cacheRead": 2688,
+          "input": 3680,
+          "output": 3101,
+          "cacheRead": 2560,
           "cacheWrite": 0
         },
-        "ms": 13001,
-        "run": "imwq0xhzq351c6e"
+        "ms": 16332,
+        "run": "imwq1d0bz30523c"
       },
-      "content": "name: developer\ndescription: 开发：按规格实现并补测试，只改代码、测试和改动说明。\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]\ntools:\n  deny: [subagent, schedule]\nskills: [write-changes]\nprompt: |\n  你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。\n  - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。\n  - 每个导出的函数都要有 JSDoc 注释，并包含 @example 用法示例（示例要能直接运行，覆盖典型输入和边界情况）。\n  - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。\n  - 每次回复最后简要说明：改了什么、为什么、怎么验证的。\n"
+      "content": "name: developer\ndescription: 开发：按规格实现并补测试，只改代码、测试和改动说明。\nmodel: deepseek-flash\nwrite: worktree\nwritePaths: [src/**, test/**, tests/**, docs/changes.md, package.json, package-lock.json]\ntools:\n  deny: [subagent, schedule]\nskills: [write-changes]\nprompt: |\n  你是严谨的软件工程师，在当前目录（一个独立的 git worktree）里按规格实现需求。\n  - 只在当前目录内修改文件，不做规格之外的改动；为改动补充或更新测试。\n  - 每个导出的函数都要有 JSDoc，并且必须包含 @example 用法示例（正常用法和空输入/边界各一例），不能只写 @param 和 @returns；改动或新增导出函数后逐一核对。\n  - 提交前对照规格验收标准和团队约定逐条自查，硬性规则（如 JSDoc/@example）确认满足后再回复。\n  - 收到测试失败、检查失败或评审意见时逐条处理：要么修改，要么带着理由说明为什么不改。\n  - 每次回复最后简要说明：改了什么、为什么、怎么验证的。\n"
     }
   ],
   "checks": {
