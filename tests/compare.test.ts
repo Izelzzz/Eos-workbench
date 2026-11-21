@@ -77,3 +77,12 @@ test('a task whose snapshot has no template info falls back to the versions reco
   assert.equal(versionUsed(old, 'template', 'developer'), 1)
   assert.equal(versionUsed({ ...old, used: {} }, 'template', 'developer'), null)
 })
+
+test('aborted tasks count in their group and lower the completion rate; tasks waiting for an answer stay out', () => {
+  const aborted = sample('x', 2, 'clean')
+  const abortedTask = { ...aborted, task: { ...aborted.task, status: 'aborted' as const } }
+  const waiting = sample('w', 2, 'clean')
+  const waitingTask = { ...waiting, task: { ...waiting.task, status: 'waiting_user' as const } }
+  const c = compare([sample('a1', 1, 'clean'), sample('b1', 2, 'clean'), abortedTask, waitingTask], { kind: 'template', name: 'developer' }, 2)
+  assert.deepEqual([c.after.tasks, c.after.done, c.after.outcomes.map(o => o.task)], [2, 1, ['b1', 'x']])
+})

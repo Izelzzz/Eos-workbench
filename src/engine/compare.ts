@@ -25,7 +25,7 @@ export type TaskOutcome = {
   reviews: number
   /** 没通过的检查结果条数。 */
   checkFailures: number
-  /** 交付物检查没通过后的补齐次数。 */
+  /** agent 节点的补齐调用次数：交付物检查没通过后的补齐，以及检查次数用完、按用户指示的调整（引擎里都是 fix 调用）。 */
   fixes: number
   /** 归纳出的证据条数（评审要求修改、检查失败……，见 evidence.ts）。 */
   signals: number

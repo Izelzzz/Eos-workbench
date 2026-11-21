@@ -5,14 +5,16 @@ import { duration, tokens } from './format.ts'
 const ROWS: { key: OutcomeKey; label: string; fmt: (n: number) => string }[] = [
   { key: 'reviews', label: '评审轮次（有效结论）', fmt: n => n.toFixed(1) },
   { key: 'checkFailures', label: '检查失败', fmt: n => n.toFixed(1) },
-  { key: 'fixes', label: '补齐次数', fmt: n => n.toFixed(1) },
+  { key: 'fixes', label: '补齐次数（含按用户指示）', fmt: n => n.toFixed(1) },
   { key: 'signals', label: '证据条数', fmt: n => n.toFixed(1) },
   { key: 'tokens', label: 'token（输入 + 输出）', fmt: n => tokens(Math.round(n)) },
   { key: 'agentMs', label: 'agent 时长', fmt: n => duration(n) },
 ]
 
 const pct = (x: number) => `${Math.round(x * 100)}%`
-const change = (before: number, after: number) => (before === 0 ? (after === 0 ? '0' : '新出现') : `${after >= before ? '+' : ''}${pct((after - before) / before)}`)
+const change = (before: number, after: number) => (after === before ? '0%' : before === 0 ? '新出现' : `${after > before ? '+' : ''}${pct((after - before) / before)}`)
+/** 完成率的变化用百分点。 */
+const points = (before: number, after: number) => { const d = Math.round((after - before) * 100); return d === 0 ? '0' : `${d > 0 ? '+' : ''}${d} 个百分点` }
 const taskLinks = (ids: string[]) => ids.length === 0 ? <span className="muted">无</span> : ids.map((id, i) => <span key={id}>{i > 0 && '、'}<a href={`#/tasks/${id}`}>{id}</a></span>)
 
 export function ComparisonTable(props: { c: Comparison }) {
@@ -27,7 +29,8 @@ export function ComparisonTable(props: { c: Comparison }) {
             <tr><td>任务数</td><td className="num">{b.tasks}</td><td className="num">{a.tasks}</td><td className="num muted">—</td></tr>
             <tr>
               <td>完成率</td>
-              <td className="num">{b.tasks === 0 ? '—' : pct(b.done / b.tasks)}</td><td className="num">{a.tasks === 0 ? '—' : pct(a.done / a.tasks)}</td><td className="num muted">—</td>
+              <td className="num">{b.tasks === 0 ? '—' : pct(b.done / b.tasks)}</td><td className="num">{a.tasks === 0 ? '—' : pct(a.done / a.tasks)}</td>
+              <td className="num">{enough ? points(b.done / b.tasks, a.done / a.tasks) : <span className="muted">—</span>}</td>
             </tr>
             {ROWS.map(r => (
               <tr key={r.key}>
