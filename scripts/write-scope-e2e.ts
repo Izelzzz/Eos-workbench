@@ -1,9 +1,9 @@
 // 试用反馈第 1 条的端到端验证：agent 事先知道可写范围，范围外的位置改放到范围内并说明，不为路径问用户。
 // 真实模型、内置 standard 工作流（developer 模板只能写 src/**、test/**、tests/**、docs/changes.md、package*.json）。
-// 需求故意要求把代码写到 lib/clamp.js（范围外）。脚本用命令行跑任务；agent 提问时记下问题、回答「按你的判断」后续跑。
+// 需求故意要求把代码写到 lib/clamp.js（范围外）。脚本用命令行跑任务；agent 提问时（调用进行中或对话尽头）记下问题，回答「按你的判断做」。
 // 结果写到 <输出目录>/report.json，完整输出在 run.log。改动前后用同一个脚本跑，对比两份报告。
 // 用法：node --import tsx scripts/write-scope-e2e.ts [输出目录名，默认 write-scope-e2e]
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Store } from '../src/store/store.ts'
@@ -29,20 +29,41 @@ writeFileSync(join(REPO, 'README.md'), '# demo\n')
 for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
 
 const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-const out = eos('run', '--repo', REPO, '--no-wait', REQUEST)
-const id = /任务 (t\w+)：/.exec(out)?.[1]
-if (id === undefined) throw new Error(`没拿到任务 id：\n${out}`)
-
-const questions: { source: string; text: string }[] = []
-for (let i = 0; i < 6; i++) {
-  const store = new Store(join(DATA, 'eos.db'))
-  const t = store.get(id)!
-  store.close()
-  if (t.status !== 'waiting_user') break
-  questions.push({ source: t.question!.source, text: t.question!.text })
-  eos('answer', id, '按你的判断做')
-  eos('resume', id, '--no-wait')
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+const read = () => {
+  const s = new Store(join(DATA, 'eos.db'))
+  try {
+    const [row] = s.list()
+    return row === undefined ? undefined : s.get(row.id)
+  } finally {
+    s.close()
+  }
 }
+
+/** 运行一次 runner（run 或 resume）直到它退出；期间 agent 提问就回答。 */
+const runOnce = async (args: string[]) => {
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--no-wait', '--data', DATA], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  child.stdout.on('data', b => appendFileSync(LOG, b))
+  child.stderr.on('data', b => appendFileSync(LOG, b))
+  const exited = new Promise(r => child.on('exit', r))
+  let done = false
+  void exited.then(() => { done = true })
+  appendFileSync(LOG, `\n$ eos ${args.join(' ')}\n`)
+  while (!done) {
+    await sleep(3000)
+    const t = read()
+    if (t?.question !== undefined && !questions.some(q => q.id === `${t.id}/${t.question!.id}`)) {
+      questions.push({ id: `${t.id}/${t.question.id}`, source: t.question.source, node: t.question.node, text: t.question.text })
+      eos('answer', t.id, '按你的判断做')
+    }
+  }
+}
+
+const questions: { id: string; source: string; node?: string; text: string }[] = []
+await runOnce(['run', '--repo', REPO, REQUEST])
+const id = read()?.id
+if (id === undefined) throw new Error('没有建出任务，见 run.log')
+for (let i = 0; i < 6 && read()?.status !== 'done' && read()?.status !== 'failed'; i++) await runOnce(['resume', id])
 
 const store = new Store(join(DATA, 'eos.db'))
 const t = store.get(id)!
@@ -53,11 +74,13 @@ const firstBuild = calls.find(c => c.node === 'build')
 const files = execFileSync('git', ['diff', '--name-only', meta.baseSha, meta.branch], { cwd: REPO, encoding: 'utf8' }).trim().split('\n').filter(f => f !== '')
 const reverted = calls.flatMap(c => (c.reverted ?? []).map(p => `${c.node}: ${p}`))
 const pathQuestions = questions.filter(q => /lib|路径|目录|位置|范围/.test(q.text))
+const build = calls.filter(c => c.node === 'build')
 
 const report = {
   commit, task: id, status: t.status, request: REQUEST,
   checks: {
     '开发第一次调用的提示词里有可写范围': firstBuild?.prompt.includes('# 你的可写范围') ?? false,
+    '开发第一次回复就没有越界（事先知道范围）': build.length > 0 && (build[0]!.reverted ?? []).length === 0,
     '没有为路径向用户提问': pathQuestions.length === 0,
     '没有越界改动被撤销': reverted.length === 0,
     '任务分支里没有 lib/ 下的文件': !files.some(f => f.startsWith('lib/')),

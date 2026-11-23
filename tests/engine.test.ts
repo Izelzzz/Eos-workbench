@@ -240,7 +240,7 @@ nodes:
   assert.match(d.pending.prompt, /# 你的可写范围\n\n你这个角色是只读的，不能改动任何文件/, '只读角色')
   d.reply('方案 v1')
   assert.match(d.pending.prompt, /# 你的角色[\s\S]*# 你的可写范围\n\n你可以改动的路径（任务 worktree 内的 glob）：\n- src\/\*\*\n- tests\/\*\*/)
-  assert.match(d.pending.prompt, /改放到范围内最合适的位置，并在回复里写明放在了哪里、为什么；不要为路径向用户提问/)
+  assert.match(d.pending.prompt, /写每个文件之前，先核对它的路径匹配上面的某一条[\s\S]*改放到范围内最合适的位置，并在回复里写明原来要求的位置、实际放在了哪里、为什么；不要为路径向用户提问/)
   assert.doesNotMatch(d.pending.prompt, /由用户决定/)
   d.reply('实现 v1')
   d.reply(CHANGES)

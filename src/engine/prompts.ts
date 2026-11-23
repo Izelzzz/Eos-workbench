@@ -25,8 +25,9 @@ const conventions = (task: Task): string =>
   task.docs.map(d => section(`团队约定：${d.name}（第 ${d.version} 版）`, d.content)).join('')
 
 /** 范围外的位置怎么办：会话开头和越界撤销后的说明用同一条规则，agent 不为路径问用户。 */
-const SCOPE_RULE = '可写范围由团队的 Agent 模板决定，任务里改不了。需求、方案或评审要你写到范围外的位置时，改放到范围内最合适的位置，'
-  + '并在回复里写明放在了哪里、为什么；不要为路径向用户提问，也不要建议放宽范围。范围外的改动会在提交前被平台撤销。'
+const SCOPE_RULE = '可写范围由团队的 Agent 模板决定，任务里改不了。写每个文件之前，先核对它的路径匹配上面的某一条；'
+  + '需求、规格、方案或评审里点名的路径也一样要核对。点名的位置在范围外时，改放到范围内最合适的位置，'
+  + '并在回复里写明原来要求的位置、实际放在了哪里、为什么；不要为路径向用户提问，也不要建议放宽范围。范围外的改动会在提交前被平台撤销。'
 
 const allowedPaths = (writePaths: string[]): string =>
   writePaths.includes('**') ? '你可以改动任务 worktree 里的任何文件。' : `你可以改动的路径（任务 worktree 内的 glob）：\n${writePaths.map(p => `- ${p}`).join('\n')}`
