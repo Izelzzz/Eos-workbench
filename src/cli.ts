@@ -10,6 +10,7 @@ import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor, dshInstall } from './executor/dsh.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
+import { appendLog, processLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
@@ -86,7 +87,7 @@ const showQuestion = (t: Task) => {
 
 const summary = (t: Task) => {
   say(`\n任务 ${t.id}：${STATUS[t.status]} · ${describePosition(t)}`)
-  if (t.failure !== undefined) say(`失败原因：${t.failure}\n重试：npm run eos -- retry ${t.id}`)
+  if (t.failure !== undefined) say(`失败原因\n${t.failure}${t.failure.includes('eos -- retry') ? '' : `\n重试：npm run eos -- retry ${t.id}`}`)
   showQuestion(t)
   if (t.status === 'done') {
     const meta = store.meta(t.id)
@@ -208,12 +209,18 @@ const commands: Record<string, () => Promise<void> | void> = {
   async web() {
     const port = Number(values.port)
     const ex = executor()
-    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => say(`[${id}] ${line}`) })
+    // Web 服务进程的输出也写进 logs/eos.log：服务器上没人盯着终端。
+    const processLog = processLogPath(dataDir)
+    const note = (line: string) => {
+      appendLog(processLog, line)
+      say(line)
+    }
+    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`) })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir } })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
-    say(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，Ctrl+C 退出）`)
+    note(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
     const resumed = sup.resumeAll()
-    if (resumed.length > 0) say(`接着运行上次没跑完的任务：${resumed.join('、')}`)
+    if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
       server.close()
       void ex.close().finally(() => process.exit(130))

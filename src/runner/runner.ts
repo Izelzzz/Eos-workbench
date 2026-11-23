@@ -5,6 +5,7 @@ import { isCheck } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf } from '../workflow/types.ts'
+import { explain } from './failure.ts'
 
 export type RunnerOptions = {
   store: Store
@@ -20,6 +21,16 @@ export type RunnerOptions = {
   /** 执行一组检查（在任务的 worktree 里）。结果顺序与 run.checks 一致。 */
   checker?: (task: Task, run: CheckRun, signal: AbortSignal) => Promise<CheckResult[]>
   log?: (line: string) => void
+  /** 只写进日志文件、不打到终端的详细信息（错误的完整输出和堆栈）。 */
+  detail?: (text: string) => void
+  /** 这个任务的日志文件，写进失败原因里。 */
+  logPath?: string
+}
+
+/** 错误的完整信息：git 的 stderr、错误文字、堆栈。只进日志文件。 */
+const fullError = (e: unknown): string => {
+  const stderr = (e as { stderr?: unknown }).stderr
+  return [stderr === undefined ? '' : `stderr：${String(stderr).trim()}`, e instanceof Error ? e.stack ?? e.message : String(e)].filter(x => x !== '').join('\n')
 }
 
 export const keyOf = (taskId: string, session: string) => `${taskId}/${session}`
@@ -35,6 +46,13 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const pollMs = o.pollMs ?? 1000
   const log = o.log ?? (() => {})
   const dispatch = (event: Parameters<Store['dispatch']>[1], actor: 'runner' | 'executor' = 'executor') => o.store.dispatch(id, event, now(), actor)
+  /** 这一步失败：终端打一行，日志文件记完整信息，任务的失败原因写清哪一步、什么原因、怎么修。 */
+  const fail = (where: string, callId: Call['id'] | CheckRun['id'], reason: string, e?: unknown) => {
+    const first = reason.trim().split('\n')[0]!
+    log(`✗ ${where}：${first}`)
+    if (e !== undefined) o.detail?.(`✗ ${where} 的完整错误：\n${fullError(e)}`)
+    dispatch({ kind: 'call_failed', call: callId, error: explain({ where, error: first, log: o.logPath ?? '（没有日志文件）', task: id }) })
+  }
 
   /** agent 中途提问：记成问题，等 `eos answer` 写入回答。崩溃前已经提过的同一个问题直接复用。 */
   const waitForAnswer = async (call: Call, q: { id: string; text: string; options?: string[] }, signal: AbortSignal): Promise<string> => {
@@ -99,8 +117,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
           },
         })
       } catch (e) {
-        log(`✗ ${label(task, call)}：${(e as Error).message}`)
-        dispatch({ kind: 'call_failed', call: call.id, error: (e as Error).message })
+        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, (e as Error).message, e)
         return
       }
     }
@@ -111,9 +128,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
         reverted = o.afterWrite?.(task, call) ?? []
       } catch (e) {
         // 改动没提交上（例如 worktree 被删了）：这次调用记为失败，任务停下等人工处理，而不是让 runner 悄悄退出。
-        const error = `提交改动失败：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}`
-        log(`✗ ${label(task, call)}：${error}`)
-        dispatch({ kind: 'call_failed', call: call.id, error })
+        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, `提交改动失败：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()}`, e)
         return
       }
     }
@@ -127,7 +142,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const check = async (task: Task, run: CheckRun): Promise<void> => {
     const where = `[${run.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] 检查`
     if (o.checker === undefined) {
-      dispatch({ kind: 'call_failed', call: run.id, error: '没有配置检查执行器' })
+      fail(where, run.id, '没有配置检查执行器')
       return
     }
     log(`→ ${where}（${run.checks.length} 项）`)
@@ -142,8 +157,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       results = await o.checker(task, run, aborter.signal)
     } catch (e) {
       clearInterval(watch)
-      log(`✗ ${where}：${(e as Error).message}`)
-      dispatch({ kind: 'call_failed', call: run.id, error: `检查无法执行：${(e as Error).message}` })
+      fail(where, run.id, `检查无法执行：${(e as Error).message}`, e)
       return
     }
     clearInterval(watch)

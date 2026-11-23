@@ -244,3 +244,6 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .compare .small { font-size: 12.5px; margin: 6px 0 0; }
 .compare-item + .compare-item { margin-top: 18px; }
 .compare-item h3 { font-size: 14px; margin: 6px 0; font-weight: 600; }
+
+/* 失败原因和日志 */
+.failure-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
