@@ -1,5 +1,6 @@
 // 把 YAML 文本解析成 Workflow，并做语义校验。错误用中文，带出错位置（例如 nodes[2].with）。
 // 角色可以直接写配置，也可以引用平台上的 Agent 模板（{ template: developer }）；模板由调用方注入的 lookup 查找，解析保持纯函数。
+import { matchesAny } from './glob.ts'
 import { z } from 'zod'
 import type { FieldError } from './agent.ts'
 import { agentErrors, agentFields, DEFAULT_MODEL, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
@@ -91,6 +92,17 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     if (n.role !== undefined && wf.roles[n.role] === undefined) errors.push({ path: at('role'), message: `没有名为「${n.role}」的角色` })
     if (n.kind === 'agent' && n.checks.some(c => c.kind === 'file') && wf.roles[n.role]?.write === 'none') {
       errors.push({ path: at('deliverables'), message: `角色「${n.role}」只读（write: none），写不出交付物文件；把它的 write 改成 worktree` })
+    }
+    // 交付物由写文件的那个角色产出：agent 节点是它自己，对话节点是被评审的节点。交付物在它的可写范围外时，
+    // 写了会被撤销、检查永远过不了，所以在这里就报错，不留到任务里卡住。
+    const writer = n.kind === 'agent' ? n.role : (() => { const t = seen.get(n.with); return t?.kind === 'agent' ? t.role : undefined })()
+    const writerRole = writer === undefined ? undefined : wf.roles[writer]
+    if (writerRole?.write === 'worktree') {
+      n.checks.forEach(c => {
+        if (c.kind === 'file' && !matchesAny(writerRole.writePaths, c.path)) {
+          errors.push({ path: at('deliverables'), message: `交付物「${c.path}」不在角色「${writer}」的可写范围（${writerRole.writePaths.join('、')}）内，写了会被撤销；把它加进 writePaths，或换一个范围内的路径` })
+        }
+      })
     }
     if (n.kind === 'dialog' && n.role === undefined && n.checks.length === 0) {
       errors.push({ path: at('role'), message: '对话节点至少要有评审角色（role）或检查（checks、deliverables）其中之一' })

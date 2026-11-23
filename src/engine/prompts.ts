@@ -27,16 +27,16 @@ const conventions = (task: Task): string =>
 /** 范围外的位置怎么办：会话开头和越界撤销后的说明用同一条规则，agent 不为路径问用户。 */
 const SCOPE_RULE = '可写范围由团队的 Agent 模板决定，任务里改不了。写每个文件之前，先核对它的路径匹配上面的某一条；'
   + '需求、规格、方案或评审里点名的路径也一样要核对。点名的位置在范围外时，改放到范围内最合适的位置，'
-  + '并在回复里写明原来要求的位置、实际放在了哪里、为什么；不要为路径向用户提问，也不要建议放宽范围。范围外的改动会在提交前被平台撤销。'
-
-const allowedPaths = (writePaths: string[]): string =>
-  writePaths.includes('**') ? '你可以改动任务 worktree 里的任何文件。' : `你可以改动的路径（任务 worktree 内的 glob）：\n${writePaths.map(p => `- ${p}`).join('\n')}`
+  + '并在回复里写明原来要求的位置、实际放在了哪里、为什么。要改的就是范围外某个已有文件本身、换个位置没有意义时，'
+  + '不要另造替代文件，在回复里说明这一项没做和原因。不要为路径向用户提问，也不要建议放宽范围。范围外的改动会在提交前被平台撤销。'
 
 /** 角色的可写范围，事先告诉 agent，免得它写到范围外再被撤销。只读角色说明它不能改文件。 */
 export const writeScope = (write: 'none' | 'worktree', writePaths: string[]): string =>
   write === 'none'
     ? '你这个角色是只读的，不能改动任何文件；要交付的内容写在回复里。'
-    : `${allowedPaths(writePaths)}\n\n${SCOPE_RULE}`
+    : writePaths.includes('**')
+      ? '你可以改动任务 worktree 里的文件（指向目录的符号链接、嵌套的 git 仓库除外）。'
+      : `你可以改动的路径（任务 worktree 内的 glob）：\n${writePaths.map(p => `- ${p}`).join('\n')}\n\n${SCOPE_RULE}`
 
 /** 会话的第一条消息带上团队约定、角色说明和可写范围；之后同一会话里不再重复。 */
 const intro = (task: Task, session: NodeId, wf: Workflow, n: WorkflowNode): string => {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { MAX_FORMAT_RETRIES, reduce } from '../src/engine/machine.ts'
+import { scopeNotice } from '../src/engine/prompts.ts'
 import { parseWorkflow } from '../src/workflow/parse.ts'
 import { ASK, CHANGES, Driver, GARBAGE, PASS, REVISE, workflow } from './helpers.ts'
 
@@ -187,7 +188,7 @@ test('被撤销的越界改动记进调用日志和节点说明，并通知同�
   // 回应评审走 build 会话：这时才带上说明。
   assert.equal(d.pending.session, 'build')
   assert.match(d.pending.prompt, /# 有改动被撤销（超出你的可写范围）[\s\S]*- docs\/design\.md\n- top\.txt/)
-  assert.match(d.pending.prompt, /你可以改动任务 worktree 里的任何文件。/, '同时说明允许的范围')
+  assert.match(d.pending.prompt, /你可以改动任务 worktree 里的文件（指向目录的符号链接、嵌套的 git 仓库除外）。/, '同时说明允许的范围')
   assert.match(d.pending.prompt, /有改动被撤销[\s\S]*评审意见（第 1 轮）/, '说明加在原来的提示词最前面')
   assert.deepEqual(d.task.scopeNotices, {}, '发出去之后就清除')
   // 第 2 轮：再一次回到 build 会话时不会重复通知。
@@ -240,7 +241,7 @@ nodes:
   assert.match(d.pending.prompt, /# 你的可写范围\n\n你这个角色是只读的，不能改动任何文件/, '只读角色')
   d.reply('方案 v1')
   assert.match(d.pending.prompt, /# 你的角色[\s\S]*# 你的可写范围\n\n你可以改动的路径（任务 worktree 内的 glob）：\n- src\/\*\*\n- tests\/\*\*/)
-  assert.match(d.pending.prompt, /写每个文件之前，先核对它的路径匹配上面的某一条[\s\S]*改放到范围内最合适的位置，并在回复里写明原来要求的位置、实际放在了哪里、为什么；不要为路径向用户提问/)
+  assert.match(d.pending.prompt, /写每个文件之前，先核对它的路径匹配上面的某一条[\s\S]*改放到范围内最合适的位置，并在回复里写明原来要求的位置、实际放在了哪里、为什么。[\s\S]*不要为路径向用户提问/)
   assert.doesNotMatch(d.pending.prompt, /由用户决定/)
   d.reply('实现 v1')
   d.reply(CHANGES)
@@ -248,12 +249,17 @@ nodes:
   assert.doesNotMatch(d.pending.prompt, /你的可写范围/, '同一会话里不重复')
 })
 
-test('整个 worktree 可写时不列 glob；越界撤销后的说明用同一条规则', () => {
+test('整个 worktree 可写时不列 glob，也不附加核对路径的规则；越界撤销后的说明同样如此', () => {
   const d = new Driver(workflow({ maxRounds: 2, escalate: true }))
   d.reply('方案 v1')
-  assert.match(d.pending.prompt, /# 你的可写范围\n\n你可以改动任务 worktree 里的任何文件。/)
+  assert.match(d.pending.prompt, /# 你的可写范围\n\n你可以改动任务 worktree 里的文件（指向目录的符号链接、嵌套的 git 仓库除外）。\n/)
+  assert.doesNotMatch(d.pending.prompt, /上面的某一条/)
   replyReverting(d, '实现 v1', ['top.txt'])
   d.reply(CHANGES)
-  assert.match(d.pending.prompt, /# 有改动被撤销[\s\S]*- top\.txt[\s\S]*你可以改动任务 worktree 里的任何文件。[\s\S]*不要为路径向用户提问/)
+  assert.match(d.pending.prompt, /# 有改动被撤销[\s\S]*- top\.txt[\s\S]*你可以改动任务 worktree 里的文件/)
   assert.doesNotMatch(d.pending.prompt, /由用户决定/)
+})
+
+test('要改的就是范围外的已有文件时，规则要求说明没做，不另造替代文件', () => {
+  assert.match(scopeNotice(['ci.yml'], ['src/**']), /要改的就是范围外某个已有文件本身、换个位置没有意义时，不要另造替代文件，在回复里说明这一项没做和原因/)
 })

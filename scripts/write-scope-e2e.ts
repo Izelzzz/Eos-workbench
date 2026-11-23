@@ -4,7 +4,7 @@
 // 结果写到 <输出目录>/report.json，完整输出在 run.log。改动前后用同一个脚本跑，对比两份报告。
 // 用法：node --import tsx scripts/write-scope-e2e.ts [输出目录名，默认 write-scope-e2e]
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Store } from '../src/store/store.ts'
 
@@ -30,13 +30,19 @@ for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=
 
 const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+/** 读任务状态。runner 正在写库时可能撞上锁，或库还没建出来：这一轮当作没读到，下一轮再读。 */
 const read = () => {
-  const s = new Store(join(DATA, 'eos.db'))
+  if (!existsSync(join(DATA, 'eos.db'))) return undefined
   try {
-    const [row] = s.list()
-    return row === undefined ? undefined : s.get(row.id)
-  } finally {
-    s.close()
+    const s = new Store(join(DATA, 'eos.db'))
+    try {
+      const [row] = s.list()
+      return row === undefined ? undefined : s.get(row.id)
+    } finally {
+      s.close()
+    }
+  } catch {
+    return undefined
   }
 }
 
@@ -61,7 +67,11 @@ const runOnce = async (args: string[]) => {
 
 const questions: { id: string; source: string; node?: string; text: string }[] = []
 await runOnce(['run', '--repo', REPO, REQUEST])
-const id = read()?.id
+let id = read()?.id
+for (let i = 0; i < 5 && id === undefined; i++) {
+  await sleep(1000)
+  id = read()?.id
+}
 if (id === undefined) throw new Error('没有建出任务，见 run.log')
 for (let i = 0; i < 6 && read()?.status !== 'done' && read()?.status !== 'failed'; i++) await runOnce(['resume', id])
 
