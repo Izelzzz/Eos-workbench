@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { MAX_FORMAT_RETRIES, reduce } from '../src/engine/machine.ts'
+import { parseWorkflow } from '../src/workflow/parse.ts'
 import { ASK, CHANGES, Driver, GARBAGE, PASS, REVISE, workflow } from './helpers.ts'
 
 const toReview = (d: Driver) => {
@@ -186,7 +187,7 @@ test('被撤销的越界改动记进调用日志和节点说明，并通知同�
   // 回应评审走 build 会话：这时才带上说明。
   assert.equal(d.pending.session, 'build')
   assert.match(d.pending.prompt, /# 有改动被撤销（超出你的可写范围）[\s\S]*- docs\/design\.md\n- top\.txt/)
-  assert.match(d.pending.prompt, /你可以改动的路径（任务 worktree 内的 glob）：\n- \*\*/, '同时列出允许的范围')
+  assert.match(d.pending.prompt, /你可以改动任务 worktree 里的任何文件。/, '同时说明允许的范围')
   assert.match(d.pending.prompt, /有改动被撤销[\s\S]*评审意见（第 1 轮）/, '说明加在原来的提示词最前面')
   assert.deepEqual(d.task.scopeNotices, {}, '发出去之后就清除')
   // 第 2 轮：再一次回到 build 会话时不会重复通知。
@@ -221,4 +222,38 @@ test('没有越界改动时提示词和日志都不变', () => {
   assert.equal(entry?.type === 'call' ? 'reverted' in entry : true, false, '空数组不写进日志')
   assert.deepEqual(d.task.scopeNotices, {})
   assert.doesNotMatch(d.pending.prompt, /有改动被撤销/)
+})
+
+test('会话第一条消息就告诉 agent 可写范围，范围外的位置改放到范围内、不问用户；之后同一会话不重复', () => {
+  const r = parseWorkflow(`
+name: t
+roles:
+  planner: { prompt: 你负责规划 }
+  dev: { prompt: 你负责开发, write: worktree, writePaths: [src/**, tests/**] }
+nodes:
+  - { id: plan, kind: agent, role: planner, task: 写方案 }
+  - { id: build, kind: agent, role: dev, task: 实现, inputs: [plan] }
+  - { id: review, kind: dialog, role: planner, with: build, maxRounds: 2, task: 评审 }
+`)
+  assert.ok(r.ok)
+  const d = new Driver(r.workflow)
+  assert.match(d.pending.prompt, /# 你的可写范围\n\n你这个角色是只读的，不能改动任何文件/, '只读角色')
+  d.reply('方案 v1')
+  assert.match(d.pending.prompt, /# 你的角色[\s\S]*# 你的可写范围\n\n你可以改动的路径（任务 worktree 内的 glob）：\n- src\/\*\*\n- tests\/\*\*/)
+  assert.match(d.pending.prompt, /改放到范围内最合适的位置，并在回复里写明放在了哪里、为什么；不要为路径向用户提问/)
+  assert.doesNotMatch(d.pending.prompt, /由用户决定/)
+  d.reply('实现 v1')
+  d.reply(CHANGES)
+  assert.equal(d.pending.session, 'build')
+  assert.doesNotMatch(d.pending.prompt, /你的可写范围/, '同一会话里不重复')
+})
+
+test('整个 worktree 可写时不列 glob；越界撤销后的说明用同一条规则', () => {
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true }))
+  d.reply('方案 v1')
+  assert.match(d.pending.prompt, /# 你的可写范围\n\n你可以改动任务 worktree 里的任何文件。/)
+  replyReverting(d, '实现 v1', ['top.txt'])
+  d.reply(CHANGES)
+  assert.match(d.pending.prompt, /# 有改动被撤销[\s\S]*- top\.txt[\s\S]*你可以改动任务 worktree 里的任何文件。[\s\S]*不要为路径向用户提问/)
+  assert.doesNotMatch(d.pending.prompt, /由用户决定/)
 })
