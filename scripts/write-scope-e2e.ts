@@ -1,7 +1,7 @@
 // 试用反馈第 1 条的端到端验证：agent 事先知道可写范围，范围外的位置改放到范围内并说明，不为路径问用户。
 // 真实模型、内置 standard 工作流（developer 模板只能写 src/**、test/**、tests/**、docs/changes.md、package*.json）。
 // 需求故意要求把代码写到 lib/clamp.js（范围外）。脚本用命令行跑任务；agent 提问时（调用进行中或对话尽头）记下问题，回答「按你的判断做」。
-// 结果写到 <输出目录>/report.json，完整输出在 run.log。改动前后用同一个脚本跑，对比两份报告。
+// 结果写到 <输出目录>/report.json，完整输出在 run.log。
 // 用法：node --import tsx scripts/write-scope-e2e.ts [输出目录名，默认 write-scope-e2e]
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -85,6 +85,8 @@ const files = execFileSync('git', ['diff', '--name-only', meta.baseSha, meta.bra
 const reverted = calls.flatMap(c => (c.reverted ?? []).map(p => `${c.node}: ${p}`))
 const pathQuestions = questions.filter(q => /lib|路径|目录|位置|范围/.test(q.text))
 const build = calls.filter(c => c.node === 'build')
+/** 开发的全部回复（build 节点，以及测试、评审轮次里的回应），撤销之后的说明可能在后面几轮里。 */
+const devReplies = calls.filter(c => c.role === 'developer').map(c => c.reply)
 
 const report = {
   commit, task: id, status: t.status, request: REQUEST,
@@ -95,11 +97,12 @@ const report = {
     '没有越界改动被撤销': reverted.length === 0,
     '任务分支里没有 lib/ 下的文件': !files.some(f => f.startsWith('lib/')),
     'clamp 实现放在了 src/ 下': files.some(f => /^src\/.*clamp/.test(f)),
-    '开发的回复里提到了 lib/（说明改放的位置）': calls.filter(c => c.node === 'build').some(c => c.reply.includes('lib/')),
+    '开发的某条回复里同时提到 lib/ 和 src/ 下的 clamp（说明了改放的位置）': devReplies.some(r => r.includes('lib/') && /src\/clamp/.test(r)),
     '任务完成': t.status === 'done',
   },
   questions, reverted, files,
   buildReplies: calls.filter(c => c.node === 'build').map(c => c.reply),
+  developerReplies: calls.filter(c => c.role === 'developer').map(c => ({ node: c.node, purpose: c.purpose, reply: c.reply })),
 }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 const passed = Object.values(report.checks).filter(Boolean).length

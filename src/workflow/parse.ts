@@ -90,13 +90,13 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     const at = (field: string) => `nodes[${i}].${field}`
     if (seen.has(n.id)) errors.push({ path: at('id'), message: `节点 id「${n.id}」重复` })
     if (n.role !== undefined && wf.roles[n.role] === undefined) errors.push({ path: at('role'), message: `没有名为「${n.role}」的角色` })
-    if (n.kind === 'agent' && n.checks.some(c => c.kind === 'file') && wf.roles[n.role]?.write === 'none') {
-      errors.push({ path: at('deliverables'), message: `角色「${n.role}」只读（write: none），写不出交付物文件；把它的 write 改成 worktree` })
-    }
     // 交付物由写文件的那个角色产出：agent 节点是它自己，对话节点是被评审的节点。交付物在它的可写范围外时，
     // 写了会被撤销、检查永远过不了，所以在这里就报错，不留到任务里卡住。
     const writer = n.kind === 'agent' ? n.role : (() => { const t = seen.get(n.with); return t?.kind === 'agent' ? t.role : undefined })()
     const writerRole = writer === undefined ? undefined : wf.roles[writer]
+    if (writerRole?.write === 'none' && n.checks.some(c => c.kind === 'file')) {
+      errors.push({ path: at('deliverables'), message: `角色「${writer}」只读（write: none），写不出交付物文件；把它的 write 改成 worktree` })
+    }
     if (writerRole?.write === 'worktree') {
       n.checks.forEach(c => {
         if (c.kind === 'file' && !matchesAny(writerRole.writePaths, c.path)) {

@@ -144,3 +144,10 @@ test('交付物不在产出它的角色的可写范围内时报错：写了会�
   assert.deepEqual(dialog.map(e => e.path), ['nodes[2].deliverables'])
   assert.equal(parseWorkflow(withChecks.replace('planner: { prompt: 写规格, write: worktree }', 'planner: { prompt: 写规格, write: worktree, writePaths: [docs/**] }')).ok, true)
 })
+
+test('对话节点的交付物由被评审的节点产出：那个角色只读时同样报错', () => {
+  const errors = errorsOf(withChecks
+    .replace('dev: { prompt: 写代码, write: worktree }', 'dev: { prompt: 写代码, write: none }')
+    .replace("checks: [{ run: [npm, test], timeoutSec: 120 }] }", "checks: [{ run: [npm, test], timeoutSec: 120 }], deliverables: [{ path: docs/changes.md }] }"))
+  assert.deepEqual(errors, [{ path: 'nodes[2].deliverables', message: '角色「dev」只读（write: none），写不出交付物文件；把它的 write 改成 worktree' }])
+})
