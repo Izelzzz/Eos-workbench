@@ -1,0 +1,17 @@
+$ docker compose stop
+$ docker run --rm --volumes-from "$(docker compose ps -aq eos)" -v "$PWD":/backup ubuntu:24.04 tar czf /backup/eos-data.tgz -C /data .
+exit=0
+./
+./eos.db
+./eos.db-shm
+./eos.db-wal
+## 恢复到全新的空卷
+$ docker compose down -v && docker compose create
+$ docker run --rm --volumes-from "$(docker compose ps -aq eos)" -v "$PWD":/backup ubuntu:24.04 tar xzf /backup/eos-data.tgz -C /data
+exit=0
+$ docker compose start
+marker=hello
+eos /data
+eos /data/marker.txt
+eos /data/eos.db
+GET /api/tasks 200

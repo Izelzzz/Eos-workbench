@@ -1,0 +1,9 @@
+{
+  "masterMarkerSet": true,
+  "check": [
+    {
+      "passed": false,
+      "detail": "退出码 1。输出：\nplatform_pid=7\nmaster_key_hits=/proc/1/environ /proc/16/environ /proc/7/environ \nmodel_key_hits=/proc/30/environ \nmodel_key_in: 30 /usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk \nself_env_has_master=0"
+    }
+  ]
+}
