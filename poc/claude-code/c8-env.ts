@@ -32,7 +32,7 @@ const probe = async (label: string, env: Record<string, string | undefined> | un
   if (env === undefined) delete (opts as any).env; else (opts as any).env = env
   const t = await run(tag + `这是一次环境隔离测试。依次用 Bash 执行两条命令，原样给出输出：1) ${CMD1}  2) ${CMD2}`, opts)
   const out = toolResults(t).map(r => r.text).join('\n')
-  note(`${label} 宿主读到的 Claude Code 进程环境`, { vars: parentEnv.split('\0').filter(Boolean).length, hasFake: parentEnv.includes('FAKE-SECRET-8c1e'), hasRealKey: !!realKey && parentEnv.includes(realKey) })
+  note(`${label} 宿主读到的 Claude Code 进程环境`, { vars: parentEnv.split('\0').filter(Boolean).length, ...(env ? { names: parentEnv.split('\0').filter(Boolean).map(l => l.split('=')[0]).sort() } : {}), hasFake: parentEnv.includes('FAKE-SECRET-8c1e'), hasRealKey: !!realKey && parentEnv.includes(realKey) })
   const names = [...new Set(out.split("\n").filter(l => /^[A-Za-z_][A-Za-z0-9_]*$/.test(l)))]
   note(`${label} agent 看到的变量名`, names)
   return { out, names, error: t.error, parentEnv }
@@ -42,10 +42,14 @@ const probe = async (label: string, env: Record<string, string | undefined> | un
 const up = agentEnv('/nonexistent')
 const saved = { ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
 Object.assign(process.env, { ANTHROPIC_BASE_URL: up.ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY: 'sk-ant-eos-placeholder' })
-const a = await probe('inherit', undefined)
-Object.assign(process.env, saved)
-check('A 不传 env：宿主的凭据漏给 agent', a.out.includes('FAKE-SECRET-8c1e'), { leaked: a.out.includes('FAKE-SECRET-8c1e'), error: a.error })
-if (realKey) note('A 不传 env：真实 key 在 Claude Code 进程的环境里', a.parentEnv.includes(realKey))
+// 只在 mock 模式下跑：不传 env 时宿主的全部环境（含真凭据）都会进 agent 进程，不能交给真实模型驱动、没有沙箱的 agent。
+// 这一条验证的是 SDK 和 Claude Code 的行为，和模型无关，mock 的结论就够了。
+if (MOCK) {
+  const a = await probe('inherit', undefined)
+  check('A 不传 env：宿主的凭据漏给 agent', a.out.includes('FAKE-SECRET-8c1e'), { leaked: a.out.includes('FAKE-SECRET-8c1e'), error: a.error })
+  if (realKey) note('A 不传 env：真实 key 在 Claude Code 进程的环境里', a.parentEnv.includes(realKey))
+} else note('A 不传 env：真实模式下跳过', '不把宿主的真凭据交给真实模型驱动的 agent；结论见 logs/mock/c8-env.log')
+for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v
 
 const b = await probe('explicit', agentEnv(dirs('c8-explicit').home))
 check('B 显式 env：宿主的凭据不会给 agent', !b.out.includes('FAKE-SECRET-8c1e') && b.names.length > 0, { names: b.names })

@@ -1,31 +1,33 @@
 NOTE A 工具调用 :: []
 NOTE A init 工具表 :: ["Glob","Grep","Read"]
 PASS A 只读：工具表里没有 Write/Edit/Bash :: ["DeferredToolPlaceholder","Glob","Grep","Read"]
-PASS A 只读：文件没有被写出来 :: {"a":false,"b":false}
+NOTE A 只读：文件没有被写出来（没有发起调用，这一条只有 mock 能证明） :: {"attempts":0,"a":false,"b":false}
 NOTE A2 工具调用 :: []
 NOTE A2 canUseTool 收到 :: []
 FAIL A2 只读+沙箱：能执行只读命令 :: undefined
-PASS A2 只读+沙箱：bash 写不了 worktree（含绕过沙箱参数） :: {"b":false,"c":false,"error":"Claude Code returned an error result: Sandbox required but unavailable: sandbox is enabled but dependencies are missing: socat not installed · install missing tools (e.g. apt install bubblewrap socat) or see https://code.claude.com/docs/en/sandboxing. Set sandbox.failIfUnavailable=false to allow unsandboxed execution."}
+FAIL A2 只读+沙箱：bash 写不了 worktree（含绕过沙箱参数） :: {"attempts":0,"need":3,"error":"Claude Code returned an error result: Sandbox required but unavailable: sandbox is enabled but dependencies are missing: socat not installed · install missing tools (e.g. apt install bubblewrap socat) or see https://code.claude.com/docs/en/sandboxing. Set sandbox.failIfUnavailable=false to allow unsandboxed execution.","b":false,"c":false}
 NOTE B 工具调用 :: []
 NOTE B canUseTool 收到（全部拒绝） :: []
-FAIL B 可写：worktree 内 Write 和 bash 写入成功 :: {"write":false,"bash":false}
-PASS B 可写：worktree 外一个都没写成（绝对路径、../、软链接、bash、绕过沙箱参数） :: {"escaped":[]}
-NOTE B /tmp 写入 :: {"file":"/tmp/eos-c3-845.txt","writtenToRealTmp":false}
+FAIL B 可写：worktree 内 Write 和 bash 写入成功 :: {"write":false,"bash":false,"error":"Claude Code returned an error result: Sandbox required but unavailable: sandbox is enabled but dependencies are missing: socat not installed · install missing tools (e.g. apt install bubblewrap socat) or see https://code.claude.com/docs/en/sandboxing. Set sandbox.failIfUnavailable=false to allow unsandboxed execution."}
+FAIL B 可写：worktree 外一个都没写成（绝对路径、../、软链接、bash、绕过沙箱参数） :: {"attempts":0,"need":9,"error":"Claude Code returned an error result: Sandbox required but unavailable: sandbox is enabled but dependencies are missing: socat not installed · install missing tools (e.g. apt install bubblewrap socat) or see https://code.claude.com/docs/en/sandboxing. Set sandbox.failIfUnavailable=false to allow unsandboxed execution.","escaped":[]}
+NOTE B /tmp 写入 :: {"file":"/tmp/eos-c3-11909.txt","writtenToRealTmp":false}
 NOTE C 不限制时 init 工具表 :: ["Task","AskUserQuestion","Bash","CronCreate","CronDelete","CronList","Edit","EnterPlanMode","EnterWorktree","ExitPlanMode","ExitWorktree","ListAgents","Monitor","NotebookEdit","Read","ReportFindings","ScheduleWakeup","SendMessage","Skill","TaskStop","ToolSearch","WebFetch","WebSearch","Workflow","Write"]
 NOTE C 不限制时发给模型的工具表 :: ["Agent","AskUserQuestion","Bash","DeferredToolPlaceholder","Edit","ListAgents","Read","ReportFindings","ScheduleWakeup","Skill","ToolSearch","Workflow","Write"]
-NOTE C 不限制时 messaging_socket_path :: /tmp/cc-socks/921.sock
+NOTE C 不限制时 messaging_socket_path :: /tmp/cc-socks/11975.sock
 NOTE C 白名单 init 工具表 :: ["Edit","Glob","Grep","Read","Write"]
 NOTE C 白名单 发给模型的工具表 :: ["DeferredToolPlaceholder","Edit","Glob","Grep","Read","Write"]
 NOTE C 白名单 强行调用 :: []
-PASS C 白名单：发给模型的工具表里没有联网、子 agent、命令、跨会话消息 :: ["DeferredToolPlaceholder","Edit","Glob","Grep","Read","Write"]
-PASS C 白名单：强行调用被去掉的工具全部报错 :: []
+PASS C 白名单：init 工具表和发给模型的工具表里都没有联网、子 agent、命令、跨会话消息 :: {"init":["Edit","Glob","Grep","Read","Write"],"request":["DeferredToolPlaceholder","Edit","Glob","Grep","Read","Write"]}
+NOTE C 白名单：强行调用被去掉的工具全部报错（没有发起调用，这一条只有 mock 能证明） :: []
+NOTE C 黑名单 init 工具表 :: ["AskUserQuestion","CronDelete","CronList","Edit","EnterPlanMode","EnterWorktree","ExitPlanMode","ExitWorktree","Glob","Grep","NotebookEdit","Read","ReportFindings","Skill","TaskStop","ToolSearch","Write"]
 NOTE C 黑名单 发给模型的工具表 :: ["AskUserQuestion","DeferredToolPlaceholder","Edit","Glob","Grep","Read","ReportFindings","Skill","ToolSearch","Write"]
-PASS C 黑名单：同样去掉了这些工具，强行调用报错 :: []
+PASS C 黑名单：init 工具表和发给模型的工具表里同样没有这些工具 :: {"stillThere":[]}
+NOTE C 黑名单：强行调用报错（没有发起调用，这一条只有 mock 能证明） :: []
 NOTE D 工具调用 :: [{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt","isError":false,"out":"1\thello"},{"tool":"Glob","input":"*.txt","isError":false,"out":"f.txt"},{"tool":"Bash","input":"ls","isError":false,"out":"f.txt"},{"tool":"Bash","input":"echo x > by-bash.txt","isError":false,"out":"(Bash completed with no output)"},{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/denied.txt","isError":true,"out":"平台拒绝 Write"},{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt","isError":false,"out":"1\thello"}]
-NOTE D canUseTool 收到 :: ["Bash","Write"]
+NOTE D canUseTool 收到 :: [{"name":"Bash","input":"echo x > by-bash.txt"},{"name":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/denied.txt"}]
 NOTE D PreToolUse hook 收到 :: ["Read","Glob","Bash","Bash","Write","Read"]
-NOTE D canUseTool 是否每次都触发 :: {"toolUses":6,"canUseTool":2,"notAsked":["Read","Glob","Read"]}
+NOTE D canUseTool 是否每次都触发 :: {"toolUses":6,"canUseTool":2,"notAsked":["Read /home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt","Glob *.txt","Bash ls","Read /home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt"]}
 PASS D PreToolUse hook 每次工具调用都触发 :: {"uses":["Read","Glob","Bash","Bash","Write","Read"],"hooked":["Read","Glob","Bash","Bash","Write","Read"]}
 PASS D 平台拒绝的 Write 没有执行 :: {"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/denied.txt","isError":true,"out":"平台拒绝 Write"}
 PASS D PreToolUse hook 能拒绝本来自动允许的 Read :: [{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d2/ws/.git/HEAD","isError":true,"out":"PreToolUse:Read hook error: 平台拒绝"}]
-mode=real model=claude-sonnet-5-5 failed=2
+mode=real model=claude-sonnet-5-5 failed=4

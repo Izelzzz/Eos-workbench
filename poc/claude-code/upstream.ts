@@ -83,7 +83,7 @@ export const startUpstream = (): Promise<{ url: string; close: () => void }> => 
       let json: any
       try { json = JSON.parse(body.toString('utf8')) } catch { json = undefined }
       if (json && req.method === 'POST' && /\/v1\/messages(\?|$)/.test(req.url ?? '')) requests.push(json)
-      if (!MOCK) { forward(req, body, res).catch(e => { res.writeHead(502); res.end(String(e)) }); return }
+      if (!MOCK) { forward(req, body, res).catch(e => { if (!res.headersSent) res.writeHead(502); res.end(String(e)) }); return }
       if (json && /\/v1\/messages(\?|$)/.test(req.url ?? '')) {
         const blocks = reply(json)
         if (json.stream) sse(res, json.model, blocks)

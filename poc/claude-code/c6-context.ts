@@ -37,8 +37,9 @@ const sent = (from: number) => JSON.stringify(requests.slice(from))
   check('a 按会话挂的插件技能能用（技能内容进了上下文）', sent(from).includes('SK-7Q2W') && (finalText(t) ?? '').includes('SK-7Q2W'), finalText(t))
   check('a 按会话挂的 stdio MCP 服务能用', toolResults(t).some(r => r.text.includes('MC-9K3D')) && (finalText(t) ?? '').includes('MC-9K3D'), finalText(t))
   note('a init.skills 仍列出自带技能（skills 选项只过滤模型看到的列表）', t.init?.skills)
-  const firstReq = JSON.stringify(requests[from] ?? {})
-  check('a 发给模型的技能列表里没有自带技能（claude-api、update-config）', !/claude-api|update-config/.test(firstReq) && firstReq.includes('codeword'), { claudeApi: firstReq.includes('claude-api'), updateConfig: firstReq.includes('update-config') })
+  // 看这一轮的全部请求；正向条件用技能自己的说明文字（提示词里没有这句话），证明技能列表确实在请求里
+  const all = sent(from)
+  check('a 发给模型的技能列表里有平台给的技能，没有自带技能（claude-api、update-config）', !/claude-api|update-config/.test(all) && all.includes('用户问\\"技能暗号\\"时使用'), { requests: requests.length - from, listed: all.includes('用户问\\"技能暗号\\"时使用'), claudeApi: all.includes('claude-api'), updateConfig: all.includes('update-config') })
   check('a 调用没给的技能被拒绝', toolResults(t).filter(r => r.isError).length >= 1, toolResults(t).map(r => ({ e: r.isError, t: r.text.slice(0, 100) })))
 }
 

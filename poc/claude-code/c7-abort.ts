@@ -11,6 +11,11 @@ const d = dirs('c7')
 writeFileSync(join(d.ws, 'hold.sh'), '#!/bin/sh\nsleep 300 "0.$$" 2>/dev/null || sleep 300\n', { mode: 0o755 })
 const id = String(process.pid)
 const ps = (pat: string) => { try { return execFileSync('pgrep', ['-af', '--', pat], { encoding: 'utf8' }).trim() } catch { return '' } }
+// hold.sh 起的 sleep 命令行里没有 fg-/bg- 标记，按父进程找：返回匹配进程的全部后代（pid 和命令）
+const kids = (pid: string): string[] => { try { return execFileSync('pgrep', ['-a', '-P', pid], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).flatMap(l => [l, ...kids(l.split(' ')[0]!)]) } catch { return [] } }
+const descendants = (pat: string) => ps(pat).split('\n').filter(Boolean).flatMap(l => kids(l.split(' ')[0]!))
+const alive = (lines: string[]) => lines.filter(l => { try { return execFileSync('ps', ['-o', 'pid=', '-p', l.split(' ')[0]!], { encoding: 'utf8' }).trim() !== '' } catch { return false } })
+let sleeps: string[] = []
 const sid = sessionIdFor(`c7/${id}`)
 const ac = new AbortController()
 let startedFg = 0
@@ -28,6 +33,8 @@ const t = await run(tag + `依次用 Bash 执行两条命令：先在后台（ru
     startedFg = Date.now()
     setTimeout(() => {
       before = { fg: ps(`fg-${id}`), bg: ps(`bg-${id}`), agent: ps(`--session-id=${sid}`) }
+      sleeps = [...new Set([...descendants(`fg-${id}`), ...descendants(`bg-${id}`)])].filter(l => /\bsleep\b/.test(l))
+      note('abort 前 hold.sh 起的 sleep', sleeps)
       note('abort 前', Object.fromEntries(Object.entries(before).map(([k, v]) => [k, v.split('\n').map(l => l.slice(0, 90))])))
       ac.abort()
     }, 3000)
@@ -43,6 +50,8 @@ check('abort 后 SDK 调用很快结束', startedFg > 0 && returnedAfter - (star
 check('abort 后 Claude Code 进程停下', after.agent === '', after.agent)
 check('abort 后前台命令停下', after.fg === '', after.fg)
 check('abort 后后台命令停下', after.bg === '', after.bg)
+check('abort 后两个命令起的 sleep（孙进程）也停下', sleeps.length >= 2 && alive(sleeps).length === 0, { before: sleeps, stillAlive: alive(sleeps) })
 // 清理：留下的进程由平台负责杀掉
 for (const p of [`fg-${id}`, `bg-${id}`, `--session-id=${sid}`]) try { execFileSync('pkill', ['-f', '--', p]) } catch {}
+for (const l of alive(sleeps)) try { process.kill(Number(l.split(' ')[0])) } catch {}
 done()

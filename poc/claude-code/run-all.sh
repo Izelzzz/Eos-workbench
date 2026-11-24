@@ -27,4 +27,7 @@ run c8-env c8-env.ts
 if [ $mode = real ] && [ -n "${EOS_CLAUDE_OAUTH_TOKEN:-}" ]; then
   EOS_AUTH=oauth run c1-oauth-a c1-resume.ts a; EOS_AUTH=oauth run c1-oauth-b c1-resume.ts b
 fi
-echo "== 汇总"; grep -h '^FAIL' logs/$mode/*.log || echo "没有 FAIL"
+echo "== 汇总"; if grep -h '^FAIL' logs/$mode/*.log; then exit 1; fi
+# 每个带判定的脚本都要跑到最后一行（c1-resume-a、c4-recover-a 会 SIGKILL 自己，没有这一行）
+for f in logs/$mode/*.log; do case $f in *c1-*-a.log|*c4-recover-a.log) ;; *) grep -q "^mode=$mode .* failed=0$" "$f" || { echo "没跑完：$f"; exit 1; } ;; esac; done
+echo "没有 FAIL"

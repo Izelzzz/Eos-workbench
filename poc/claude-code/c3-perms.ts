@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CanUseTool, Options } from '@anthropic-ai/claude-agent-sdk'
 import { baseOptions, check, dirs, done, note, run, toolResults, toolUses, type Turn } from './common.ts'
-import { requests, script, type Block } from './upstream.ts'
+import { MOCK, requests, script, type Block } from './upstream.ts'
 
 type Action = { desc: string; block: Block }
 const plan = (name: string, actions: Action[]) =>
@@ -31,6 +31,13 @@ const summary = (t: Turn) => {
 const forcedCheck = (name: string, pre: boolean, calls: { isError?: boolean }[]) =>
   calls.length ? check(name, pre && calls.every(c => c.isError === true), calls)
     : (pre ? note(name + '（没有发起调用，这一条只有 mock 能证明）', calls) : check(name, false, calls))
+/** "没写成"类的判定：要求确实尝试过 need 次调用。真实模型在工具表里没有工具时不会调用（need 次都没有），那时只记 NOTE。 */
+const attemptedCheck = (name: string, t: Turn, need: number, ok: boolean, evidence: object) => {
+  const n = toolUses(t).length
+  if (n >= need) check(name, ok, { attempts: n, ...evidence })
+  else if (!MOCK && n === 0 && !t.error && ok) note(name + '（没有发起调用，这一条只有 mock 能证明）', { attempts: n, ...evidence })
+  else check(name, false, { attempts: n, need, error: t.error, ...evidence })
+}
 const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name).sort()
 
 // ---- A 只读：不给 Write/Edit/Bash ----
@@ -44,7 +51,7 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   note('A 工具调用', summary(t))
   note('A init 工具表', t.init?.tools)
   check('A 只读：工具表里没有 Write/Edit/Bash', !requestTools().some((n: string) => ['Write', 'Edit', 'Bash', 'NotebookEdit'].includes(n)), requestTools())
-  check('A 只读：文件没有被写出来', !existsSync(join(d.ws, 'a.txt')) && !existsSync(join(d.ws, 'b.txt')), { a: existsSync(join(d.ws, 'a.txt')), b: existsSync(join(d.ws, 'b.txt')) })
+  attemptedCheck('A 只读：文件没有被写出来', t, 2, !existsSync(join(d.ws, 'a.txt')) && !existsSync(join(d.ws, 'b.txt')), { a: existsSync(join(d.ws, 'a.txt')), b: existsSync(join(d.ws, 'b.txt')) })
 }
 
 // ---- A2 只读但给 Bash：沙箱禁止写 worktree ----
@@ -63,7 +70,7 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   note('A2 工具调用', summary(t))
   note('A2 canUseTool 收到', g.calls)
   check('A2 只读+沙箱：能执行只读命令', summary(t)[0]?.out?.includes('hello') === true, summary(t)[0])
-  check('A2 只读+沙箱：bash 写不了 worktree（含绕过沙箱参数）', !existsSync(join(d.ws, 'b.txt')) && !existsSync(join(d.ws, 'c.txt')), { b: existsSync(join(d.ws, 'b.txt')), c: existsSync(join(d.ws, 'c.txt')), error: t.error })
+  attemptedCheck('A2 只读+沙箱：bash 写不了 worktree（含绕过沙箱参数）', t, 3, !existsSync(join(d.ws, 'b.txt')) && !existsSync(join(d.ws, 'c.txt')), { b: existsSync(join(d.ws, 'b.txt')), c: existsSync(join(d.ws, 'c.txt')), error: t.error })
 }
 
 // ---- B 可写：写入限制在 worktree 内 ----
@@ -91,9 +98,9 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   note('B 工具调用', summary(t))
   note('B canUseTool 收到（全部拒绝）', g.calls.map(c => ({ name: c.name, path: c.input.file_path ?? c.input.command, blockedPath: c.blockedPath })))
   const exists = (f: string) => existsSync(join(d.ws, f))
-  check('B 可写：worktree 内 Write 和 bash 写入成功', exists('in.txt') && exists('in-bash.txt'), { write: exists('in.txt'), bash: exists('in-bash.txt') })
+  check('B 可写：worktree 内 Write 和 bash 写入成功', exists('in.txt') && exists('in-bash.txt'), { write: exists('in.txt'), bash: exists('in-bash.txt'), error: t.error })
   const escaped = ['abs.txt', 'rel.txt', 'via-link.txt', 'bash.txt', 'bash-link.txt', 'unsandboxed.txt'].filter(f => existsSync(join(outside, f)))
-  check('B 可写：worktree 外一个都没写成（绝对路径、../、软链接、bash、绕过沙箱参数）', escaped.length === 0, { escaped })
+  attemptedCheck('B 可写：worktree 外一个都没写成（绝对路径、../、软链接、bash、绕过沙箱参数）', t, 9, escaped.length === 0, { escaped })
   note('B /tmp 写入', { file: tmpFile, writtenToRealTmp: existsSync(tmpFile) })
 }
 
@@ -116,11 +123,15 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   note('C 白名单 发给模型的工具表', requestTools())
   note('C 白名单 强行调用', summary(allow))
   const banned = ['WebFetch', 'WebSearch', 'Agent', 'Task', 'Bash', 'ListAgents', 'SendMessage', 'Workflow', 'Monitor', 'CronCreate', 'ScheduleWakeup']
-  check('C 白名单：发给模型的工具表里没有联网、子 agent、命令、跨会话消息', !requestTools().some((n: string) => banned.includes(n)), requestTools())
+  // 有些工具是延迟加载的，不在请求的工具表里（要经 ToolSearch 才出现），所以 init 工具表也要查
+  const has = (tools: string[] | undefined) => (tools ?? ['（没有 init）']).filter(n => banned.includes(n) || n === '（没有 init）')
+  check('C 白名单：init 工具表和发给模型的工具表里都没有联网、子 agent、命令、跨会话消息', has(allow.init?.tools).length === 0 && !requestTools().some((n: string) => banned.includes(n)), { init: allow.init?.tools, request: requestTools() })
   forcedCheck('C 白名单：强行调用被去掉的工具全部报错', true, summary(allow))
   const deny = await run(plan('c3-c2', forced), { ...baseOptions(d.home, d.ws), disallowedTools: banned, canUseTool: g.fn(() => true) })
+  note('C 黑名单 init 工具表', deny.init?.tools)
   note('C 黑名单 发给模型的工具表', requestTools())
-  forcedCheck('C 黑名单：同样去掉了这些工具，强行调用报错', !requestTools().some((n: string) => banned.includes(n)), summary(deny))
+  check('C 黑名单：init 工具表和发给模型的工具表里同样没有这些工具', has(deny.init?.tools).length === 0 && !requestTools().some((n: string) => banned.includes(n)), { stillThere: has(deny.init?.tools) })
+  forcedCheck('C 黑名单：强行调用报错', true, summary(deny))
 }
 
 // ---- D canUseTool 和 PreToolUse hook 的触发次数 ----
@@ -145,11 +156,11 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   const t = await run(plan('c3-d', actions), opts)
   const uses = toolUses(t).map(u => u.name)
   note('D 工具调用', summary(t))
-  note('D canUseTool 收到', g.calls.map(c => c.name))
+  note('D canUseTool 收到', g.calls.map(c => ({ name: c.name, input: c.input.command ?? c.input.file_path })))
   note('D PreToolUse hook 收到', hooked)
-  note('D canUseTool 是否每次都触发', { toolUses: uses.length, canUseTool: g.calls.length, notAsked: uses.filter((n, i) => !g.calls.some(c => c.name === n)) })
+  note('D canUseTool 是否每次都触发', { toolUses: uses.length, canUseTool: g.calls.length, notAsked: toolUses(t).filter(u => !g.calls.some(c => c.name === u.name && JSON.stringify(c.input) === JSON.stringify(u.input))).map(u => `${u.name} ${u.input.command ?? u.input.file_path ?? u.input.pattern ?? ''}`) })
   check('D PreToolUse hook 每次工具调用都触发', hooked.length === uses.length, { uses, hooked })
-  check('D 平台拒绝的 Write 没有执行', !existsSync(join(d.ws, 'denied.txt')), summary(t).find(s => s.tool === 'Write'))
+  check('D 平台拒绝的 Write 没有执行', summary(t).some(s => s.tool === 'Write') && !existsSync(join(d.ws, 'denied.txt')), summary(t).find(s => s.tool === 'Write'))
   // hook 也能拒绝：deny 决定写在 hookSpecificOutput 里
   const g2 = gate(); const d2 = dirs('c3d2')
   const t2 = await run(plan('c3-d2', [{ desc: `用 Read 读 ${join(d2.ws, '.git', 'HEAD')}`, block: { tool: 'Read', input: { file_path: join(d2.ws, '.git', 'HEAD') } } }]), {

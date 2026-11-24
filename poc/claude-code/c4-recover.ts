@@ -48,7 +48,7 @@ if (phase === 'a') {
   }
 } else {
   // agent 进程是否在宿主死后还活着（它可能自己把这一轮跑完）
-  const alive = () => { try { return execFileSync('sh', ['-c', `ps -eo pid,args | grep -v grep | grep -E 'wait.sh|claude-agent-sdk' || true`], { encoding: 'utf8' }).trim() } catch { return '' } }
+  const alive = () => { try { return execFileSync('sh', ['-c', `ps -eo pid,ppid,args | grep -v grep | grep -E 'wait.sh|claude-agent-sdk' || true`], { encoding: 'utf8' }).trim() } catch { return '' } }
   note('b: 宿主被杀后 agent 进程', alive() || '（没有）')
   await new Promise(r => setTimeout(r, 35000))
   note('b: 35 秒后 agent 进程', alive() || '（没有）')

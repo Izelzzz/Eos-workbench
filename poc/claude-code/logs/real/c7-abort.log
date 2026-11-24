@@ -1,9 +1,11 @@
-NOTE abort 前 :: {"fg":["4219 /bin/bash -c source /home/user/Eos-workbench/poc/claude-code/.run/c7/home/.claude/she","4220 /bin/sh ./hold.sh fg-4175"],"bg":["4216 /bin/bash -c source /home/user/Eos-workbench/poc/claude-code/.run/c7/home/.claude/she","4217 /bin/sh ./hold.sh bg-4175"],"agent":["4183 /home/user/Eos-workbench/poc/claude-code/node_modules/@anthropic-ai/claude-agent-sdk-"]}
-NOTE SDK 调用结束 :: {"ms":8976,"error":"Claude Code process aborted by user"}
+NOTE abort 前 hold.sh 起的 sleep :: ["11671 sleep 300 0.11670","11668 sleep 300 0.11667"]
+NOTE abort 前 :: {"fg":["11669 /bin/bash -c source /home/user/Eos-workbench/poc/claude-code/.run/c7/home/.claude/sh","11670 /bin/sh ./hold.sh fg-11626"],"bg":["11666 /bin/bash -c source /home/user/Eos-workbench/poc/claude-code/.run/c7/home/.claude/sh","11667 /bin/sh ./hold.sh bg-11626"],"agent":["11634 /home/user/Eos-workbench/poc/claude-code/node_modules/@anthropic-ai/claude-agent-sdk"]}
+NOTE SDK 调用结束 :: {"ms":9872,"error":"Claude Code process aborted by user"}
 NOTE abort 3 秒后 :: {"fg":"","bg":"","agent":""}
 PASS abort 前三者都在运行 :: {"fg":true,"bg":true,"agent":true}
-PASS abort 后 SDK 调用很快结束 :: {"startedFg":3944,"returnedAfter":8976}
+PASS abort 后 SDK 调用很快结束 :: {"startedFg":4745,"returnedAfter":9872}
 PASS abort 后 Claude Code 进程停下 :: 
 PASS abort 后前台命令停下 :: 
 PASS abort 后后台命令停下 :: 
+PASS abort 后两个命令起的 sleep（孙进程）也停下 :: {"before":["11671 sleep 300 0.11670","11668 sleep 300 0.11667"],"stillAlive":[]}
 mode=real model=claude-sonnet-5-5 failed=0
