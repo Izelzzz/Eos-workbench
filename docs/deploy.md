@@ -139,7 +139,8 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 | `eos.db`（和 `-wal`、`-shm`） | 任务、事件、trace、约定、改进提案、加密的凭据 |
 | `dsh/` | dsh 的会话日志（续跑和回放 trace 要用） |
 | `worktrees/` | 每个任务的 worktree |
-| `repos/` | 克隆的仓库 |
+| `repos/` | 克隆的仓库：平台维护的 GitHub 镜像在 `repos/github.com/` 下，自己克隆的放在 `repos/local/` 下 |
+| `git-home/` | 平台访问远程仓库时 git 用的空 HOME（不读宿主机或镜像里的 git 全局配置） |
 | `logs/` | `eos.log` 和每个任务的日志 |
 | `locks/` | 任务锁 |
 
