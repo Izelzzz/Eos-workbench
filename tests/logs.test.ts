@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Credentials } from '../src/credentials/store.ts'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
@@ -86,7 +87,7 @@ test('任务的进度行和完整错误写进 logs/<任务>.log；任务详情�
   assert.match(log, /at TCPConnectWrap \(net\.js:1\)/, '完整错误进日志文件')
   assert.ok(!terminal.some(l => l.includes('TCPConnectWrap')), '完整错误不打到终端')
 
-  const server = createWebServer({ store: s.store, supervisor: sup, replay: { traceOf: async () => [] }, staticDir: join(s.dir, 'static') })
+  const server = createWebServer({ store: s.store, supervisor: sup, replay: { traceOf: async () => [] }, staticDir: join(s.dir, 'static'), credentials: new Credentials(':memory:', undefined) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   try {

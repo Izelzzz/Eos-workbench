@@ -1,5 +1,5 @@
-// Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
-// 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
+// Web 服务：JSON 接口 + 前端静态文件。默认只监听本机地址；第一版没有登录。
+// 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向本服务发的跨站请求。
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
@@ -11,6 +11,9 @@ import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
+import { GENERATE_HINT } from '../credentials/key.ts'
+import type { Credentials } from '../credentials/store.ts'
+import { CREDENTIAL_KINDS, type CredentialKind, LOCAL_OWNER } from '../credentials/types.ts'
 import { evidence } from '../engine/evidence.ts'
 import { compare, versionUsed, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
@@ -21,7 +24,7 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -30,6 +33,7 @@ const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$
 /** /api/improve/proposals/<id>，以及审批：/api/improve/proposals/<id>/(approve|reject)。 */
 const PROPOSAL = /^\/api\/improve\/proposals\/(\d{1,15})$/
 const DECIDE = /^\/api\/improve\/proposals\/(\d{1,15})\/(approve|reject)$/
+
 
 const decodeName = (raw: string): string | undefined => {
   try {
@@ -65,18 +69,48 @@ const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unk
 })
 
 /**
- * Host 必须是本机地址加本服务的端口。挡住 DNS 重绑定：攻击者的域名解析到 127.0.0.1 时，
- * Origin 和 Host 都是攻击者的域名、彼此一致，只比较两者挡不住，所以先限定 Host 本身。
+ * 外部地址（EOS_PUBLIC_URL）：部署在容器或反向代理后面时，浏览器地址栏里的地址。只取 http(s) 的 origin，
+ * 带路径、查询、用户名的都不接受（平台只挂在根路径上）。返回错误说明，由命令行报出来。
  */
-const localHost = (req: IncomingMessage): boolean => {
-  const port = req.socket.localPort
-  return ['127.0.0.1', 'localhost', '[::1]'].some(h => req.headers.host === `${h}:${port}`)
+export const parsePublicUrl = (raw: string): URL | string => {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return `EOS_PUBLIC_URL 不是合法的地址：${raw}`
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return `EOS_PUBLIC_URL 只支持 http 或 https：${raw}`
+  if (u.pathname !== '/' || u.search !== '' || u.hash !== '' || u.username !== '' || u.password !== '') return `EOS_PUBLIC_URL 只能是 协议://主机[:端口]，不能带路径、查询或用户名：${raw}`
+  return new URL(u.origin)
 }
 
-/** 浏览器发来的同源请求：Origin 必须存在且与 Host 一致。 */
-const sameOrigin = (req: IncomingMessage): boolean => {
-  const origin = req.headers.origin
-  return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
+/**
+ * 这个 Host 对应的唯一合法 Origin；Host 不被接受时为 undefined。
+ * 接受两类 Host：本机地址加本服务的端口，以及外部地址的主机部分。挡住 DNS 重绑定：攻击者的域名解析到本服务时，
+ * Origin 和 Host 都是攻击者的域名、彼此一致，只比较两者挡不住，所以先限定 Host 本身。
+ */
+export const originFor = (host: string | undefined, port: number | undefined, publicUrl: URL | undefined): string | undefined => {
+  if (host === undefined) return undefined
+  if (['127.0.0.1', 'localhost', '[::1]'].some(h => host === `${h}:${port}`)) return `http://${host}`
+  if (publicUrl === undefined) return undefined
+  // 精确比较，只放宽大小写和默认端口：反向代理可能传来 EOS.example.com 或 eos.example.com:443。
+  const h = host.toLowerCase()
+  return h === publicUrl.host || h === `${publicUrl.host}:${publicUrl.protocol === 'https:' ? 443 : 80}` ? publicUrl.origin : undefined
+}
+
+const WILDCARD = ['0.0.0.0', '::']
+const LOOPBACK: Record<string, string> = { '127.0.0.1': 'http://127.0.0.1', localhost: 'http://localhost', '::1': 'http://[::1]' }
+
+/**
+ * 按监听地址算出浏览器该打开的地址，以及要不要警告（监听了非本机地址）。
+ * 不设外部地址时只能通过本机地址访问，所以监听某个具体的非本机地址（或 127.0.0.2 这类）就没人能用：直接报错。
+ */
+export const listenPlan = (host: string, port: number, publicUrl: URL | undefined): { url: string; exposed: boolean } | string => {
+  const exposed = LOOPBACK[host] === undefined
+  if (publicUrl !== undefined) return { url: publicUrl.origin, exposed }
+  if (LOOPBACK[host] !== undefined) return { url: `${LOOPBACK[host]}:${port}`, exposed }
+  if (WILDCARD.includes(host)) return { url: `http://localhost:${port}`, exposed }
+  return `监听 ${host} 时浏览器的 Host 是 ${host}:${port}，不是本机地址；要么改用 --host 0.0.0.0，要么把浏览器用的地址设成 EOS_PUBLIC_URL`
 }
 
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
@@ -100,7 +134,14 @@ export const tail = (path: string, max: number): string => {
 }
 
 /** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
-export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string } }): Server => {
+/**
+ * publicUrl：外部地址，见 parsePublicUrl；不给时只接受本机地址。
+ * credentials：凭据存储。凭据的值只写不读：接口不返回值，错误信息里也不带值。
+ * 现在没有登录，所有凭据都属于 LOCAL_OWNER；接上登录后按登录的用户取 owner。
+ */
+export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; credentials: Credentials; improve?: { executor: Executor; dataDir: string }; publicUrl?: URL }): Server => {
+  const allowedOrigin = (req: IncomingMessage) => originFor(req.headers.host, req.socket.localPort, o.publicUrl)
+
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
 
@@ -139,7 +180,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   /** 写接口的公共检查：同源、JSON、大小。通过时返回解析后的请求体。 */
   const guarded = async (req: IncomingMessage): Promise<{ body: Record<string, unknown> } | [number, { ok: false; error: string }]> => {
-    if (!sameOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
+    if (req.headers.origin === undefined || req.headers.origin !== allowedOrigin(req)) {
+      // 浏览器在外部地址上，Host 却是本机地址：反向代理把 Host 改写了。
+      const rewritten = o.publicUrl !== undefined && req.headers.origin === o.publicUrl.origin
+      return [403, { ok: false, error: rewritten ? `只接受来自本页面的请求：Origin 是 ${o.publicUrl!.origin}，Host 却是 ${req.headers.host ?? '（空）'}，反向代理要把原始 Host 传过来` : '只接受来自本页面的请求' }]
+    }
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
     const read = await readJson(req)
     if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]
@@ -288,6 +333,25 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     return [r.row === undefined ? 404 : 409, { ok: false, error: r.error }]
   }
 
+  const credentialList = (): CredentialsResponse => ({
+    usable: o.credentials.usable, ...(o.credentials.keyId === undefined ? { hint: GENERATE_HINT } : { keyId: o.credentials.keyId }), items: o.credentials.list(LOCAL_OWNER),
+  })
+
+  // 名字放在请求体里、不放进 URL：用户把值误填进名字时，值也不会进 URL 和访问记录。
+  const saveCredential = (body: Record<string, unknown>): [number, SaveCredentialResponse] => {
+    if (typeof body.name !== 'string') return [400, { ok: false, error: '需要 name（凭据名）' }]
+    const name = body.name
+    if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
+    if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
+    const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
+    return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
+  }
+
+  const deleteCredential = (body: Record<string, unknown>): [number, DeleteCredentialResponse] => {
+    if (typeof body.name !== 'string') return [400, { ok: false, error: '需要 name（凭据名）' }]
+    return o.credentials.delete(LOCAL_OWNER, body.name) ? [200, { ok: true }] : [404, { ok: false, error: '没有这条凭据' }]
+  }
+
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {
     const file = normalize(join(root, path))
@@ -303,16 +367,18 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   return createServer(async (req, res) => {
     try {
-      if (!localHost(req)) return json(res, 421, { error: '只接受通过本机地址访问' })
+      if (allowedOrigin(req) === undefined) return json(res, 421, { error: o.publicUrl === undefined ? '只接受通过本机地址访问' : `只接受通过本机地址或 ${o.publicUrl.origin} 访问` })
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'POST') {
         const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
         const conv = CONVENTION.exec(url.pathname)
         const dec = DECIDE.exec(url.pathname)
         const gen = url.pathname === '/api/improve/generate'
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen) return json(res, 404, { error: '没有这个接口' })
+        const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (cred !== undefined) return json(res, ...(cred === 'save' ? saveCredential(g.body) : deleteCredential(g.body)))
         if (gen) return json(res, ...(await startGenerate(g.body)))
         if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
         if (conv !== null) {
@@ -325,6 +391,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
       if (url.pathname === '/api/workflows') return json(res, 200, workflows())
       if (url.pathname === '/api/conventions') return json(res, 200, conventions())
+      if (url.pathname === '/api/credentials') return json(res, 200, credentialList())
       const conv = CONVENTION.exec(url.pathname)
       if (conv) {
         const name = decodeName(conv[2]!)

@@ -59,6 +59,11 @@ export class Credentials {
     return this.key !== undefined
   }
 
+  /** 当前主密钥的指纹；没有主密钥时是 undefined。 */
+  get keyId(): string | undefined {
+    return this.key?.id
+  }
+
   list(owner: Owner): CredentialInfo[] {
     return this.db.prepare('SELECT name, kind, key_id, created_at, updated_at FROM credentials WHERE owner = ? ORDER BY name').all(owner).flatMap(raw => {
       const r = infoRow.safeParse(raw).data
@@ -71,7 +76,8 @@ export class Credentials {
   /** 新建或替换一条凭据。替换时保留创建时间。 */
   put(owner: Owner, name: string, kind: CredentialKind, value: string): PutResult {
     if (this.key === undefined) return { ok: false, error: NO_KEY }
-    if (!NAME.test(name)) return { ok: false, error: `凭据名「${name}」不合规：只能用小写字母、数字和 . _ -，以字母或数字开头，最长 64 个字符` }
+    // 不回显名字：用户可能把值误填进了名字。
+    if (!NAME.test(name)) return { ok: false, error: '凭据名不合规：只能用小写字母、数字和 . _ -，以字母或数字开头，最长 64 个字符' }
     if (!isKind(kind)) return { ok: false, error: `不认识的凭据类型「${String(kind)}」，可选：${CREDENTIAL_KINDS.join('、')}` }
     if (value.trim() === '') return { ok: false, error: '凭据的值不能为空' }
     if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) return { ok: false, error: `凭据的值超过 ${MAX_VALUE_BYTES / 1024}KB` }

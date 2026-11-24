@@ -44,7 +44,9 @@ npm run eos -- run --repo <仓库路径> "<需求>"
 
 其他命令：`resume`、`retry`、`answer`、`status`、`log`、`abort`、`workflows`，见 `npm run eos -- --help`。数据默认在 `~/.eos`。
 
-> 安全：Web 服务只监听 `127.0.0.1`，没有登录，只接受本机 Host 和同源请求。它能在本机任何 git 仓库上建分支和 worktree，只适合在自己的机器上单人使用。
+> 安全：Web 服务默认只监听 `127.0.0.1`，没有登录，只接受本机 Host 和同源请求。它能在本机任何 git 仓库上建分支和 worktree，只适合在自己的机器上单人使用。
+>
+> 在容器或反向代理后面运行时：`--host 0.0.0.0` 改监听地址；浏览器用别的地址访问时设 `EOS_PUBLIC_URL`（例如 `https://eos.example.com`），平台只额外接受这个地址的 Host 和 Origin，反向代理要把原始 Host 传过来。没有登录：能打开这个地址的人都能建任务、看 trace，不要直接暴露到公网。
 
 ## 开发
 

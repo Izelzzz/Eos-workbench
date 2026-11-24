@@ -67,7 +67,13 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
   return () => {
     if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...extra]
     checkedAt = now()
-    const items = credentials.list(LOCAL_OWNER)
+    let items
+    try {
+      items = credentials.list(LOCAL_OWNER)
+    } catch {
+      // 凭据存储已经关闭（服务退出时）或暂时读不了：沿用上次的值，遮蔽不能让写日志的地方出错。
+      return [...(cache?.values ?? []), ...extra]
+    }
     const sig = items.map(i => `${i.name}@${i.updatedAt}`).join('\n')
     if (cache?.sig !== sig) cache = { sig, values: items.flatMap(i => { const r = credentials.get(LOCAL_OWNER, i.name); return r.kind === 'ok' ? [r.value] : [] }) }
     return [...cache.values, ...extra]

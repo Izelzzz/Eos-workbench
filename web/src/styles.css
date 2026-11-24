@@ -263,3 +263,10 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .change-status { font-size: 12px; padding: 0 6px; border-radius: 4px; background: var(--hover); white-space: nowrap; }
 .change-status.added { color: var(--ok); }
 .change-status.deleted { color: var(--error); }
+
+.credentials { max-width: 760px; display: flex; flex-direction: column; gap: 12px; }
+.credentials h1 { font-size: 18px; margin: 0; }
+.credentials p { margin: 0; overflow-wrap: anywhere; }
+.credentials .new-task h2 { font-size: 15px; margin: 0; }
+.credential-list td, .credential-list th { white-space: nowrap; }
+@media (max-width: 600px) { .credential-list .fp { display: none; } .credential-list th, .credential-list td { padding: 8px; } }
