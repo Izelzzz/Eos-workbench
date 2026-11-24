@@ -2,11 +2,14 @@
 # 新增一条之前先判断它是不是真的凭据；真的凭据要作废并轮换，不能只加到这里。
 # 每条上面写清楚：是什么、为什么不是真的凭据、谁判断的。
 # 同一行以后被改动会产生新的指纹，CI 会重新报出来，需要重新判断。
+# 指纹含提交 SHA：只给已经在 main 上的提交按指纹放行。PR 自己的提交用 squash 或 rebase 合并后 SHA 会变，
+# 这种情况把明显的假值按值写进 .gitleaks.toml 的 [[allowlists]]。
 
-# tests/logs.test.ts 的 SECRET：日志遮蔽测试里故意造的「像密钥的字符串」。
-# 值里有 0123456789、abc 这样的顺序片段，长度 24，真的 DeepSeek key 是 sk- 加 32 位十六进制。
-# 同一个值，e1e6b17 在第 110 行加入，8ee2ccc 挪到第 132 行。CI 第一批 2/3 判断，测试假值。
+# tests/logs.test.ts 的两个 SECRET：日志遮蔽测试里故意造的「像密钥的字符串」，是两个不同的值。
+# 真的 DeepSeek key 是 sk- 加 32 位十六进制，一共 35 位；这两个都是 24 位。CI 第一批 2/3 判断，测试假值。
+# e1e6b17 第 110 行：sk- 加字母、升序的 0123456789、abc 开头的一段字母。
 e1e6b17f06c2180f4dd55ab9c42d32a3a2bf2106:tests/logs.test.ts:generic-api-key:110
+# 8ee2ccc 第 132 行：8ee2ccc 新加的另一个测试里的值，sk- 加两段字母和降序的 9876543210。
 8ee2ccc67f8b459c8d21ce8bf39f1cead56356ab:tests/logs.test.ts:generic-api-key:132
 
 # tests/redact.test.ts 的 KEY：redactText 单元测试里故意造的「像密钥的字符串」。
