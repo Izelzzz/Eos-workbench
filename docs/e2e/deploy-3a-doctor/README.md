@@ -2,7 +2,7 @@
 
 ## 怎么跑的
 
-镜像用仓库里的 `Dockerfile` 构建，在三种权限配置下运行 `eos doctor`，命令和输出在 `container-doctor.txt`。每次都带 compose 的 `--cap-drop ALL --security-opt no-new-privileges`。
+镜像用仓库里的 `Dockerfile` 构建，在三种权限配置下运行 `eos doctor`，命令和输出在 `container-doctor.txt`（提交 9bfdb7b 的镜像）。每次都带 compose 的 `--cap-drop ALL --security-opt no-new-privileges`。
 
 | 配置 | doctor「沙箱」 | 退出码 |
 |---|---|---|
@@ -20,6 +20,10 @@
 - `dsh-backend-none.json`：agent 连自己的 worktree 都没写进去，`/proc` 报告也没写出来，说明 dsh 拒绝执行命令，和 doctor 的 ✗ 一致。
 
 第一种配置（Landlock）的对照在 `docs/e2e/deploy-2-image/sandbox/compose-final.json`：agent 写进了真实 `/tmp`，写不了别的 worktree。
+
+## 部署 E2E
+
+`scripts/deploy-e2e.ts`（真实模型，compose），在提交 9bfdb7b 上跑：6 项核对全部为 true，任务 `t261124183503gy9` 完成，agent 提了 2 个问题、经接口回答。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
 
 ## 局限
 
