@@ -1,0 +1,23 @@
+NOTE a init.skills / plugins / mcp_servers :: {"skills":["deep-research","eos:codeword","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","claude-api","workflow-authoring","run","run-skill-generator","plugin-authoring"],"plugins":[{"name":"eos","path":"/home/user/Eos-workbench/poc/claude-code/.run/c6a/plugin","source":"eos@inline","version":"0.0.0"},{"name":"cc-plugin-agents-md","path":"builtin","source":"cc-plugin-agents-md@builtin"},{"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"},{"name":"cc-plugin-plugin-authoring","path":"builtin","source":"cc-plugin-plugin-authoring@builtin"}],"mcp":[{"name":"eos","status":"connected","source":"dynamic"}]}
+NOTE a 发给模型的工具表 :: ["Read","Skill","DeferredToolPlaceholder","mcp__eos__get_codeword"]
+NOTE a 工具结果 :: ["Launching skill: eos:codeword","MC-9K3D","<tool_use_error>Skill dataviz is not in this session's skills allowlist</tool_use_error>"]
+PASS a 按会话挂的插件技能能用（技能内容进了上下文） :: SK-7Q2W MC-9K3D
+PASS a 按会话挂的 stdio MCP 服务能用 :: SK-7Q2W MC-9K3D
+NOTE a init.skills 仍列出自带技能（skills 选项只过滤模型看到的列表） :: ["deep-research","eos:codeword","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","claude-api","workflow-authoring","run","run-skill-generator","plugin-authoring"]
+PASS a 发给模型的技能列表里有平台给的技能，没有自带技能（claude-api、update-config） :: {"requests":2,"listed":true,"claudeApi":false,"updateConfig":false}
+PASS a 调用没给的技能被拒绝 :: [{"e":false,"t":"Launching skill: eos:codeword"},{"e":false,"t":"MC-9K3D"},{"e":true,"t":"<tool_use_error>Skill dataviz is not in this session's skills allowlist</tool_use_error>"}]
+NOTE b 默认：请求里出现的暗号 :: ["WS-CLAUDE-31","HOME-CLAUDE-33","WS-SKILL-34"]
+NOTE b 默认：init.skills :: ["repo-skill","deep-research","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","claude-api","workflow-authoring","run","run-skill-generator","plugin-authoring"]
+NOTE b 默认：模型回复 :: 我的指令里有这三个暗号：
+
+1. **HOME-CLAUDE-33**：来自用户目录的 `CLAUDE.md`，是用户的全局私有指令。
+2. **WS-CLAUDE-31**：来自工作目录 `ws/CLAUDE.md`，是仓库指令。
+3. **WS-SKILL-34**：来自技能列表里 `repo-skill` 的描述，写的是"仓库技能 WS-SKILL-34"。
+
+位于 `/home/user/Eos-workbench/CLAUDE.md` 的项目指令里没有暗号，内容只是仓库的工作约定。
+NOTE b settingSources=[]：请求里出现的暗号 :: []
+NOTE b settingSources=[]：init.skills :: ["deep-research","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","claude-api","workflow-authoring","run","run-skill-generator","plugin-authoring"]
+NOTE b settingSources=[]：模型回复 :: 没有。
+PASS b 默认会读仓库和用户目录的指令文件 :: ["WS-CLAUDE-31","HOME-CLAUDE-33","WS-SKILL-34"]
+PASS b settingSources: [] 之后一个都不读 :: []
+mode=real model=claude-sonnet-5-5 failed=0

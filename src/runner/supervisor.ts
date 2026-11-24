@@ -3,6 +3,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Conventions } from '../conventions/conventions.ts'
+import { redactDeep } from '../credentials/redact.ts'
 import type { CheckResult, Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
@@ -41,6 +42,8 @@ export class Supervisor {
     /** 每个任务的进度行。 */
     log?: (id: string, line: string) => void
     pollMs?: number
+    /** 遮蔽已知凭据值：日志行和检查输出写下来之前都经过它。agent 的输出由包了 redacting 的执行器遮蔽。 */
+    redact?: (text: string) => string
     /** 访问远程仓库用的令牌从这里取；不给时只能访问公开仓库。 */
     credentials?: Credentials
     /** 认得的代码托管平台，默认只有 github.com。 */
@@ -156,13 +159,15 @@ export class Supervisor {
     if ('heldBy' in lock) return { ok: false, error: `任务正在被进程 ${lock.heldBy} 运行` }
     // 进度行既交给调用方（终端），也写进数据目录下的 logs/<任务>.log；详细错误只写文件。
     const logPath = this.logPath(id)
-    const log = (line: string) => {
+    const redact = this.o.redact ?? (s => s)
+    const log = (raw: string) => {
+      const line = redact(raw)
       appendLog(logPath, line)
       this.o.log?.(id, line)
     }
     appendLog(logPath, `runner 开始（进程 ${process.pid}，${this.o.actor ?? 'cli'}）`)
     const done = runTask(id, {
-      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, detail: text => appendLog(logPath, text),
+      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, detail: text => appendLog(logPath, redact(text)), redact,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
       // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。
@@ -172,7 +177,7 @@ export class Supervisor {
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
       },
-      checker: (t, run, signal) => runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)),
+      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)), redact),
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)
@@ -195,7 +200,7 @@ export class Supervisor {
     this.active.set(id, done)
     done.then(t => appendLog(logPath, `runner 结束：${t.status}`), e => {
       log(`✗ runner 出错：${(e as Error).message}`)
-      appendLog(logPath, (e as Error).stack ?? String(e))
+      appendLog(logPath, redact((e as Error).stack ?? String(e)))
     })
     return { ok: true, done }
   }

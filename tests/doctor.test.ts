@@ -13,7 +13,7 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', apiKey: true, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, bwrap: true, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
+const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, bwrap: true, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -29,13 +29,13 @@ test('环境都满足时每项都通过', () => {
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', apiKey: false, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, bwrap: false, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
+  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, bwrap: false, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
   const items = evaluate(bad)
   assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail'])
   assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
-  assert.match(text, /✗ DeepSeek API key：没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/)
+  assert.match(text, /✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：在 Web 的「凭据」页添加名为 deepseek/)
   assert.match(text, /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：生成一个主密钥：openssl rand -base64 32/)
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
@@ -56,24 +56,31 @@ test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显�
 })
 
 test('设置了主密钥时提示还没隔离的地方：有没有 bwrap 说法不同；没设置主密钥时不提示', () => {
-  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥\n  怎么修：团队共用的服务器上，用独立的用户运行/)
+  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：团队共用的服务器上，用独立的用户运行/)
   assert.match(formatItems(evaluate({ ...good, bwrap: false })), /⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到.*\n  怎么修：安装 bubblewrap（bwrap）；/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
 })
 
-test('gather：读 package.json 的 engines 和 dsh 版本；只看 key 有没有设置；数据目录建不出来时记下原因', () => {
-  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), env: { DEEPSEEK_API_KEY: ' ' }, masterKey: { kind: 'missing' } })
+test('模型 key 显示来源：凭据存储、环境变量；读不出来时是 ✗，不悄悄改用环境变量', () => {
+  assert.match(formatItems(evaluate(good)), /✓ DeepSeek API key：来自凭据存储（凭据 deepseek）/)
+  assert.match(formatItems(evaluate({ ...good, modelKey: { source: 'env' } })), /✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）/)
+  assert.match(formatItems(evaluate({ ...good, modelKey: { source: 'error', error: '凭据 deepseek 解密失败' } })), /✗ DeepSeek API key：凭据存储里的 deepseek 读不出来：凭据 deepseek 解密失败\n  怎么修：/)
+})
+
+test('gather：读 package.json 的 engines 和 dsh 版本；只记 key 的来源，不带值；数据目录建不出来时记下原因', () => {
+  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'credentials', value: 'sk-secret-value' }, masterKey: { kind: 'missing' } })
   assert.equal(f.nodeRequired, '>=24.9.0')
   assert.equal(f.node, process.versions.node)
-  assert.equal(f.apiKey, false, '空白不算设置')
+  assert.deepEqual(f.modelKey, { source: 'credentials' })
+  assert.ok(!JSON.stringify(f).includes('sk-secret-value'))
   assert.match(f.dsh ?? '', /^0\.2\.2/)
   assert.match('version' in f.git ? f.git.version : '', /^\d+\.\d+/)
   assert.equal(f.dataDirError, undefined)
   assert.ok(existsSync(f.dataDir), '和别的命令一样会建出数据目录')
   const file = join(tmp(), 'a-file')
   writeFileSync(file, '')
-  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), env: { DEEPSEEK_API_KEY: 'k' }, masterKey: { kind: 'missing' } })
-  assert.equal(blocked.apiKey, true)
+  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' } })
+  assert.deepEqual(blocked.modelKey, { source: 'missing' })
   assert.equal(blocked.dataDirError, '路径里有一段不是目录（是普通文件）（ENOTDIR）')
 })
 

@@ -36,7 +36,7 @@ const probeMcp: McpServer = {
 
 const ex = new DshExecutor({
   dshHome: join(OUT, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1' }, modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
 
 /** 跑一次真实调用，返回这次会话实际拿到的工具表、技能目录、工具调用和回复。 */
