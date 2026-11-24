@@ -23,7 +23,7 @@
 
 ## 部署 E2E
 
-`scripts/deploy-e2e.ts`（真实模型，compose），在提交 9bfdb7b 上跑：6 项核对全部为 true，任务 `t261124183503gy9` 完成，agent 提了 2 个问题、经接口回答。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
+`scripts/deploy-e2e.ts`（真实模型，compose），在合入 main（#62、#63）后的提交 511a889 上跑：6 项核对全部为 true，任务 `t2611241841395wz` 完成，agent 提了 2 个问题、经接口回答。合入前在 9bfdb7b 上也跑通过一次。`container-doctor.txt` 是 9bfdb7b 的镜像，之后 doctor 和 dsh 的探测代码没有变。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
 
 ## 局限
 
