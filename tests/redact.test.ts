@@ -53,21 +53,31 @@ test('redactText masks a token inside a base64 Git auth header (x-access-token:<
 
 test('base64 masking works at every byte alignment and with any prefix or suffix, leaving at most one token-dependent character at each end', () => {
   const token = 'ghp_' + randomBytes(18).toString('hex')
+  const other = 'ghp_' + randomBytes(18).toString('hex')
   for (const prefix of ['', 'a', 'ab', 'x:', 'x-access-token:', 'oauth2:', 'user@example.com:']) {
     for (const suffix of ['', 'z', '\n', ':tail']) {
       const encoded = Buffer.from(prefix + token + suffix).toString('base64')
+      // 换一个同样长的令牌再编码：不同的位置就是和令牌有关的字符。
+      const differs = [...encoded].map((c, i) => c !== Buffer.from(prefix + other + suffix).toString('base64')[i])
       const out = redactText(encoded, [token])
-      assert.ok(out.includes(MASK), `${prefix}|${suffix}: ${out}`)
-      const kept = out.length - MASK.length
-      const outside = Math.ceil((prefix.length * 8) / 6) + Math.ceil((suffix.length * 8) / 6) + 4
-      assert.ok(kept <= outside + 2, `${prefix}|${suffix}: 留下 ${kept} 个字符：${out}`)
+      const at = out.indexOf(MASK)
+      assert.ok(at >= 0, `${prefix}|${suffix}: ${out}`)
+      const head = out.slice(0, at)
+      const tail = out.slice(at + MASK.length)
+      assert.ok(encoded.startsWith(head) && encoded.endsWith(tail), out)
+      const leftHead = differs.slice(0, head.length).filter(Boolean).length
+      const leftTail = differs.slice(encoded.length - tail.length).filter(Boolean).length
+      assert.ok(leftHead <= 1 && leftTail <= 1, `${JSON.stringify(prefix)}|${JSON.stringify(suffix)}: 两端各留下 ${leftHead}、${leftTail} 个和令牌有关的字符：${out}`)
     }
   }
 })
 
-test('base64Forms skips forms shorter than 8 characters and ordinary base64 text is untouched', () => {
-  assert.deepEqual(base64Forms('abcd1234').every(f => f.length >= 8), true)
-  assert.equal(redactText(`payload ${Buffer.from('hello world').toString('base64')}`, [TOKEN]), `payload ${Buffer.from('hello world').toString('base64')}`)
+test('base64Forms gives the exact middle of the encoding for each byte alignment; ordinary base64 text is untouched', () => {
+  // 'abcd1234' 本身、'x' + 它、'xy' + 它的 base64 分别是 YWJjZDEyMzQ=、eGFiY2QxMjM0、eHlhYmNkMTIzNA==；每种只取完全由 'abcd1234' 决定的字符。
+  assert.deepEqual(base64Forms('abcd1234'), ['YWJjZDEyMz', 'FiY2QxMjM0', 'hYmNkMTIzN'])
+  for (const [prefix, form] of [['', 'YWJjZDEyMz'], ['x', 'FiY2QxMjM0'], ['xy', 'hYmNkMTIzN']] as const) assert.ok(Buffer.from(`${prefix}abcd1234`).toString('base64').includes(form))
+  const plain = `payload ${Buffer.from('hello world').toString('base64')}`
+  assert.equal(redactText(plain, [TOKEN]), plain)
 })
 
 test('redactText replaces the longer value first when one value contains another', () => {
