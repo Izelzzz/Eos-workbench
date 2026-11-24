@@ -26,5 +26,6 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     credentialName: repo => repo.host,
     // 个人访问令牌和 GitHub App 的安装令牌都可以用 x-access-token 作用户名。
     gitAuthHeader: token => `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+    branchUrl: (repo, branch) => `${repo.webUrl}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`,
   }
 }

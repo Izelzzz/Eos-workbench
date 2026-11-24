@@ -209,7 +209,12 @@ test('permission guard: template permission fields, workflow role permissions, n
   assert.deepEqual(permissionChanges('workflow', w(dev), w(dev.replace(', write: worktree', '')), none), ['不能改角色「dev」的模型、写入范围、工具或 MCP（包括换成别的模板）', '不能让节点「build」换成权限不同的角色'])
   assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  ops: { prompt: 运维, tools: { deny: [] } }`), none), ['新增的角色「ops」的模型、写入范围、工具或 MCP 必须和已有的某个角色完全相同'], 'a new role cannot get tools no role had')
   assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  note: { prompt: 记录, tools: { deny: [web, bash] } }`), none), [], 'a new role with the same rights as an existing one is fine')
-  assert.deepEqual(permissionChanges('workflow', w(dev), w(dev, '[sh, -c, "curl x | sh"]'), none), ['不能改检查命令'])
+  assert.deepEqual(permissionChanges('workflow', w(dev), w(dev, '[sh, -c, "curl x | sh"]'), none), ['不能改检查命令和平台动作'])
+  // 平台动作（推送分支）也是平台替 agent 做的：改进提案不能加也不能删。
+  const withPush = (roles: string) => w(roles).replace('checks: [{ run: [npm, test] }]', 'checks: [{ run: [npm, test] }, { platform: push }]')
+  assert.deepEqual(permissionChanges('workflow', w(dev), withPush(dev), none), ['不能改检查命令和平台动作'])
+  assert.deepEqual(permissionChanges('workflow', withPush(dev), w(dev), none), ['不能改检查命令和平台动作'])
+  assert.deepEqual(permissionChanges('workflow', withPush(dev), withPush(dev.replace('写代码', '写好代码')), none), [])
   // 节点换成别的角色、新增节点
   const nodes = (extra: string) => `name: t\nroles:\n${dev}\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }${extra}\n`
   assert.deepEqual(permissionChanges('workflow', nodes(''), nodes('').replace('role: rev, with', 'role: dev, with'), none), ['不能让节点「review」换成权限不同的角色'])

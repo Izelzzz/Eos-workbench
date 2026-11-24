@@ -11,8 +11,9 @@ const permissionFields = (a: AgentConfig): Record<string, string> => ({
 })
 const permissionOf = (a: AgentConfig) => JSON.stringify(permissionFields(a))
 
+/** 检查命令和平台动作：都是平台替 agent 执行的，改进提案不能增删改。 */
 const commandsOf = (w: Workflow): string[] =>
-  w.nodes.flatMap(n => n.checks.flatMap(c => (c.kind === 'run' ? [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`] : []))).sort()
+  w.nodes.flatMap(n => n.checks.flatMap(c => (c.kind === 'run' ? [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`] : c.kind === 'platform' ? [`${n.id}：平台动作 ${c.action}`] : []))).sort()
 
 const UNPARSABLE = '当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'
 
@@ -54,7 +55,7 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
         if (perm(a.workflow, oldAt.get(node)) !== perm(b.workflow, role)) out.push(`不能让节点「${node}」换成权限不同的角色`)
       } else if (role !== undefined && !existing.has(perm(b.workflow, role))) out.push(`新增的节点「${node}」只能用已有权限的角色`)
     }
-    if (JSON.stringify(commandsOf(a.workflow)) !== JSON.stringify(commandsOf(b.workflow))) out.push('不能改检查命令')
+    if (JSON.stringify(commandsOf(a.workflow)) !== JSON.stringify(commandsOf(b.workflow))) out.push('不能改检查命令和平台动作')
     return out
   }
   return []

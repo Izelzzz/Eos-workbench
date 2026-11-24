@@ -10,6 +10,7 @@ import { defaultForges, looksRemote, parseRemote } from '../src/forge/forges.ts'
 import { githubForge } from '../src/forge/github.ts'
 import { explain, foreignConfig, secretsOf, mirrorDir, remoteEnv, withGitConfig } from '../src/runner/mirror.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
+import { linksOf } from '../src/web/server.ts'
 import { Store } from '../src/store/store.ts'
 import { FakeExecutor } from './fake-executor.ts'
 import { PASS } from './helpers.ts'
@@ -252,4 +253,114 @@ test('访问远程时 Web 服务照常响应：create 是异步的，不卡住�
   clearInterval(timer)
   assert.equal(c.ok, true)
   assert.ok(ticks > 0, '访问远程期间计时器照常触发')
+})
+
+const SHIP = `name: ship
+roles:
+  developer:
+    model: deepseek-flash
+    write: worktree
+    prompt: 按需求实现。
+nodes:
+  - id: build
+    kind: agent
+    role: developer
+    task: 实现需求。
+  - id: deliver
+    kind: dialog
+    with: build
+    task: 推送任务分支。
+    maxRounds: 1
+    checks:
+      - { run: [git, --version] }
+      - { platform: push }
+`
+
+/** 带推送的工作流：开发每次回复往 worktree 里写一个文件（平台随后提交）。 */
+const shipper = (r: Awaited<ReturnType<typeof remote>>, credentials = r.credentials) => {
+  assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship', content: SHIP, actor: 'test' }, Date.now()).ok, true)
+  let n = 0
+  const executor = new FakeExecutor(async ({ key }) => {
+    const id = key.split('/')[0]!
+    writeFileSync(join(r.store.meta(id).worktree, `change-${++n}.txt`), `${n}\n`)
+    return '改好了'
+  })
+  return new Supervisor({ store: r.store, executor, dataDir: r.data, credentials, forges: [r.forge], pollMs: 2 })
+}
+
+const remoteSha = (r: Awaited<ReturnType<typeof remote>>, branch: string): string =>
+  execFileSync('git', ['--git-dir', join(r.dir, 'remote', 'acme', 'app.git'), 'rev-parse', '--verify', `refs/heads/${branch}`], { encoding: 'utf8' }).trim()
+
+test('平台动作 push：任务跑完后远程有同名分支，提交和任务分支一致，检查结果带分支链接；令牌不落盘', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const sup = shipper(r)
+  const c = await sup.create({ repo: r.url, workflow: 'ship', request: '需求' })
+  assert.equal(c.ok, true, JSON.stringify(c))
+  const id = (c as { id: string }).id
+  const started = sup.start(id)
+  assert.ok(started.ok)
+  const task = await started.done
+  assert.equal(task.status, 'done', task.failure)
+  const meta = r.store.meta(id)
+  const local = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim()
+  assert.notEqual(local, r.first, '开发的改动提交了')
+  assert.equal(remoteSha(r, meta.branch), local)
+  const check = task.log.filter(e => e.type === 'check').at(-1) as Extract<(typeof task.log)[number], { type: 'check' }>
+  const push = check.results.find(x => x.check.kind === 'platform')!
+  assert.equal(push.passed, true)
+  assert.deepEqual(push.links, [{ label: `分支 ${meta.branch}`, url: `${r.url}/tree/eos/${id}` }])
+  assert.deepEqual(linksOf(task), push.links, '任务页显示这个链接')
+  assert.match(push.detail, new RegExp(`已把分支 ${meta.branch}（${local.slice(0, 12)}）推到`))
+  const header = Buffer.from(`x-access-token:${TOKEN}`).toString('base64')
+  for (const f of filesUnder(r.data)) {
+    const b = readFileSync(f)
+    assert.ok(!b.includes(TOKEN) && !b.includes(header), f)
+  }
+})
+
+test('远程的任务分支被别人推过：不强推，检查失败并说明原因；远程的提交保持原样', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const sup = shipper(r)
+  const c = (await sup.create({ repo: r.url, workflow: 'ship', request: '需求' })) as { id: string }
+  const meta = r.store.meta(c.id)
+  // 别人先往同名分支推了一个提交。
+  const other = r.commit('OTHER.md')
+  execFileSync('git', ['--git-dir', join(r.dir, 'remote', 'acme', 'app.git'), 'update-ref', `refs/heads/${meta.branch}`, other])
+  // 推送失败、对话打满轮次后会问用户：不等回答，停在那里。
+  const started = sup.start(c.id, { wait: false })
+  assert.ok(started.ok)
+  const task = await started.done
+  assert.equal(task.status, 'waiting_user')
+  const results = task.log.filter(e => e.type === 'check').flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results)
+  const push = results.find(x => x.check.kind === 'platform' && !x.passed)!
+  assert.match(push.detail, new RegExp(`分支 ${meta.branch} 已经有平台没有的提交（被别人推过或改过），平台不强推`))
+  assert.equal(remoteSha(r, meta.branch), other, '远程没被覆盖')
+})
+
+test('平台动作：本机仓库的任务跳过推送并写明原因；前面的检查没通过时不推送', async () => {
+  const { runChecks } = await import('../src/runner/checks.ts')
+  const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-push-'))
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
+  let pushed = 0
+  const platform = async (c: { kind: 'platform'; action: 'push' }) => { pushed++; return { check: c, passed: true, detail: '' } }
+  const failed = await runChecks(dir, [{ kind: 'run', run: ['false'], timeoutSec: 5 }, { kind: 'platform', action: 'push' }], process.env, undefined, platform)
+  assert.deepEqual(failed.map(x => [x.passed, x.detail]), [[false, failed[0]!.detail], [false, '前面的检查没有通过，这一步没有做']])
+  assert.equal(pushed, 0)
+  const ok = await runChecks(dir, [{ kind: 'run', run: ['true'], timeoutSec: 5 }, { kind: 'platform', action: 'push' }], process.env, undefined, platform)
+  assert.deepEqual(ok.map(x => x.passed), [true, true])
+  assert.equal(pushed, 1)
+  // 本机仓库的任务：走完整个流程，推送这一步算通过并说明跳过。
+  const r = await remote(undefined)
+  const sup = shipper(r)
+  const local = join(dir, 'local')
+  mkdirSync(local)
+  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: local })
+  const c = (await sup.create({ repo: local, workflow: 'ship', request: '需求' })) as { id: string }
+  const task = await (sup.start(c.id) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(task.status, 'done', task.failure)
+  const push = task.log.filter(e => e.type === 'check').flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results).find(x => x.check.kind === 'platform')!
+  assert.match(push.detail, /任务用的是本机仓库 .*，没有远程仓库，跳过推送/)
+  assert.equal(r.requests().length, 0)
 })

@@ -112,6 +112,17 @@ test('deliverables and command checks become one list of checks; dialogs may che
   assert.deepEqual(review?.checks, [])
 })
 
+test('平台动作 { platform: push } 解析成检查；不认识的动作、多余的字段报中文原因', () => {
+  const src = withChecks.replace('checks: [{ run: [npm, test], timeoutSec: 120 }]', 'checks: [{ run: [npm, test], timeoutSec: 120 }, { platform: push }]')
+  const r = parseWorkflow(src)
+  assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
+  assert.deepEqual(r.workflow.nodes[2]?.checks, [{ kind: 'run', run: ['npm', 'test'], timeoutSec: 120 }, { kind: 'platform', action: 'push' }])
+  for (const bad of ['{ platform: deploy }', '{ platform: push, run: [x] }', '{ push: true }']) {
+    const errors = errorsOf(withChecks.replace('checks: [{ run: [npm, test], timeoutSec: 120 }]', `checks: [${bad}]`))
+    assert.ok(errors.some(e => e.path.startsWith('nodes[2].checks[0]')), `${bad}：${JSON.stringify(errors)}`)
+  }
+})
+
 test('a dialog needs a reviewer or checks, and deliverable paths must stay inside the worktree', () => {
   const src = withChecks
     .replace("{ id: test, kind: dialog, with: build, task: 跑测试, checks: [{ run: [npm, test], timeoutSec: 120 }] }", '{ id: test, kind: dialog, with: build, task: 跑测试 }')
