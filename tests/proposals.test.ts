@@ -98,7 +98,7 @@ test('proposals that cannot be saved, are out of date, change nothing or lack re
 test('approval re-validates: content that no longer saves keeps the proposal pending', () => {
   const { store, p } = setup()
   const wf = store.convention('workflow', 'standard')!
-  const r = p.add(input({ target: { kind: 'workflow', name: 'standard' }, content: wf.content.replace('maxRounds: 2', 'maxRounds: 3') }), 10)
+  const r = p.add(input({ target: { kind: 'workflow', name: 'standard' }, content: wf.content.replace('maxRounds: 1', 'maxRounds: 2') }), 10)
   assert.ok(r.ok, !r.ok ? r.errors.join() : '')
   // 提案之后，它引用的模板变得无法解析（直接写库模拟解析器升级后旧版本不合法）。
   store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 11)

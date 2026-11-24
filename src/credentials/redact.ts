@@ -7,10 +7,32 @@ import { LOCAL_OWNER } from './types.ts'
 export const MASK = '***'
 export const MIN_SECRET_LENGTH = 8
 
-/** 一个值可能出现的写法：原样，以及 JSON 转义后的样子（多行的私钥在 trace 的 JSON 字符串里换行是 \n）。 */
+/**
+ * 值嵌在一段更长的字节里、整体做 base64 之后，一定会出现的那段字符（例如 Git 认证头 base64("x-access-token:<令牌>")）。
+ * 值在原文里的起点按 3 字节对齐有三种情况，各算一次；每种只取完全由值本身决定的字符，前后跨到别的字节的字符不取，
+ * 所以替换后两端最多各留下一个和值有关的字符（不到 2 个字节的信息）。8 字节以上的值，每种至少 10 个字符。
+ * 只认标准 base64（+ /）的连续写法：不认 URL 安全的写法（- _），也不认中间换了行的（base64 命令按 76 列折行）。
+ */
+export const base64Forms = (s: string): string[] => {
+  const bytes = Buffer.from(s, 'utf8')
+  return [0, 1, 2].map(offset => {
+    const encoded = Buffer.concat([Buffer.alloc(offset), bytes]).toString('base64')
+    return encoded.slice(Math.ceil((offset * 8) / 6), Math.floor(((offset + bytes.length) * 8) / 6))
+  })
+}
+
+/** 每个值的写法只算一次：遮蔽在每条 trace 事件的每个字符串上都要跑。已知值很少（凭据条数加上两三个），缓存不会变大多少。 */
+const formCache = new Map<string, string[]>()
+
+/** 一个值可能出现的写法：原样、JSON 转义后的样子（多行的私钥在 trace 的 JSON 字符串里换行是 \n），以及 base64 编码在更长内容里的样子。 */
 const forms = (s: string): string[] => {
-  const escaped = JSON.stringify(s).slice(1, -1)
-  return escaped === s ? [s] : [s, escaped]
+  let f = formCache.get(s)
+  if (f === undefined) {
+    f = [...new Set([s, JSON.stringify(s).slice(1, -1), ...base64Forms(s)])]
+    if (formCache.size >= 256) formCache.clear()
+    formCache.set(s, f)
+  }
+  return f
 }
 
 /** 把 text 里的每个 secret 换成 ***。长的先换：一个值包含另一个值时，不会只换掉一部分。 */

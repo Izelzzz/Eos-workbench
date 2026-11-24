@@ -26,6 +26,7 @@ const eventsFor = (t: Task): Event[] => {
     const run = t.pending
     out.push({ kind: 'checked', call: run.id, results: results(run, true), ms: 1 })
     out.push({ kind: 'checked', call: run.id, results: results(run, false), ms: 1 })
+    if (run.checks.some(c => c.kind === 'platform')) out.push({ kind: 'checked', call: run.id, results: results(run, 'platform', '远程分支被别人改过'), ms: 1 })
     out.push({ kind: 'checked', call: run.id, results: [], ms: 1 })
     out.push({ kind: 'replied', call: run.id, sessionId: 'x', text: PASS, usage: zeroUsage(), ms: 1 })
     out.push({ kind: 'asked', call: run.id, question: { id: 'n', text: '检查不会提问' } })
@@ -116,6 +117,12 @@ const INVARIANTS: Record<string, Check> = {
     const d = a.workflow.nodes.find(n => n.id === passedNow.node) as DialogNode
     if (d.role === undefined) return e.kind === 'checked' ? undefined : `check-only dialog passed by ${e.kind}`
     return e.kind === 'replied' && b.pending?.purpose === 'critique' ? undefined : `reviewed dialog passed by ${e.kind}`
+  },
+  '平台动作失败（别的检查都通过）不交回 agent：任务失败，挂着同一个节点的检查等重试': (b, e, a, accepted) => {
+    if (!accepted || e.kind !== 'checked' || !e.results.some(r => r.check.kind === 'platform' && !r.passed)) return undefined
+    const onlyPlatform = e.results.every(r => r.passed || r.check.kind === 'platform')
+    if (!onlyPlatform) return a.pending !== undefined && !isCheck(a.pending) && a.pending.prompt.includes('前面的检查没有通过') ? 'skipped platform action shown to the agent' : undefined
+    return a.status === 'failed' && a.pending !== undefined && isCheck(a.pending) && a.pending.node === b.pending?.node && a.pending.id !== b.pending.id ? undefined : `platform failure led to ${a.status} / ${a.pending?.purpose}`
   },
   '每个对话节点只自动重新确认一次': (_b, _e, a) => {
     const autos = a.log.filter(e => e.type === 'note' && e.text.includes('重新确认') && e.text.includes('轮未通过')).length
@@ -214,12 +221,13 @@ const CONFIGS = [
   { maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: true }, { maxRounds: 2, escalate: false },
   { maxRounds: 2, escalate: true, checks: 'review' as const }, { maxRounds: 2, escalate: false, checks: 'only' as const },
   { maxRounds: 1, escalate: true, checks: 'only' as const, maxFixes: 0 }, { maxRounds: 1, escalate: false, checks: 'review' as const, maxFixes: 2 },
+  { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 1 }, { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 2 },
 ]
 const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试', only: '有交付物、只有测试' }
 
 for (const config of CONFIGS) {
   const result = explore(workflow(config), 200)
-  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
+  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}${'ship' in config ? `，评审后交付（${config.ship} 轮）：测试通过再推送` : ''}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
     assert.deepEqual(result.violations.slice(0, 5), [])
     assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')

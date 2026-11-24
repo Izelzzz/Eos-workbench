@@ -51,12 +51,21 @@ export type Role = AgentConfig & {
 export type TemplateLookup = (name: string) => { template: AgentTemplate; version: number } | undefined
 
 /**
+ * 平台替任务做的动作。push：把任务分支推到远程仓库的同名分支（不强推）；
+ * pull-request：推送之后，从任务分支向任务的基线分支（远程的默认分支）开 PR，已经有就复用。
+ */
+export const PLATFORM_ACTIONS = ['push', 'pull-request'] as const
+export type PlatformAction = (typeof PLATFORM_ACTIONS)[number]
+
+/**
  * 平台用程序执行的验收检查，不靠模型自评：
- * file：交付物文件存在于 worktree 内，并且包含这些章节（Markdown 标题）；run：命令在 worktree 里执行，退出码为 0。
+ * file：交付物文件存在于 worktree 内，并且包含这些章节（Markdown 标题）；run：命令在 worktree 里执行，退出码为 0；
+ * platform：平台替任务做一个动作（例如推送分支），做成了算通过。用到的凭据只在平台进程里，agent 碰不到。
  */
 export type Check =
   | { kind: 'file'; path: string; sections: string[] }
   | { kind: 'run'; run: string[]; timeoutSec: number }
+  | { kind: 'platform'; action: PlatformAction }
 
 /** 一个 agent 完成一段工作，产出文本（方案、开发说明等），并拥有一个跨整个任务的会话。 */
 export type AgentNode = {

@@ -3,7 +3,7 @@ import type { CredentialInfo, CredentialKind } from '../credentials/types.ts'
 import type { RemoteRepo } from '../forge/types.ts'
 import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
-import type { Question, TaskStatus } from '../engine/types.ts'
+import type { CheckLink, Question, TaskStatus } from '../engine/types.ts'
 import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary, ProposalRow } from '../store/types.ts'
 import type { Span } from '../trace/types.ts'
 import type { Comparison } from '../engine/compare.ts'
@@ -25,6 +25,8 @@ export type TaskDetail = {
   repo: string
   /** 任务来自托管平台上的仓库时：是哪个仓库（repo 是平台里的镜像）。 */
   remote?: RemoteRepo
+  /** 检查产出的链接（推上去的分支、开出的 PR 等）：同一个地址只保留一条，按最后一次出现的先后排列。 */
+  links: CheckLink[]
   branch: string
   worktree: string
   baseSha: string

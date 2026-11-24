@@ -38,7 +38,9 @@ export type Work = Call | CheckRun
 export const isCheck = (w: Work): w is CheckRun => w.purpose === 'check'
 
 /** detail：没通过时是原因（缺哪些章节、命令输出的最后一段）；通过时可以为空。 */
-export type CheckResult = { check: Check; passed: boolean; detail: string }
+/** links：检查产出的链接（例如推上去的分支、开出的 PR），显示在任务页上。 */
+export type CheckLink = { label: string; url: string; kind?: 'branch' | 'pull-request' }
+export type CheckResult = { check: Check; passed: boolean; detail: string; links?: CheckLink[] }
 
 /** 任务创建时从平台快照下来的团队约定文档；之后平台上改了也不影响这个任务。 */
 export type ConventionDoc = { name: string; version: number; content: string }

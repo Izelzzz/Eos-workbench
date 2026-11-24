@@ -154,6 +154,7 @@ function TaskPage(props: { id: string }) {
     walk(task.trace)
     setOpen(all)
   }
+  const prLink = task.links.findLast(l => l.kind === 'pull-request')
   return (
     <div className="task-page">
       <section className="summary">
@@ -186,6 +187,7 @@ function TaskPage(props: { id: string }) {
           <dt>分支</dt><dd className="mono">{task.branch}</dd>
           <dt>工作目录（worktree）</dt><dd className="mono">{task.worktree}</dd>
           <dt>基线提交</dt><dd className="mono">{task.baseSha.slice(0, 12)}</dd>
+          {task.links.length > 0 && <><dt>链接</dt><dd>{task.links.map((l, i) => <span key={l.url}>{i > 0 && '、'}<a href={l.url} target="_blank" rel="noreferrer">{l.label}</a></span>)}</dd></>}
         </dl>
         {task.question && (
           <Answer
@@ -216,7 +218,7 @@ function TaskPage(props: { id: string }) {
         </div>
       </section>
       <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />
-      <Changes id={task.id} version={r.calls} />
+      <Changes id={task.id} version={r.calls} {...(prLink === undefined ? {} : { pr: prLink })} />
       <div className="toolbar">
         <button onClick={expandAll}>全部展开</button>
         <button onClick={() => setOpen(defaultOpen(task.trace))}>收起到调用</button>

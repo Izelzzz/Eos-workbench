@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
 import { MODEL_KEY_ENV, resolveModelKey, takeModelKeyEnv } from '../src/credentials/model-key.ts'
-import { knownSecrets, MASK, redactDeep, redacting, redactText } from '../src/credentials/redact.ts'
+import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import type { Executor } from '../src/executor/types.ts'
@@ -41,6 +41,44 @@ test('redactText also masks the JSON-escaped form of a multi-line value (a PEM i
   const pem = '-----BEGIN KEY-----\nabc\n-----END KEY-----'
   assert.equal(redactText(JSON.stringify({ out: `k=${pem}` }), [pem]), JSON.stringify({ out: 'k=***' }))
   assert.equal(redactText(`k=${pem}`, [pem]), 'k=***')
+})
+
+test('redactText masks a token inside a base64 Git auth header (x-access-token:<token>)', () => {
+  const header = `Authorization: Basic ${Buffer.from(`x-access-token:${TOKEN}`).toString('base64')}`
+  const out = redactText(header, [TOKEN])
+  assert.ok(out.includes(MASK), out)
+  for (const f of base64Forms(TOKEN)) assert.ok(!out.includes(f), out)
+  assert.ok(out.startsWith('Authorization: Basic eC1hY2Nlc3MtdG9rZW46'), '前缀 x-access-token: 的编码原样保留')
+})
+
+test('base64 masking works at every byte alignment and with any prefix or suffix, leaving at most one token-dependent character at each end', () => {
+  const token = 'ghp_' + randomBytes(18).toString('hex')
+  for (const prefix of ['', 'a', 'ab', 'x:', 'x-access-token:', 'oauth2:', 'user@example.com:']) {
+    for (const suffix of ['', 'z', '\n', ':tail']) {
+      const encoded = Buffer.from(prefix + token + suffix).toString('base64')
+      // 按位算：第 i 个字符占 [6i, 6i+6) 位，和令牌占的 [8p, 8(p+n)) 位有重叠就是和令牌有关的字符。
+      const from = Buffer.byteLength(prefix) * 8
+      const to = from + Buffer.byteLength(token) * 8
+      const differs = [...encoded].map((_, i) => 6 * i < to && 6 * i + 6 > from)
+      const out = redactText(encoded, [token])
+      const at = out.indexOf(MASK)
+      assert.ok(at >= 0, `${prefix}|${suffix}: ${out}`)
+      const head = out.slice(0, at)
+      const tail = out.slice(at + MASK.length)
+      assert.ok(encoded.startsWith(head) && encoded.endsWith(tail), out)
+      const leftHead = differs.slice(0, head.length).filter(Boolean).length
+      const leftTail = differs.slice(encoded.length - tail.length).filter(Boolean).length
+      assert.ok(leftHead <= 1 && leftTail <= 1, `${JSON.stringify(prefix)}|${JSON.stringify(suffix)}: 两端各留下 ${leftHead}、${leftTail} 个和令牌有关的字符：${out}`)
+    }
+  }
+})
+
+test('base64Forms gives the exact middle of the encoding for each byte alignment; ordinary base64 text is untouched', () => {
+  // 'abcd1234' 本身、'x' + 它、'xy' + 它的 base64 分别是 YWJjZDEyMzQ=、eGFiY2QxMjM0、eHlhYmNkMTIzNA==；每种只取完全由 'abcd1234' 决定的字符。
+  assert.deepEqual(base64Forms('abcd1234'), ['YWJjZDEyMz', 'FiY2QxMjM0', 'hYmNkMTIzN'])
+  for (const [prefix, form] of [['', 'YWJjZDEyMz'], ['x', 'FiY2QxMjM0'], ['xy', 'hYmNkMTIzN']] as const) assert.ok(Buffer.from(`${prefix}abcd1234`).toString('base64').includes(form))
+  const plain = `payload ${Buffer.from('hello world').toString('base64')}`
+  assert.equal(redactText(plain, [TOKEN]), plain)
 })
 
 test('redactText replaces the longer value first when one value contains another', () => {

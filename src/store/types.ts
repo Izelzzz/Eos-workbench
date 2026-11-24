@@ -23,8 +23,11 @@ export type ConventionsUsed = {
 /** 任务创建时快照下来的技能内容（SKILL.md 全文）。执行时写成角色的技能目录，平台上之后的修改不影响这个任务。 */
 export type SkillSnapshot = { name: string; version: number; content: string }
 
-/** repo：worktree 所在的仓库（远程仓库时是平台数据目录里的镜像）。remote：任务来自托管平台上的仓库时，它是哪个仓库。 */
-export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string; remote?: RemoteRepo; conventions?: ConventionsUsed; skills?: SkillSnapshot[] }
+/**
+ * repo：worktree 所在的仓库（远程仓库时是平台数据目录里的镜像）。remote：任务来自托管平台上的仓库时，它是哪个仓库；
+ * baseBranch：那时远程的默认分支（基线提交在它上面，开 PR 时作为目标分支）。
+ */
+export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string; remote?: RemoteRepo; baseBranch?: string; conventions?: ConventionsUsed; skills?: SkillSnapshot[] }
 
 export type ConventionKind = 'workflow' | 'doc' | 'template' | 'skill'
 

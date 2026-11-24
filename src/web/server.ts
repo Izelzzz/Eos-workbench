@@ -7,7 +7,7 @@ import { describePosition, sessionOf } from '../engine/machine.ts'
 import { insights, sampleAt } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
-import type { Task } from '../engine/types.ts'
+import type { CheckLink, Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
@@ -41,6 +41,16 @@ const decodeName = (raw: string): string | undefined => {
   } catch {
     return undefined
   }
+}
+
+/** 检查产出的链接：同一个地址只保留一条，排在它最后一次出现的位置，标签用最新的。 */
+export const linksOf = (t: Task): CheckLink[] => {
+  const byUrl = new Map<string, CheckLink>()
+  for (const e of t.log) if (e.type === 'check') for (const r of e.results) for (const l of r.links ?? []) {
+    byUrl.delete(l.url)
+    byUrl.set(l.url, l)
+  }
+  return [...byUrl.values()]
 }
 
 const summaryOf = (t: Task) => ({ id: t.id, status: t.status, workflow: t.workflow.name })
@@ -167,7 +177,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       logPath: o.supervisor.logPath(id),
-      repo: meta.repo, ...(meta.remote === undefined ? {} : { remote: meta.remote }), branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
+      repo: meta.repo, ...(meta.remote === undefined ? {} : { remote: meta.remote }), links: linksOf(task), branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }
