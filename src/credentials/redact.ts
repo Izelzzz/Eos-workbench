@@ -7,10 +7,25 @@ import { LOCAL_OWNER } from './types.ts'
 export const MASK = '***'
 export const MIN_SECRET_LENGTH = 8
 
-/** 一个值可能出现的写法：原样，以及 JSON 转义后的样子（多行的私钥在 trace 的 JSON 字符串里换行是 \n）。 */
+/**
+ * 值嵌在一段更长的字节里、整体做 base64 之后，一定会出现的那段字符（例如 Git 认证头 base64("x-access-token:<令牌>")）。
+ * 值在原文里的起点按 3 字节对齐有三种情况，各算一次；每种只取完全由值本身决定的字符，前后跨到别的字节的字符不取，
+ * 所以替换后两端最多各留下一个和值有关的字符（不到 2 个字节的信息）。只认标准 base64（+ /），不认 URL 安全的写法（- _）。
+ */
+export const base64Forms = (s: string): string[] => {
+  const bytes = Buffer.from(s, 'utf8')
+  return [0, 1, 2].map(offset => {
+    const encoded = Buffer.concat([Buffer.alloc(offset), bytes]).toString('base64')
+    const first = Math.ceil((offset * 8) / 6)
+    const end = Math.floor(((offset + bytes.length) * 8) / 6)
+    return encoded.slice(first, end)
+  }).filter(f => f.length >= MIN_SECRET_LENGTH)
+}
+
+/** 一个值可能出现的写法：原样、JSON 转义后的样子（多行的私钥在 trace 的 JSON 字符串里换行是 \n），以及 base64 编码在更长内容里的样子。 */
 const forms = (s: string): string[] => {
   const escaped = JSON.stringify(s).slice(1, -1)
-  return escaped === s ? [s] : [s, escaped]
+  return [...new Set([s, escaped, ...base64Forms(s)])]
 }
 
 /** 把 text 里的每个 secret 换成 ***。长的先换：一个值包含另一个值时，不会只换掉一部分。 */

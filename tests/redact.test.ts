@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
 import { MODEL_KEY_ENV, resolveModelKey, takeModelKeyEnv } from '../src/credentials/model-key.ts'
-import { knownSecrets, MASK, redactDeep, redacting, redactText } from '../src/credentials/redact.ts'
+import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import type { Executor } from '../src/executor/types.ts'
@@ -41,6 +41,33 @@ test('redactText also masks the JSON-escaped form of a multi-line value (a PEM i
   const pem = '-----BEGIN KEY-----\nabc\n-----END KEY-----'
   assert.equal(redactText(JSON.stringify({ out: `k=${pem}` }), [pem]), JSON.stringify({ out: 'k=***' }))
   assert.equal(redactText(`k=${pem}`, [pem]), 'k=***')
+})
+
+test('redactText masks a token inside a base64 Git auth header (x-access-token:<token>)', () => {
+  const header = `Authorization: Basic ${Buffer.from(`x-access-token:${TOKEN}`).toString('base64')}`
+  const out = redactText(header, [TOKEN])
+  assert.ok(out.includes(MASK), out)
+  for (const f of base64Forms(TOKEN)) assert.ok(!out.includes(f), out)
+  assert.ok(out.startsWith('Authorization: Basic eC1hY2Nlc3MtdG9rZW46'), '前缀 x-access-token: 的编码原样保留')
+})
+
+test('base64 masking works at every byte alignment and with any prefix or suffix, leaving at most one token-dependent character at each end', () => {
+  const token = 'ghp_' + randomBytes(18).toString('hex')
+  for (const prefix of ['', 'a', 'ab', 'x:', 'x-access-token:', 'oauth2:', 'user@example.com:']) {
+    for (const suffix of ['', 'z', '\n', ':tail']) {
+      const encoded = Buffer.from(prefix + token + suffix).toString('base64')
+      const out = redactText(encoded, [token])
+      assert.ok(out.includes(MASK), `${prefix}|${suffix}: ${out}`)
+      const kept = out.length - MASK.length
+      const outside = Math.ceil((prefix.length * 8) / 6) + Math.ceil((suffix.length * 8) / 6) + 4
+      assert.ok(kept <= outside + 2, `${prefix}|${suffix}: 留下 ${kept} 个字符：${out}`)
+    }
+  }
+})
+
+test('base64Forms skips forms shorter than 8 characters and ordinary base64 text is untouched', () => {
+  assert.deepEqual(base64Forms('abcd1234').every(f => f.length >= 8), true)
+  assert.equal(redactText(`payload ${Buffer.from('hello world').toString('base64')}`, [TOKEN]), `payload ${Buffer.from('hello world').toString('base64')}`)
 })
 
 test('redactText replaces the longer value first when one value contains another', () => {
