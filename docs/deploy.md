@@ -119,6 +119,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
   第一次部署和每次升级都要先建基础镜像，再建派生镜像，见下面的「升级」。派生镜像沿用 `eos-workbench:local` 这个标签的话，它会盖掉基础镜像，以后升级拿不到新的 Eos 代码。
 
 - agent 访问网络不受限制（拉依赖要用到）。需要限制出网时，在宿主机或 Docker 网络这一层做。
+- **检查命令**（工作流里的 `npm test` 等，由平台在沙箱外运行）只拿到最少的环境变量，不包括代理和证书变量（`HTTPS_PROXY`、`NODE_EXTRA_CA_CERTS` 等）。服务器要经代理上网时，检查命令里需要联网的步骤（例如 `npm install`）会失败。实测记录：`docs/e2e/deploy-2-image/sandbox/checks-probe.json`。这一点和「agent 和检查命令用独立用户运行」一起处理（路线图第 3 项）。
 
 ## 沙箱
 
