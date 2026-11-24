@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
+import { type FileChange, type FileDiff, hunks, MAX_FILES, type TaskChanges, truncate } from './changes.ts'
 import { matchesAny } from '../workflow/glob.ts'
 
 /**
@@ -420,3 +421,63 @@ export const diffStat = (w: Worktree): string => wgitText(locate(w.worktree, w.r
 export const contextFor = (w: Worktree): string =>
   `工作目录是任务的 git worktree：${w.worktree}（分支 ${w.branch}）。基线提交是 ${w.baseSha.slice(0, 12)}。` +
   `平台会在开发每次回复后自动提交，查看全部改动用 \`git diff ${w.baseSha.slice(0, 12)}\`，查看提交历史用 \`git log --oneline ${w.baseSha.slice(0, 12)}..HEAD\`。`
+
+const STATUS: Record<string, FileChange['status']> = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', T: 'modified' }
+
+/** 平台读 diff 时的公共参数：不用外部 diff 驱动和 textconv（它们会按 worktree 里的 .gitattributes 执行命令）。 */
+const diffArgs = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-M']
+
+/**
+ * 任务分支相对基线的改动，按文件（不含 diff 内容）。head 不给时解析当前 HEAD，之后的 git 调用都用这个提交，
+ * 文件列表和增删行数来自同一个提交。外部数据只在这里解析：name-status 和 numstat 的 -z 输出（路径不转义）。
+ * 路径不是合法 UTF-8 的文件跳过（平台不会提交这种文件）；改名前的路径不合法时当作新增。
+ */
+export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
+  const loc = locate(w.worktree, w.repo)
+  const at = head ?? wgitText(loc, ['rev-parse', 'HEAD'])
+  const diff = (args: string[]) => wgit(loc, [...diffArgs, ...args, w.baseSha, at])
+  const counts = new Map<string, { add: number; del: number; binary: boolean }>()
+  const num = splitNul(diff(['--numstat', '-z']))
+  for (let i = 0; i < num.length; i++) {
+    // 一段是「增\t删\t路径」；改名时路径为空，后面跟两段：改名前、改名后。路径里可能有 tab，只按前两个 tab 切。
+    const f = num[i]!
+    const t1 = f.indexOf(9)
+    const t2 = f.indexOf(9, t1 + 1)
+    const [add, del, rest] = [f.subarray(0, t1).toString('utf8'), f.subarray(t1 + 1, t2).toString('utf8'), f.subarray(t2 + 1)]
+    const path = rest.length === 0 ? (i += 2, utf8(num[i]!)) : utf8(rest)
+    if (path !== undefined) counts.set(path, { add: Number(add) || 0, del: Number(del) || 0, binary: add === '-' })
+  }
+  const files: FileChange[] = []
+  const names = splitNul(diff(['--name-status', '-z']))
+  for (let i = 0; i < names.length; i++) {
+    const code = names[i]!.toString('utf8')[0]!
+    const from = code === 'R' || code === 'C' ? utf8(names[++i]!) : undefined
+    const path = utf8(names[++i]!)
+    if (path === undefined) continue
+    const renamed = code === 'R' && from !== undefined
+    const status = renamed ? 'renamed' : code === 'R' || code === 'C' ? 'added' : STATUS[code] ?? 'modified'
+    files.push({ path, ...(renamed ? { from } : {}), status, ...(counts.get(path) ?? { add: 0, del: 0, binary: false }) })
+  }
+  return { base: w.baseSha, head: at, files: files.slice(0, MAX_FILES), omitted: Math.max(0, files.length - MAX_FILES) }
+}
+
+/** head 是不是任务分支上的提交（当前 HEAD 或它的祖先）。取单个文件的 diff 前核对，不让请求读仓库里别的提交。 */
+export const onBranch = (w: Worktree, head: string): boolean => {
+  if (!/^[0-9a-f]{40}$/.test(head)) return false
+  try {
+    wgit(locate(w.worktree, w.repo), ['merge-base', '--is-ancestor', head, 'HEAD'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 一个文件在 head 时相对基线的 diff。文件不在改动列表里时返回 undefined。 */
+export const fileDiff = (w: Worktree, head: string, path: string): FileDiff | undefined => {
+  const f = committedChanges(w, head).files.find(x => x.path === path)
+  if (f === undefined) return undefined
+  if (f.binary) return { diff: '' }
+  const loc = locate(w.worktree, w.repo)
+  const raw = wgit(loc, [...diffArgs, w.baseSha, head, '--', ...(f.from === undefined ? [] : [literal(f.from)]), literal(f.path)]).toString('utf8')
+  return truncate(hunks(raw))
+}

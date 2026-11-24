@@ -3,6 +3,7 @@ import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
+import { Changes } from './Changes.tsx'
 import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
 import { Detail } from './Detail.tsx'
 import { Improve, parseImproveRoute } from './Improve.tsx'
@@ -176,8 +177,13 @@ function TaskPage(props: { id: string }) {
           <div><span>agent 耗时</span><b>{duration(r.ms)}</b></div>
           <div><span>输入 / 输出</span><b>{tokens(r.usage.input)} / {tokens(r.usage.output)}</b></div>
           <div><span>缓存读 / 写</span><b>{tokens(r.usage.cacheRead)} / {tokens(r.usage.cacheWrite)}</b></div>
-          <div><span>分支</span><b className="mono">{task.branch}</b></div>
         </div>
+        <dl className="where" aria-label="仓库">
+          <dt>仓库</dt><dd className="mono">{task.repo}</dd>
+          <dt>分支</dt><dd className="mono">{task.branch}</dd>
+          <dt>工作目录（worktree）</dt><dd className="mono">{task.worktree}</dd>
+          <dt>基线提交</dt><dd className="mono">{task.baseSha.slice(0, 12)}</dd>
+        </dl>
         {task.question && (
           <Answer
             key={task.question.id}
@@ -207,6 +213,7 @@ function TaskPage(props: { id: string }) {
         </div>
       </section>
       <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />
+      <Changes id={task.id} version={r.calls} />
       <div className="toolbar">
         <button onClick={expandAll}>全部展开</button>
         <button onClick={() => setOpen(defaultOpen(task.trace))}>收起到调用</button>

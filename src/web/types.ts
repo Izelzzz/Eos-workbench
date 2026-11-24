@@ -19,8 +19,11 @@ export type TaskDetail = {
   failure?: string
   /** 这个任务的日志文件（平台所在机器上的路径，只用来显示；内容用 /api/tasks/:id/log 看）。 */
   logPath: string
+  /** 仓库、分支、worktree 都是平台所在机器上的路径，只用来显示。 */
+  repo: string
   branch: string
   worktree: string
+  baseSha: string
   report: Report
   /** 按阶段的 token 和时长构成，进行中的部分算到服务端处理请求的时刻。 */
   metrics: TaskMetrics
@@ -30,6 +33,8 @@ export type TaskDetail = {
   /** 创建任务时用的团队约定版本（第 1 块之前创建的任务没有）。 */
   conventions?: ConventionsUsed
 }
+
+export type { FileChange, FileDiff, TaskChanges } from '../runner/changes.ts'
 
 export type AnswerRequest = { questionId: string; text: string }
 export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }

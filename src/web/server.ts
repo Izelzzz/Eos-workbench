@@ -14,13 +14,14 @@ import { Proposals } from '../improve/proposals.ts'
 import { evidence } from '../engine/evidence.ts'
 import { compare, versionUsed, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
+import { committedChanges, fileDiff, onBranch } from '../runner/git.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, SaveConventionResponse, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -125,7 +126,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       logPath: o.supervisor.logPath(id),
-      branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
+      repo: meta.repo, branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }
@@ -354,6 +355,22 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         const text = existsSync(path) ? tail(path, LOG_TAIL) : `（还没有日志：${path}）\n`
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
         return void res.end(text)
+      }
+      const ch = /^\/api\/tasks\/([\w-]+)\/changes(\/diff)?$/.exec(url.pathname)
+      if (ch) {
+        if (o.store.get(ch[1]!) === undefined) return json(res, 404, { error: `没有任务 ${ch[1]}` })
+        const meta = o.store.meta(ch[1]!)
+        try {
+          if (ch[2] === undefined) return json(res, 200, committedChanges(meta) satisfies TaskChanges)
+          // 单个文件的 diff：head 来自改动列表，只接受任务分支上的提交。
+          const head = url.searchParams.get('head') ?? ''
+          const path = url.searchParams.get('path') ?? ''
+          if (!onBranch(meta, head)) return json(res, 400, { error: '提交不在任务分支上，刷新页面后再试' })
+          const d = fileDiff(meta, head, path)
+          return d === undefined ? json(res, 404, { error: `这个提交里没有改动文件 ${path}` }) : json(res, 200, d satisfies FileDiff)
+        } catch (e) {
+          return json(res, 500, { error: `读不到改动（worktree ${meta.worktree}）：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}` })
+        }
       }
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {
