@@ -14,8 +14,8 @@ export type FileChange = {
 /** 任务分支相对基线已提交的改动。head 是取列表时解析好的提交，取单个文件的 diff 时带上它，列表和 diff 对的是同一个提交。 */
 export type TaskChanges = { base: string; head: string; files: FileChange[]; /** 超出 MAX_FILES 没列出的文件数。 */ omitted: number }
 
-/** 一个文件的 diff，从第一个 @@ 开始。超过行数或字数上限时截断，记下原来的行数和字数。 */
-export type FileDiff = { diff: string; truncated?: { lines: number; chars: number } }
+/** 一个文件的 diff，从第一个 @@ 开始。超过行数或字数上限时截断，记下原来的行数和字数；输出大到没读完时只记读了多少字节。 */
+export type FileDiff = { diff: string; truncated?: { lines: number; chars: number } | { /** git 的输出超过这么多字节，后面的没读。 */ bytes: number } }
 
 export const MAX_FILES = 1000
 export const MAX_DIFF_LINES = 2000

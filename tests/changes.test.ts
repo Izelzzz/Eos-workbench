@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { hunks, MAX_DIFF_CHARS, MAX_DIFF_LINES, truncate } from '../src/runner/changes.ts'
-import { committedChanges, createWorktree, fileDiff, onBranch } from '../src/runner/git.ts'
+import { committedChanges, createWorktree, fileDiff, MAX_DIFF_BYTES, onBranch } from '../src/runner/git.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
 import { createWebServer } from '../src/web/server.ts'
@@ -79,7 +79,7 @@ test('过长的 diff 按行数和字数截断，并记下原来的大小', () =>
   const { w, head } = setup()
   const big = fileDiff(w, head, 'big.txt')!
   assert.equal(big.diff.split('\n').length, MAX_DIFF_LINES)
-  assert.equal(big.truncated?.lines, MAX_DIFF_LINES + 11, '多出的一行是 @@ 头')
+  assert.deepEqual(big.truncated !== undefined && 'lines' in big.truncated ? big.truncated.lines : undefined, MAX_DIFF_LINES + 11, '多出的一行是 @@ 头')
   const long = truncate(`@@ -0,0 +1 @@\n+${'x'.repeat(MAX_DIFF_CHARS * 2)}`)
   assert.equal(long.diff.length, MAX_DIFF_CHARS)
   assert.deepEqual(long.truncated, { lines: 2, chars: MAX_DIFF_CHARS * 2 + 15 })
@@ -140,4 +140,63 @@ test('接口：任务详情带仓库、分支、worktree 和基线；列表和�
     await new Promise(r => server.close(r))
     store.close()
   }
+})
+
+test('head 必须在基线和任务分支之间：基线之前的历史提交不行（读不到已删掉的文件）', () => {
+  const dir = tmp()
+  const repo = join(dir, 'repo')
+  mkdirSync(repo)
+  git(repo, 'init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'secret-old.txt'), 'old secret\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-q', '-m', 'c0')
+  const c0 = git(repo, 'rev-parse', 'HEAD')
+  git(repo, 'rm', '-q', 'secret-old.txt')
+  git(repo, 'commit', '-q', '-m', 'base')
+  const w = createWorktree(repo, dir, 't1')
+  writeFileSync(join(w.worktree, 'a.txt'), 'a\n')
+  git(w.worktree, 'add', '-A')
+  git(w.worktree, 'commit', '-q', '-m', 'work')
+  const head = git(w.worktree, 'rev-parse', 'HEAD')
+  assert.equal(onBranch(w, c0), false, '基线之前的提交')
+  assert.equal(onBranch(w, w.baseSha), true, '基线本身（还没有改动）')
+  assert.equal(onBranch(w, head), true)
+  // agent 在 worktree 里切到别处：列表和校验都以任务分支的 ref 为准。
+  git(w.worktree, 'checkout', '-q', '--detach', c0)
+  assert.deepEqual(committedChanges(w).files.map(f => f.path), ['a.txt'])
+  assert.equal(committedChanges(w).head, head)
+  assert.equal(onBranch(w, c0), false)
+})
+
+test('改名并修改：列出改名和增删行数，diff 有内容', () => {
+  const dir = tmp()
+  const repo = join(dir, 'repo')
+  mkdirSync(repo)
+  git(repo, 'init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'old.txt'), Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n') + '\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-q', '-m', 'init')
+  const w = createWorktree(repo, dir, 't1')
+  git(w.worktree, 'mv', 'old.txt', 'new.txt')
+  writeFileSync(join(w.worktree, 'new.txt'), Array.from({ length: 20 }, (_, i) => (i === 3 ? 'changed' : `line ${i}`)).join('\n') + '\n')
+  git(w.worktree, 'add', '-A')
+  git(w.worktree, 'commit', '-q', '-m', 'mv')
+  const c = committedChanges(w)
+  assert.deepEqual(c.files, [{ path: 'new.txt', from: 'old.txt', status: 'renamed', add: 1, del: 1, binary: false }])
+  assert.match(fileDiff(w, c.head, 'new.txt')!.diff, /^@@ [\s\S]*-line 3\n\+changed/)
+})
+
+test('git 的输出超过上限时只读前面一部分，并注明', () => {
+  const dir = tmp()
+  const repo = join(dir, 'repo')
+  mkdirSync(repo)
+  git(repo, 'init', '-q', '-b', 'main')
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'init')
+  const w = createWorktree(repo, dir, 't1')
+  writeFileSync(join(w.worktree, 'huge.txt'), `${'y'.repeat(1024)}\n`.repeat(Math.ceil(MAX_DIFF_BYTES / 1024) + 100))
+  git(w.worktree, 'add', '-A')
+  git(w.worktree, 'commit', '-q', '-m', 'huge')
+  const d = fileDiff(w, committedChanges(w).head, 'huge.txt')!
+  assert.deepEqual(d.truncated, { bytes: MAX_DIFF_BYTES })
+  assert.ok(d.diff.startsWith('@@ '))
 })

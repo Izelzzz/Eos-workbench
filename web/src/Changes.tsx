@@ -16,12 +16,20 @@ function FileDiffView(props: { id: string; head: string; file: FileChange }) {
   const [error, setError] = useState<string>()
   useEffect(() => {
     if (f.binary) return
+    // head 变了（任务又有了提交）：清掉上一次的结果和错误再取；失败时每 3 秒重试。
+    setD(undefined)
+    setError(undefined)
     let stopped = false
-    getFileDiff(props.id, props.head, f.path).then(x => { if (!stopped) setD(x) }, (e: Error) => { if (!stopped) setError(e.message) })
-    return () => { stopped = true }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const load = () => getFileDiff(props.id, props.head, f.path).then(
+      x => { if (!stopped) { setD(x); setError(undefined) } },
+      (e: Error) => { if (!stopped) { setError(e.message); timer = setTimeout(load, RETRY_MS) } },
+    )
+    void load()
+    return () => { stopped = true; clearTimeout(timer) }
   }, [props.id, props.head, f.path, f.binary])
   if (f.binary) return <p className="muted">二进制文件，不显示内容。</p>
-  if (error) return <p className="error">{error}</p>
+  if (error) return <p className="error">{error}（自动重试中）</p>
   if (d === undefined) return <p className="muted">加载中…</p>
   if (d.diff === '') return <p className="muted">{EMPTY[f.status]}</p>
   return (
@@ -29,7 +37,7 @@ function FileDiffView(props: { id: string; head: string; file: FileChange }) {
       <pre className="diff" aria-label={`${f.path} 的差异`}>
         {d.diff.split('\n').map((l, i) => <div key={i} className={lineClass(l)}>{l === '' ? ' ' : l}</div>)}
       </pre>
-      {d.truncated && <p className="muted">差异共 {d.truncated.lines} 行、{d.truncated.chars} 个字符，太长，只显示前面一部分。</p>}
+      {d.truncated && <p className="muted">{'bytes' in d.truncated ? `差异超过 ${Math.round(d.truncated.bytes / 1024 / 1024)}MB，只显示前面一部分。` : `差异共 ${d.truncated.lines} 行、${d.truncated.chars} 个字符，太长，只显示前面一部分。`}</p>}
     </>
   )
 }

@@ -434,7 +434,8 @@ const diffArgs = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-M']
  */
 export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
   const loc = locate(w.worktree, w.repo)
-  const at = head ?? wgitText(loc, ['rev-parse', 'HEAD'])
+  // 以任务分支这个 ref 为准，不看 worktree 的 HEAD：agent 能在 worktree 里切到别的提交。
+  const at = head ?? wgitText(loc, ['rev-parse', '--verify', `refs/heads/${w.branch}^{commit}`])
   const diff = (args: string[]) => wgit(loc, [...diffArgs, ...args, w.baseSha, at])
   const counts = new Map<string, { add: number; del: number; binary: boolean }>()
   const num = splitNul(diff(['--numstat', '-z']))
@@ -461,14 +462,33 @@ export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
   return { base: w.baseSha, head: at, files: files.slice(0, MAX_FILES), omitted: Math.max(0, files.length - MAX_FILES) }
 }
 
-/** head 是不是任务分支上的提交（当前 HEAD 或它的祖先）。取单个文件的 diff 前核对，不让请求读仓库里别的提交。 */
+/**
+ * head 是不是任务自己的提交：在基线和任务分支之间（基线是 head 的祖先，head 是任务分支的祖先）。
+ * 取单个文件的 diff 前核对，不让请求读仓库里别的提交（包括基线之前的历史）。
+ */
 export const onBranch = (w: Worktree, head: string): boolean => {
-  if (!/^[0-9a-f]{40}$/.test(head)) return false
+  if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(head)) return false
+  const loc = locate(w.worktree, w.repo)
   try {
-    wgit(locate(w.worktree, w.repo), ['merge-base', '--is-ancestor', head, 'HEAD'])
+    wgit(loc, ['merge-base', '--is-ancestor', w.baseSha, head])
+    wgit(loc, ['merge-base', '--is-ancestor', head, `refs/heads/${w.branch}`])
     return true
   } catch {
     return false
+  }
+}
+
+/** 单个文件的 diff 最多读这么多字节：超过的部分 git 输出了也不读进内存（页面本来也只显示前面一部分）。 */
+export const MAX_DIFF_BYTES = 8 * 1024 * 1024
+
+/** 带输出上限的 git 调用：超过上限时返回已经读到的部分，不报错。 */
+const wgitCapped = (loc: Loc, args: string[], max: number): { out: Buffer; capped: boolean } => {
+  try {
+    return { out: execFileSync('git', [...SAFE, '--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], { cwd: loc.worktree, maxBuffer: max, stdio: ['ignore', 'pipe', 'pipe'] }), capped: false }
+  } catch (e) {
+    const stdout = (e as { stdout?: unknown }).stdout
+    if ((e as NodeJS.ErrnoException).code === 'ENOBUFS' && Buffer.isBuffer(stdout)) return { out: stdout, capped: true }
+    throw e
   }
 }
 
@@ -478,6 +498,7 @@ export const fileDiff = (w: Worktree, head: string, path: string): FileDiff | un
   if (f === undefined) return undefined
   if (f.binary) return { diff: '' }
   const loc = locate(w.worktree, w.repo)
-  const raw = wgit(loc, [...diffArgs, w.baseSha, head, '--', ...(f.from === undefined ? [] : [literal(f.from)]), literal(f.path)]).toString('utf8')
-  return truncate(hunks(raw))
+  const { out, capped } = wgitCapped(loc, [...diffArgs, w.baseSha, head, '--', ...(f.from === undefined ? [] : [literal(f.from)]), literal(f.path)], MAX_DIFF_BYTES)
+  const d = truncate(hunks(out.toString('utf8')))
+  return capped ? { diff: d.diff, truncated: { bytes: MAX_DIFF_BYTES } } : d
 }

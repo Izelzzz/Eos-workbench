@@ -128,7 +128,7 @@ try {
       '任务完成': status === 'done',
       '页面显示仓库、分支、worktree、基线': where['仓库'] === detail.repo && where['分支'] === detail.branch && where['工作目录（worktree）'] === detail.worktree && where['基线提交'] === detail.baseSha.slice(0, 12),
       '改动区的文件和增删行数与 git numstat 一致': JSON.stringify([...shown].sort((a, b) => a.path.localeCompare(b.path))) === JSON.stringify([...numstat].sort((a, b) => a.path.localeCompare(b.path))),
-      '展开的 diff 和 git diff 的内容一致': gitFile.slice(gitFile.search(/^@@/m)).trim().split('\n').every(l => diffText.includes(l.trim())),
+      '展开的 diff 和 git diff 的 @@ 段逐行、按顺序一致': JSON.stringify(diffText.split('\n').map((l: string) => l.trimEnd())) === JSON.stringify(gitFile.slice(gitFile.search(/^@@/m)).replace(/\n+$/, '').split('\n').map(l => l.trimEnd())),
       '390 宽没有横向滚动': overflow <= 0,
       '页面没有报错': errors.length === 0,
     },
