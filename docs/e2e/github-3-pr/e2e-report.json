@@ -1,5 +1,5 @@
 {
-  "task": "t2611241540022ri",
+  "task": "t261124155107p5m",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -20,7 +20,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-2032ee0a7f3ee0630db39f14dcb15b83",
+      "sid": "session-ca226de5ddaa76309df258a4adc69d4e",
       "calls": [
         "c1"
       ],
@@ -31,7 +31,7 @@
       "asks": 1
     },
     "build": {
-      "sid": "session-ea4f40daf5e4086d897162e15f7876ed",
+      "sid": "session-53c8b1a549d49754f8d48d1e36971175",
       "calls": [
         "c2",
         "c4"
@@ -42,7 +42,7 @@
       "asks": 0
     },
     "review": {
-      "sid": "session-5b2c03c720874d7c58aed6a4d29c2076",
+      "sid": "session-4504e6669c215d028ef9802bfc9bccf3",
       "calls": [
         "c3",
         "c5"
@@ -56,12 +56,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 44207ms",
-    "c2 produce@build 12026ms",
-    "c3 critique@review#1 26032ms",
-    "c4 respond@review#1 16207ms",
-    "c5 critique@review#2 5435ms"
+    "c1 produce@plan 33025ms",
+    "c2 produce@build 13837ms",
+    "c3 critique@review#1 44864ms",
+    "c4 respond@review#1 11526ms",
+    "c5 critique@review#2 5784ms"
   ],
-  "commits": "090ec07 eos: review respond (c4)\n54ddfc4 eos: build produce (c2)\n",
-  "npmTest": " 13 - Infinity 属于数字，正常参与求和\n  ---\n  duration_ms: 0.056394\n  type: 'test'\n  ...\n# Subtest: Infinity 与 -Infinity 相加返回 NaN\nok 14 - Infinity 与 -Infinity 相加返回 NaN\n  ---\n  duration_ms: 0.040321\n  type: 'test'\n  ...\n# Subtest: 不修改入参数组\nok 15 - 不修改入参数组\n  ---\n  duration_ms: 0.424663\n  type: 'test'\n  ...\n1..15\n# tests 15\n# suites 0\n# pass 15\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 84.941463\n"
+  "commits": "1ff77bb eos: review respond (c4)\n616c8a5 eos: build produce (c2)\n",
+  "npmTest": "peError\n        ok 11 - 入参是数字时抛 TypeError\n          ---\n          duration_ms: 0.033216\n          type: 'test'\n          ...\n        1..11\n    ok 3 - 错误处理\n      ---\n      duration_ms: 1.551991\n      type: 'suite'\n      ...\n    1..3\nok 1 - sum\n  ---\n  duration_ms: 4.641498\n  type: 'suite'\n  ...\n1..1\n# tests 23\n# suites 4\n# pass 23\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 64.923213\n"
 }
