@@ -6,13 +6,14 @@ import type {
   ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
   FileChange, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
   CredentialsResponse, DeleteCredentialResponse, SaveCredentialRequest, SaveCredentialResponse,
+  ForgeAppsResponse, RegisterAppRequest, RegisterAppResponse,
 } from '../../src/web/types.ts'
 import type { CredentialKind } from '../../src/credentials/types.ts'
 
 export type { Insights }
 export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
 export type { FileChange, FileDiff, TaskChanges }
-export type { CredentialKind, CredentialsResponse }
+export type { CredentialKind, CredentialsResponse, ForgeAppsResponse }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -62,3 +63,6 @@ export const listComparisons = () => get<ImprovementComparison[]>('/api/improve/
 export const listCredentials = () => get<CredentialsResponse>('/api/credentials')
 export const saveCredential = (body: SaveCredentialRequest) => post<SaveCredentialResponse>('/api/credentials', body)
 export const deleteCredential = (name: string) => post<DeleteCredentialResponse>('/api/credentials/delete', { name })
+
+export const listForgeApps = () => get<ForgeAppsResponse>('/api/forge-apps')
+export const registerForgeApp = (body: RegisterAppRequest) => post<RegisterAppResponse>('/api/forge-apps/register', body)
