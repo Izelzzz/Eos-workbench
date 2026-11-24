@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
@@ -175,7 +175,8 @@ test('takeModelKeyEnv reads the env key and removes it from the environment; bla
 
 test('knownSecrets：JSON 凭据里的机密字段（例如 GitHub App 的私钥）单独出现也遮住，slug、App id 不遮；运行时登记的短期令牌也遮住', () => {
   const c = new Credentials(db(), newKey())
-  const pem = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n'
+  // 测试运行时现场生成，不把私钥写进仓库。
+  const pem = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
   assert.deepEqual(c.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', JSON.stringify({ appId: '4242424242', slug: 'eos-workbench-app', privateKey: pem })), { ok: true })
   const secrets = knownSecrets(c, [])
   assert.equal(redactText(`私钥：${pem}`, secrets()), `私钥：${MASK}`)
