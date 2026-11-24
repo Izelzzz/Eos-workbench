@@ -762,3 +762,112 @@ test('App 令牌被吊销（例如 App 卸载重装）：用它访问失败后�
   assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request: '三' })).ok, true, '重试时换了新令牌')
   assert.equal(mints(r).length, 2)
 })
+
+/** 在 remote() 上起平台的 Web 服务（和 remote 用同一个 Supervisor 和凭据存储），浏览器从 127.0.0.1 访问。 */
+const webOn = async (r: Awaited<ReturnType<typeof remote>>, credentials: Credentials = r.credentials) => {
+  const { createWebServer } = await import('../src/web/server.ts')
+  const server = createWebServer({ store: r.store, supervisor: r.sup, replay: { traceOf: async () => [] }, staticDir: join(r.dir, 'static'), credentials })
+  await new Promise<void>(ok => server.listen(0, '127.0.0.1', ok))
+  cleanup.push(() => server.close())
+  const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`
+  const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  return { base, post }
+}
+
+/** 浏览器做的事：把表单提交到托管平台，跟着它跳回平台的回调，返回平台最后跳到的页面地址（只跟一次托管平台、一次平台的跳转）。 */
+const submitManifest = async (action: string, fields: Record<string, string>): Promise<{ callback: string; page: string }> => {
+  const atForge = await fetch(action, { method: 'POST', body: new URLSearchParams(fields), redirect: 'manual' })
+  assert.equal(atForge.status, 302)
+  const callback = atForge.headers.get('location')!
+  const atPlatform = await fetch(callback, { redirect: 'manual' })
+  assert.equal(atPlatform.status, 303)
+  return { callback, page: atPlatform.headers.get('location')! }
+}
+
+test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后存下 App 凭据（不存 client secret）；装到仓库后克隆用的是 App 的令牌', async () => {
+  const r = await remote(TOKEN)
+  const web = await webOn(r)
+  const name = `github-app.${r.credential}`
+  const before = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  assert.deepEqual(before, { usable: true, callbackUrl: `${web.base}/api/forge-apps/callback`, apps: [{ name, host: r.credential, appNameMax: 34 }] })
+
+  // 写接口照样只接受同源请求。
+  assert.equal((await fetch(`${web.base}/api/forge-apps/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, appName: 'eos-test' }) })).status, 403)
+  const started = await (await web.post('/api/forge-apps/register', { name, appName: 'Eos-Test' })).json() as { ok: true; action: string; fields: Record<string, string> }
+  assert.equal(started.ok, true)
+  const action = new URL(started.action)
+  assert.equal(`${action.origin}${action.pathname}`, `http://${r.credential}/settings/apps/new`)
+  const state = action.searchParams.get('state')!
+  assert.ok(state.length >= 40, 'state 是足够长的随机串')
+  const manifest = JSON.parse(started.fields.manifest!)
+  assert.deepEqual(manifest, {
+    name: 'Eos-Test', url: web.base, redirect_url: `${web.base}/api/forge-apps/callback`, public: false,
+    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' }, default_events: [],
+  })
+
+  const done = await submitManifest(started.action, started.fields)
+  assert.equal(done.page, `/#/forges?registered=${encodeURIComponent(name)}&app=Eos-Test`)
+  const saved = r.credentials.get(LOCAL_OWNER, name)
+  assert.equal(saved.kind, 'ok')
+  const value = JSON.parse((saved as { value: string }).value)
+  assert.deepEqual(Object.keys(value).sort(), ['appId', 'htmlUrl', 'privateKey', 'slug'], '只存 App id、私钥、短名和页面地址')
+  assert.equal(value.slug, 'eos-test')
+  assert.match(value.privateKey, /BEGIN RSA PRIVATE KEY/)
+  assert.equal(r.credentials.list(LOCAL_OWNER).find(i => i.name === name)?.kind, 'github-app')
+  const after = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  assert.equal(after.apps[0]!.registered?.installUrl, `http://${r.credential}/apps/eos-test/installations/new`)
+
+  // 同一个回调地址再来一次（例如浏览器后退、别人拿到了这个地址）：state 只能用一次。
+  const replay = await fetch(done.callback, { redirect: 'manual' })
+  assert.match(new URLSearchParams(replay.headers.get('location')!.split('?')[1]).get('error')!, /已经过期、已经用过/)
+  // 已经注册过：不悄悄换掉。
+  const again = await web.post('/api/forge-apps/register', { name, appName: 'eos-2' })
+  assert.equal(again.status, 409)
+  assert.match((await again.json()).error, /先在凭据页删掉/)
+
+  // App 装到仓库后，平台不用个人令牌（凭据存储里没有）就能克隆：用的是这个 App 换来的安装令牌。
+  await fetch(`http://${r.credential}/__control/install?repo=acme/app`)
+  const created = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'x' })
+  assert.equal(created.ok, true, JSON.stringify(created))
+  assert.ok(r.requests().some(q => q.path === '/api/v3/app/installations/1000/access_tokens'), '换了安装令牌')
+})
+
+test('清单流程的回调：不是本平台发起的 state、没带 code、code 换不到凭据，都不存任何东西，回到页面说明原因', async () => {
+  const r = await remote(TOKEN)
+  const web = await webOn(r)
+  const name = `github-app.${r.credential}`
+  /** 回调跳回页面时带的错误说明。 */
+  const page = async (url: string) => new URLSearchParams((await fetch(url, { redirect: 'manual' })).headers.get('location')!.split('?')[1]).get('error') ?? ''
+  assert.match(await page(`${web.base}/api/forge-apps/callback?code=abc&state=forged`), /这次注册不是从本页面发起的.*那边已经建好了一个 App：到托管平台的 App 设置里删掉它/)
+  assert.doesNotMatch(await page(`${web.base}/api/forge-apps/callback?state=forged`), /删掉它/, '没带 code：托管平台上没有建 App，不提示删')
+
+  const start = async () => new URL(((await (await web.post('/api/forge-apps/register', { name, appName: 'eos-x' })).json()) as { action: string }).action).searchParams.get('state')!
+  assert.match(await page(`${web.base}/api/forge-apps/callback?state=${await start()}`), /没有带回 code/)
+  assert.match(await page(`${web.base}/api/forge-apps/callback?code=unknown&state=${await start()}`), /不认这次注册返回的 code/)
+  assert.deepEqual(r.credentials.list(LOCAL_OWNER), [])
+
+  // 发起注册之后、跳回之前，别处已经存了这个名字的凭据：不覆盖它。
+  const started = await (await web.post('/api/forge-apps/register', { name, appName: 'eos-race' })).json() as { action: string; fields: Record<string, string> }
+  r.credentials.put(LOCAL_OWNER, name, 'github-app', '{"appId":1,"privateKey":"old PRIVATE KEY"}')
+  const raced = await submitManifest(started.action, started.fields)
+  assert.match(new URLSearchParams(raced.page.split('?')[1]).get('error')!, /注册期间已经有了凭据.*没有覆盖它/)
+  assert.equal((r.credentials.get(LOCAL_OWNER, name) as { value: string }).value, '{"appId":1,"privateKey":"old PRIVATE KEY"}')
+  r.credentials.delete(LOCAL_OWNER, name)
+
+  // 输入的检查：名字太长、组织名不对、没有这个托管平台。
+  assert.equal((await web.post('/api/forge-apps/register', { name, appName: 'x'.repeat(35) })).status, 400)
+  assert.equal((await web.post('/api/forge-apps/register', { name, appName: '😀'.repeat(34) })).status, 200, '按字符数算：34 个 emoji 不超长')
+  assert.equal((await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'bad/org' })).status, 400)
+  assert.equal((await web.post('/api/forge-apps/register', { name: 'github-app.gitlab.com', appName: 'eos' })).status, 400)
+  // 注册在组织下：表单提交到组织的页面。
+  const org = await (await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'acme' })).json() as { action: string }
+  assert.equal(new URL(org.action).pathname, '/organizations/acme/settings/apps/new')
+})
+
+test('没有主密钥时不能发起注册：注册完存不了私钥，GitHub 上会留下一个用不上的 App', async () => {
+  const r = await remote(TOKEN)
+  const web = await webOn(r, new Credentials(join(r.data, 'eos.db'), undefined))
+  const res = await web.post('/api/forge-apps/register', { name: `github-app.${r.credential}`, appName: 'eos' })
+  assert.equal(res.status, 409)
+  assert.match((await res.json()).error, /没有主密钥/)
+})

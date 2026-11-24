@@ -42,7 +42,7 @@ export class Supervisor {
   private readonly active = new Map<string, Promise<Task>>()
   readonly locksDir: string
   readonly conventions: Conventions
-  private readonly forges: Forge[]
+  readonly forges: Forge[]
 
   constructor(private readonly o: {
     store: Store

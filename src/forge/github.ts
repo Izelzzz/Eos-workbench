@@ -1,7 +1,7 @@
 // GitHub：仓库地址的写法、令牌的名字、git 的认证头、开 PR。
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
-import { appCredential, appCredentialName, GitHubApp } from './github-app.ts'
+import { appCredential, appCredentialName, GitHubApp, githubAppRegistration } from './github-app.ts'
 import { ForgeError, type Forge, type PullRequest, type RemoteRepo } from './types.ts'
 
 /** 一次 API 请求最多等这么久。 */
@@ -122,6 +122,7 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       return { number: pr.data.number, url: pr.data.html_url, reused: false }
     },
     appCredentialName: repo => appCredentialName(repo.host),
+    appRegistration: githubAppRegistration({ host, web: `${scheme}://${host}`, api }),
     forgetAppToken: repo => {
       for (const app of apps.values()) app.forget(repo)
     },

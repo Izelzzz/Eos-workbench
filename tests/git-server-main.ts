@@ -4,16 +4,21 @@
 // 另外模拟 GitHub 的 PR 接口（/api/v3/repos/<owner>/<repo>/pulls 的 GET 和 POST），要求 "Authorization: Bearer <令牌>"；PR 存在内存里。
 // 再模拟 GitHub App：环境变量 EOS_TEST_APP_ID、EOS_TEST_APP_KEY（公钥 PEM 文件）、EOS_TEST_APP_INSTALLED（装了 App 的 owner/repo，逗号分隔）、
 // EOS_TEST_APP_TTL_MS（安装令牌的有效期）。查安装和换令牌要用 App 私钥签的 JWT；换出的令牌在有效期内，git 和 PR 接口都认。
+// 还模拟清单流程注册 App：POST /settings/apps/new?state=…（或 /organizations/<org>/settings/apps/new）收下清单，新生成一个 App（换掉上面的 App），
+// 不经确认页直接 302 跳回清单里的 redirect_url（带 code 和 state）；POST /api/v3/app-manifests/<code>/conversions 用 code 换 App 的 id 和私钥，code 只能用一次。
+// 收到的清单写进记录文件（path 是表单地址，manifest 是清单）。
 import { execFileSync, spawn } from 'node:child_process'
-import { createPublicKey, createVerify, randomBytes } from 'node:crypto'
+import { createPublicKey, createVerify, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { appendFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 const [root, token, record] = process.argv.slice(2) as [string, string, string]
-const appId = process.env.EOS_TEST_APP_ID
-const appKey = process.env.EOS_TEST_APP_KEY === undefined ? undefined : createPublicKey(readFileSync(process.env.EOS_TEST_APP_KEY))
+let appId = process.env.EOS_TEST_APP_ID
+let appKey: KeyObject | undefined = process.env.EOS_TEST_APP_KEY === undefined ? undefined : createPublicKey(readFileSync(process.env.EOS_TEST_APP_KEY))
+/** 清单流程里发出去、还没换过的 code。 */
+const conversions = new Map<string, { id: number; slug: string; pem: string; name: string }>()
 const installed = (process.env.EOS_TEST_APP_INSTALLED ?? '').split(',').filter(Boolean)
 const ttl = Number(process.env.EOS_TEST_APP_TTL_MS ?? 3600_000)
 /** 换出去的安装令牌：令牌 → 到期时间和授权的仓库。 */
@@ -102,9 +107,40 @@ const server = createServer((req, res) => {
     else if (ctl[1] === 'fail-post') control.failPost = Number(q.get('status'))
     else if (ctl[1] === 'close' && pr !== undefined) pr.state = 'closed'
     else if (ctl[1] === 'revoke') issued.clear()
+    else if (ctl[1] === 'install') installed.push(q.get('repo')!)
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)
     return void res.end()
+  }
+  // 清单流程：收下清单，生成 App，跳回平台。
+  const newApp = /^\/(?:organizations\/[^/]+\/)?settings\/apps\/new\?state=([^&]*)$/.exec(req.url ?? '')
+  if (newApp !== null && req.method === 'POST') {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      const manifest = JSON.parse(new URLSearchParams(Buffer.concat(chunks).toString('utf8')).get('manifest') ?? '{}') as { name: string; redirect_url: string }
+      appendFileSync(record, `${JSON.stringify({ path: req.url, manifest })}\n`)
+      const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      const id = 700 + conversions.size
+      const code = randomBytes(10).toString('hex')
+      conversions.set(code, { id, slug: manifest.name.toLowerCase(), pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(), name: manifest.name })
+      appId = String(id)
+      appKey = publicKey
+      const back = new URL(manifest.redirect_url)
+      back.searchParams.set('code', code)
+      back.searchParams.set('state', decodeURIComponent(newApp[1]!))
+      res.writeHead(302, { location: back.toString() })
+      res.end()
+    })
+    return
+  }
+  const conv = /^\/api\/v3\/app-manifests\/([^/]+)\/conversions$/.exec(req.url ?? '')
+  if (conv !== null && req.method === 'POST') {
+    const c = conversions.get(decodeURIComponent(conv[1]!))
+    conversions.delete(decodeURIComponent(conv[1]!))
+    res.writeHead(c === undefined ? 404 : 201, { 'content-type': 'application/json' })
+    // 真实 GitHub 还返回 client_secret、webhook_secret：平台不该存它们。
+    return void res.end(JSON.stringify(c === undefined ? { message: 'Not Found' } : { id: c.id, slug: c.slug, name: c.name, pem: c.pem, html_url: `http://127.0.0.1:${port}/apps/${c.slug}`, client_id: 'Iv1.test', client_secret: 'client-secret-should-not-be-stored', webhook_secret: null }))
   }
   // GitHub App：查安装、换安装令牌。
   const inst = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(req.url ?? '')
