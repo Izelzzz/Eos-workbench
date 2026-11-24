@@ -1,0 +1,12 @@
+NOTE b: 宿主被杀后 agent 进程 :: 10039     1 /home/user/Eos-workbench/poc/claude-code/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude --output-format stream-json --verbose --input-format stream-json --model=claude-sonnet-5-5 --permission-prompt-tool=stdio --tools=Bash --setting-sources= --session-mirror --session-id=aa77bdd4-5960-4e2c-a15d-36d8b29fa1ec
+10065 10039 /bin/bash -c source /home/user/Eos-workbench/poc/claude-code/.run/c4/home/.claude/shell-snapshots/snapshot-bash-1795529066311-zp88g9.sh 2>/dev/null || true && \builtin shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'which'; \builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval ./wait.sh < /dev/null && pwd -P >| /tmp/claude-43db-cwd
+10066 10065 /bin/sh ./wait.sh
+NOTE b: 35 秒后 agent 进程 :: 10039     1 /home/user/Eos-workbench/poc/claude-code/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude --output-format stream-json --verbose --input-format stream-json --model=claude-sonnet-5-5 --permission-prompt-tool=stdio --tools=Bash --setting-sources= --session-mirror --session-id=aa77bdd4-5960-4e2c-a15d-36d8b29fa1ec
+NOTE b: 本地会话记录条数 :: 5
+NOTE b: nonce1 :: {"found":true,"complete":true,"text":"2","usage":{"input":100,"output":20,"cacheRead":25,"cacheWrite":50},"model":"claude-sonnet-5-5","lastStop":"end_turn","entries":1}
+NOTE b: nonce2 :: {"found":true,"complete":false,"usage":{"input":100,"output":20,"cacheRead":25,"cacheWrite":50},"model":"claude-sonnet-5-5","lastStop":"tool_use","entries":2}
+PASS b: 按 nonce1 从本地会话记录找回完整回复和用量 :: {"found":true,"complete":true,"text":"2","usage":{"input":100,"output":20,"cacheRead":25,"cacheWrite":50},"model":"claude-sonnet-5-5","lastStop":"end_turn","entries":1}
+PASS b: nonce2 没做完，判成需要重发 :: {"found":true,"complete":false,"usage":{"input":100,"output":20,"cacheRead":25,"cacheWrite":50},"model":"claude-sonnet-5-5","lastStop":"tool_use","entries":2}
+NOTE b: SessionStore 镜像条数 / 本地条数 :: {"mirrored":2,"local":5}
+PASS b: 平台的 SessionStore 镜像里也能按 nonce1 找回 :: {"found":true,"complete":true,"text":"2","usage":{"input":100,"output":20,"cacheRead":25,"cacheWrite":50},"model":"claude-sonnet-5-5","lastStop":"end_turn","entries":1}
+mode=mock model=claude-sonnet-5-5 failed=0

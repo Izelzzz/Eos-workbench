@@ -1,0 +1,6 @@
+NOTE init :: {"session_id":"032043b6-063e-4d29-aee3-be95fdf6e71b","cwd":"/home/user/Eos-workbench/poc/claude-code/.run/c1/ws"}
+NOTE init :: {"session_id":"032043b6-063e-4d29-aee3-be95fdf6e71b","cwd":"/home/user/Eos-workbench/poc/claude-code/.run/c1/ws"}
+PASS a: 会话 id 是平台指定的 :: ["032043b6-063e-4d29-aee3-be95fdf6e71b","032043b6-063e-4d29-aee3-be95fdf6e71b"]
+PASS a: 同一进程第二轮记得暗号 :: {"code":"EOS-69D9E7","reply":"EOS-69D9E7"}
+PASS a: 会话记录写在 agent 的 HOME 下 :: /home/user/Eos-workbench/poc/claude-code/.run/c1/home/.claude/projects/-home-user-Eos-workbench-poc-claude-code--run-c1-ws/032043b6-063e-4d29-aee3-be95fdf6e71b.jsonl
+a: 宿主进程 SIGKILL 自己
