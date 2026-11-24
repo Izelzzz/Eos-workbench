@@ -34,7 +34,7 @@ docker compose up -d --build
 docker compose exec eos node --import tsx src/cli.ts doctor
 ```
 
-- 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`（两边都没有时平台不启动）。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
+- 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos node --import tsx src/cli.ts doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
 - `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
 - 「凭据隔离」一项现在是 ⚠：agent 和检查命令还和平台是同一个用户，这是路线图第 3 项下一个 PR 要做的事。
 
@@ -134,7 +134,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
   - 同一个容器里的任务共用 `/tmp`（tmpfs），而且都能写：能读到别的任务的临时文件和 dsh 的输出暂存文件（`/tmp/dsh-spill-*`）；也能改共享的依赖缓存，一个任务的 agent 往缓存里放的东西，会被下一个任务用到。npm 按 lockfile 里的 hash 校验包，pip 的缓存和 corepack 下载的 pnpm、yarn 没有这种校验。
 - **MCP 服务不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类「现下载现运行」的命令启动。** MCP 服务跑在沙箱外，并继承 dsh 的环境，包括上面这几个缓存目录；用这类命令启动时，它可能运行 agent 放进缓存里的代码。把 MCP 服务装进派生镜像（见「执行器环境」），在模板里写它的绝对路径。
   - agent 能看到进程列表。
-- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
+- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。检查命令是例外：它的环境里没有关字节码缓存的开关，npm 会在 `/tmp/node-compile-cache` 留下缓存，之后的检查命令会加载它。检查命令本来就在沙箱外运行 agent 改过的代码，所以这不会让 agent 多拿到权限；和检查命令的环境变量一起在路线图第 3 项处理。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
 
 ## 数据和升级
 

@@ -52,7 +52,7 @@
 
 - `/data` 里有 `eos.db`、`dsh/`、`worktrees/`、`logs/`、`locks/`，用户的仓库放在 `repos/`。
 - 升级镜像就是换容器，卷不动。`/tmp` 用 tmpfs，不进卷。
-- Landlock 下 agent 能写 `/tmp`。平台和 dsh 会加载的缓存不能放在那里，否则 agent 往里放的代码会在沙箱外运行：关掉 tsx 的编译缓存和 Node 的字节码缓存；dsh 的 native 模块缓存放到平台用户的家目录。反过来，npm、pip、corepack 的缓存放到 `/tmp/cache`，因为 agent 写不了家目录。不设 `XDG_CACHE_HOME`：dsh 自己（沙箱外）也按它找缓存目录（例如 libreoffice-kit）。这些变量要在 dsh 的环境白名单（`AGENT_ENV_KEEP`）里按名字放行，否则到不了 dsh 和 agent。tmpfs 带 `exec`，因为 agent 跑测试、编译时要执行自己生成的文件；另外设了 4g 的大小上限。（部署 E2E 第一次运行时 native 缓存还在 `/tmp`，`noexec` 让 dsh 起不来；缓存移走后已经不依赖 exec。）
+- Landlock 下 agent 能写 `/tmp`。平台和 dsh 会加载的缓存不能放在那里，否则 agent 往里放的代码会在沙箱外运行：关掉 tsx 的编译缓存和 Node 的字节码缓存；dsh 的 native 模块缓存放到平台用户的家目录。反过来，npm、pip、corepack 的缓存放到 `/tmp/cache`，因为 agent 写不了家目录。不设 `XDG_CACHE_HOME`：dsh 自己（沙箱外）也按它找缓存目录（例如 libreoffice-kit）。其中 dsh 和 agent 要用到的 5 个（`NARB_NATIVE_CACHE_DIR`、`NODE_DISABLE_COMPILE_CACHE`、`npm_config_cache`、`PIP_CACHE_DIR`、`COREPACK_HOME`）要在 dsh 的环境白名单（`AGENT_ENV_KEEP`）里按名字放行，否则到不了 dsh 和 agent。`TSX_DISABLE_CACHE` 只给平台进程自己用，不在白名单里。tmpfs 带 `exec`，因为 agent 跑测试、编译时要执行自己生成的文件；另外设了 4g 的大小上限。（部署 E2E 第一次运行时 native 缓存还在 `/tmp`，`noexec` 让 dsh 起不来；缓存移走后已经不依赖 exec。）
 
 ## 为什么不选其他方案
 
