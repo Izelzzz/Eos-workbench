@@ -33,6 +33,10 @@
 
 `scripts/deploy-e2e.ts`（真实模型，compose），在合入 main（#62、#63）后的提交 511a889 上跑：6 项核对全部为 true，任务 `t2611241841395wz` 完成，agent 提了 2 个问题、经接口回答。合入前在 9bfdb7b 上也跑通过一次。之后处理独立审查时改了说明文字、非 Linux 平台的分支，并加了一致性测试，探测逻辑没有变，没有重跑部署 E2E。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
 
+## 最终提交上的部署 E2E：被模型账户余额挡住
+
+处理独立审查并合入 #66 之后，在 062217d 和 82b229e 上各跑了一次部署 E2E，任务都在规格那一步的第一次调用就失败了（`deploy-e2e-final-blocked-report.json`：「这一轮没有正常完成（出错）」）。原因是模型账户余额不足：`model-api-balance.txt` 是直接调用模型 API 的结果，返回 `Insufficient Balance`。这和本 PR 的改动无关，doctor 那一项在同一次运行里照常报了 Landlock。所以最后一次能通过的部署 E2E 是 511a889 那次。
+
 ## 局限
 
 - 「没有 Landlock」是用 seccomp 让系统调用返回 ENOSYS 模拟的，不是真正没有 Landlock 的内核。
