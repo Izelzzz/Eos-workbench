@@ -52,7 +52,7 @@
 
 - `/data` 里有 `eos.db`、`dsh/`、`worktrees/`、`logs/`、`locks/`，用户的仓库放在 `repos/`。
 - 升级镜像就是换容器，卷不动。`/tmp` 用 tmpfs，不进卷。
-- Landlock 下 agent 能写 `/tmp`。平台和 dsh 会加载的缓存不能放在那里，否则 agent 往里放的代码会在沙箱外运行：关掉 tsx 的编译缓存和 Node 的字节码缓存；dsh 的 native 模块缓存放到平台用户的家目录。反过来，npm、pip、corepack 的缓存放到 `/tmp/cache`，因为 agent 写不了家目录。tmpfs 带 `exec`，因为 agent 跑测试、编译时要执行自己生成的文件；另外设了 4g 的大小上限。（部署 E2E 第一次运行时 native 缓存还在 `/tmp`，`noexec` 让 dsh 起不来；缓存移走后已经不依赖 exec。）
+- Landlock 下 agent 能写 `/tmp`。平台和 dsh 会加载的缓存不能放在那里，否则 agent 往里放的代码会在沙箱外运行：关掉 tsx 的编译缓存和 Node 的字节码缓存；dsh 的 native 模块缓存放到平台用户的家目录。反过来，npm、pip、corepack 的缓存放到 `/tmp/cache`，因为 agent 写不了家目录。不设 `XDG_CACHE_HOME`：dsh 自己（沙箱外）也按它找缓存目录（例如 libreoffice-kit）。这些变量要在 dsh 的环境白名单（`AGENT_ENV_KEEP`）里按名字放行，否则到不了 dsh 和 agent。tmpfs 带 `exec`，因为 agent 跑测试、编译时要执行自己生成的文件；另外设了 4g 的大小上限。（部署 E2E 第一次运行时 native 缓存还在 `/tmp`，`noexec` 让 dsh 起不来；缓存移走后已经不依赖 exec。）
 
 ## 为什么不选其他方案
 
@@ -73,6 +73,7 @@
 
 - **Landlock 比 bwrap 弱的地方**：
   - `/tmp` 是同一个 tmpfs，所有任务都能读写：能看到彼此的临时文件和 dsh 的输出暂存文件，也能改共享的依赖缓存（任务之间可以互相投毒）。npm 的缓存按 hash 校验，pip 缓存和 corepack 下载的 pnpm、yarn 不校验。
+  - 这几个缓存目录也会传给沙箱外的 MCP 服务（它们继承 dsh 的环境）。用 `npx`、`uvx` 这类命令启动的 MCP 可能运行 agent 放进缓存的代码，所以文档要求 MCP 预装、写绝对路径。根本的办法是按任务分开缓存，并且不让沙箱外的进程用 agent 可写的缓存，作为后续项。
   - 不放在 `/tmp` 的缓存是按已知的几种列出来的（tsx、Node 字节码、dsh 的 native 模块）。以后的依赖再往 `os.tmpdir()` 放会被加载的文件时，需要重新检查。
   - agent 能看到进程列表（只是读不到别的进程的环境）。
 - **Landlock 只限制写，不限制读**：agent 能读整个 `/data`，包括别的任务的 worktree、所有仓库、`eos.db` 里所有任务的 trace、dsh 的会话日志。bwrap 的默认配置也是只读挂载整个根目录，在这一点上没有区别。按仓库或按人隔离读权限，要等登录和多人（路线图第 7 项）之后一起设计。

@@ -20,6 +20,6 @@ const results = await runChecks(wt, [
 ])
 console.log(JSON.stringify({
   checkEnvKeys: Object.keys(checkEnv(process.env)).sort(),
-  results: results.map(r => ({ ...r, output: String((r as { output?: string }).output ?? '').slice(-400) })),
+  results: results.map(r => ({ ...r, detail: r.detail.slice(-400) })),
   before, after: snap(),
 }, null, 2))

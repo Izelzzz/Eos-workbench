@@ -45,13 +45,13 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
     GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.x.insteadOf', GIT_CONFIG_VALUE_0: 'y', GIT_EDITOR: 'true',
     DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-env', GITHUB_TOKEN: 'ghp_x', AWS_SECRET_ACCESS_KEY: 's', EOS_MASTER_KEY: 'm', NODE_OPTIONS: '--require /evil.js', EMPTY: undefined,
     // 部署镜像设定的缓存位置和开关：按名字放行。长得像的其他变量（npm 的 registry 和认证、pip 的源）不放行。
-    NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack', XDG_CACHE_HOME: '/tmp/cache/xdg',
-    npm_config_registry: 'https://evil.example', 'npm_config_//registry.npmjs.org/:_authToken': 'npm_x', PIP_INDEX_URL: 'https://u:p@pypi.example', NARB_DISABLE_NATIVE_CACHE: '1', COREPACK_NPM_TOKEN: 't',
+    NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
+    npm_config_registry: 'https://evil.example', 'npm_config_//registry.npmjs.org/:_authToken': 'npm_x', PIP_INDEX_URL: 'https://u:p@pypi.example', NARB_DISABLE_NATIVE_CACHE: '1', COREPACK_NPM_TOKEN: 't', XDG_CACHE_HOME: '/tmp/cache/xdg',
   }, 'from-store')
   assert.deepEqual(env, {
     PATH: '/bin', HOME: '/home/eos', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', HTTPS_PROXY: 'http://proxy:3128', no_proxy: 'localhost', NODE_EXTRA_CA_CERTS: '/ca.pem',
     DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-store',
-    NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack', XDG_CACHE_HOME: '/tmp/cache/xdg',
+    NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
   })
 })
 

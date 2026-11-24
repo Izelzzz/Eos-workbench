@@ -13,7 +13,7 @@ const git = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, stdio
 git(repo, 'init', '-q', '-b', 'main')
 git(repo, '-c', 'user.name=p', '-c', 'user.email=p@localhost', 'commit', '-q', '--allow-empty', '-m', 'init')
 git(repo, 'worktree', 'add', '-q', '-b', 'eos/t1', wt)
-const ex = new DshExecutor({ dshHome: join(OUT, 'dsh'), dshBin: '/app/node_modules/@deepseek-ai/dsh/lib/bin.js', modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' })
+const ex = new DshExecutor({ dshHome: join(OUT, 'dsh'), dshBin: '/app/node_modules/@deepseek-ai/dsh/lib/bin.js', modelKey: () => process.env.DEEPSEEK_API_KEY || 'proxy-injected' })
 const steps = [
   `cd ${wt} && npm init -y >/dev/null && npm install --no-audit --no-fund is-number@7.0.0 2>&1 | tail -2`,
   `cd ${wt} && mkdir -p p && cd p && npm init -y >/dev/null && npm pkg set packageManager=pnpm@9.15.0 && pnpm add is-odd@3.0.1 2>&1 | tail -2`,

@@ -208,7 +208,6 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'npm_config_cache', // npm 缓存放到 agent 能写的位置，不然 agent 的 npm install 去写不可写的家目录而失败（只放行这一项，不放行别的 npm_config_*，其中可能有 registry 认证）
   'PIP_CACHE_DIR', // 同上，pip
   'COREPACK_HOME', // 同上，corepack 下载的 pnpm、yarn
-  'XDG_CACHE_HOME', // 同上，遵循 XDG 的工具（例如 node-gyp）
 ]
 
 export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_') || name.startsWith('DSH_')

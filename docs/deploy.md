@@ -96,8 +96,8 @@ agent 跑任务时的环境，就是这个镜像：
 agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任务时装不了系统包**（`apt-get` 会失败）。
 
 - **项目自己的依赖**照常装进 worktree：`npm install`、`pnpm install`、`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。在沙箱里实测过这三种（`docs/e2e/deploy-2-image/sandbox/deps-probe.json`）。
-- 包管理器的缓存在 `/tmp/cache`（npm、pip、corepack，以及遵循 `XDG_CACHE_HOME` 的工具，例如 node-gyp），因为家目录在沙箱里不可写。`/tmp` 是 tmpfs（默认上限 4g），重启容器后缓存清空，依赖和 pnpm、yarn 会重新下载。
-- 别的工具如果要写家目录，在沙箱里会失败，需要用它自己的环境变量把缓存或配置指到 worktree 或 `/tmp` 下。
+- 包管理器的缓存在 `/tmp/cache`（npm、pip、corepack），因为家目录在沙箱里不可写。`/tmp` 是 tmpfs（默认上限 4g），重启容器后缓存清空，依赖和 pnpm、yarn 会重新下载。
+- 别的工具如果要写家目录，在沙箱里会失败，需要用它自己的环境变量把缓存或配置指到 worktree 或 `/tmp` 下。例如需要编译原生模块的 npm 包（node-gyp 要写 `~/.cache/node-gyp`）：在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp`（实测能传到安装脚本，但 npm 11 会警告这个配置项下个大版本不再支持）。镜像没有统一设 `XDG_CACHE_HOME`，因为 dsh 自己（在沙箱外）也按它找缓存目录。
 - **需要别的系统依赖**（某个版本的 Python、Go、Java、系统库）时，写一个基于 Eos 镜像的 Dockerfile，例如 `Dockerfile.team`：
 
   ```dockerfile
@@ -128,6 +128,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 - 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 现在还不检查这一项，也不检查 dsh 能不能真正启动：doctor 全是 ✓ 时，任务仍可能在第一步失败（部署 E2E 第一次运行就遇到过，见 `docs/e2e/deploy-2-image/README.md`）。
 - 和 bwrap 相比的差别：
   - 同一个容器里的任务共用 `/tmp`（tmpfs），而且都能写：能读到别的任务的临时文件和 dsh 的输出暂存文件（`/tmp/dsh-spill-*`）；也能改共享的依赖缓存，一个任务的 agent 往缓存里放的东西，会被下一个任务用到。npm 按 lockfile 里的 hash 校验包，pip 的缓存和 corepack 下载的 pnpm、yarn 没有这种校验。
+- **MCP 服务不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类「现下载现运行」的命令启动。** MCP 服务跑在沙箱外，并继承 dsh 的环境，包括上面这几个缓存目录；用这类命令启动时，它可能运行 agent 放进缓存里的代码。把 MCP 服务装进派生镜像（见「执行器环境」），在模板里写它的绝对路径。
   - agent 能看到进程列表。
 - agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
 

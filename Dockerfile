@@ -39,7 +39,8 @@ ENV EOS_HOME=/data
 # 关掉平台 tsx 的编译缓存和 Node 的字节码缓存（dsh 会打开它，默认放在 /tmp）；dsh 的 native 模块缓存放到平台用户的家目录（agent 写不了）。
 ENV TSX_DISABLE_CACHE=1 NODE_DISABLE_COMPILE_CACHE=1 NARB_NATIVE_CACHE_DIR=/home/eos/.cache/native-addons
 # 反过来，agent 装依赖时用的缓存要放在 agent 能写的地方：家目录在沙箱里不可写。
-ENV npm_config_cache=/tmp/cache/npm PIP_CACHE_DIR=/tmp/cache/pip COREPACK_HOME=/tmp/cache/corepack XDG_CACHE_HOME=/tmp/cache/xdg
+# 不设 XDG_CACHE_HOME：dsh 自己（沙箱外）也按它找缓存目录（例如 libreoffice-kit），不能指到 agent 能写的地方。
+ENV npm_config_cache=/tmp/cache/npm PIP_CACHE_DIR=/tmp/cache/pip COREPACK_HOME=/tmp/cache/corepack
 USER eos
 VOLUME /data
 EXPOSE 4317
