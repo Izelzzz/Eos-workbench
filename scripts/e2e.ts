@@ -128,12 +128,14 @@ const testRun = (() => {
 /** 远程仓库：任务记下了远程仓库，worktree 建在镜像上；数据目录里的任何文件都找不到令牌。 */
 function remoteChecks(): Record<string, boolean> {
   const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? files(join(d, e.name)) : e.isFile() ? [join(d, e.name)] : []))
-  const leaked = GIT_TOKEN === undefined ? [] : files(DATA).filter(f => readFileSync(f).includes(GIT_TOKEN))
+  // 原始令牌，和它在认证头里的 base64 形式。
+  const forms = GIT_TOKEN === undefined ? [] : [GIT_TOKEN, Buffer.from(`x-access-token:${GIT_TOKEN}`).toString('base64')]
+  const leaked = files(DATA).filter(f => { const b = readFileSync(f); return forms.some(x => b.includes(x)) })
   if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)
   return {
     '任务记下了远程仓库': JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
     'worktree 建在平台数据目录里的镜像上': meta.repo.startsWith(join(DATA, 'repos')),
-    '数据目录里找不到令牌（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
+    '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
   }
 }
 

@@ -8,7 +8,7 @@ import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../src/forge/forges.ts'
 import { githubForge } from '../src/forge/github.ts'
-import { explain, mirrorDir, withGitConfig } from '../src/runner/mirror.ts'
+import { explain, foreignConfig, secretsOf, mirrorDir, remoteEnv, withGitConfig } from '../src/runner/mirror.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
 import { FakeExecutor } from './fake-executor.ts'
@@ -24,7 +24,7 @@ const TOKEN = 'ghp_MirrorTestToken0123456789ABCDEF'
 test('GitHub 地址：认 https、带 .git 或末尾 /、git@ 写法；认不出的返回 undefined', () => {
   const gh = githubForge()
   const want = { forge: 'github', host: 'github.com', owner: 'Izelzzz', name: 'eos-e2e-sandbox', cloneUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox.git', webUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox' }
-  for (const s of ['https://github.com/Izelzzz/eos-e2e-sandbox', 'https://github.com/Izelzzz/eos-e2e-sandbox.git', 'https://github.com/Izelzzz/eos-e2e-sandbox/', ' git@github.com:Izelzzz/eos-e2e-sandbox.git ', 'https://GitHub.com/Izelzzz/eos-e2e-sandbox']) assert.deepEqual(gh.parse(s), want, s)
+  for (const s of ['https://github.com/Izelzzz/eos-e2e-sandbox', 'github.com/Izelzzz/eos-e2e-sandbox', 'https://github.com/Izelzzz/eos-e2e-sandbox.git', 'https://github.com/Izelzzz/eos-e2e-sandbox/', ' git@github.com:Izelzzz/eos-e2e-sandbox.git ', 'https://GitHub.com/Izelzzz/eos-e2e-sandbox']) assert.deepEqual(gh.parse(s), want, s)
   for (const s of ['https://github.com/Izelzzz', 'https://github.com/a/b/c', 'https://gitlab.com/a/b', 'http://github.com/a/b', 'https://github.com/a/..', 'https://github.com/-a/b', 'https://github.com/a/b?x=1', '/srv/repo']) assert.equal(gh.parse(s), undefined, s)
   assert.equal(gh.credentialName(want), 'github.com')
   assert.equal(gh.gitAuthHeader('t0k'), `Authorization: Basic ${Buffer.from('x-access-token:t0k').toString('base64')}`)
@@ -46,6 +46,19 @@ test('git 的报错换成中文原因，报错里出现的令牌被抹掉', () =
   assert.match(explain(repo, "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", { credential: 'github.com', hasToken: true }), /找不到仓库 github\.com 上的 o\/r/)
   assert.match(explain(repo, 'fatal: unable to access: Could not resolve host: github.com', { credential: 'github.com', hasToken: false }), /连不上 github\.com/)
   assert.equal(explain(repo, `fatal: weird ${TOKEN} thing`, { credential: 'github.com', hasToken: true, secrets: [TOKEN] }).includes(TOKEN), false)
+  assert.match(explain(repo, "fatal: remote helper 'https' not found", { credential: 'github.com', hasToken: true }), /^访问 github\.com 上的 o\/r 失败：/, '本机 git 的问题不当成找不到仓库')
+})
+
+test('访问远程的环境：不继承宿主机的 GIT_CONFIG_PARAMETERS、GIT_SSL_NO_VERIFY，HOME 换成平台的目录，强制校验证书', () => {
+  const repo = githubForge().parse('https://github.com/o/r')!
+  const env = remoteEnv(repo, 'Authorization: Basic abc', '/srv/eos/git-home', { PATH: '/bin', HOME: '/root', GIT_CONFIG_PARAMETERS: "'url.x.insteadof'='https://github.com/'", GIT_SSL_NO_VERIFY: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.proxy', GIT_CONFIG_VALUE_0: 'http://proxy:3128' })
+  assert.equal(env.GIT_CONFIG_PARAMETERS, undefined)
+  assert.equal(env.GIT_SSL_NO_VERIFY, undefined)
+  assert.equal(env.HOME, '/srv/eos/git-home')
+  assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, '1')
+  const pairs = Object.fromEntries(Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]))
+  assert.deepEqual(pairs, { 'http.proxy': 'http://proxy:3128', 'credential.helper': '', 'http.sslVerify': 'true', 'http.lowSpeedLimit': '1000', 'http.lowSpeedTime': '60', 'http.https://github.com/.extraheader': 'Authorization: Basic abc' })
 })
 
 /** 一个"远程"：bare 仓库放在 <root>/acme/app.git，由单独进程里的 git HTTP 服务提供，可以要求令牌。 */
@@ -114,6 +127,38 @@ test('私有远程仓库：带凭据里的令牌克隆成镜像，在默认分�
   assert.doesNotMatch(readFileSync(join(meta.repo, 'config'), 'utf8'), /url|extraheader|127\.0\.0\.1/)
 })
 
+test('同一个进程里同时在同一个仓库上建两个任务：排队依次更新镜像，两个都建成', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const [a, b, c] = await Promise.all(['一', '二', '三'].map(request => r.sup.create({ repo: r.url, workflow: 'feature', request })))
+  assert.deepEqual([a!.ok, b!.ok, c!.ok], [true, true, true], JSON.stringify([a, b, c]))
+})
+
+test('报错里认证头的 base64 形式也被抹掉', () => {
+  const header = githubForge().gitAuthHeader(TOKEN)
+  const b64 = Buffer.from(`x-access-token:${TOKEN}`).toString('base64')
+  assert.deepEqual(secretsOf({ header, secret: TOKEN }), [TOKEN, b64])
+  const repo = githubForge().parse('https://github.com/o/r')!
+  const text = explain(repo, `fatal: odd failure\n> ${header}\n> token ${TOKEN}`, { credential: 'github.com', hasToken: true, secrets: secretsOf({ header, secret: TOKEN }) })
+  assert.ok(!text.includes(TOKEN) && !text.includes(b64), text)
+  assert.match(text, /\*\*\*/)
+})
+
+test('镜像的配置里有不是平台写的项（例如代理、include）：不访问远程，报出这些项', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const a = await r.sup.create({ repo: r.url, workflow: 'feature', request: '一' })
+  assert.equal(a.ok, true)
+  const gitDir = mirrorDir(r.data, r.forge.parse(r.url)!)
+  assert.deepEqual(foreignConfig(gitDir), [])
+  writeFileSync(join(gitDir, 'config'), `${readFileSync(join(gitDir, 'config'), 'utf8')}[http]\n\tproxy = http://evil:3128\n[include]\n\tpath = /tmp/x\n`)
+  const before = r.requests().length
+  const b = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '二' })) as { ok: boolean; error: string }
+  assert.equal(b.ok, false)
+  assert.match(b.error, /配置里有不是平台写的项（http\.proxy、include\.path），为了不把令牌发到别处，没有访问远程/)
+  assert.equal(r.requests().length, before, '没有发出请求')
+})
+
 test('第二个任务先更新镜像：基线是远程最新的提交', async () => {
   const r = await remote(TOKEN)
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
@@ -140,6 +185,8 @@ test('令牌无效、没有令牌、仓库不存在、空仓库：创建失败�
   assert.deepEqual(r.store.list(), [])
   const e = await remote(undefined, { empty: true })
   assert.match((await e.sup.create({ repo: e.url, workflow: 'feature', request: '需求' }) as { error: string }).error, /acme\/app 还没有任何提交（空仓库）/)
+  assert.deepEqual(e.store.list(), [])
+  assert.equal(existsSync(mirrorDir(e.data, e.forge.parse(e.url)!)), false, '空仓库也不留镜像')
 })
 
 test('公开仓库不需要令牌；认不出的远程地址报出支持的写法；工作流不对时不访问网络', async () => {

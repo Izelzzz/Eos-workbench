@@ -6,13 +6,13 @@ const NAME = '[A-Za-z0-9._-]{1,100}'
 
 /**
  * host 默认 github.com；自建的 GitHub Enterprise 传它的域名。scheme 只在测试里用 http（本地的 git 服务）。
- * 认的写法：https://<host>/<owner>/<repo>（可以带 .git 或末尾的 /），以及 git@<host>:<owner>/<repo>.git（换成 HTTPS 访问）。
+ * 认的写法：https://<host>/<owner>/<repo>（可以带 .git 或末尾的 /，也可以省略 https://），以及 git@<host>:<owner>/<repo>.git（换成 HTTPS 访问）。
  */
 export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}): Forge => {
   const host = (o.host ?? 'github.com').toLowerCase()
   const scheme = o.scheme ?? 'https'
   const h = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const https = new RegExp(`^${scheme}://${h}/(${OWNER})/(${NAME}?)(?:\\.git)?/?$`, 'i')
+  const https = new RegExp(`^(?:${scheme}://)?${h}/(${OWNER})/(${NAME}?)(?:\\.git)?/?$`, 'i')
   const ssh = new RegExp(`^git@${h}:(${OWNER})/(${NAME}?)(?:\\.git)?$`, 'i')
   return {
     kind: 'github',

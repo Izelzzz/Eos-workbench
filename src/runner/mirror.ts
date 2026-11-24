@@ -1,12 +1,14 @@
 // 远程仓库在平台数据目录里的镜像：repos/<主机>/<owner>/<仓库>.git（owner 和仓库名用小写），一个 bare 仓库。任务的 worktree 从它建。
 // - 镜像的配置里不存远程地址和任何凭据：每次 fetch 都在命令行上给出不带凭据的地址。
 // - 令牌只放进这一次 git 子进程的环境变量（GIT_CONFIG_* 里的一行 HTTP 认证头），不上命令行（ps 能看到），不写进任何文件。
-// - git 子进程不读宿主机的全局和系统配置：url.*.insteadOf 之类的配置能把地址改走，绕开平台的令牌。
+// - git 子进程不读宿主机的全局、系统配置和 ~/.netrc（HOME 换成平台的空目录），也不继承 GIT_CONFIG_PARAMETERS、GIT_SSL_NO_VERIFY：
+//   url.*.insteadOf 之类的配置能把地址改走，绕开平台的令牌。宿主机用 GIT_CONFIG_COUNT 注入的配置照样生效（部署方的代理等设置靠它）。
+// - 每次访问远程前核对镜像自己的配置只有平台写过的项：没有 bwrap 时 agent 能读写整个文件系统，可能往镜像的配置里加代理。
 // - 异步执行，有超时：克隆大仓库时 Web 服务照常响应。
-// - 同一个镜像同一时间只让一个进程更新（锁文件），别的进程直接报"稍后再试"。
+// - 同一个镜像：本进程内排队依次更新；跨进程用锁文件，别的进程正在更新时报"稍后再试"。
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { RemoteRepo } from '../forge/types.ts'
@@ -39,13 +41,42 @@ export const withGitConfig = (env: NodeJS.ProcessEnv, pairs: [string, string][])
  * 访问远程仓库时 git 的环境：不读宿主机的全局、系统配置和凭据助手，不弹出输入用户名密码的提示，传输卡住时失败；
  * 有令牌时只对这个托管平台的地址带认证头。
  */
-export const remoteEnv = (repo: RemoteRepo, authHeader: string | undefined, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv =>
-  withGitConfig({ ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' }, [
+export const remoteEnv = (repo: RemoteRepo, authHeader: string | undefined, home: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => {
+  const { GIT_CONFIG_PARAMETERS: _p, GIT_SSL_NO_VERIFY: _v, ...rest } = env
+  return withGitConfig({ ...rest, HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' }, [
     ['credential.helper', ''],
+    ['http.sslVerify', 'true'],
     ['http.lowSpeedLimit', '1000'],
     ['http.lowSpeedTime', '60'],
     ...(authHeader === undefined ? [] : [[`http.${new URL(repo.cloneUrl).origin}/.extraheader`, authHeader] as [string, string]]),
   ])
+}
+
+/** git init --bare 写进镜像配置的项。别的项（代理、include、url 改写……）都不是平台写的。 */
+const MIRROR_CONFIG = /^core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks)$/
+
+/** 镜像配置里不是平台写的项；读不出时当作被改过。 */
+export const foreignConfig = (gitDir: string): string[] => {
+  try {
+    const keys = readFileSync(join(gitDir, 'config'), 'utf8').split('\n')
+    let section = ''
+    const out: string[] = []
+    for (const raw of keys) {
+      const line = raw.replace(/[#;].*$/, '').trim()
+      if (line === '') continue
+      const sec = /^\[\s*([^\]\s"]+)(?:\s+"([^"]*)")?\s*\]$/.exec(line)
+      if (sec !== null) {
+        section = sec[2] === undefined ? sec[1]!.toLowerCase() : `${sec[1]!.toLowerCase()}.${sec[2]}`
+        continue
+      }
+      const key = `${section}.${line.split('=')[0]!.trim().toLowerCase()}`
+      if (!MIRROR_CONFIG.test(key)) out.push(key)
+    }
+    return out
+  } catch {
+    return ['(读不出配置文件)']
+  }
+}
 
 export class MirrorError extends Error {}
 
@@ -58,7 +89,7 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
       ? `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」里的令牌无效、已过期，或者没有授权这个仓库。在凭据页替换这条凭据`
       : `${repo.host} 拒绝了访问 ${where}：这是私有仓库或需要登录。在凭据页添加名字为「${o.credential}」、类型为 Git 令牌的凭据`
   }
-  if (/Repository not found|not found|returned error: 404/i.test(raw)) {
+  if (/Repository not found|repository '[^']*' not found|returned error: 404/i.test(raw)) {
     return `找不到仓库 ${where}：地址写错了，或者${o.hasToken ? `凭据「${o.credential}」里的令牌` : '没有令牌时'}看不到这个仓库`
   }
   if (/Could not resolve host|Failed to connect|Connection refused|timed out|Connection reset|too slow/i.test(raw)) return `连不上 ${repo.host}：${raw.trim().split('\n').at(-1)}`
@@ -69,13 +100,32 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
  * 更新镜像：没有就建一个空的 bare 仓库，问远程的默认分支，把它 fetch 到 refs/remotes/origin/<分支>，返回它最新的提交。
  * 远程是空仓库（还没有提交）时报错。这次新建的镜像在失败时删掉。所有错误都是 MirrorError，消息是给用户看的中文。
  */
-export const syncMirror = async (dataDir: string, repo: RemoteRepo, auth: { header?: string; credential: string; secret?: string }): Promise<Mirror> => {
+/** 报错里要抹掉的内容：令牌本身，和认证头里的凭据部分（例如 Basic 后面的 base64）。 */
+export const secretsOf = (auth: { header?: string; secret?: string }): string[] =>
+  [auth.secret ?? '', auth.header?.replace(/^Authorization:\s*\w+\s+/i, '') ?? ''].filter(x => x !== '')
+
+/** 本进程里每个镜像正在进行的更新：同一个镜像的请求排队，依次进行。 */
+const queues = new Map<string, Promise<unknown>>()
+
+export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: { header?: string; credential: string; secret?: string }): Promise<Mirror> => {
   const gitDir = mirrorDir(dataDir, repo)
+  const prev = queues.get(gitDir) ?? Promise.resolve()
+  const next = prev.catch(() => {}).then(() => syncOnce(dataDir, gitDir, repo, auth))
+  queues.set(gitDir, next)
+  void next.catch(() => {}).finally(() => {
+    if (queues.get(gitDir) === next) queues.delete(gitDir)
+  })
+  return next
+}
+
+const syncOnce = async (dataDir: string, gitDir: string, repo: RemoteRepo, auth: { header?: string; credential: string; secret?: string }): Promise<Mirror> => {
   const lockId = `mirror-${createHash('sha256').update(gitDir).digest('hex').slice(0, 16)}`
   const lock = acquire(join(resolve(dataDir), 'locks'), lockId)
   if ('heldBy' in lock) throw new MirrorError(`另一个进程（${lock.heldBy}）正在更新 ${repo.owner}/${repo.name} 的镜像，稍后再试`)
-  const env = remoteEnv(repo, auth.header)
-  const secrets = [auth.secret ?? '', auth.header?.replace(/^Authorization:\s*\w+\s+/i, '') ?? '']
+  const home = join(resolve(dataDir), 'git-home')
+  mkdirSync(home, { recursive: true })
+  const env = remoteEnv(repo, auth.header, home)
+  const secrets = secretsOf(auth)
   const git = async (args: string[]): Promise<string> => {
     try {
       const { stdout } = await run('git', [...SAFE, '--git-dir', gitDir, ...args], { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: REMOTE_TIMEOUT_MS })
@@ -92,6 +142,8 @@ export const syncMirror = async (dataDir: string, repo: RemoteRepo, auth: { head
       mkdirSync(gitDir, { recursive: true })
       await run('git', ['init', '--bare', '-q', gitDir], { env })
     }
+    const foreign = foreignConfig(gitDir)
+    if (foreign.length > 0) throw new MirrorError(`镜像 ${gitDir} 的配置里有不是平台写的项（${foreign.join('、')}），为了不把令牌发到别处，没有访问远程。请人工检查这个镜像，确认后删掉这些项或删掉整个镜像`)
     // 输出形如 "ref: refs/heads/main\tHEAD\n<sha>\tHEAD"；空仓库什么都不输出。
     const head = await git(['ls-remote', '--symref', repo.cloneUrl, 'HEAD'])
     const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(head)?.[1]
