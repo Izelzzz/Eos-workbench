@@ -1,0 +1,4 @@
+PASS b: 新进程续接的是同一个会话 :: 032043b6-063e-4d29-aee3-be95fdf6e71b
+PASS b: 新进程续接后记得暗号 :: {"code":"EOS-6C2066","reply":"EOS-6C2066"}
+NOTE b: 已存在的会话 id 再用 sessionId 新建 :: {"error":"Claude Code process exited with code 1. stderr: Error: Session ID 032043b6-063e-4d29-aee3-be95fdf6e71b is already in use."}
+mode=mock model=claude-sonnet-5-5 failed=0
