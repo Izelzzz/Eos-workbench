@@ -1,5 +1,5 @@
 {
-  "task": "t261124162636sl2",
+  "task": "t261124163822acp",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -20,7 +20,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-63711db6604919f82b85be082210cc93",
+      "sid": "session-2886140bfef43bc44a6d13893e6eb4cc",
       "calls": [
         "c1"
       ],
@@ -28,10 +28,10 @@
         "workspace-write",
         "read-only"
       ],
-      "asks": 2
+      "asks": 1
     },
     "build": {
-      "sid": "session-921928fe0dbe73485c1813404a624219",
+      "sid": "session-10a94ee36840c26de971757f5e1ea25e",
       "calls": [
         "c2",
         "c4"
@@ -42,7 +42,7 @@
       "asks": 0
     },
     "review": {
-      "sid": "session-72b49cedfa74b1f118a185eccb1cd0c0",
+      "sid": "session-f2ca384eac142c8691d0a9fb95b51e38",
       "calls": [
         "c3",
         "c5"
@@ -56,12 +56,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 102103ms",
-    "c2 produce@build 25561ms",
-    "c3 critique@review#1 31562ms",
-    "c4 respond@review#1 16987ms",
-    "c5 critique@review#2 10459ms"
+    "c1 produce@plan 73080ms",
+    "c2 produce@build 16778ms",
+    "c3 critique@review#1 44045ms",
+    "c4 respond@review#1 14064ms",
+    "c5 critique@review#2 8247ms"
   ],
-  "commits": "a439fbb eos: review respond (c4)\n4e39fd4 eos: build produce (c2)\n",
-  "npmTest": "误信息包含下标和类型\nok 25 - 错误信息包含下标和类型\n  ---\n  duration_ms: 0.064413\n  type: 'test'\n  ...\n# Subtest: 在第一个非法元素处立即抛错\nok 26 - 在第一个非法元素处立即抛错\n  ---\n  duration_ms: 0.042469\n  type: 'test'\n  ...\n# Subtest: 每个非法元素用例都只抛 TypeError\nok 27 - 每个非法元素用例都只抛 TypeError\n  ---\n  duration_ms: 0.107689\n  type: 'test'\n  ...\n1..27\n# tests 27\n# suites 0\n# pass 27\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 63.491017\n"
+  "commits": "af96d44 eos: review respond (c4)\nfdff2b1 eos: build produce (c2)\n",
+  "npmTest": "036983\n  type: 'test'\n  ...\n# Subtest: 抛错信息包含出错的下标\nok 28 - 抛错信息包含出错的下标\n  ---\n  duration_ms: 0.076755\n  type: 'test'\n  ...\n# Subtest: 不修改入参\nok 29 - 不修改入参\n  ---\n  duration_ms: 0.632343\n  type: 'test'\n  ...\n# Subtest: 冻结数组可正常求和\nok 30 - 冻结数组可正常求和\n  ---\n  duration_ms: 0.079426\n  type: 'test'\n  ...\n1..30\n# tests 30\n# suites 0\n# pass 30\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 78.731361\n"
 }
