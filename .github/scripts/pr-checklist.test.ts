@@ -1,7 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, needsE2E, parseRules, sections, type Change } from './pr-checklist.ts'
+import { check, needsE2E, parseNameStatusZ, parseRules, sections, type Change } from './pr-checklist.ts'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
 
@@ -113,4 +117,29 @@ test('「不能证明的」不算「能证明的」；标题要以这几个词�
 test('代码块只由开始时的那种标记结束：``` 块里的 ~~~ 不结束它', () => {
   const s = sections('## A\n```\n~~~\n# 还在代码块里\n```\n## B\nx\n')
   assert.deepEqual(s.map((x) => x.title), ['A', 'B'])
+})
+
+test('真实 git 输出：中文文件名不被转义，删除记成 deleted；中文证据路径能对上', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pr-checklist-'))
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, encoding: 'utf8' })
+  try {
+    git('init', '-q')
+    mkdirSync(join(dir, 'docs/e2e/b1'), { recursive: true })
+    writeFileSync(join(dir, 'docs/e2e/b1/旧.log'), 'x')
+    git('add', '.'); git('commit', '-qm', 'a')
+    writeFileSync(join(dir, 'docs/e2e/b1/截图.png'), 'x')
+    rmSync(join(dir, 'docs/e2e/b1/旧.log'))
+    git('add', '-A'); git('commit', '-qm', 'b')
+    const changed = parseNameStatusZ(git('diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD'))
+    assert.deepEqual(changed, [{ path: 'docs/e2e/b1/截图.png', deleted: false }, { path: 'docs/e2e/b1/旧.log', deleted: true }])
+    const r = check({ body: `${proof}\n## 端到端验证\n\n见 docs/e2e/b1/截图.png 。\n`, changed: [...ch('src/a.ts'), ...changed], rules })
+    assert.deepEqual(r.errors, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('表格里紧挨 | 的证据路径能取出来', () => {
+  const r = check({ body: `${proof}\n## 端到端验证\n\n| 证据 |docs/e2e/b1/run.log|\n`, changed: ch('src/a.ts', 'docs/e2e/b1/run.log'), rules })
+  assert.deepEqual(r.errors, [])
 })

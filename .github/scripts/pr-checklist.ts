@@ -112,8 +112,10 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
     r.errors.push('改动碰到了需要 E2E 的路径，描述里要有非空的「端到端验证」一节：写 docs/e2e/ 下的证据路径，或写「不需要，理由是……」（CLAUDE.md 自检第 3 条）')
     return r
   }
-  // 路径里的 * 不当通配：截到它前面的目录，按目录匹配
-  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、*]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
+  // 路径到空白或标点为止；* 不当通配，截到它前面的目录，按目录匹配。
+  // 证据文件名可能是中文，所以路径后面紧跟的中文字会被当成路径的一部分：路径后面要留空格或标点。
+  // 只写目录时，这个目录下有任何新增或修改的文件就算数。
+  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
@@ -132,11 +134,17 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
   return r
 }
 
+/** 解析 `git diff --name-status -z` 的输出：状态和路径用 NUL 分隔，路径不加引号、不转义（中文文件名原样）。 */
+export function parseNameStatusZ(out: string): Change[] {
+  const parts = out.split('\0').filter((p) => p !== '')
+  const changes: Change[] = []
+  for (let i = 0; i + 1 < parts.length; i += 2) changes.push({ path: parts[i + 1]!, deleted: parts[i] === 'D' })
+  return changes
+}
+
 function main(): void {
   const body = process.env.PR_BODY ?? ''
-  const changed: Change[] = execFileSync('git', ['diff', '--name-status', '--no-renames', 'HEAD^1', 'HEAD'], { encoding: 'utf8' })
-    .split('\n').filter((l) => l !== '')
-    .map((l) => { const [status, ...rest] = l.split('\t'); return { path: rest.join('\t'), deleted: status === 'D' } })
+  const changed = parseNameStatusZ(execFileSync('git', ['diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD'], { encoding: 'utf8' }))
   const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
   const r = check({ body, changed, rules })
   for (const n of r.notes) console.log(n)
