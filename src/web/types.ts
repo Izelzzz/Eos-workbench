@@ -79,3 +79,11 @@ export type CredentialsResponse = { usable: boolean; keyId?: string; hint?: stri
 export type SaveCredentialRequest = { name: string; kind: CredentialKind; value: string }
 export type SaveCredentialResponse = { ok: true } | { ok: false; error: string }
 export type DeleteCredentialResponse = { ok: true } | { ok: false; error: string }
+
+/** 托管平台 App（例如 GitHub App）的注册情况。name 是它在凭据存储里的名字；registered 是已经存了凭据。 */
+export type ForgeAppInfo = { name: string; host: string; appNameMax: number; registered?: { updatedAt: number; installUrl?: string } }
+/** callbackUrl：注册完托管平台跳回的地址，就是浏览器现在访问平台用的地址加上回调路径。 */
+export type ForgeAppsResponse = { usable: boolean; hint?: string; callbackUrl: string; apps: ForgeAppInfo[] }
+export type RegisterAppRequest = { name: string; appName: string; org?: string }
+/** 浏览器把 fields 作为表单字段 POST 到 action（托管平台的页面）。 */
+export type RegisterAppResponse = { ok: true; action: string; fields: Record<string, string> } | { ok: false; error: string }

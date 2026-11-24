@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
 import { MODEL_KEY_ENV, resolveModelKey, takeModelKeyEnv } from '../src/credentials/model-key.ts'
-import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText } from '../src/credentials/redact.ts'
+import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText, rememberSecret } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import type { Executor } from '../src/executor/types.ts'
@@ -171,4 +171,17 @@ test('takeModelKeyEnv reads the env key and removes it from the environment; bla
   assert.equal(takeModelKeyEnv(env), 'k-from-env')
   assert.deepEqual(env, { PATH: '/bin' })
   assert.equal(takeModelKeyEnv({ [MODEL_KEY_ENV]: '  ' }), undefined)
+})
+
+test('knownSecrets：JSON 凭据里的机密字段（例如 GitHub App 的私钥）单独出现也遮住，slug、App id 不遮；运行时登记的短期令牌也遮住', () => {
+  const c = new Credentials(db(), newKey())
+  // 测试运行时现场生成，不把私钥写进仓库。
+  const pem = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+  assert.deepEqual(c.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', JSON.stringify({ appId: '4242424242', slug: 'eos-workbench-app', privateKey: pem })), { ok: true })
+  const secrets = knownSecrets(c, [])
+  assert.equal(redactText(`私钥：${pem}`, secrets()), `私钥：${MASK}`)
+  assert.equal(redactText('安装 eos-workbench-app（App 4242424242）', secrets()), '安装 eos-workbench-app（App 4242424242）', 'slug 和 App id 不是机密，不遮')
+  const minted = `ghs_${randomBytes(12).toString('hex')}`
+  rememberSecret(minted)
+  assert.equal(redactText(`令牌 ${minted} 和认证头 ${Buffer.from(`x-access-token:${minted}`).toString('base64')}`, secrets()).includes(minted.slice(4)), false)
 })

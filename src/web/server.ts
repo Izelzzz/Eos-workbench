@@ -1,5 +1,6 @@
 // Web 服务：JSON 接口 + 前端静态文件。默认只监听本机地址；第一版没有登录。
 // 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向本服务发的跨站请求。
+import { randomBytes } from 'node:crypto'
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
@@ -24,7 +25,7 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, ForgeAppsResponse, RegisterAppResponse, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -122,6 +123,11 @@ export const listenPlan = (host: string, port: number, publicUrl: URL | undefine
   if (WILDCARD.includes(host)) return { url: `http://localhost:${port}`, exposed }
   return `监听 ${host} 时浏览器的 Host 是 ${host}:${port}，不是本机地址；要么改用 --host 0.0.0.0，要么把浏览器用的地址设成 EOS_PUBLIC_URL`
 }
+
+/** 托管平台注册完 App 跳回的路径。 */
+export const APP_CALLBACK = '/api/forge-apps/callback'
+/** 发起注册后多久内要完成（在托管平台的页面上确认）。 */
+const PENDING_MS = 30 * 60 * 1000
 
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
 export const LOG_TAIL = 2 * 1024 * 1024
@@ -353,8 +359,82 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const name = body.name
     if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
     if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
+    // github-app. 开头的名字留给 GitHub App 的凭据：平台按这个名字找 App，放成别的类型会挡住 App 和令牌。
+    if (name.startsWith('github-app.') !== (body.kind === 'github-app')) return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app') return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
     const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
     return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
+  }
+
+  // 清单流程注册 App：发起时记下一个随机的 state，托管平台跳回时原样带回；只认平台自己发起、没过期、没用过的 state。
+  // 回调是浏览器从托管平台跳过来的 GET，没有 Origin 可查，state 就是它的同源证明（挡住别人诱导浏览器带着他自己的 code 来存凭据）。
+  // 只存在内存里：平台重启后，进行中的注册要重新发起。
+  const pending = new Map<string, { name: string; expires: number }>()
+  const appRegistrations = () => o.supervisor.forges.flatMap(f => (f.appRegistration === undefined ? [] : [f.appRegistration]))
+  const callbackUrl = (req: IncomingMessage) => `${allowedOrigin(req)}${APP_CALLBACK}`
+
+  const forgeApps = (req: IncomingMessage): ForgeAppsResponse => {
+    const items = o.credentials.list(LOCAL_OWNER)
+    return {
+      usable: o.credentials.usable, ...(o.credentials.usable ? {} : { hint: GENERATE_HINT }), callbackUrl: callbackUrl(req),
+      apps: appRegistrations().map(a => {
+        // 和发起注册时的判断一致：这个名字已经有凭据（不管能不能读出来），就算已注册，不再给注册表单。
+        const saved = items.find(i => i.name === a.credentialName)
+        if (saved === undefined) return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax }
+        const value = o.credentials.get(LOCAL_OWNER, a.credentialName)
+        const installUrl = value.kind === 'ok' ? a.installUrl(value.value) : undefined
+        return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax, registered: { updatedAt: saved.updatedAt, ...(installUrl === undefined ? {} : { installUrl }) } }
+      }),
+    }
+  }
+
+  const registerApp = (req: IncomingMessage, body: Record<string, unknown>): [number, RegisterAppResponse] => {
+    const reg = appRegistrations().find(a => a.credentialName === body.name)
+    if (reg === undefined) return [400, { ok: false, error: '没有这个托管平台' }]
+    const appName = typeof body.appName === 'string' ? body.appName.trim() : ''
+    // 按字符数算（emoji 等算一个），和页面上的输入框一致。
+    if (appName === '' || Array.from(appName).length > reg.appNameMax) return [400, { ok: false, error: `App 名字要 1 到 ${reg.appNameMax} 个字符` }]
+    const org = typeof body.org === 'string' && body.org.trim() !== '' ? body.org.trim() : undefined
+    if (org !== undefined && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(org)) return [400, { ok: false, error: `组织名不对：${org}` }]
+    if (!o.credentials.usable) return [409, { ok: false, error: `平台没有主密钥，注册后存不了 App 的凭据。${GENERATE_HINT}` }]
+    // 已经注册过：不悄悄换掉正在用的 App（换掉后，装了旧 App 的仓库都要重新安装）。
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === reg.credentialName)) return [409, { ok: false, error: `已经有凭据「${reg.credentialName}」；要换一个 App，先在凭据页删掉它` }]
+    const now = Date.now()
+    for (const [k, v] of pending) if (v.expires <= now) pending.delete(k)
+    // 不挤掉进行中的注册：挤掉后，那个人在托管平台上建好的 App 回来时会被拒，成了没人用的 App。
+    if (pending.size >= 32) return [429, { ok: false, error: '进行中的注册太多了，过半小时再试' }]
+    const state = randomBytes(32).toString('base64url')
+    pending.set(state, { name: reg.credentialName, expires: now + PENDING_MS })
+    return [200, { ok: true, ...reg.form({ appName, origin: allowedOrigin(req)!, callbackUrl: callbackUrl(req), state, ...(org === undefined ? {} : { org }) }) }]
+  }
+
+  /** 托管平台跳回来：核对 state，用 code 换 App 的凭据存起来，再跳回页面，结果放在页面地址里。 */
+  const appCallback = async (url: URL): Promise<string> => {
+    const back = (q: Record<string, string>) => `/#/forges?${new URLSearchParams(q)}`
+    const state = url.searchParams.get('state') ?? ''
+    const p = pending.get(state)
+    // 先删掉：同一个 state 只能用一次，并发的第二次也拿不到。
+    pending.delete(state)
+    if (p === undefined || p.expires <= Date.now()) {
+      // 带着 code 回来，说明托管平台那边已经建好了 App，只是这边认不出这次注册：提醒去删掉，免得留下没人用的 App。
+      const orphan = url.searchParams.has('code') ? '。如果你刚在托管平台上确认了注册，那边已经建好了一个 App：到托管平台的 App 设置里删掉它' : ''
+      return back({ error: `这次注册不是从本页面发起的，或者已经过期、已经用过（发起后 ${PENDING_MS / 60_000} 分钟内有效，平台重启后失效）：在本页面重新注册${orphan}` })
+    }
+    const code = url.searchParams.get('code') ?? ''
+    if (!/^[\w-]{1,200}$/.test(code)) return back({ error: '托管平台没有带回 code（可能在那边取消了注册）：重新注册' })
+    const reg = appRegistrations().find(a => a.credentialName === p.name)!
+    let done
+    try {
+      done = await reg.complete(code)
+    } catch (e) {
+      return back({ error: (e as Error).message })
+    }
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === reg.credentialName)) {
+      return back({ error: `注册期间已经有了凭据「${reg.credentialName}」，没有覆盖它。${done.appUrl} 上新注册的 App 没有用上，可以在那里删掉` })
+    }
+    const r = o.credentials.put(LOCAL_OWNER, reg.credentialName, 'github-app', done.value)
+    if (!r.ok) return back({ error: `${r.error}。${done.appUrl} 上新注册的 App 没有存下凭据，在那里删掉后重新注册` })
+    return back({ registered: reg.credentialName, app: done.appName })
   }
 
   const deleteCredential = (body: Record<string, unknown>): [number, DeleteCredentialResponse] => {
@@ -385,9 +465,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         const dec = DECIDE.exec(url.pathname)
         const gen = url.pathname === '/api/improve/generate'
         const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined) return json(res, 404, { error: '没有这个接口' })
+        const reg = url.pathname === '/api/forge-apps/register'
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (reg) return json(res, ...registerApp(req, g.body))
         if (cred !== undefined) return json(res, ...(cred === 'save' ? saveCredential(g.body) : deleteCredential(g.body)))
         if (gen) return json(res, ...(await startGenerate(g.body)))
         if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
@@ -402,6 +484,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       if (url.pathname === '/api/workflows') return json(res, 200, workflows())
       if (url.pathname === '/api/conventions') return json(res, 200, conventions())
       if (url.pathname === '/api/credentials') return json(res, 200, credentialList())
+      if (url.pathname === '/api/forge-apps') return json(res, 200, forgeApps(req))
+      if (url.pathname === APP_CALLBACK) {
+        res.writeHead(303, { location: await appCallback(url), 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+        return void res.end()
+      }
       const conv = CONVENTION.exec(url.pathname)
       if (conv) {
         const name = decodeName(conv[2]!)
