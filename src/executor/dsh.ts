@@ -493,7 +493,7 @@ export class DshExecutor implements Executor {
     }
     const keyId = createHmac('sha256', this.keySalt).update(modelKey).digest('hex')
     // 换了 key：没有调用在跑的旧 key 进程都关掉（包括别的工作目录的），之后的调用用新 key 重起，会话从日志续接。
-    // 有调用在跑的进程（例如 agent 在等用户回答）等它的调用结束后，下一次调用时再换。
+    // 有调用在跑的进程（例如 agent 在等用户回答）等它的调用结束后，下一次调用时再换；在那之前，同一个工作目录里并发进来的调用也还用这个旧 key 进程（不打断在跑的调用）。
     if ([...this.harnesses.values()].some(v => v.keyId !== keyId)) await this.releaseIdle(v => v.keyId !== keyId, spec.cwd)
     const known = this.open.get(id)
     if (known !== undefined) return known.s
@@ -535,7 +535,9 @@ export class DshExecutor implements Executor {
   /** 关掉满足条件、而且所在工作目录没有调用在跑的进程（调用自己的工作目录计数里不算它自己）。 */
   private async releaseIdle(match: (v: { cwd: string; keyId: string }) => boolean, self?: string): Promise<void> {
     const cwds = new Set([...this.harnesses.values()].filter(v => match(v) && (this.running.get(v.cwd) ?? 0) <= (v.cwd === self ? 1 : 0)).map(v => v.cwd))
-    await Promise.all([...cwds].map(cwd => this.release(cwd)))
+    // release 同步地把进程从 harnesses 里拿掉、登记到 closing：别的工作目录不用等它们关完，那些目录之后的调用会先等 closing。
+    const releases = [...cwds].map(cwd => [cwd, this.release(cwd)] as const)
+    await Promise.all(releases.filter(([cwd]) => cwd === self).map(([, r]) => r))
   }
 
   private async sendIn(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {

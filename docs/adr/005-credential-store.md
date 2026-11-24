@@ -46,7 +46,7 @@
 
 - 进程启动时的环境（`/proc/<pid>/environ`）里一直带着主密钥，读出后从 `process.env` 删掉也改不了它。模型 key 必须交给 dsh 进程（这一版 dsh 的模型服务只认环境变量名 `apiKeyEnv`；写进配置文件就落在磁盘上，agent 的沙箱能读），所以也在 dsh 进程的环境里。
 - 谁能读到（2026-11-24 在部署镜像里实测，见 `docs/e2e/deploy-2-image/sandbox/checks-env-probe.json`、`modelkey-probe.json`）：
-  - agent 自己的 shell：读不到。dsh 的沙箱生效时（容器里用的是 Landlock），读别的进程的 environ 被拒绝。
+  - agent 自己的 shell：读不到。dsh 的沙箱生效时（容器里用的是 Landlock），读别的进程的 environ 被拒绝。这是在内核 6.18 上测的，换内核或换沙箱后端要重测。
   - **检查命令能读到**：它以平台的用户、在沙箱外运行 agent 改过的代码，从平台进程（和容器的初始进程）读到主密钥，从 dsh 进程读到模型 key。任何以平台用户在沙箱外运行 agent 代码的地方都一样。主密钥能解开全部凭据。
   - 平台的启动器（tsx）在平台代码运行之前起的 esbuild 服务也带着启动时的环境。
 - 根本的解决办法是用独立的用户运行 agent 和检查命令（路线图第 3 项，部署会话的 PR ③）。在它合并之前，不要在共享服务器上存真实凭据。

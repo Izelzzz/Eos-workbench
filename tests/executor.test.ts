@@ -160,6 +160,7 @@ test('after the model key changes, the next call closes every idle dsh process h
   assert.equal(created.length, 2, '同一个 key：进程复用')
   key = 'sk-new-key-111111'
   await send('/data/worktrees/t1', 'c3')
+  await settle() // 别的工作目录的旧进程在后台关
   assert.deepEqual(created.map(c => [c.cwd, c.key, c.closed]), [
     ['/data/worktrees/t1', 'sk-old-key-000000', true],
     ['/data/worktrees/t2', 'sk-old-key-000000', true],
@@ -199,9 +200,13 @@ test('when the model key is deleted (no fallback), idle dsh processes are closed
   await send('/data/worktrees/t2', 'c1')
   key = undefined
   await assert.rejects(send('/data/worktrees/t1', 'c2'), /没有可用的模型 API key/)
+  await settle()
   assert.deepEqual(created.map(c => c.closed), [true, true])
   await ex.close()
 })
+
+/** 等后台的关闭做完（假进程的 close 是一个 setTimeout(0)）。 */
+const settle = () => new Promise(r => setTimeout(r, 20))
 
 /** 测试用的 dsh home：执行器会往里面写能力面的补丁和技能目录；跑完一起删掉。 */
 const homes: string[] = []
