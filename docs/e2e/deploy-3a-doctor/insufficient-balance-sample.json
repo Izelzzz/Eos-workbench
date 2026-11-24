@@ -1,0 +1,7 @@
+{
+  "说明": "余额不足时的原始报错（直接调用模型 API）和平台给出的失败原因，供以后让失败分类认出余额不足时当测试用例。不含任何 key。",
+  "原始报错（模型 API 的返回体）": "{\"error\":{\"message\":\"Insufficient Balance (request_id: <略>)\",\"type\":\"insufficient_balance_error\",\"param\":null,\"code\":\"invalid_request_error\"}}",
+  "平台给出的失败原因（task.failure）": "哪一步：[spec] spec-writer · produce（调用 c1）\n原因：这一轮没有正常完成（出错）\n怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t261124185723oba",
+  "任务": "t261124185723oba",
+  "提交": "82b229e"
+}
