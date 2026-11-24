@@ -124,6 +124,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 ## 沙箱
 
 - dsh 用 Landlock 限制 agent 的写入范围：只能写自己任务的 worktree 和 `/tmp`，写不了别的任务和数据目录，也读不到别的进程的环境（模型 key、主密钥）。实测记录在 `docs/e2e/deploy-2-image/sandbox/`。
+- **模型 key 在 dsh 进程的环境里**（这一版 dsh 只能这样拿到 key）。在实测过的配置下（本镜像、这份 compose、内核 6.18），Landlock 挡住了 agent 读 dsh 和平台进程的 `/proc/<pid>/environ`（`docs/e2e/deploy-2-image/sandbox/modelkey-probe.json`）。**Landlock 没有生效时**，例如内核不支持、或者用别的方式运行没有走沙箱，同一用户的 agent 就能读到模型 key。换了宿主机内核时，请用这个探针重新确认。
 - **Landlock 只限制写，不限制读。** agent 能读整个 `/data`：别的任务和别的成员的 worktree、`/data/repos` 下所有仓库、`eos.db`（所有任务的 trace）、`/data/dsh` 的会话日志。放进这台服务器的仓库和任务，对所有任务的 agent 都是可见的。
 - 镜像里装了 bubblewrap，但在 Docker 默认权限下用不了。要用它就得放宽容器的 seccomp 和 `/proc` 屏蔽，所以没有这样做（见 ADR-006）。
 - 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 现在还不检查这一项，也不检查 dsh 能不能真正启动：doctor 全是 ✓ 时，任务仍可能在第一步失败（部署 E2E 第一次运行就遇到过，见 `docs/e2e/deploy-2-image/README.md`）。
