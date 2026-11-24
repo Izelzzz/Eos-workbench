@@ -17,7 +17,7 @@ export interface Forge {
   /** 浏览器里打开这个分支的地址。 */
   branchUrl(repo: RemoteRepo, branch: string): string
   /**
-   * 从 head 分支向 base 开一个 PR；head 已经有打开的 PR 时复用它（reused 为 true），重复调用不会开出第二个。
+   * 从 head 分支向 base 开一个 PR；head 已经有打开的 PR（不管目标分支是哪个）时复用它（reused 为 true），重复调用不会开出第二个。
    * head 和 base 没有差别时返回 { empty: true }。出错时抛 ForgeError（消息是给用户看的中文）。
    */
   openPullRequest(repo: RemoteRepo, token: string | undefined, p: { head: string; base: string; title: string; body: string }): Promise<PullRequest | { empty: true }>

@@ -8,15 +8,18 @@ const API_TIMEOUT_MS = 60_000
 const pull = z.object({ number: z.number().int(), html_url: z.string().url() })
 const apiError = z.object({ message: z.string().optional(), errors: z.array(z.object({ message: z.string().optional() }).passthrough()).optional() }).passthrough()
 
-/** GitHub 的报错换成中文原因；body 是它返回的 JSON（解析不了时是 undefined）。 */
-const explainApi = (repo: RemoteRepo, status: number, body: unknown, credential: string, hasToken: boolean): string => {
+/** GitHub 的报错换成中文原因；body 是它返回的 JSON（解析不了时是 undefined）。op：在做什么（查 PR 还是开 PR）。 */
+const explainApi = (repo: RemoteRepo, op: 'list' | 'create', status: number, body: unknown, credential: string, hasToken: boolean): string => {
   const e = apiError.safeParse(body).data
-  const said = [e?.message, ...(e?.errors ?? []).map(x => x.message)].filter((x): x is string => typeof x === 'string' && x !== '').join('；')
+  // 每条错误有 message 就用它，没有就用 field 和 code（例如 base 分支不存在时只有 { field: base, code: invalid }）。
+  const detail = (x: Record<string, unknown>) => (typeof x.message === 'string' && x.message !== '' ? x.message : [x.field, x.code].filter(v => typeof v === 'string').join(' '))
+  const said = [e?.message, ...(e?.errors ?? []).map(detail)].filter((x): x is string => typeof x === 'string' && x !== '').join('；')
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
-  if (status === 401) return `${repo.host} 拒绝了令牌：凭据「${credential}」${hasToken ? '里的令牌无效或已过期' : '不存在，开 PR 需要令牌'}。在凭据页添加或替换这条凭据`
-  if (status === 403) return `${repo.host} 不允许在 ${where} 开 PR：令牌没有 Pull requests 的写权限，或者被限流了（${said || status}）`
+  const doing = op === 'list' ? '查已有的 PR' : '开 PR'
+  if (status === 401) return `${repo.host} 拒绝了${doing}的请求：${hasToken ? `凭据「${credential}」里的令牌无效或已过期` : `没有带令牌（凭据「${credential}」不存在或读不出来），开 PR 需要令牌`}。在凭据页添加或替换这条凭据`
+  if (status === 403) return `${repo.host} 不允许在 ${where} ${doing}：${op === 'list' ? '令牌没有 Pull requests 的读权限、组织要求 SSO 授权，' : '令牌没有 Pull requests 的写权限，'}或者被限流了（${said || status}）`
   if (status === 404) return `找不到仓库 ${where}，或者凭据「${credential}」里的令牌看不到它`
-  return `在 ${where} 开 PR 失败（HTTP ${status}）：${said || '没有说明'}`
+  return `在 ${where} ${doing}失败（HTTP ${status}）：${said || '没有说明'}`
 }
 
 const OWNER = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})'
@@ -50,7 +53,7 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     } catch {
       body = undefined
     }
-    if (!res.ok && !(res.status === 422 && init.method === 'POST')) throw new ForgeError(explainApi(repo, res.status, body, credential, token !== undefined))
+    if (!res.ok && !(res.status === 422 && init.method === 'POST')) throw new ForgeError(explainApi(repo, init.method === 'POST' ? 'create' : 'list', res.status, body, credential, token !== undefined))
     return { status: res.status, body }
   }
   const h = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -70,16 +73,25 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     gitAuthHeader: token => `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
     async openPullRequest(repo, token, p): Promise<PullRequest | { empty: true }> {
       const credential = repo.host
-      // 同一个分支已经有打开的 PR：复用它（重试、崩溃后重跑时不会开出第二个）。
-      const existing = await call(repo, token, credential, `/pulls?state=open&head=${encodeURIComponent(`${repo.owner}:${p.head}`)}&base=${encodeURIComponent(p.base)}`)
-      const list = z.array(pull).safeParse(existing.body)
-      if (!list.success) throw new ForgeError(`${repo.host} 返回的 PR 列表格式不对`)
-      if (list.data[0] !== undefined) return { number: list.data[0].number, url: list.data[0].html_url, reused: true }
+      // 这个分支已经有打开的 PR（不管目标是哪个分支）：复用它，重试、崩溃后重跑时不会开出第二个。
+      const existing = async (): Promise<PullRequest | undefined> => {
+        const res = await call(repo, token, credential, `/pulls?state=open&head=${encodeURIComponent(`${repo.owner}:${p.head}`)}`)
+        const list = z.array(pull).safeParse(res.body)
+        if (!list.success) throw new ForgeError(`${repo.host} 返回的 PR 列表格式不对`)
+        return list.data[0] === undefined ? undefined : { number: list.data[0].number, url: list.data[0].html_url, reused: true }
+      }
+      const found = await existing()
+      if (found !== undefined) return found
       const created = await call(repo, token, credential, '/pulls', { method: 'POST', body: { title: p.title, head: p.head, base: p.base, body: p.body } })
       if (created.status === 422) {
         const said = JSON.stringify(created.body ?? '')
         if (/No commits between/i.test(said)) return { empty: true }
-        throw new ForgeError(explainApi(repo, 422, created.body, credential, token !== undefined))
+        // 查和开之间别人刚开了一个：再查一次，复用它。
+        if (/already exists/i.test(said)) {
+          const raced = await existing()
+          if (raced !== undefined) return raced
+        }
+        throw new ForgeError(explainApi(repo, 'create', 422, created.body, credential, token !== undefined))
       }
       const pr = pull.safeParse(created.body)
       if (!pr.success) throw new ForgeError(`${repo.host} 返回的 PR 格式不对`)

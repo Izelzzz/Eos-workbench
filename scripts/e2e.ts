@@ -164,17 +164,18 @@ function remoteChecks(): Record<string, boolean> {
   // 再开一次（模拟重跑交付）和查这个分支打开的 PR：在走代理的子进程里调平台的同一个函数和 GitHub 的接口。
   const probe = `import { defaultForges, parseRemote } from ${JSON.stringify(join(ROOT, 'src', 'forge', 'forges.ts'))}
 const { repo, forge } = parseRemote(defaultForges(), ${JSON.stringify(REMOTE)})
-const again = await forge.openPullRequest(repo, ${JSON.stringify(GIT_TOKEN ?? '')} || undefined, { head: ${JSON.stringify(meta.branch)}, base: ${JSON.stringify(meta.baseBranch ?? 'main')}, title: 'e2e 重开', body: 'e2e' })
-const list = await (await fetch(\`https://api.github.com/repos/\${repo.owner}/\${repo.name}/pulls?state=open&head=\${repo.owner}:${meta.branch}\`, { headers: { authorization: 'Bearer ${GIT_TOKEN ?? ''}', 'user-agent': 'eos-e2e' } })).json()
+const again = await forge.openPullRequest(repo, process.env.EOS_PROBE_TOKEN || undefined, { head: ${JSON.stringify(meta.branch)}, base: ${JSON.stringify(meta.baseBranch ?? 'main')}, title: 'e2e 重开', body: 'e2e' })
+const list = await (await fetch(\`https://api.github.com/repos/\${repo.owner}/\${repo.name}/pulls?state=open&head=\${repo.owner}:${meta.branch}\`, { headers: { authorization: \`Bearer \${process.env.EOS_PROBE_TOKEN ?? ''}\`, 'user-agent': 'eos-e2e' } })).json()
 process.stdout.write(JSON.stringify({ again, openCount: Array.isArray(list) ? list.length : -1 }))`
   let again: { reused: boolean; url: string } | undefined
   let openCount = -1
   try {
-    const out = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', probe], { cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1' }, encoding: 'utf8' })) as { again: { reused: boolean; url: string }; openCount: number }
+    const out = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', probe], { cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', EOS_PROBE_TOKEN: GIT_TOKEN ?? '' }, encoding: 'utf8' })) as { again: { reused: boolean; url: string }; openCount: number }
     again = out.again
     openCount = out.openCount
   } catch (e) {
-    record(`\n[e2e] 再开一次 PR 失败：${(e as Error).message}\n`)
+    // 报错里有子进程的命令行（探测代码本身），不带令牌；保险起见再抹一次。
+    record(`\n[e2e] 再开一次 PR 失败：${GIT_TOKEN === undefined ? (e as Error).message : (e as Error).message.split(GIT_TOKEN).join('***')}\n`)
   }
   record(`[e2e] PR：${prLink?.url ?? '（没有）'}；再开一次：${JSON.stringify(again)}；这个分支打开的 PR：${openCount} 个\n`)
   if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)

@@ -15,7 +15,7 @@ import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
 import { ForgeError, type Forge, type RemoteRepo } from '../forge/types.ts'
 import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, type Worktree } from './git.ts'
-import { MirrorError, pushBranch, type RemoteAuth, scrub, secretsOf, syncMirror } from './mirror.ts'
+import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
 import { runTask } from './runner.ts'
@@ -152,10 +152,19 @@ export class Supervisor {
     const branchLink = { label: `分支 ${meta.branch}`, url: branchUrl, kind: 'branch' as const }
     const pushed = `已把分支 ${meta.branch}（${sha.slice(0, 12)}）推到 ${branchUrl}`
     if (c.action === 'push') return { check: c, passed: true, detail: pushed, links: [branchLink] }
-    if (meta.baseBranch === undefined) return fail(`${pushed}。这个任务创建时没有记下远程的默认分支（旧版本建的任务），不知道往哪个分支开 PR；请在 ${meta.remote.webUrl} 上手动开 PR`)
+    // 旧版本建的任务没有记下默认分支：现在去问一次远程。
+    let base = meta.baseBranch
+    if (base === undefined) {
+      try {
+        base = await remoteDefaultBranch(this.o.dataDir, meta.remote, auth)
+      } catch (e) {
+        if (!(e instanceof MirrorError)) throw e
+        return { ...fail(withCredential(`${pushed}，但不知道往哪个分支开 PR：${e.message}`)), links: [branchLink] }
+      }
+    }
     try {
-      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base: meta.baseBranch, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
-      if ('empty' in pr) return { check: c, passed: true, detail: `${pushed}。任务分支和 ${meta.baseBranch} 没有差别，没有开 PR`, links: [branchLink] }
+      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      if ('empty' in pr) return { check: c, passed: true, detail: `${pushed}。任务分支和 ${base} 没有差别，没有开 PR`, links: [branchLink] }
       return {
         check: c, passed: true, detail: `${pushed}。${pr.reused ? '复用已经打开的' : '已开'} PR #${pr.number}：${pr.url}`,
         links: [branchLink, { label: `PR #${pr.number}`, url: pr.url, kind: 'pull-request' }],
@@ -165,7 +174,6 @@ export class Supervisor {
       return { ...fail(withCredential(`${pushed}，但开 PR 失败：${scrub(e.message, secretsOf(auth))}`)), links: [branchLink] }
     }
   }
-
 
   /**
    * 取这个仓库的令牌（凭据存储里没有就匿名访问），更新镜像。

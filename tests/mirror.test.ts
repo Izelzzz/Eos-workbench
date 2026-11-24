@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
 import { Credentials } from '../src/credentials/store.ts'
@@ -542,11 +543,11 @@ test('开 PR 被拒（令牌不对）：报中文原因，不含令牌；推送�
   const r = await remote(TOKEN)
   const repo = r.forge.parse(r.url)!
   await assert.rejects(r.forge.openPullRequest(repo, 'wrong-token', { head: 'x', base: 'main', title: 't', body: 'b' }), (e: Error) => {
-    assert.match(e.message, new RegExp(`${r.credential} 拒绝了令牌：凭据「${r.credential}」里的令牌无效或已过期`))
+    assert.match(e.message, new RegExp(`${r.credential} 拒绝了查已有的 PR的请求：凭据「${r.credential}」里的令牌无效或已过期`))
     assert.ok(!e.message.includes('wrong-token'))
     return true
   })
-  await assert.rejects(r.forge.openPullRequest(repo, undefined, { head: 'x', base: 'main', title: 't', body: 'b' }), /凭据「.*」不存在，开 PR 需要令牌/)
+  await assert.rejects(r.forge.openPullRequest(repo, undefined, { head: 'x', base: 'main', title: 't', body: 'b' }), /没有带令牌（凭据「.*」不存在或读不出来），开 PR 需要令牌/)
 })
 
 test('standard 工作流的交付阶段是平台开 PR；它能通过解析', async () => {
@@ -555,4 +556,36 @@ test('standard 工作流的交付阶段是平台开 PR；它能通过解析', as
   assert.ok(resolved.ok, JSON.stringify(resolved))
   const deliver = resolved.workflow.nodes.find(n => n.id === 'deliver')!
   assert.deepEqual(deliver.checks, [{ kind: 'platform', action: 'pull-request' }])
+})
+
+test('分支已经有指向别的分支的 PR：也复用它；旧任务没记下默认分支时现问远程', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const repo = r.forge.parse(r.url)!
+  // 先在远程建一个 develop 分支，并手动从任务分支开一个指向 develop 的 PR。
+  const first = await runPr(r)
+  const reused = await r.forge.openPullRequest(repo, TOKEN, { head: first.meta.branch, base: 'develop', title: 'x', body: 'y' })
+  assert.deepEqual(reused, { number: 1, url: first.result.links![1]!.url, reused: true })
+  // 旧任务：meta 里没有 baseBranch（直接改数据库模拟旧版本建的任务）。
+  const sup = new Supervisor({ store: r.store, executor: new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/review')) return PASS
+    writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'old.txt'), 'old\n')
+    return '改好了'
+  }), dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: '旧任务' })) as { id: string }
+  const meta = r.store.meta(c.id)
+  const { baseBranch: _dropped, ...old } = meta
+  const db = new DatabaseSync(join(r.data, 'eos.db'))
+  db.prepare('UPDATE tasks SET meta = ? WHERE id = ?').run(JSON.stringify(old), c.id)
+  db.close()
+  assert.equal(r.store.meta(c.id).baseBranch, undefined)
+  const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(task.status, 'done', task.failure)
+  const posts = apiCalls(r).filter(q => q.method === 'POST')
+  assert.equal(posts.at(-1)!.body!.base, 'main', '现问到的默认分支')
+})
+
+test('GitHub 的 422 只给 field 和 code 时，报错里写出来', async () => {
+  const r = await remote(TOKEN)
+  await assert.rejects(r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: 'no-such-branch', base: 'main', title: 't', body: 'b' }), /开 PR失败（HTTP 422）：Validation Failed；head invalid/)
 })
