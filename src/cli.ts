@@ -9,6 +9,7 @@ import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor, dshInstall } from './executor/dsh.ts'
+import { takeMasterKey } from './credentials/key.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
@@ -45,6 +46,8 @@ const { values, positionals } = parseArgs({
   options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' }, tasks: { type: 'string' } },
 })
 
+// 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（dsh、git、检查命令）都继承不到它。
+const masterKey = takeMasterKey(process.env)
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
 const say = (s: string): void => void process.stdout.write(`${s}\n`)
 const fail = (s: string): never => {
@@ -57,13 +60,13 @@ const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
 const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
 if (positionals[0] === 'doctor' && !values.help) {
-  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
+  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env, masterKey }))
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
 if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
-  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
+  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env, masterKey }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
   const warned = items.filter(i => i.status === 'warn')

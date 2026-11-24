@@ -13,7 +13,7 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', apiKey: true, git: { version: '2.43.0' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
+const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', apiKey: true, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, bwrap: true, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -25,17 +25,18 @@ test('版本比较按主、次、修订号', () => {
 
 test('环境都满足时每项都通过', () => {
   const items = evaluate(good)
-  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
+  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['凭据主密钥', 'ok'], ['凭据隔离', 'warn'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', apiKey: false, git: { missing: true }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
+  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', apiKey: false, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, bwrap: false, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
   const items = evaluate(bad)
-  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail'])
+  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail'])
   assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
   assert.match(text, /✗ DeepSeek API key：没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/)
+  assert.match(text, /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：生成一个主密钥：openssl rand -base64 32/)
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
   assert.match(text, /✗ dsh：没有安装，或安装不完整\n  怎么修：在仓库目录运行 npm install/)
@@ -48,8 +49,20 @@ test('engines 读不出或写法认不出时给出提示；git 运行失败和�
   assert.match(formatItems(evaluate({ ...good, git: { error: 'permission denied' } })), /✗ git：git 运行失败：permission denied\n  怎么修：/)
 })
 
+test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显示指纹', () => {
+  const text = formatItems(evaluate({ ...good, masterKey: { kind: 'missing' } }))
+  assert.match(text, /⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据\n  怎么修：生成一个主密钥/)
+  assert.match(formatItems(evaluate(good)), /✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 0123456789abcdef）/)
+})
+
+test('设置了主密钥时提示还没隔离的地方：有没有 bwrap 说法不同；没设置主密钥时不提示', () => {
+  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥\n  怎么修：团队共用的服务器上，用独立的用户运行/)
+  assert.match(formatItems(evaluate({ ...good, bwrap: false })), /⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到.*\n  怎么修：安装 bubblewrap（bwrap）；/)
+  assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
+})
+
 test('gather：读 package.json 的 engines 和 dsh 版本；只看 key 有没有设置；数据目录建不出来时记下原因', () => {
-  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), env: { DEEPSEEK_API_KEY: ' ' } })
+  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), env: { DEEPSEEK_API_KEY: ' ' }, masterKey: { kind: 'missing' } })
   assert.equal(f.nodeRequired, '>=24.9.0')
   assert.equal(f.node, process.versions.node)
   assert.equal(f.apiKey, false, '空白不算设置')
@@ -59,10 +72,12 @@ test('gather：读 package.json 的 engines 和 dsh 版本；只看 key 有没�
   assert.ok(existsSync(f.dataDir), '和别的命令一样会建出数据目录')
   const file = join(tmp(), 'a-file')
   writeFileSync(file, '')
-  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), env: { DEEPSEEK_API_KEY: 'k' } })
+  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), env: { DEEPSEEK_API_KEY: 'k' }, masterKey: { kind: 'missing' } })
   assert.equal(blocked.apiKey, true)
   assert.equal(blocked.dataDirError, '路径里有一段不是目录（是普通文件）（ENOTDIR）')
 })
+
+const KEY = Buffer.alloc(32, 7).toString('base64')
 
 const cli = (args: string[], env: NodeJS.ProcessEnv) =>
   spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH, ...env } })
@@ -72,11 +87,21 @@ test('eos doctor 逐项列出结果，有 ✗ 时退出码不为 0', () => {
   const r = cli(['doctor', '--data', data], {})
   assert.equal(r.status, 1)
   assert.match(r.stdout, new RegExp(`^Eos 环境检查（数据目录 ${data.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}）`))
-  for (const name of ['Node', 'DeepSeek API key', 'git', '数据目录', 'dsh']) assert.match(r.stdout, new RegExp(`[✓⚠✗] ${name}：`))
+  for (const name of ['Node', 'DeepSeek API key', '凭据主密钥', 'git', '数据目录', 'dsh']) assert.match(r.stdout, new RegExp(`[✓⚠✗] ${name}：`))
   assert.match(r.stdout, /✗ DeepSeek API key[\s\S]*怎么修/)
   const withKey = cli(['doctor', '--data', data], { DEEPSEEK_API_KEY: 'k' })
   assert.match(withKey.stdout, /✓ DeepSeek API key/)
   assert.equal(withKey.status, 0, '没有 ✗ 时退出码为 0（Node 版本不够只是 ⚠）')
+})
+
+test('主密钥格式不对时 doctor 报 ✗，输出里没有主密钥本身', () => {
+  const bad = 'not*base64'
+  const r = cli(['doctor', '--data', join(tmp(), 'data')], { DEEPSEEK_API_KEY: 'k', EOS_MASTER_KEY: bad })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码/)
+  const ok = cli(['doctor', '--data', join(tmp(), 'data')], { DEEPSEEK_API_KEY: 'k', EOS_MASTER_KEY: KEY })
+  assert.match(ok.stdout, /✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 [0-9a-f]{16}）/)
+  assert.ok(!ok.stdout.includes(KEY) && !ok.stderr.includes(KEY))
 })
 
 test('doctor --help 显示帮助，不跑检查', () => {
@@ -102,10 +127,10 @@ test('不调用模型的命令不做启动检查', () => {
 })
 
 test('Node 版本不够时只提示，命令照常执行；版本够时不提示', () => {
-  const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], { DEEPSEEK_API_KEY: 'k' })
+  const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], { DEEPSEEK_API_KEY: 'k', EOS_MASTER_KEY: KEY })
   assert.doesNotMatch(r.stderr, /没有启动/)
   assert.match(r.stderr, /找不到目录/, '通过了启动检查，走到了创建任务')
   const old = !atLeast(process.versions.node, '24.9.0')
   if (old) assert.match(r.stderr, /^启动前检查有提示（照常启动）：\n⚠ Node：/)
-  else assert.doesNotMatch(r.stderr, /启动前检查有提示/)
+  else assert.doesNotMatch(r.stderr, /⚠ Node/)
 })
