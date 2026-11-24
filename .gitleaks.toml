@@ -1,0 +1,10 @@
+# gitleaks 配置：沿用官方默认规则，只加按值精确匹配的允许项。
+# 具体某一次发现的放行写在 .gitleaksignore（按指纹）；这里只放和提交 SHA 无关、必须按值放行的明显假值。
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "CI 第一批 2/3 故意提交的明显假令牌（ghp_CIdeliberateFAKEtoken 加 15 个 0），用来证明 gitleaks 会变红。按值放行，换合并方式（rebase 会改 SHA）也不失效"
+regexTarget = "secret"
+regexes = ['''^ghp_CIdeliberateFAKEtoken0{15}$''']
