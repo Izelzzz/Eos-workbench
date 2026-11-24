@@ -1,0 +1,15 @@
+# 最终镜像（提交 6775304）。.env 里没有 DEEPSEEK_API_KEY、凭据存储里也没有 deepseek
+$ docker compose run --rm eos node --import tsx src/cli.ts doctor
+Eos 环境检查（数据目录 /data）
+✓ Node：24.22.3（要求 >=24.9.0）
+✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY
+⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据
+✓ git：2.43.0
+✓ 数据目录：/data 可写
+✓ dsh：0.2.2-rc.5
+doctor 退出码=1
+$ docker compose up -d，等 20 秒后 docker compose ps 和 docker compose logs eos
+eos Restarting (1) 2 seconds ago
+eos-1  | ✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY
+eos-1  | ✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY
+eos-1  | ✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY
