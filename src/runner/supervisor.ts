@@ -9,7 +9,12 @@ import type { Store } from '../store/store.ts'
 import { role as roleOf } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
 import { killProcessesIn } from './procs.ts'
-import { commitInScope, contextFor, createWorktree } from './git.ts'
+import type { Credentials } from '../credentials/store.ts'
+import { LOCAL_OWNER } from '../credentials/types.ts'
+import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
+import type { Forge, RemoteRepo } from '../forge/types.ts'
+import { addWorktree, commitInScope, contextFor, createWorktree, type Worktree } from './git.ts'
+import { MirrorError, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
 import { runTask } from './runner.ts'
@@ -36,32 +41,67 @@ export class Supervisor {
     /** 每个任务的进度行。 */
     log?: (id: string, line: string) => void
     pollMs?: number
+    /** 访问远程仓库用的令牌从这里取；不给时只能访问公开仓库。 */
+    credentials?: Credentials
+    /** 认得的代码托管平台，默认只有 github.com。 */
+    forges?: Forge[]
   }) {
     this.locksDir = join(o.dataDir, 'locks')
     this.conventions = new Conventions(o.store)
     this.conventions.seed(Date.now())
   }
 
-  /** 校验输入、建 worktree、写入存储。所有错误都是给用户看的中文。 */
-  create(input: CreateInput): Created {
+  /**
+   * 校验输入、建 worktree、写入存储。所有错误都是给用户看的中文。
+   * repo 可以是平台所在机器上的 git 仓库路径，或托管平台上的仓库地址（例如 https://github.com/<owner>/<repo>）：
+   * 远程仓库先更新平台数据目录里的镜像，在默认分支的最新提交上建 worktree。
+   */
+  async create(input: CreateInput): Promise<Created> {
     const request = input.request.trim()
     if (request === '') return { ok: false, error: '需求不能为空' }
-    const repo = resolve(input.repo.trim())
-    if (input.repo.trim() === '' || !existsSync(repo) || !statSync(repo).isDirectory()) return { ok: false, error: `找不到目录：${input.repo}` }
-    if (!isRepo(repo)) return { ok: false, error: `不是 git 仓库：${repo}` }
+    const where = input.repo.trim()
+    if (where === '') return { ok: false, error: '需要仓库：平台所在机器上的路径，或 https://github.com/<owner>/<repo>' }
+    const remote = parseRemote(this.o.forges ?? defaultForges(), where)
+    if (remote === undefined && looksRemote(where)) return { ok: false, error: `认不出仓库地址：${where}。目前支持 https://github.com/<owner>/<repo>（或 git@github.com:<owner>/<repo>.git）` }
+    const repo = resolve(where)
+    if (remote === undefined && (!existsSync(repo) || !statSync(repo).isDirectory())) return { ok: false, error: `找不到目录：${input.repo}` }
+    if (remote === undefined && !isRepo(repo)) return { ok: false, error: `不是 git 仓库：${repo}` }
+    // 先校验工作流，再访问网络。
     const resolved = this.conventions.resolve(input.workflow.trim())
     if (!resolved.ok) return resolved
     const id = newId()
-    let w: ReturnType<typeof createWorktree>
+    let w: Worktree
     try {
-      w = createWorktree(repo, this.o.dataDir, id)
+      if (remote === undefined) w = createWorktree(repo, this.o.dataDir, id)
+      else {
+        const m = await this.syncRemote(remote.repo, remote.forge)
+        if (!m.ok) return m
+        w = addWorktree(m.gitDir, m.baseSha, this.o.dataDir, id)
+      }
     } catch (e) {
       const msg = String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
     this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-      meta: { ...w, conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
+      meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
+  }
+
+  /**
+   * 取这个仓库的令牌（凭据存储里没有就匿名访问），更新镜像。
+   * 凭据存在但读不出来（没有主密钥、换了主密钥）时先匿名试一次：公开仓库照样能用；匿名也不行时两个原因都报出来。
+   */
+  private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string } | { ok: false; error: string }> {
+    const credential = forge.credentialName(repo)
+    const got = this.o.credentials?.get(LOCAL_OWNER, credential) ?? { kind: 'absent' as const }
+    const token = got.kind === 'ok' ? got.value : undefined
+    try {
+      const m = await syncMirror(this.o.dataDir, repo, { credential, ...(token === undefined ? {} : { header: forge.gitAuthHeader(token), secret: token }) })
+      return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha }
+    } catch (e) {
+      if (!(e instanceof MirrorError)) throw e
+      return { ok: false, error: got.kind === 'error' ? `${e.message}（凭据「${credential}」读不出来，所以没带令牌：${got.error}）` : e.message }
+    }
   }
 
   /** 这个任务的日志文件（数据目录下的 logs/<任务>.log）。 */

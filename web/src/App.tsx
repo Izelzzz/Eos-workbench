@@ -180,7 +180,9 @@ function TaskPage(props: { id: string }) {
           <div><span>缓存读 / 写</span><b>{tokens(r.usage.cacheRead)} / {tokens(r.usage.cacheWrite)}</b></div>
         </div>
         <dl className="where" aria-label="仓库">
-          <dt>仓库</dt><dd className="mono">{task.repo}</dd>
+          {task.remote === undefined
+            ? <><dt>仓库</dt><dd className="mono">{task.repo}</dd></>
+            : <><dt>仓库</dt><dd className="mono"><a href={task.remote.webUrl} target="_blank" rel="noreferrer">{task.remote.host}/{task.remote.owner}/{task.remote.name}</a></dd><dt>镜像</dt><dd className="mono">{task.repo}</dd></>}
           <dt>分支</dt><dd className="mono">{task.branch}</dd>
           <dt>工作目录（worktree）</dt><dd className="mono">{task.worktree}</dd>
           <dt>基线提交</dt><dd className="mono">{task.baseSha.slice(0, 12)}</dd>

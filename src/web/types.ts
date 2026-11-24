@@ -1,5 +1,6 @@
 // Web 接口返回的数据类型（纯类型，前端也引用）。
 import type { CredentialInfo, CredentialKind } from '../credentials/types.ts'
+import type { RemoteRepo } from '../forge/types.ts'
 import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
@@ -22,6 +23,8 @@ export type TaskDetail = {
   logPath: string
   /** 仓库、分支、worktree 都是平台所在机器上的路径，只用来显示。 */
   repo: string
+  /** 任务来自托管平台上的仓库时：是哪个仓库（repo 是平台里的镜像）。 */
+  remote?: RemoteRepo
   branch: string
   worktree: string
   baseSha: string
