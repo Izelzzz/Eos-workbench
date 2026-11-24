@@ -1,5 +1,7 @@
 // GitHub：仓库地址的写法、令牌的名字、git 的认证头、开 PR。
 import { z } from 'zod'
+import { createHash } from 'node:crypto'
+import { appCredential, appCredentialName, GitHubApp } from './github-app.ts'
 import { ForgeError, type Forge, type PullRequest, type RemoteRepo } from './types.ts'
 
 /** 一次 API 请求最多等这么久。 */
@@ -18,8 +20,15 @@ const explainApi = (repo: RemoteRepo, op: 'list' | 'create', status: number, bod
   const said = [e?.message, ...(e?.errors ?? []).map(detail)].filter((x): x is string => typeof x === 'string' && x !== '').join('；')
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
   const doing = op === 'list' ? '查已有的 PR' : '开 PR'
-  if (status === 401) return `${repo.host} 拒绝了${doing} 的请求：${hasToken ? `凭据「${credential}」里的令牌无效或已过期。在凭据页替换这条凭据` : `没有带令牌，开 PR 需要令牌。在凭据页添加名字为「${credential}」、类型为 Git 令牌的凭据`}`
-  if (status === 403) return `${repo.host} 不允许在 ${where} ${doing}：${op === 'list' ? '令牌没有 Pull requests 的读权限、组织要求 SSO 授权，' : '令牌没有 Pull requests 的写权限，'}或者被限流了（${said || status}）`
+  const app = credential.startsWith('github-app.')
+  if (status === 401) {
+    if (app) return `${repo.host} 拒绝了${doing} 的请求：凭据「${credential}」的 GitHub App 换来的令牌无效（App 可能被卸载或撤销了）`
+    return `${repo.host} 拒绝了${doing} 的请求：${hasToken ? `凭据「${credential}」里的令牌无效或已过期。在凭据页替换这条凭据` : `没有带令牌，开 PR 需要令牌。在凭据页添加名字为「${credential}」、类型为 Git 令牌的凭据`}`
+  }
+  if (status === 403) {
+    const who = app ? `凭据「${credential}」的 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限（在 App 的设置里加上，并在安装里接受新权限），` : `令牌没有 Pull requests 的${op === 'list' ? '读权限、组织要求 SSO 授权' : '写权限'}，`
+    return `${repo.host} 不允许在 ${where} ${doing}：${who}或者被限流了（${said || status}）`
+  }
   if (status === 404) return `找不到仓库 ${where}，或者凭据「${credential}」里的令牌看不到它`
   return `在 ${where} ${doing} 失败（HTTP ${status}）：${said || '没有说明'}`
 }
@@ -36,6 +45,8 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
   const scheme = o.scheme ?? 'https'
   // github.com 的 API 在 api.github.com；GitHub Enterprise 在 /api/v3。
   const api = host === 'github.com' ? 'https://api.github.com' : `${scheme}://${host}/api/v3`
+  /** 按凭据内容缓存 App：凭据被替换后用新的，旧的令牌缓存跟着丢掉。 */
+  const apps = new Map<string, GitHubApp>()
   const call = async (repo: RemoteRepo, token: string | undefined, credential: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<{ status: number; body: unknown }> => {
     let res: Response
     let text: string
@@ -81,7 +92,7 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     // 个人访问令牌和 GitHub App 的安装令牌都可以用 x-access-token 作用户名。
     gitAuthHeader: token => `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
     async openPullRequest(repo, token, p): Promise<PullRequest | { empty: true } | { merged: { number: number; url: string } }> {
-      const credential = repo.host
+      const credential = p.credential ?? repo.host
       // 这个分支已经有打开的 PR（不管目标是哪个分支）：复用它，重试、崩溃后重跑时不会开出第二个。
       const existing = async (): Promise<PullRequest | undefined> => {
         const res = await call(repo, token, credential, `/pulls?state=open&head=${encodeURIComponent(`${repo.owner}:${p.head}`)}`)
@@ -109,6 +120,28 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       const pr = pull.safeParse(created.body)
       if (!pr.success) throw new ForgeError(`${repo.host} 返回的 PR 格式不对`)
       return { number: pr.data.number, url: pr.data.html_url, reused: false }
+    },
+    appCredentialName: repo => appCredentialName(repo.host),
+    forgetAppToken: repo => {
+      for (const app of apps.values()) app.forget(repo)
+    },
+    async appToken(repo, credential) {
+      const key = createHash('sha256').update(credential.value).digest('hex')
+      let app = apps.get(key)
+      if (app === undefined) {
+        let json: unknown
+        try {
+          json = JSON.parse(credential.value)
+        } catch {
+          throw new ForgeError(`凭据「${credential.name}」不是 GitHub App 的凭据（应该是包含 appId 和 privateKey 的 JSON）`)
+        }
+        const parsed = appCredential.safeParse(json)
+        if (!parsed.success) throw new ForgeError(`凭据「${credential.name}」不是有效的 GitHub App 凭据：${parsed.error.issues.map(i => `${i.path.join('.') || '（整体）'} ${i.message}`).join('；')}`)
+        app = new GitHubApp({ apiUrl: api, credential: parsed.data, credentialName: credential.name })
+        apps.clear()
+        apps.set(key, app)
+      }
+      return (await app.token(repo)).token
     },
     branchUrl: (repo, branch) => `${repo.webUrl}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`,
   }
