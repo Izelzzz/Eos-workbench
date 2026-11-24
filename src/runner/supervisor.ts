@@ -264,6 +264,8 @@ export class Supervisor {
         await this.o.executor.release(worktree)
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
+        const stuck = killed.filter(k => !k.exited)
+        if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 2 秒还没退出，照常撤销越界改动）`)
       },
       checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)), redact),
       afterWrite: (t, call) => {

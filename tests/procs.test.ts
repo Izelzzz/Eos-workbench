@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { killProcessesIn } from '../src/runner/procs.ts'
+import { killProcessesIn, type Procfs } from '../src/runner/procs.ts'
 
 /** 进程还在运行：/proc 里有它、而且不是僵尸（Z）。被杀的子进程在被回收之前是僵尸，kill(pid, 0) 仍然成功，不能用它判断。 */
 const alive = (pid: number) => {
@@ -43,4 +43,52 @@ test('processes whose working directory is inside the worktree are killed, detac
   process.kill(other, 'SIGKILL')
   assert.deepEqual(await killProcessesIn(wt), [], 'nothing left in the worktree')
   rmSync(base, { recursive: true, force: true })
+})
+
+/**
+ * 假的 /proc：一个工作目录在 /wt 里的进程。被杀后依次经过：工作目录还在（R）→ 工作目录已释放但还没变成僵尸（R）→ 僵尸（Z）。
+ * 第二段就是内核 exit_fs 之后、exit_notify 之前；CI 上 tests/procs.test.ts:41 偶发失败时，等待循环正是在这一段提前返回的。
+ */
+const fakeProc = (stages: ('inside' | 'cwd-gone' | 'zombie' | 'gone')[], started = '4242') => {
+  let polls = 0
+  let killedAt: number | undefined
+  const stage = () => (killedAt === undefined ? 'inside' : stages[Math.min(polls - killedAt, stages.length - 1)]!)
+  const stat = (state: string, start = started) => `77 (sl eep) ${state} ${Array.from({ length: 18 }, () => '0').join(' ')} ${start} 0`
+  const proc: Procfs = {
+    pids: () => (stage() === 'gone' ? [] : [77]),
+    cwdOf: () => (stage() === 'inside' ? '/wt' : undefined),
+    stat: () => {
+      polls++
+      const s = stage()
+      return s === 'gone' ? undefined : stat(s === 'zombie' ? 'Z' : 'R')
+    },
+    comm: () => 'sleep',
+    kill: () => { killedAt = polls },
+  }
+  return { proc, polls: () => polls }
+}
+
+test('the wait does not end while a killed process has released its working directory but is not yet a zombie', async () => {
+  const { proc, polls } = fakeProc(['inside', 'cwd-gone', 'cwd-gone', 'cwd-gone', 'zombie'])
+  const killed = await killProcessesIn('/', 2000, { ...proc, cwdOf: pid => (proc.cwdOf(pid) === '/wt' ? '/' : undefined) })
+  assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: true }])
+  assert.ok(polls() >= 5, `等到变成僵尸才返回（查了 ${polls()} 次）`)
+})
+
+test('a killed process that is still running at the deadline is reported as not exited', async () => {
+  const { proc } = fakeProc(['inside', 'cwd-gone'])
+  const killed = await killProcessesIn('/', 100, { ...proc, cwdOf: pid => (proc.cwdOf(pid) === '/wt' ? '/' : undefined) })
+  assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: false }])
+})
+
+test('a process number reused by a new process (different start time) counts as exited', async () => {
+  const { proc } = fakeProc(['inside', 'cwd-gone'])
+  let reused = false
+  const killed = await killProcessesIn('/', 2000, {
+    ...proc,
+    cwdOf: pid => (proc.cwdOf(pid) === '/wt' ? '/' : undefined),
+    kill: pid => { proc.kill(pid); reused = true },
+    stat: pid => { const s = proc.stat(pid); return reused && s !== undefined ? s.replace(' 4242 ', ' 9999 ') : s },
+  })
+  assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: true }])
 })
