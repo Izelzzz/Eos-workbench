@@ -1,5 +1,5 @@
 {
-  "task": "t261124134658z83",
+  "task": "t261124145720vqi",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -13,7 +13,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-f7589af245b3bc4dd5355def6956c7c5",
+      "sid": "session-5e0be9f21b4184e549c849adfe6e149d",
       "calls": [
         "c1"
       ],
@@ -24,7 +24,7 @@
       "asks": 2
     },
     "build": {
-      "sid": "session-56242f9e6e89b4300a619965ee96b4e9",
+      "sid": "session-585ed82eb890b3c910035ec7d1b1b039",
       "calls": [
         "c2",
         "c4"
@@ -32,10 +32,10 @@
       "presets": [
         "workspace-write"
       ],
-      "asks": 1
+      "asks": 0
     },
     "review": {
-      "sid": "session-dd6546ec48c9e8a9ceee37542e9694f9",
+      "sid": "session-05f8e661b16a500d9deb1b7e7a4da54c",
       "calls": [
         "c3",
         "c5"
@@ -49,12 +49,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 55689ms",
-    "c2 produce@build 25671ms",
-    "c3 critique@review#1 25559ms",
-    "c4 respond@review#1 10917ms",
-    "c5 critique@review#2 6486ms"
+    "c1 produce@plan 74607ms",
+    "c2 produce@build 16500ms",
+    "c3 critique@review#1 34016ms",
+    "c4 respond@review#1 14765ms",
+    "c5 critique@review#2 10487ms"
   ],
-  "commits": "2013bdd eos: review respond (c4)\ned84193 eos: build produce (c2)\n",
-  "npmTest": "y 与 -Infinity 参与求和\n  ---\n  duration_ms: 0.094386\n  type: 'test'\n  ...\n# Subtest: Infinity 与 -Infinity 相加结果为 NaN，不抛错\nok 13 - Infinity 与 -Infinity 相加结果为 NaN，不抛错\n  ---\n  duration_ms: 0.122023\n  type: 'test'\n  ...\n# Subtest: 较大数组求和\nok 14 - 较大数组求和\n  ---\n  duration_ms: 0.213982\n  type: 'test'\n  ...\n1..14\n# tests 14\n# suites 0\n# pass 14\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 93.008396\n"
+  "commits": "3795777 eos: review respond (c4)\nc4767de eos: build produce (c2)\n",
+  "npmTest": " Subtest: throws TypeError for sparse array holes\nok 12 - throws TypeError for sparse array holes\n  ---\n  duration_ms: 0.079611\n  type: 'test'\n  ...\n# Subtest: throws TypeError for non-array inputs\nok 13 - throws TypeError for non-array inputs\n  ---\n  duration_ms: 0.235308\n  type: 'test'\n  ...\n1..13\n# tests 13\n# suites 0\n# pass 13\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 68.95785\n"
 }
