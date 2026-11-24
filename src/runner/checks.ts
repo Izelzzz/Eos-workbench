@@ -124,10 +124,23 @@ const checkRun = (worktree: string, c: Extract<Check, { kind: 'run' }>, env: Nod
     })
   })
 
-/** 按顺序执行，结果顺序与 checks 一致。一项失败不影响后面的检查：一次把所有问题都告诉 agent。 */
-export const runChecks = async (worktree: string, checks: Check[], env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal): Promise<CheckResult[]> => {
+/** 平台动作由调用方执行（它知道任务的远程仓库和凭据）。 */
+export type PlatformRunner = (c: Extract<Check, { kind: 'platform' }>) => Promise<CheckResult>
+
+/**
+ * 按顺序执行，结果顺序与 checks 一致。一项失败不影响后面的检查：一次把所有问题都告诉 agent。
+ * 平台动作只在前面的检查都通过时才做（例如测试不过就不推送）。
+ */
+export const runChecks = async (worktree: string, checks: Check[], env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal, platform?: PlatformRunner): Promise<CheckResult[]> => {
   if (!existsSync(worktree)) throw new Error(`worktree 不存在：${worktree}`)
   const results: CheckResult[] = []
-  for (const c of checks) results.push(c.kind === 'file' ? checkFile(worktree, c) : await checkRun(worktree, c, env, signal))
+  for (const c of checks) {
+    if (c.kind === 'file') results.push(checkFile(worktree, c))
+    else if (c.kind === 'run') results.push(await checkRun(worktree, c, env, signal))
+    else if (signal?.aborted === true) results.push({ check: c, passed: false, detail: '任务已中止，这一步没有做' })
+    else if (results.some(r => !r.passed)) results.push({ check: c, passed: false, detail: '前面的检查没有通过，这一步没有做' })
+    else if (platform === undefined) results.push({ check: c, passed: false, detail: '这里不能执行平台动作' })
+    else results.push(await platform(c))
+  }
   return results
 }

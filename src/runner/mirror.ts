@@ -78,11 +78,19 @@ export const foreignConfig = (gitDir: string): string[] => {
   }
 }
 
-export class MirrorError extends Error {}
+/** raw：git 的原始报错（已抹掉令牌和认证头），给调用方按具体情况再判断。 */
+export class MirrorError extends Error {
+  constructor(message: string, readonly raw = '') {
+    super(message)
+  }
+}
+
+/** 把 secrets 换成 ***。 */
+export const scrub = (text: string, secrets: string[]): string => secrets.filter(x => x !== '').reduce((t, x) => t.split(x).join('***'), text)
 
 /** git 的报错换成给用户看的中文原因。secrets 出现在报错里时抹掉（git 不会打印请求头，这里是兜底）。 */
 export const explain = (repo: RemoteRepo, stderr: string, o: { credential: string; hasToken: boolean; secrets?: string[] }): string => {
-  const raw = (o.secrets ?? []).filter(x => x !== '').reduce((text, x) => text.split(x).join('***'), stderr)
+  const raw = scrub(stderr, o.secrets ?? [])
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
   if (/Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]|HTTP 40[13]|403 Forbidden|401 Unauthorized/i.test(raw)) {
     return o.hasToken
@@ -96,21 +104,25 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
   return `访问 ${where} 失败：${raw.trim().split('\n').at(-1) ?? ''}`
 }
 
-/**
- * 更新镜像：没有就建一个空的 bare 仓库，问远程的默认分支，把它 fetch 到 refs/remotes/origin/<分支>，返回它最新的提交。
- * 远程是空仓库（还没有提交）时报错。这次新建的镜像在失败时删掉。所有错误都是 MirrorError，消息是给用户看的中文。
- */
+export type RemoteAuth = { header?: string; credential: string; secret?: string }
+
 /** 报错里要抹掉的内容：令牌本身，和认证头里的凭据部分（例如 Basic 后面的 base64）。 */
 export const secretsOf = (auth: { header?: string; secret?: string }): string[] =>
   [auth.secret ?? '', auth.header?.replace(/^Authorization:\s*\w+\s+/i, '') ?? ''].filter(x => x !== '')
 
-/** 本进程里每个镜像正在进行的更新：同一个镜像的请求排队，依次进行。 */
+/** 本进程里每个镜像正在进行的操作：同一个镜像的操作排队，依次进行。 */
 const queues = new Map<string, Promise<unknown>>()
 
-export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: { header?: string; credential: string; secret?: string }): Promise<Mirror> => {
+type Git = (args: string[]) => Promise<string>
+
+/**
+ * 对一个镜像做一次访问远程的操作：本进程内排队、跨进程加锁，准备好 git 的环境，核对镜像的配置，再执行 fn。
+ * create：镜像不存在时新建（失败时删掉这次新建的）；不 create 时镜像必须已经存在。
+ */
+const withMirror = <T,>(dataDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
   const gitDir = mirrorDir(dataDir, repo)
   const prev = queues.get(gitDir) ?? Promise.resolve()
-  const next = prev.catch(() => {}).then(() => syncOnce(dataDir, gitDir, repo, auth))
+  const next = prev.catch(() => {}).then(() => once(dataDir, gitDir, repo, auth, create, fn))
   queues.set(gitDir, next)
   void next.catch(() => {}).finally(() => {
     if (queues.get(gitDir) === next) queues.delete(gitDir)
@@ -118,25 +130,30 @@ export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: { header?: s
   return next
 }
 
-const syncOnce = async (dataDir: string, gitDir: string, repo: RemoteRepo, auth: { header?: string; credential: string; secret?: string }): Promise<Mirror> => {
+const once = async <T,>(dataDir: string, gitDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
   const lockId = `mirror-${createHash('sha256').update(gitDir).digest('hex').slice(0, 16)}`
   const lock = acquire(join(resolve(dataDir), 'locks'), lockId)
-  if ('heldBy' in lock) throw new MirrorError(`另一个进程（${lock.heldBy}）正在更新 ${repo.owner}/${repo.name} 的镜像，稍后再试`)
+  if ('heldBy' in lock) throw new MirrorError(`另一个进程（${lock.heldBy}）正在使用 ${repo.owner}/${repo.name} 的镜像，稍后再试`)
+  // 拿到锁之后再看镜像在不在：失败时只删自己这次新建的，不会删掉别的进程刚建好的。
+  const fresh = !existsSync(join(gitDir, 'HEAD'))
+  if (fresh && !create) {
+    lock.release()
+    throw new MirrorError(`平台数据目录里没有 ${repo.owner}/${repo.name} 的镜像：${gitDir}`)
+  }
   const home = join(resolve(dataDir), 'git-home')
   mkdirSync(home, { recursive: true })
   const env = remoteEnv(repo, auth.header, home)
   const secrets = secretsOf(auth)
-  const git = async (args: string[]): Promise<string> => {
+  const git: Git = async args => {
     try {
       const { stdout } = await run('git', [...SAFE, '--git-dir', gitDir, ...args], { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: REMOTE_TIMEOUT_MS })
       return stdout.trim()
     } catch (e) {
       const err = e as { stderr?: unknown; killed?: boolean; message: string }
       const stderr = err.killed === true ? `timed out after ${REMOTE_TIMEOUT_MS / 60000} minutes` : String(err.stderr ?? err.message)
-      throw new MirrorError(explain(repo, stderr, { credential: auth.credential, hasToken: auth.header !== undefined, secrets }))
+      throw new MirrorError(explain(repo, stderr, { credential: auth.credential, hasToken: auth.header !== undefined, secrets }), scrub(stderr, secrets))
     }
   }
-  const fresh = !existsSync(join(gitDir, 'HEAD'))
   try {
     if (fresh) {
       mkdirSync(gitDir, { recursive: true })
@@ -144,12 +161,7 @@ const syncOnce = async (dataDir: string, gitDir: string, repo: RemoteRepo, auth:
     }
     const foreign = foreignConfig(gitDir)
     if (foreign.length > 0) throw new MirrorError(`镜像 ${gitDir} 的配置里有不是平台写的项（${foreign.join('、')}），为了不把令牌发到别处，没有访问远程。请人工检查这个镜像，确认后删掉这些项或删掉整个镜像`)
-    // 输出形如 "ref: refs/heads/main\tHEAD\n<sha>\tHEAD"；空仓库什么都不输出。
-    const head = await git(['ls-remote', '--symref', repo.cloneUrl, 'HEAD'])
-    const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(head)?.[1]
-    if (branch === undefined) throw new MirrorError(`${repo.owner}/${repo.name} 还没有任何提交（空仓库），先推一个提交上去`)
-    await git(['fetch', '-q', '--no-tags', repo.cloneUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`])
-    return { gitDir, branch, baseSha: await git(['rev-parse', '--verify', `refs/remotes/origin/${branch}^{commit}`]) }
+    return await fn(git, gitDir)
   } catch (e) {
     if (fresh) rmSync(gitDir, { recursive: true, force: true })
     throw e
@@ -157,3 +169,35 @@ const syncOnce = async (dataDir: string, gitDir: string, repo: RemoteRepo, auth:
     lock.release()
   }
 }
+
+/**
+ * 更新镜像：没有就建一个空的 bare 仓库，问远程的默认分支，把它 fetch 到 refs/remotes/origin/<分支>，返回它最新的提交。
+ * 远程是空仓库（还没有提交）时报错。所有错误都是 MirrorError，消息是给用户看的中文。
+ */
+export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth): Promise<Mirror> =>
+  withMirror(dataDir, repo, auth, true, async (git, gitDir) => {
+    // 输出形如 "ref: refs/heads/main\tHEAD\n<sha>\tHEAD"；空仓库什么都不输出。
+    const head = await git(['ls-remote', '--symref', repo.cloneUrl, 'HEAD'])
+    const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(head)?.[1]
+    if (branch === undefined) throw new MirrorError(`${repo.owner}/${repo.name} 还没有任何提交（空仓库），先推一个提交上去`)
+    await git(['fetch', '-q', '--no-tags', repo.cloneUrl, `+refs/heads/${branch}:refs/remotes/origin/${branch}`])
+    return { gitDir, branch, baseSha: await git(['rev-parse', '--verify', `refs/remotes/origin/${branch}^{commit}`]) }
+  })
+
+/**
+ * 把核对过的提交 sha 推到远程的 branch 分支，不强推。推的是这个提交，不是推送时分支指向的提交：核对和推送之间分支被移动也不影响。
+ * 远程的这个分支有平台没有的提交（被别人改过）时失败：平台不覆盖别人的提交。
+ */
+export const pushBranch = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth, branch: string, sha: string): Promise<{ sha: string }> =>
+  withMirror(dataDir, repo, auth, false, async git => {
+    if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) throw new MirrorError(`不是提交号：${sha}`)
+    try {
+      await git(['push', '-q', '--no-verify', repo.cloneUrl, `${sha}:refs/heads/${branch}`])
+    } catch (e) {
+      if (e instanceof MirrorError && /\[rejected\]|non-fast-forward|fetch first/.test(e.raw)) {
+        throw new MirrorError(`${repo.host} 上的分支 ${branch} 已经有平台没有的提交（被别人推过或改过），平台不强推，没有覆盖它。请人工处理这个分支（例如合并后再推，或删掉远程分支），然后重试`)
+      }
+      throw e
+    }
+    return { sha }
+  })

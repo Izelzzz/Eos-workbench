@@ -2,7 +2,7 @@
 import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
-import { allPassed, describeFailures } from './checks.ts'
+import { allPassed, describeCheck, describeFailures } from './checks.ts'
 import {
   checksStuckQuestion, critiquePrompt, fixInstructPrompt, fixPrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, scopeNotice, stuckQuestion,
 } from './prompts.ts'
@@ -124,16 +124,34 @@ const checksFailed = (task: Task, n: AgentNode, results: CheckResult[], at: numb
   return ask(task, { source: 'loop', text: checksStuckQuestion(n, results) }, at)
 }
 
+/**
+ * 平台动作（推送等）失败而别的检查都通过了：agent 改不了（远程被别人改过、凭据不对……），不交回 agent。
+ * 任务失败，等人处理后重试；重试时整轮检查重新跑一遍（挂上一次新的检查）。
+ */
+const platformFailed = (task: Task, n: WorkflowNode, results: CheckResult[], at: number): Task | undefined => {
+  if (!results.every(r => r.passed || r.check.kind === 'platform')) return undefined
+  const failed = results.filter(r => !r.passed)
+  if (failed.length === 0) return undefined
+  const failure = explain({ where: `「${n.id}」的${failed.map(r => describeCheck(r.check)).join('、')}`, error: failed.map(r => r.detail).join('\n'), task: task.id,
+    fix: '这是平台替任务做的动作，agent 改不了：按原因处理远程仓库或凭据' })
+  return append({ ...runChecks(task, n), status: 'failed', failure }, { type: 'note', at, node: n.id, text: '平台动作没有完成，任务暂停，等人工处理后重试' })
+}
+
+/** 交回 agent 的失败说明：平台动作因为前面的检查没通过而跳过时，不算 agent 要处理的问题。 */
+const agentFailures = (results: CheckResult[]): CheckResult[] => results.filter(r => r.check.kind !== 'platform')
+
 const onChecked = (task: Task, run: CheckRun, results: CheckResult[], at: number): Task => {
   const n = current(task)!
+  const blocked = platformFailed(task, n, results, at)
+  if (blocked !== undefined) return blocked
   const passed = allPassed(results)
   if (n.kind === 'agent') {
     if (passed) return advance(append(task, { type: 'note', at, node: n.id, text: '交付物检查通过' }), at)
-    return checksFailed(task, n, results, at)
+    return checksFailed(task, n, agentFailures(results), at)
   }
   const d = dialogNode(task)
   if (passed) return afterChecks(task, d, at)
-  return notPassed(task, d, describeFailures(results), at)
+  return notPassed(task, d, describeFailures(agentFailures(results)), at)
 }
 
 /** 回复格式不对：在同一会话里重新要求；次数用完则失败，pending 保留成一个新的要求，人工重试时直接接着跑。 */

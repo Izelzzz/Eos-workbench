@@ -4,18 +4,18 @@ import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Conventions } from '../conventions/conventions.ts'
 import { redactDeep } from '../credentials/redact.ts'
-import type { Task } from '../engine/types.ts'
+import type { CheckResult, Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
-import { role as roleOf } from '../workflow/types.ts'
+import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
 import { killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
 import type { Forge, RemoteRepo } from '../forge/types.ts'
-import { addWorktree, commitInScope, contextFor, createWorktree, type Worktree } from './git.ts'
-import { MirrorError, syncMirror } from './mirror.ts'
+import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, type Worktree } from './git.ts'
+import { MirrorError, pushBranch, type RemoteAuth, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
 import { runTask } from './runner.ts'
@@ -90,20 +90,61 @@ export class Supervisor {
     return { ok: true, id }
   }
 
+  /** 访问这个仓库用的认证：凭据存储里有令牌就带上；读不出来时 error 写明原因（调用方决定要不要匿名试）。 */
+  private authFor(repo: RemoteRepo, forge: Forge): { auth: RemoteAuth; error?: string } {
+    const credential = forge.credentialName(repo)
+    const got = this.o.credentials?.get(LOCAL_OWNER, credential) ?? { kind: 'absent' as const }
+    if (got.kind === 'ok') return { auth: { credential, header: forge.gitAuthHeader(got.value), secret: got.value } }
+    return { auth: { credential }, ...(got.kind === 'error' ? { error: got.error } : {}) }
+  }
+
+  /** 任务的远程仓库对应的托管平台：按记下的种类和地址找回来。 */
+  private forgeOf(repo: RemoteRepo): Forge | undefined {
+    return (this.o.forges ?? defaultForges()).find(f => f.kind === repo.forge && f.parse(repo.webUrl) !== undefined)
+  }
+
+  /** 平台动作。本机仓库的任务没有远程，推送直接算通过并写明原因。 */
+  private async platform(id: string, c: Extract<Check, { kind: 'platform' }>): Promise<CheckResult> {
+    const meta = this.o.store.meta(id)
+    if (meta.remote === undefined) return { check: c, passed: true, detail: `任务用的是本机仓库 ${meta.repo}，没有远程仓库，跳过推送` }
+    const forge = this.forgeOf(meta.remote)
+    if (forge === undefined) return { check: c, passed: false, detail: `平台不认得任务的远程仓库 ${meta.remote.webUrl}（${meta.remote.forge}）` }
+    // agent 能在 worktree 里自己提交：推送前按整个任务分支核对，改到的文件都要在可写角色的范围内。
+    const writable = Object.values(this.o.store.get(id)!.workflow.roles).filter(r => r.write === 'worktree').flatMap(r => r.writePaths)
+    let scope: ReturnType<typeof scopeOfBranch>
+    try {
+      scope = scopeOfBranch(meta, writable)
+    } catch (e) {
+      return { check: c, passed: false, detail: `核对任务分支失败，没有推送：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}` }
+    }
+    if ('error' in scope) return { check: c, passed: false, detail: scope.error }
+    const { outside } = scope
+    if (outside.length > 0) {
+      return { check: c, passed: false, detail: `任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支` }
+    }
+    const { auth, error } = this.authFor(meta.remote, forge)
+    try {
+      const { sha } = await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)
+      const url = forge.branchUrl(meta.remote, meta.branch)
+      return { check: c, passed: true, detail: `已把分支 ${meta.branch}（${sha.slice(0, 12)}）推到 ${url}`, links: [{ label: `分支 ${meta.branch}`, url }] }
+    } catch (e) {
+      if (!(e instanceof MirrorError)) throw e
+      return { check: c, passed: false, detail: error === undefined ? e.message : `${e.message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）` }
+    }
+  }
+
   /**
    * 取这个仓库的令牌（凭据存储里没有就匿名访问），更新镜像。
    * 凭据存在但读不出来（没有主密钥、换了主密钥）时先匿名试一次：公开仓库照样能用；匿名也不行时两个原因都报出来。
    */
   private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string } | { ok: false; error: string }> {
-    const credential = forge.credentialName(repo)
-    const got = this.o.credentials?.get(LOCAL_OWNER, credential) ?? { kind: 'absent' as const }
-    const token = got.kind === 'ok' ? got.value : undefined
+    const { auth, error } = this.authFor(repo, forge)
     try {
-      const m = await syncMirror(this.o.dataDir, repo, { credential, ...(token === undefined ? {} : { header: forge.gitAuthHeader(token), secret: token }) })
+      const m = await syncMirror(this.o.dataDir, repo, auth)
       return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha }
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
-      return { ok: false, error: got.kind === 'error' ? `${e.message}（凭据「${credential}」读不出来，所以没带令牌：${got.error}）` : e.message }
+      return { ok: false, error: error === undefined ? e.message : `${e.message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）` }
     }
   }
 
@@ -143,7 +184,7 @@ export class Supervisor {
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
       },
-      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal), redact),
+      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)), redact),
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)

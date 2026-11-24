@@ -14,4 +14,6 @@ export interface Forge {
   credentialName(repo: RemoteRepo): string
   /** git 走 HTTPS 时带的认证头（整行，例如 "Authorization: Basic …"）。 */
   gitAuthHeader(token: string): string
+  /** 浏览器里打开这个分支的地址。 */
+  branchUrl(repo: RemoteRepo, branch: string): string
 }

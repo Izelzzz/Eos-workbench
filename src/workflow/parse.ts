@@ -4,7 +4,7 @@ import { matchesAny } from './glob.ts'
 import { z } from 'zod'
 import type { FieldError } from './agent.ts'
 import { agentErrors, agentFields, DEFAULT_MODEL, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
-import type { Check, NodeId, Role, RoleId, TemplateLookup, Workflow, WorkflowNode } from './types.ts'
+import { PLATFORM_ACTIONS, type Check, type NodeId, type Role, type RoleId, type TemplateLookup, type Workflow, type WorkflowNode } from './types.ts'
 
 export type WorkflowError = FieldError
 export type ParseResult = { ok: true; workflow: Workflow } | { ok: false; errors: WorkflowError[] }
@@ -50,9 +50,13 @@ const runCheck = z.object({
   timeoutSec: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 秒' }).max(3600, { error: '最多 3600 秒' }).default(DEFAULT_CHECK_TIMEOUT_SEC),
 }, { error: '必须是对象，例如 { run: [npm, test] }' }).strict()
 
+const platformCheck = z.object({
+  platform: z.enum(PLATFORM_ACTIONS, { error: `只能是 ${PLATFORM_ACTIONS.join('、')}` }),
+}, { error: '必须是对象，例如 { platform: push }' }).strict()
+
 const checkFields = {
   deliverables: z.array(deliverable, { error: '必须是列表' }).default([]),
-  checks: z.array(runCheck, { error: '必须是列表' }).default([]),
+  checks: z.array(z.union([runCheck, platformCheck], { error: '必须是命令检查 { run: [npm, test] } 或平台动作 { platform: push }' }), { error: '必须是列表' }).default([]),
 }
 
 const common = { id, task: text, inputs: z.array(id, { error: '必须是列表' }).default([]) }
@@ -104,6 +108,20 @@ const semantic = (wf: Workflow): WorkflowError[] => {
         }
       })
     }
+    // 平台动作（推送等）会改到远程：只放在评审之后单独的交付节点里（没有评审角色的对话节点，前面有带评审角色的对话节点），
+    // 而且排在命令检查后面：评审通过、测试等检查也都通过了才做。交付节点的检查没过、交回开发改过之后不会再评审，
+    // 所以交付节点的 maxRounds 越小，推出去的未评审改动越少。
+    if (n.checks.some(c => c.kind === 'platform')) {
+      if (n.kind !== 'dialog' || n.role !== undefined) {
+        errors.push({ path: at('checks'), message: '平台动作（platform）只能放在没有评审角色的对话节点里：评审通过之后单独加一个交付节点，例如 { id: deliver, kind: dialog, with: build, checks: [{ platform: push }] }' })
+      } else if (![...seen.values()].some(p => p.kind === 'dialog' && p.role !== undefined)) {
+        errors.push({ path: at('checks'), message: '平台动作（platform）所在的交付节点前面要有带评审角色的对话节点：先评审，通过了再推送' })
+      }
+      const firstPlatform = n.checks.findIndex(c => c.kind === 'platform')
+      if (n.checks.slice(firstPlatform).some(c => c.kind !== 'platform')) {
+        errors.push({ path: at('checks'), message: '平台动作（platform）要排在命令检查后面：先跑测试，通过了再推送' })
+      }
+    }
     if (n.kind === 'dialog' && n.role === undefined && n.checks.length === 0) {
       errors.push({ path: at('role'), message: '对话节点至少要有评审角色（role）或检查（checks、deliverables）其中之一' })
     }
@@ -150,7 +168,7 @@ export const parseWorkflow = (source: string, lookup: TemplateLookup = () => und
       const { deliverables, checks: runs, ...rest } = n
       const checks: Check[] = [
         ...deliverables.map(d => ({ kind: 'file' as const, path: d.path, sections: d.sections })),
-        ...runs.map(r => ({ kind: 'run' as const, run: r.run, timeoutSec: r.timeoutSec })),
+        ...runs.map(r => ('platform' in r ? { kind: 'platform' as const, action: r.platform } : { kind: 'run' as const, run: r.run, timeoutSec: r.timeoutSec })),
       ]
       return { ...rest, checks, id: n.id as NodeId, inputs: n.inputs as NodeId[], ...(n.role === undefined ? {} : { role: n.role as RoleId }),
         ...(n.kind === 'dialog' ? { with: n.with as NodeId, ...(n.escalate === undefined ? {} : { escalate: n.escalate as NodeId }) } : {}) }

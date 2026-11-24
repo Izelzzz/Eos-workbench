@@ -144,7 +144,10 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       ...(reply.model === undefined ? {} : { model: reply.model }), ...(reverted.length === 0 ? {} : { reverted }) })
   }
 
-  /** 检查没有副作用，崩溃后直接重跑即可，不需要像调用那样认领。 */
+  /**
+   * 检查崩溃后直接重跑，不像调用那样认领。命令检查没有副作用；平台动作必须做成重复执行结果相同
+   * （推送同一个分支：已经推上去时什么都不变；开 PR：已经有就复用）。
+   */
   const check = async (task: Task, run: CheckRun): Promise<void> => {
     const where = `[${run.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] 检查`
     if (o.checker === undefined) {
