@@ -10,6 +10,7 @@ import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor, dshInstall } from './executor/dsh.ts'
 import { takeMasterKey } from './credentials/key.ts'
+import { Credentials } from './credentials/store.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
@@ -219,13 +220,15 @@ const commands: Record<string, () => Promise<void> | void> = {
       say(line)
     }
     const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`) })
-    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir } })
+    const credentials = new Credentials(join(dataDir, 'eos.db'), masterKey.kind === 'ok' ? masterKey.key : undefined)
+    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), credentials, improve: { executor: ex, dataDir } })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
     note(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
       server.close()
+      credentials.close()
       void ex.close().finally(() => process.exit(130))
     }
     process.once('SIGINT', shutdown)

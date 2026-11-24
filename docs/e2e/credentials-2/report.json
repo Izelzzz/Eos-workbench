@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "值输入框是密码框，截图里看不到明文": true,
+    "保存后输入框清空": true,
+    "列表显示两条凭据和类型": true,
+    "同名保存是替换，类型沿用原来的": true,
+    "页面 HTML 里没有值（刷新后）": true,
+    "删除后列表只剩一条": true,
+    "390 宽没有横向滚动": true,
+    "没有主密钥时页面写明怎么设置": true,
+    "没有主密钥时保存按钮不可用": true,
+    "没有主密钥时仍能列出已有凭据": true,
+    "接口响应里没有值": true,
+    "服务的输出里没有值": true,
+    "数据目录（数据库、WAL、日志）里没有值": true,
+    "页面没有报错": true
+  },
+  "passed": 14,
+  "total": 14,
+  "responses": 11,
+  "dataFiles": [
+    "eos.db",
+    "eos.db-shm",
+    "eos.db-wal",
+    "logs/eos.log"
+  ],
+  "errors": []
+}
