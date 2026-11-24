@@ -184,6 +184,14 @@ export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth):
     return { gitDir, branch, baseSha: await git(['rev-parse', '--verify', `refs/remotes/origin/${branch}^{commit}`]) }
   })
 
+/** 远程现在的默认分支（ls-remote 的 HEAD）。镜像必须已经存在。 */
+export const remoteDefaultBranch = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth): Promise<string> =>
+  withMirror(dataDir, repo, auth, false, async git => {
+    const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(await git(['ls-remote', '--symref', repo.cloneUrl, 'HEAD']))?.[1]
+    if (branch === undefined) throw new MirrorError(`问不出 ${repo.owner}/${repo.name} 的默认分支`)
+    return branch
+  })
+
 /**
  * 把核对过的提交 sha 推到远程的 branch 分支，不强推。推的是这个提交，不是推送时分支指向的提交：核对和推送之间分支被移动也不影响。
  * 远程的这个分支有平台没有的提交（被别人改过）时失败：平台不覆盖别人的提交。

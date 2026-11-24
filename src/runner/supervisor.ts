@@ -13,9 +13,9 @@ import { killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
-import type { Forge, RemoteRepo } from '../forge/types.ts'
+import { ForgeError, type Forge, type RemoteRepo } from '../forge/types.ts'
 import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, type Worktree } from './git.ts'
-import { MirrorError, pushBranch, type RemoteAuth, syncMirror } from './mirror.ts'
+import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
 import { runTask } from './runner.ts'
@@ -23,6 +23,16 @@ import { runTask } from './runner.ts'
 export type CreateInput = { repo: string; workflow: string; request: string }
 export type Created = { ok: true; id: string } | { ok: false; error: string }
 export type Started = { ok: true; done: Promise<Task> } | { ok: false; error: string }
+
+/** PR 的标题：需求的第一行，最长 72 个字。 */
+export const prTitle = (request: string): string => {
+  const first = request.trim().split('\n')[0]!.trim()
+  return first.length <= 72 ? first : `${first.slice(0, 71)}…`
+}
+
+/** PR 的说明：需求原文，加上是哪个任务开的。 */
+export const prBody = (request: string, id: string, branch: string): string =>
+  `${request.trim()}\n\n---\n由 Eos 平台开的 PR：任务 ${id}，分支 ${branch}。代码由 agent 编写，平台推送；合并前请评审。`
 
 export const newId = (): string => `t${new Date().toISOString().replace(/\D/g, '').slice(2, 14)}${Math.random().toString(36).slice(2, 5)}`
 
@@ -74,19 +84,21 @@ export class Supervisor {
     if (!resolved.ok) return resolved
     const id = newId()
     let w: Worktree
+    let baseBranch: string | undefined
     try {
       if (remote === undefined) w = createWorktree(repo, this.o.dataDir, id)
       else {
         const m = await this.syncRemote(remote.repo, remote.forge)
         if (!m.ok) return m
         w = addWorktree(m.gitDir, m.baseSha, this.o.dataDir, id)
+        baseBranch = m.branch
       }
     } catch (e) {
       const msg = String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
     this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-      meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
+      meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), ...(baseBranch === undefined ? {} : { baseBranch }), conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
     return { ok: true, id }
   }
 
@@ -103,33 +115,66 @@ export class Supervisor {
     return (this.o.forges ?? defaultForges()).find(f => f.kind === repo.forge && f.parse(repo.webUrl) !== undefined)
   }
 
-  /** 平台动作。本机仓库的任务没有远程，推送直接算通过并写明原因。 */
+  /**
+   * 平台动作：先核对并推送任务分支；pull-request 再向任务的基线分支开 PR（已经有就复用）。
+   * 本机仓库的任务没有远程，算通过并写明原因。所有失败都写成给人看的原因（引擎不会把它交回 agent）。
+   */
   private async platform(id: string, c: Extract<Check, { kind: 'platform' }>): Promise<CheckResult> {
     const meta = this.o.store.meta(id)
-    if (meta.remote === undefined) return { check: c, passed: true, detail: `任务用的是本机仓库 ${meta.repo}，没有远程仓库，跳过推送` }
+    if (meta.remote === undefined) return { check: c, passed: true, detail: `任务用的是本机仓库 ${meta.repo}，没有远程仓库，跳过${c.action === 'push' ? '推送' : '推送和开 PR'}` }
     const forge = this.forgeOf(meta.remote)
     if (forge === undefined) return { check: c, passed: false, detail: `平台不认得任务的远程仓库 ${meta.remote.webUrl}（${meta.remote.forge}）` }
+    const fail = (detail: string): CheckResult => ({ check: c, passed: false, detail })
     // agent 能在 worktree 里自己提交：推送前按整个任务分支核对，改到的文件都要在可写角色的范围内。
-    const writable = Object.values(this.o.store.get(id)!.workflow.roles).filter(r => r.write === 'worktree').flatMap(r => r.writePaths)
+    const task = this.o.store.get(id)!
+    const writable = Object.values(task.workflow.roles).filter(r => r.write === 'worktree').flatMap(r => r.writePaths)
     let scope: ReturnType<typeof scopeOfBranch>
     try {
       scope = scopeOfBranch(meta, writable)
     } catch (e) {
-      return { check: c, passed: false, detail: `核对任务分支失败，没有推送：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}` }
+      return fail(`核对任务分支失败，没有推送：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}`)
     }
-    if ('error' in scope) return { check: c, passed: false, detail: scope.error }
+    if ('error' in scope) return fail(scope.error)
     const { outside } = scope
     if (outside.length > 0) {
-      return { check: c, passed: false, detail: `任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支` }
+      return fail(`任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支`)
     }
     const { auth, error } = this.authFor(meta.remote, forge)
+    const withCredential = (message: string) => (error === undefined ? message : `${message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）`)
+    let sha: string
     try {
-      const { sha } = await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)
-      const url = forge.branchUrl(meta.remote, meta.branch)
-      return { check: c, passed: true, detail: `已把分支 ${meta.branch}（${sha.slice(0, 12)}）推到 ${url}`, links: [{ label: `分支 ${meta.branch}`, url }] }
+      sha = (await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)).sha
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
-      return { check: c, passed: false, detail: error === undefined ? e.message : `${e.message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）` }
+      return fail(withCredential(e.message))
+    }
+    const branchUrl = forge.branchUrl(meta.remote, meta.branch)
+    const branchLink = { label: `分支 ${meta.branch}`, url: branchUrl, kind: 'branch' as const }
+    const pushed = `已把分支 ${meta.branch}（${sha.slice(0, 12)}）推到 ${branchUrl}`
+    if (c.action === 'push') return { check: c, passed: true, detail: pushed, links: [branchLink] }
+    // 旧版本建的任务没有记下默认分支：现在去问一次远程。
+    let base = meta.baseBranch
+    if (base === undefined) {
+      try {
+        base = await remoteDefaultBranch(this.o.dataDir, meta.remote, auth)
+      } catch (e) {
+        if (!(e instanceof MirrorError)) throw e
+        return { ...fail(withCredential(`${pushed}，但不知道往哪个分支开 PR：${e.message}`)), links: [branchLink] }
+      }
+    }
+    try {
+      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base, sha, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      if ('merged' in pr) {
+        return { check: c, passed: true, detail: `${pushed}。这个提交已经通过 PR #${pr.merged.number} 合并了：${pr.merged.url}`, links: [branchLink, { label: `PR #${pr.merged.number}（已合并）`, url: pr.merged.url, kind: 'pull-request' }] }
+      }
+      if ('empty' in pr) return { check: c, passed: true, detail: `${pushed}。任务分支和 ${base} 没有差别，没有开 PR`, links: [branchLink] }
+      return {
+        check: c, passed: true, detail: `${pushed}。${pr.reused ? '复用已经打开的' : '已开'} PR #${pr.number}：${pr.url}`,
+        links: [branchLink, { label: `PR #${pr.number}`, url: pr.url, kind: 'pull-request' }],
+      }
+    } catch (e) {
+      if (!(e instanceof ForgeError)) throw e
+      return { ...fail(withCredential(`${pushed}，但开 PR 失败：${scrub(e.message, secretsOf(auth))}`)), links: [branchLink] }
     }
   }
 
@@ -137,11 +182,11 @@ export class Supervisor {
    * 取这个仓库的令牌（凭据存储里没有就匿名访问），更新镜像。
    * 凭据存在但读不出来（没有主密钥、换了主密钥）时先匿名试一次：公开仓库照样能用；匿名也不行时两个原因都报出来。
    */
-  private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string } | { ok: false; error: string }> {
+  private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string; branch: string } | { ok: false; error: string }> {
     const { auth, error } = this.authFor(repo, forge)
     try {
       const m = await syncMirror(this.o.dataDir, repo, auth)
-      return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha }
+      return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha, branch: m.branch }
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
       return { ok: false, error: error === undefined ? e.message : `${e.message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）` }

@@ -4,8 +4,8 @@
 // 3. 开发第一次完成后 SIGKILL 掉 runner，再用 `eos resume` 续跑；
 // 4. 跑完后从存储里逐条检查，结果写到 .eos/e2e/report.json，完整输出在 .eos/e2e/run.log。
 // 设置 EOS_E2E_REPO=https://github.com/<owner>/<repo> 时不建本地示例仓库，在这个远程仓库上跑（它要有同样的 package.json 和 src/math.js）：
-// 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY）。工作流用 feature-push：feature 加一个交付节点，平台推送任务分支。
-// 跑完多核对任务记下了远程仓库、数据目录里找不到令牌、远程的任务分支和本地一致。
+// 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY）。工作流用 feature-pr：feature 加一个交付节点，平台推送任务分支并开 PR。
+// 跑完多核对任务记下了远程仓库、数据目录里找不到令牌、远程的任务分支和本地一致、开了 PR 且再开一次会复用同一个。
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -123,18 +123,18 @@ else {
     c.close()
     if (!put.ok) throw new Error(put.error)
   }
-  // feature 加一个交付节点：平台把任务分支推到远程。
+  // feature 加一个交付节点：平台推送任务分支并开 PR。
   const feature = readFileSync(join(ROOT, 'src', 'workflow', 'templates', 'feature.yaml'), 'utf8')
-  const push = `${feature.replace(/^name: feature$/m, 'name: feature-push').trimEnd()}\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支。\n    maxRounds: 2\n    checks:\n      - { platform: push }\n`
+  const push = `${feature.replace(/^name: feature$/m, 'name: feature-pr').trimEnd()}\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n`
   const seedStore = new Store(join(DATA, 'eos.db'))
   const conventions = new Conventions(seedStore)
   conventions.seed(Date.now())
-  const saved = conventions.save({ kind: 'workflow', name: 'feature-push', content: push, actor: 'e2e' }, Date.now())
+  const saved = conventions.save({ kind: 'workflow', name: 'feature-pr', content: push, actor: 'e2e' }, Date.now())
   seedStore.close()
-  if (!saved.ok) throw new Error(`保存 feature-push 失败：${JSON.stringify(saved)}`)
+  if (!saved.ok) throw new Error(`保存 feature-pr 失败：${JSON.stringify(saved)}`)
 }
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
-const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', remote === undefined ? 'feature' : 'feature-push', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', remote === undefined ? 'feature' : 'feature-pr', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
 await drive(['resume', first.id])
 
@@ -160,6 +160,24 @@ function remoteChecks(): Record<string, boolean> {
   const remoteHead = execFileSync('git', ['ls-remote', remote!.repo.cloneUrl, `refs/heads/${meta.branch}`], { encoding: 'utf8' }).split('\t')[0]!.trim()
   const pushResult = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(r => r.check.kind === 'platform').at(-1)
   record(`\n[e2e] 本地任务分支 ${localHead}，远程 ${remoteHead}；推送检查：${pushResult?.detail ?? '（没有）'}\n`)
+  const prLink = (pushResult?.links ?? []).find(l => l.kind === 'pull-request')
+  // 再开一次（模拟重跑交付）和查这个分支打开的 PR：在走代理的子进程里调平台的同一个函数和 GitHub 的接口。
+  const probe = `import { defaultForges, parseRemote } from ${JSON.stringify(join(ROOT, 'src', 'forge', 'forges.ts'))}
+const { repo, forge } = parseRemote(defaultForges(), ${JSON.stringify(REMOTE)})
+const again = await forge.openPullRequest(repo, process.env.EOS_PROBE_TOKEN || undefined, { head: ${JSON.stringify(meta.branch)}, base: ${JSON.stringify(meta.baseBranch ?? 'main')}, sha: ${JSON.stringify(localHead)}, title: 'e2e 重开', body: 'e2e' })
+const list = await (await fetch(\`https://api.github.com/repos/\${repo.owner}/\${repo.name}/pulls?state=open&head=\${repo.owner}:${meta.branch}\`, { headers: { authorization: \`Bearer \${process.env.EOS_PROBE_TOKEN ?? ''}\`, 'user-agent': 'eos-e2e' } })).json()
+process.stdout.write(JSON.stringify({ again, openCount: Array.isArray(list) ? list.length : -1 }))`
+  let again: { reused: boolean; url: string } | undefined
+  let openCount = -1
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', probe], { cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', EOS_PROBE_TOKEN: GIT_TOKEN ?? '' }, encoding: 'utf8' })) as { again: { reused: boolean; url: string }; openCount: number }
+    again = out.again
+    openCount = out.openCount
+  } catch (e) {
+    // 报错里有子进程的命令行（探测代码本身），不带令牌；保险起见再抹一次。
+    record(`\n[e2e] 再开一次 PR 失败：${GIT_TOKEN === undefined || GIT_TOKEN === '' ? (e as Error).message : (e as Error).message.split(GIT_TOKEN).join('***')}\n`)
+  }
+  record(`[e2e] PR：${prLink?.url ?? '（没有）'}；再开一次：${JSON.stringify(again)}；这个分支打开的 PR：${openCount} 个\n`)
   if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)
   return {
     '任务记下了远程仓库': JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
@@ -167,6 +185,8 @@ function remoteChecks(): Record<string, boolean> {
     '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
     '远程的任务分支和本地任务分支是同一个提交': remoteHead === localHead && localHead !== '',
     '推送检查通过并带着分支链接': pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === remote!.forge.branchUrl(remote!.repo, meta.branch)),
+    '开了 PR，检查结果带着 PR 链接': prLink !== undefined && /\/pull\/\d+$/.test(prLink.url),
+    '同一个分支再开一次：复用同一个 PR，GitHub 上这个分支打开的 PR 只有一个': again?.reused === true && again.url === prLink?.url && openCount === 1,
   }
 }
 

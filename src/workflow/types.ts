@@ -50,8 +50,11 @@ export type Role = AgentConfig & {
 /** 按名字找模板的最新版本。解析工作流时注入：解析本身保持纯函数。 */
 export type TemplateLookup = (name: string) => { template: AgentTemplate; version: number } | undefined
 
-/** 平台替任务做的动作。push：把任务分支推到远程仓库的同名分支（不强推）。 */
-export const PLATFORM_ACTIONS = ['push'] as const
+/**
+ * 平台替任务做的动作。push：把任务分支推到远程仓库的同名分支（不强推）；
+ * pull-request：推送之后，从任务分支向任务的基线分支（远程的默认分支）开 PR，已经有就复用。
+ */
+export const PLATFORM_ACTIONS = ['push', 'pull-request'] as const
 export type PlatformAction = (typeof PLATFORM_ACTIONS)[number]
 
 /**

@@ -1,5 +1,5 @@
 name: standard
-description: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付。每个阶段的交付物由平台检查。
+description: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。
 docs: [研发约定]
 
 # 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。
@@ -45,11 +45,12 @@ nodes:
     checks:
       - { run: [npm, test], timeoutSec: 600 }
 
-  # 交付：占位命令。在团队约定页把它换成你们的发布或开 PR 命令；命令失败会交回开发处理。
+  # 交付：平台推送任务分支，并向任务的基线分支（远程仓库的默认分支）开 PR，任务页显示 PR 链接。
+  # 令牌只在平台进程里，agent 碰不到。本机仓库的任务没有远程，这一步跳过。推送或开 PR 失败时任务暂停，处理后重试。
   - id: deliver
     kind: dialog
     with: build
-    task: 执行交付命令。
-    maxRounds: 2
+    task: 平台推送任务分支并开 PR。
+    maxRounds: 1
     checks:
-      - { run: [sh, -c, "echo 交付占位：在团队约定页把这条命令换成你们的发布或开 PR 命令"], timeoutSec: 60 }
+      - { platform: pull-request }
