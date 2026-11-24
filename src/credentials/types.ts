@@ -4,8 +4,11 @@
 export type Owner = string & { readonly __owner: unique symbol }
 export const LOCAL_OWNER = 'local' as Owner
 
-/** api-key：模型服务的 key；token：Git 托管服务的令牌（个人访问令牌等）。 */
-export const CREDENTIAL_KINDS = ['api-key', 'token'] as const
+/**
+ * api-key：模型服务的 key；token：Git 托管服务的令牌（个人访问令牌等）；
+ * github-app：GitHub App 的 id 和私钥（JSON），平台用它换短期的安装令牌。
+ */
+export const CREDENTIAL_KINDS = ['api-key', 'token', 'github-app'] as const
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number]
 
 /**

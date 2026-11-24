@@ -693,3 +693,19 @@ test('凭据：跨站请求和非 JSON 请求被挡住，什么都不改', async
     await s.close()
   }
 })
+
+test('凭据：github-app. 开头的名字只能是 GitHub App 凭据；已有的 App 凭据不能被换成别的类型', async () => {
+  const s = await serve(undefined, undefined, KEY)
+  try {
+    const bad = await postTo(s.base, '/api/credentials', { name: 'github-app.github.com', kind: 'token', value: VALUE })
+    assert.equal(bad.status, 400)
+    const wrongName = await postTo(s.base, '/api/credentials', { name: 'github.com', kind: 'github-app', value: '{}' })
+    assert.equal(wrongName.status, 400)
+    s.credentials.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', '{"appId":1,"privateKey":"x"}')
+    const overwrite = await postTo(s.base, '/api/credentials', { name: 'github-app.github.com', kind: 'token', value: VALUE })
+    assert.equal(overwrite.status, 400)
+    assert.deepEqual(s.credentials.list(LOCAL_OWNER).map(i => [i.name, i.kind]), [['github-app.github.com', 'github-app']])
+  } finally {
+    await s.close()
+  }
+})
