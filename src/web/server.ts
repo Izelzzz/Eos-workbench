@@ -1,5 +1,5 @@
-// Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
-// 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
+// Web 服务：JSON 接口 + 前端静态文件。默认只监听本机地址；第一版没有登录。
+// 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向本服务发的跨站请求。
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
@@ -65,18 +65,38 @@ const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unk
 })
 
 /**
- * Host 必须是本机地址加本服务的端口。挡住 DNS 重绑定：攻击者的域名解析到 127.0.0.1 时，
- * Origin 和 Host 都是攻击者的域名、彼此一致，只比较两者挡不住，所以先限定 Host 本身。
+ * 外部地址（EOS_PUBLIC_URL）：部署在容器或反向代理后面时，浏览器地址栏里的地址。只取 http(s) 的 origin，
+ * 带路径、查询、用户名的都不接受（平台只挂在根路径上）。返回错误说明，由命令行报出来。
  */
-const localHost = (req: IncomingMessage): boolean => {
-  const port = req.socket.localPort
-  return ['127.0.0.1', 'localhost', '[::1]'].some(h => req.headers.host === `${h}:${port}`)
+export const parsePublicUrl = (raw: string): URL | string => {
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return `EOS_PUBLIC_URL 不是合法的地址：${raw}`
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return `EOS_PUBLIC_URL 只支持 http 或 https：${raw}`
+  if (u.pathname !== '/' || u.search !== '' || u.hash !== '' || u.username !== '' || u.password !== '') return `EOS_PUBLIC_URL 只能是 协议://主机[:端口]，不能带路径、查询或用户名：${raw}`
+  return new URL(u.origin)
 }
 
-/** 浏览器发来的同源请求：Origin 必须存在且与 Host 一致。 */
-const sameOrigin = (req: IncomingMessage): boolean => {
-  const origin = req.headers.origin
-  return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
+/**
+ * 这个 Host 对应的唯一合法 Origin；Host 不被接受时为 undefined。
+ * 接受两类 Host：本机地址加本服务的端口，以及外部地址的主机部分。挡住 DNS 重绑定：攻击者的域名解析到本服务时，
+ * Origin 和 Host 都是攻击者的域名、彼此一致，只比较两者挡不住，所以先限定 Host 本身。
+ */
+export const originFor = (host: string | undefined, port: number | undefined, publicUrl: URL | undefined): string | undefined => {
+  if (host === undefined) return undefined
+  if (['127.0.0.1', 'localhost', '[::1]'].some(h => host === `${h}:${port}`)) return `http://${host}`
+  if (publicUrl === undefined || /[/?#@\\]/.test(host)) return undefined
+  // 按外部地址的协议规范化：反向代理可能传来大写或带默认端口（eos.example.com:443）的 Host。
+  let normalized: string
+  try {
+    normalized = new URL(`${publicUrl.protocol}//${host}`).host
+  } catch {
+    return undefined
+  }
+  return normalized === publicUrl.host ? publicUrl.origin : undefined
 }
 
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
@@ -100,7 +120,10 @@ export const tail = (path: string, max: number): string => {
 }
 
 /** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
-export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string } }): Server => {
+/** publicUrl：外部地址，见 parsePublicUrl；不给时只接受本机地址。 */
+export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string }; publicUrl?: URL }): Server => {
+  const allowedOrigin = (req: IncomingMessage) => originFor(req.headers.host, req.socket.localPort, o.publicUrl)
+
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
 
@@ -139,7 +162,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   /** 写接口的公共检查：同源、JSON、大小。通过时返回解析后的请求体。 */
   const guarded = async (req: IncomingMessage): Promise<{ body: Record<string, unknown> } | [number, { ok: false; error: string }]> => {
-    if (!sameOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
+    if (req.headers.origin === undefined || req.headers.origin !== allowedOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
     const read = await readJson(req)
     if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]
@@ -303,7 +326,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   return createServer(async (req, res) => {
     try {
-      if (!localHost(req)) return json(res, 421, { error: '只接受通过本机地址访问' })
+      if (allowedOrigin(req) === undefined) return json(res, 421, { error: o.publicUrl === undefined ? '只接受通过本机地址访问' : `只接受通过本机地址或 ${o.publicUrl.origin} 访问` })
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'POST') {
         const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)

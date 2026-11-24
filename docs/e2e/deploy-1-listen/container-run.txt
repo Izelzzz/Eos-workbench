@@ -1,0 +1,23 @@
+# 代码：6c911c1 之上的本分支改动（src/web/server.ts、src/cli.ts），提交前的最终版本
+# 容器内：eos web --host 0.0.0.0，EOS_PUBLIC_URL=https://eos.example.com；宿主机端口映射 127.0.0.1:4317 → 容器 4317
+## 启动日志
+注意：监听 0.0.0.0，能连到这台机器 4317 端口的人都能用 Eos（没有登录）。浏览器只能通过 localhost:4317 或 https://eos.example.com 访问
+Eos Web：https://eos.example.com（监听 0.0.0.0:4317，数据目录 /srv/data，日志 /srv/data/logs/eos.log，Ctrl+C 退出）
+## 没设 EOS_PUBLIC_URL 时的启动警告（另起一次容器）
+注意：监听 0.0.0.0，能连到这台机器 4317 端口的人都能用 Eos（没有登录）。浏览器只能通过 localhost:4317 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL
+## 请求 → 状态码（curl 从宿主机发出，打到 127.0.0.1:4317）
+GET Host 127.0.0.1:4317（端口映射或 SSH 隧道，两边端口相同） → 200
+GET Host localhost:8080（宿主机换了端口，又没设成外部地址） → 421
+GET Host eos.example.com（外部地址） → 200
+GET Host eos.example.com:443（代理带上默认端口） → 200
+GET Host evil.example（DNS 重绑定） → 421
+POST /api/tasks 外部 Host + Origin https://eos.example.com，空请求体（通过同源检查，400 是请求体校验） → 400
+POST /api/tasks 外部 Host + Origin http://eos.example.com → 403
+POST /api/tasks 外部 Host + 没有 Origin → 403
+## EOS_PUBLIC_URL 带路径
+EOS_PUBLIC_URL 只能是 协议://主机[:端口]，不能带路径、查询或用户名：https://eos.example.com/eos
+eos 退出码=1
+## --host 不是本机地址
+Web 服务没能监听 10.9.9.9:4317：EADDRNOTAVAIL
+eos 退出码=1
+
