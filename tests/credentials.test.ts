@@ -74,7 +74,7 @@ test('凭据按 owner 分开：别人的同名凭据看不到、删不掉', () =
 
 test('输入检查：名字、类型、空值、超长都拒绝，报中文原因', () => {
   const c = new Credentials(':memory:', K1)
-  for (const name of ['', 'Upper', '-x', 'a/b', 'a b', 'x'.repeat(65)]) assert.match((c.put(LOCAL_OWNER, name, 'token', 'v') as { error: string }).error, /凭据名「.*」不合规/, name)
+  for (const name of ['', 'Upper', '-x', 'a/b', 'a b', 'x'.repeat(65)]) assert.equal((c.put(LOCAL_OWNER, name, 'token', 'v') as { error: string }).error.startsWith('凭据名不合规：'), true, name)
   assert.match((c.put(LOCAL_OWNER, 'x', 'password' as never, 'v') as { error: string }).error, /不认识的凭据类型/)
   assert.match((c.put(LOCAL_OWNER, 'x', 'token', '  ') as { error: string }).error, /不能为空/)
   assert.match((c.put(LOCAL_OWNER, 'x', 'token', 'v'.repeat(16 * 1024 + 1)) as { error: string }).error, /超过 16KB/)

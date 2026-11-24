@@ -1,4 +1,5 @@
 // Web 接口返回的数据类型（纯类型，前端也引用）。
+import type { CredentialInfo, CredentialKind } from '../credentials/types.ts'
 import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
 import type { Question, TaskStatus } from '../engine/types.ts'
@@ -67,3 +68,9 @@ export type GenerateResponse =
   | { ok: false; error: string; call?: { model?: string; usage: Usage; ms: number; replyHead: string } }
 export type DecideRequest = { note?: string } | { reason: string }
 export type DecideResponse = { ok: true; proposal: ProposalRow } | { ok: false; error: string }
+
+/** 凭据页：usable 为 false 时没有主密钥，只能列出和删除；hint 写明怎么设置主密钥。列表里没有凭据的值。 */
+export type CredentialsResponse = { usable: boolean; keyId?: string; hint?: string; items: CredentialInfo[] }
+export type SaveCredentialRequest = { name: string; kind: CredentialKind; value: string }
+export type SaveCredentialResponse = { ok: true } | { ok: false; error: string }
+export type DeleteCredentialResponse = { ok: true } | { ok: false; error: string }

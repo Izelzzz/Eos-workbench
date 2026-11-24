@@ -10,6 +10,10 @@ import { test } from 'node:test'
 import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { createWebServer, listenPlan, parsePublicUrl } from '../src/web/server.ts'
+import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
+import { Credentials } from '../src/credentials/store.ts'
+import { LOCAL_OWNER } from '../src/credentials/types.ts'
+import type { CredentialsResponse } from '../src/web/types.ts'
 import type { Insights } from '../src/engine/insights.ts'
 import { Proposals } from '../src/improve/proposals.ts'
 import type { ProposalDetail, ProposalInfo, TaskDetail } from '../src/web/types.ts'
@@ -21,7 +25,7 @@ import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 
-const serve = async (improve?: Executor, publicUrl?: URL) => {
+const serve = async (improve?: Executor, publicUrl?: URL, masterKey?: MasterKey) => {
   const dir = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-web-'))
   mkdirSync(join(dir, 'static'))
   writeFileSync(join(dir, 'static', 'index.html'), '<html>eos</html>')
@@ -43,10 +47,11 @@ const serve = async (improve?: Executor, publicUrl?: URL) => {
   const replay = { traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => { replayed.push(`${key} ${nonce}`); return [{ kind: 'call_start', t: 1000 }, { kind: 'step_start', t: 1001, step: 1 }, { kind: 'step_end', t: 1090, step: 1 }] } }
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: dir, pollMs: 5 })
   const locksDir = supervisor.locksDir
-  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static'), ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }), ...(publicUrl === undefined ? {} : { publicUrl }) })
+  const credentials = new Credentials(join(dir, 'eos.db'), masterKey)
+  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static'), credentials, ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }), ...(publicUrl === undefined ? {} : { publicUrl }) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { base, dir, store, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(r)) }
+  return { base, dir, store, credentials, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(() => { credentials.close(); r(undefined) })) }
 }
 
 test('lists tasks and returns a detail with the trace tree, replaying calls recorded before the trace existed', async () => {
@@ -615,6 +620,75 @@ test('comparisons: each approved proposal compares the tasks before and after it
     run('a3', 2, ['方案', '实现', PASS])
     const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
     assert.deepEqual([d.comparison?.after.tasks, d.comparison?.enough], [3, true])
+  } finally {
+    await s.close()
+  }
+})
+
+const KEY = (parseMasterKey(Buffer.alloc(32, 5).toString('base64')) as { key: MasterKey }).key
+const VALUE = 'ghp_web-test-secret-0123456789abcdef'
+
+test('凭据：保存、替换、删除；列表和所有响应里都没有值', async () => {
+  const s = await serve(undefined, undefined, KEY)
+  const bodies: string[] = []
+  const call = async (r: Promise<Response>) => {
+    const res = await r
+    const text = await res.text()
+    bodies.push(text)
+    return { status: res.status, body: JSON.parse(text) }
+  }
+  try {
+    assert.deepEqual((await call(fetch(`${s.base}/api/credentials`))).body, { usable: true, keyId: KEY.id, items: [] })
+    assert.deepEqual(await call(postTo(s.base, '/api/credentials', { name: 'github.com', kind: 'token', value: VALUE })), { status: 200, body: { ok: true } })
+    assert.deepEqual(s.credentials.get(LOCAL_OWNER, 'github.com'), { kind: 'ok', value: VALUE }, '存进了凭据存储')
+    const list = (await call(fetch(`${s.base}/api/credentials`))).body as CredentialsResponse
+    assert.deepEqual(list.items.map(i => [i.name, i.kind, i.keyId]), [['github.com', 'token', KEY.id]])
+    assert.deepEqual(await call(postTo(s.base, '/api/credentials', { name: 'github.com', kind: 'token', value: `${VALUE}-2` })), { status: 200, body: { ok: true } })
+    assert.deepEqual(s.credentials.get(LOCAL_OWNER, 'github.com'), { kind: 'ok', value: `${VALUE}-2` }, '同名替换')
+    // 不合规的输入：报原因，不回显值。
+    assert.equal((await call(postTo(s.base, '/api/credentials', { name: 'Bad Name', kind: 'token', value: VALUE }))).status, 400)
+    assert.equal((await call(postTo(s.base, '/api/credentials', { name: 'x', kind: 'password', value: VALUE }))).status, 400)
+    assert.equal((await call(postTo(s.base, '/api/credentials', { name: 'x', kind: 'token' }))).status, 400)
+    assert.equal((await call(postTo(s.base, '/api/credentials', { kind: 'token', value: VALUE }))).status, 400)
+    // 值误填进名字：报错不回显名字。
+    const pasted = VALUE.toUpperCase()
+    const misplaced = await call(postTo(s.base, '/api/credentials', { name: pasted, kind: 'token', value: 'x' }))
+    assert.equal(misplaced.status, 400)
+    assert.ok(!JSON.stringify(misplaced.body).includes(pasted))
+    assert.deepEqual(await call(postTo(s.base, '/api/credentials/delete', { name: 'github.com' })), { status: 200, body: { ok: true } })
+    assert.deepEqual(await call(postTo(s.base, '/api/credentials/delete', { name: 'github.com' })), { status: 404, body: { ok: false, error: '没有这条凭据' } })
+    assert.deepEqual((await call(fetch(`${s.base}/api/credentials`))).body.items, [])
+    for (const b of bodies) assert.ok(!b.includes(VALUE), b)
+  } finally {
+    await s.close()
+  }
+})
+
+test('凭据：没有主密钥时保存返回 409 并写明怎么设置；列表带上说明', async () => {
+  const s = await serve()
+  try {
+    const list = (await (await fetch(`${s.base}/api/credentials`)).json()) as CredentialsResponse
+    assert.equal(list.usable, false)
+    assert.match(list.hint ?? '', /openssl rand -base64 32/)
+    const r = await postTo(s.base, '/api/credentials', { name: 'deepseek', kind: 'api-key', value: VALUE })
+    assert.equal(r.status, 409)
+    assert.match(((await r.json()) as { error: string }).error, /没有设置主密钥 EOS_MASTER_KEY/)
+  } finally {
+    await s.close()
+  }
+})
+
+test('凭据：跨站请求和非 JSON 请求被挡住，什么都不改', async () => {
+  const s = await serve(undefined, undefined, KEY)
+  try {
+    const evil = await fetch(`${s.base}/api/credentials`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }) })
+    assert.equal(evil.status, 403)
+    const form = await fetch(`${s.base}/api/credentials`, { method: 'POST', headers: { 'content-type': 'text/plain', origin: s.base }, body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }) })
+    assert.equal(form.status, 415)
+    s.credentials.put(LOCAL_OWNER, 'keep', 'token', VALUE)
+    const del = await fetch(`${s.base}/api/credentials/delete`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ name: 'keep' }) })
+    assert.equal(del.status, 403)
+    assert.deepEqual(s.credentials.list(LOCAL_OWNER).map(i => i.name), ['keep'])
   } finally {
     await s.close()
   }

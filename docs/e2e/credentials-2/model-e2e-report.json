@@ -1,0 +1,60 @@
+{
+  "task": "t261124095021mdb",
+  "killed": true,
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个 dsh 会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-643b41f59412a7b0448f8f9294d65bad",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "session-76af1a24d56ccac0fdcfbcd1eeb0fcf8",
+      "calls": [
+        "c2",
+        "c4"
+      ],
+      "presets": [
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "session-f673556a362fadb6a1c8cac1f4eafeab",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 49861ms",
+    "c2 produce@build 16377ms",
+    "c3 critique@review#1 31086ms",
+    "c4 respond@review#1 23607ms",
+    "c5 critique@review#2 12839ms"
+  ],
+  "commits": "85e4564 eos: review respond (c4)\n999b42c eos: build produce (c2)\n",
+  "npmTest": "est'\n      ...\n    # Subtest: 不传参\n    ok 7 - 不传参\n      ---\n      duration_ms: 0.107977\n      type: 'test'\n      ...\n    1..7\nok 5 - 入参不是数组时抛出 TypeError\n  ---\n  duration_ms: 0.618326\n  type: 'test'\n  ...\n# Subtest: 不修改入参且结果稳定\nok 6 - 不修改入参且结果稳定\n  ---\n  duration_ms: 0.674469\n  type: 'test'\n  ...\n1..6\n# tests 37\n# suites 0\n# pass 37\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 119.268222\n"
+}

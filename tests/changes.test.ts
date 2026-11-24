@@ -8,6 +8,7 @@ import { hunks, MAX_DIFF_CHARS, MAX_DIFF_LINES, truncate } from '../src/runner/c
 import { committedChanges, createWorktree, fileDiff, MAX_DIFF_BYTES, onBranch } from '../src/runner/git.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
+import { Credentials } from '../src/credentials/store.ts'
 import { createWebServer } from '../src/web/server.ts'
 import type { FileDiff, TaskChanges, TaskDetail } from '../src/web/types.ts'
 import { FakeExecutor } from './fake-executor.ts'
@@ -113,7 +114,7 @@ test('接口：任务详情带仓库、分支、worktree 和基线；列表和�
   const store = new Store(join(dir, 'eos.db'))
   store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: w }, 1000)
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async () => '回复'), dataDir: dir, pollMs: 5 })
-  const server = createWebServer({ store, supervisor, replay: { traceOf: async () => [] }, staticDir: join(dir, 'static') })
+  const server = createWebServer({ store, supervisor, replay: { traceOf: async () => [] }, staticDir: join(dir, 'static'), credentials: new Credentials(':memory:', undefined) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   const diffOf = (h: string, p: string) => fetch(`${base}/api/tasks/t1/changes/diff?${new URLSearchParams({ head: h, path: p })}`)
