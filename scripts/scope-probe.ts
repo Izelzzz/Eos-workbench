@@ -28,7 +28,7 @@ process.chdir(host)
 
 const ex = new DshExecutor({
   dshHome: join(OUT, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1' }, modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
 
 type Target = { name: string; dir: string }

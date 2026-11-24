@@ -23,6 +23,8 @@ export type RunnerOptions = {
   log?: (line: string) => void
   /** 只写进日志文件、不打到终端的详细信息（错误的完整输出和堆栈）。 */
   detail?: (text: string) => void
+  /** 遮蔽已知凭据值：失败原因存进任务之前经过它（git、检查命令的报错可能带着凭据）。 */
+  redact?: (text: string) => string
 }
 
 /** 错误的完整信息：git 的 stderr、错误文字、堆栈。只进日志文件。 */
@@ -52,7 +54,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const dispatch = (event: Parameters<Store['dispatch']>[1], actor: 'runner' | 'executor' = 'executor') => o.store.dispatch(id, event, now(), actor)
   /** 这一步失败：终端打一行，日志文件记完整信息，任务的失败原因写清哪一步、什么原因、怎么修。 */
   const fail = (where: string, callId: Call['id'] | CheckRun['id'], reason: string, e?: unknown) => {
-    const first = reason.trim().split('\n')[0]!
+    const first = (o.redact ?? (t => t))(reason.trim().split('\n')[0]!)
     log(`✗ ${where}：${first}`)
     if (e !== undefined) o.detail?.(`✗ ${where} 的完整错误：\n${fullError(e)}`)
     dispatch({ kind: 'call_failed', call: callId, error: explain({ where, error: first, task: id }) })
