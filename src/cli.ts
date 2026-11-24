@@ -15,7 +15,7 @@ import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
-import { createWebServer } from './web/server.ts'
+import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
@@ -30,20 +30,21 @@ const HELP = `用法：
   eos abort <任务>                                        中止任务
   eos workflows                                           列出内置工作流
   eos doctor                                              检查运行环境（Node、API key、git、数据目录、dsh）
-  eos web [--port 4317]                                   打开 Web 界面（任务列表与 trace 详情）
+  eos web [--port 4317] [--host 127.0.0.1]                打开 Web 界面（任务列表与 trace 详情）
   eos improve [--workflow standard] [--tasks <id,…>]      从已结束的任务归纳证据，生成改进提案（待审批）
   eos proposals                                           列出改进提案
   eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
   eos reject <提案号> "<理由>"                             拒绝
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
+web：--host 是监听地址（容器里用 0.0.0.0）；通过别的地址访问时（端口映射、反向代理）设 EOS_PUBLIC_URL，例如 https://eos.example.com。没有登录，不要直接暴露到公网。
 run、resume、retry、improve、web 启动前会做同样的环境检查：有 ✗ 不启动，只有 ⚠ 时提示后照常启动。`
 
 const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_user: '等待回答', done: '已完成', failed: '失败', aborted: '已中止' }
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, help: { type: 'boolean', short: 'h' }, tasks: { type: 'string' } },
+  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, host: { type: 'string', default: '127.0.0.1' }, help: { type: 'boolean', short: 'h' }, tasks: { type: 'string' } },
 })
 
 // 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（dsh、git、检查命令）都继承不到它。
@@ -211,6 +212,8 @@ const commands: Record<string, () => Promise<void> | void> = {
   },
   async web() {
     const port = Number(values.port)
+    const publicUrl = process.env.EOS_PUBLIC_URL === undefined || process.env.EOS_PUBLIC_URL === '' ? undefined : parsePublicUrl(process.env.EOS_PUBLIC_URL)
+    if (typeof publicUrl === 'string') return fail(publicUrl)
     const ex = executor()
     // Web 服务进程的输出也写进 logs/eos.log：服务器上没人盯着终端。
     const processLog = processLogPath(dataDir)
@@ -219,9 +222,22 @@ const commands: Record<string, () => Promise<void> | void> = {
       say(line)
     }
     const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`) })
-    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir } })
-    await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
-    note(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
+    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir }, ...(publicUrl === undefined ? {} : { publicUrl }) })
+    const plan = listenPlan(values.host, port, publicUrl)
+    if (typeof plan === 'string') return fail(plan)
+    await new Promise<void>(r => {
+      const failed = (e: NodeJS.ErrnoException) => {
+        const line = `Web 服务没能监听 ${values.host}:${port}：${e.code ?? e.message}`
+        appendLog(processLog, line)
+        fail(line)
+      }
+      server.once('error', failed).listen(port, values.host, () => {
+        server.off('error', failed)
+        r()
+      })
+    })
+    if (plan.exposed) note(`注意：监听 ${values.host}，能连到这台机器 ${port} 端口的人都能用 Eos（没有登录）。浏览器只能通过 ${publicUrl === undefined ? `localhost:${port} 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL` : `localhost:${port} 或 ${publicUrl.origin} 访问`}`)
+    note(`Eos Web：${plan.url}（监听 ${values.host}:${port}，数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
