@@ -53,12 +53,13 @@ test('redactText masks a token inside a base64 Git auth header (x-access-token:<
 
 test('base64 masking works at every byte alignment and with any prefix or suffix, leaving at most one token-dependent character at each end', () => {
   const token = 'ghp_' + randomBytes(18).toString('hex')
-  const other = 'ghp_' + randomBytes(18).toString('hex')
   for (const prefix of ['', 'a', 'ab', 'x:', 'x-access-token:', 'oauth2:', 'user@example.com:']) {
     for (const suffix of ['', 'z', '\n', ':tail']) {
       const encoded = Buffer.from(prefix + token + suffix).toString('base64')
-      // 换一个同样长的令牌再编码：不同的位置就是和令牌有关的字符。
-      const differs = [...encoded].map((c, i) => c !== Buffer.from(prefix + other + suffix).toString('base64')[i])
+      // 按位算：第 i 个字符占 [6i, 6i+6) 位，和令牌占的 [8p, 8(p+n)) 位有重叠就是和令牌有关的字符。
+      const from = Buffer.byteLength(prefix) * 8
+      const to = from + Buffer.byteLength(token) * 8
+      const differs = [...encoded].map((_, i) => 6 * i < to && 6 * i + 6 > from)
       const out = redactText(encoded, [token])
       const at = out.indexOf(MASK)
       assert.ok(at >= 0, `${prefix}|${suffix}: ${out}`)
