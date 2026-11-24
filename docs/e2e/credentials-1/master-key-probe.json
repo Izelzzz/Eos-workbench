@@ -1,0 +1,71 @@
+{
+  "e2eExit": 0,
+  "holders": [
+    {
+      "class": "driver",
+      "cmd": "npm run e2e"
+    },
+    {
+      "class": "driver",
+      "cmd": "sh -c node --import tsx scripts/e2e.ts"
+    },
+    {
+      "class": "driver",
+      "cmd": "node --import tsx scripts/e2e.ts"
+    },
+    {
+      "class": "driver",
+      "cmd": "git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init"
+    },
+    {
+      "class": "driver",
+      "cmd": "/tmp/code-sign -Y sign -n git -f /home/claude/.ssh/commit_signing_key.pub /tmp/.git_signing_buffer_tmp5YDM1C"
+    },
+    {
+      "class": "platform",
+      "cmd": "/opt/node22/bin/node --import tsx /home/user/Eos-workbench/src/cli.ts run --repo /home/user/Eos-workbench/.eos/e2e/repo --workflow feature 在 src/math.js 里实现并导出一个求和函数，接收一个数字数组，返回总和；空数组返回 0；数组里有非数字时抛出 T"
+    },
+    {
+      "class": "platform",
+      "cmd": "/opt/node22/bin/node --import tsx /home/user/Eos-workbench/src/cli.ts answer t261124091953awc sum (Recommended) --data /home/user/Eos-workbench/.eos/e2e/data"
+    },
+    {
+      "class": "platform",
+      "cmd": "/opt/node22/bin/node --import tsx /home/user/Eos-workbench/src/cli.ts answer t261124091953awc typeof 校验，NaN/Infinity 视为数字 (Recommended) --data /home/user/Eos-workbench/.eos/e2e/data"
+    },
+    {
+      "class": "platform",
+      "cmd": "/opt/node22/bin/node --import tsx /home/user/Eos-workbench/src/cli.ts resume t261124091953awc --data /home/user/Eos-workbench/.eos/e2e/data"
+    },
+    {
+      "class": "driver",
+      "cmd": "npm test"
+    },
+    {
+      "class": "driver",
+      "cmd": "sh -c node --test"
+    },
+    {
+      "class": "driver",
+      "cmd": "node --test"
+    },
+    {
+      "class": "driver",
+      "cmd": "/opt/node22/bin/node test/math.test.js"
+    }
+  ],
+  "leaks": [],
+  "platformChildrenSeen": 56,
+  "platformChildrenSample": [
+    "/opt/node22/bin/node",
+    "bash",
+    "npm",
+    "sh",
+    "node",
+    "tail",
+    "git",
+    "/tmp/code-sign"
+  ],
+  "dshSeen": 5,
+  "checkCommandsSeen": 19
+}
