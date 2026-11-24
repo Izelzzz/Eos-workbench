@@ -1,0 +1,8 @@
+.git
+node_modules
+.eos
+.claude
+web/dist
+docs
+poc/logs
+*.log

@@ -1,0 +1,10 @@
+{
+  "writes": {
+    "ownWorktree": true,
+    "otherWorktree": false,
+    "dataDirRoot": false,
+    "realTmp": false
+  },
+  "proc": "visible_pids=6\nmarker_hits=0\nself_environ_marker=0",
+  "reply": "按顺序执行完毕，未提升权限、未改写命令。每条命令的原始输出如下：\n\n**1.** `echo x > /home/agent/out/data/worktrees/t1/w.txt`\n```\n(no output)\n```\n（无 stdout/stderr，执行成功）\n\n**2.** `echo x > /home/agent/out/data/worktrees/t2/w.txt`\n```\nbash: line 1: /home/agent/out/data/worktrees/t2/w.txt: Read-only file system\n[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]\n[exit code: 1]\n```\n\n**3.** `echo x > /home/agent/out/data/w.txt`\n```\nbash: line 1: /home/agent/out/data/w.txt: Read-only file system\n[sandbox: file access denied under workspace-write mode]\n[sandbox: escalation available — retry this exact command once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]\n[exit code: 1]\n```\n\n**4.** `echo x > /tmp/probe-w.txt`\n```\n(no output)\n```\n（无 stdout/stderr，执行成功）\n\n**5.** \n```\n(echo \"visible_pids=$(ls /proc | grep -c '^[0-9]')\"; echo \"marker_hits=$(grep -sl PROBE_MARKER_7f3e /proc/[0-9]*/environ | wc -l)\"; echo \"self_environ_marker=$(grep -c PROBE_MARKER_7f3e /proc/self/environ)\") > /home/agent/out/data/worktrees/t1/proc-report.txt 2>&1; cat /home/agent/out/data/worktrees/t1/proc-report.txt\n```\n```\nvisible_pids=6\nmarker_hits=0\nself_environ_marker=0\n```\n\n汇总：工作区 `t1` 可写，`t2` 与 `data` 根目录只读，`/tmp` 可写；报告中进程可见数为 6，带 `PROBE_MARKER_7f3e` 标记的环境变量命中数为 0（含自身）。"
+}
