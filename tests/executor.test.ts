@@ -43,7 +43,8 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
   const env = agentEnv({
     PATH: '/bin', HOME: '/home/eos', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', HTTPS_PROXY: 'http://proxy:3128', no_proxy: 'localhost', NODE_EXTRA_CA_CERTS: '/ca.pem',
     GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.x.insteadOf', GIT_CONFIG_VALUE_0: 'y', GIT_EDITOR: 'true',
-    DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-env', GITHUB_TOKEN: 'ghp_x', AWS_SECRET_ACCESS_KEY: 's', EOS_MASTER_KEY: 'm', NODE_OPTIONS: '--require /evil.js', EMPTY: undefined,
+    DSH_TELEMETRY_DISABLED: '1', DSH_AGENTS_HOME: '/srv/old-agents', DSH_SNAPSHOT_FILE: '/tmp/snap', DSH_SPEECH_TOKEN: 'st_x', DSH_HOME: '/elsewhere',
+    DEEPSEEK_API_KEY: 'from-env', GITHUB_TOKEN: 'ghp_x', AWS_SECRET_ACCESS_KEY: 's', EOS_MASTER_KEY: 'm', NODE_OPTIONS: '--require /evil.js', EMPTY: undefined,
     // 部署镜像设定的缓存位置和开关：按名字放行。长得像的其他变量（npm 的 registry 和认证、pip 的源）不放行。
     NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
     npm_config_registry: 'https://evil.example', 'npm_config_//registry.npmjs.org/:_authToken': 'npm_x', PIP_INDEX_URL: 'https://u:p@pypi.example', NARB_DISABLE_NATIVE_CACHE: '1', COREPACK_NPM_TOKEN: 't', XDG_CACHE_HOME: '/tmp/cache/xdg',
@@ -125,9 +126,9 @@ test('a live call returns its reply only when the last turn completed, trusting 
 
 /** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
 const fakeHarnesses = (closeMs = 0) => {
-  const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; closed: boolean; resumed: string[] }[] = []
-  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[] }) => {
-    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, closed: false, resumed: [] as string[] }
+  const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; key?: string; closed: boolean; resumed: string[] }[] = []
+  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; env?: NodeJS.ProcessEnv }) => {
+    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, key: o.env?.DEEPSEEK_API_KEY, closed: false, resumed: [] as string[] }
     created.push(rec)
     const session = (id: string) => ({
       id,
@@ -147,6 +148,29 @@ const fakeHarnesses = (closeMs = 0) => {
   }
   return { created, createHarness }
 }
+
+test('after the model key changes, the next call closes the old dsh process for that worktree and starts one with the new key', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  let key = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => key, createHarness })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  await send('/data/worktrees/t1', 'c1')
+  await send('/data/worktrees/t2', 'c1')
+  await send('/data/worktrees/t1', 'c2')
+  assert.equal(created.length, 2, '同一个 key：进程复用')
+  key = 'sk-new-key-111111'
+  await send('/data/worktrees/t1', 'c3')
+  assert.equal(created.length, 3)
+  assert.deepEqual(created.map(c => [c.cwd, c.key, c.closed]), [
+    ['/data/worktrees/t1', 'sk-old-key-000000', true],
+    ['/data/worktrees/t2', 'sk-old-key-000000', false],
+    ['/data/worktrees/t1', 'sk-new-key-111111', false],
+  ])
+  await send('/data/worktrees/t2', 'c2')
+  assert.equal(created[1]!.closed, true, 't2 的下一次调用也换成新 key')
+  assert.equal(created[3]!.key, 'sk-new-key-111111')
+  await ex.close()
+})
 
 /** 测试用的 dsh home：执行器会往里面写能力面的补丁和技能目录；跑完一起删掉。 */
 const homes: string[] = []

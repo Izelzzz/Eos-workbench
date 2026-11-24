@@ -196,12 +196,15 @@ const marker = (nonce: string) => `<!-- eos:${nonce} -->`
 /**
  * 交给 dsh 进程的环境变量：只有白名单里的，加上模型 key。平台进程环境里别的变量（其他服务的令牌、
  * 宿主机注入的 GIT_CONFIG_*、部署方加的各种配置）都不交给 dsh，也就到不了 agent 的工具子进程。
- * 代理和证书变量要留着：服务器经代理访问模型时，没有它们 dsh 连不上模型。LC_* 和 dsh 自己的配置（DSH_*，例如 DSH_TELEMETRY_DISABLED）也留着。
+ * 代理和证书变量要留着：服务器经代理访问模型时，没有它们 dsh 连不上模型。LC_*（只是区域设置）也留着。
+ * dsh 自己的配置按名字放行，不按 DSH_ 前缀：DSH_AGENTS_HOME、DSH_SNAPSHOT* 之类残留在部署环境里会改掉 dsh 读的目录，
+ * DSH_SPEECH_TOKEN 是令牌。DSH_HOME 由 SDK 按平台的 dshHome 覆盖，不用放行。
  */
 export const AGENT_ENV_KEEP: readonly string[] = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LANGUAGE', 'TMPDIR', 'TZ',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'DSH_TELEMETRY_DISABLED', // 部署方关掉 dsh 的遥测
   // 缓存的位置和开关，部署镜像设定（见 Dockerfile、ADR-006）。agent 在沙箱里能写 /tmp、写不了家目录：
   'NARB_NATIVE_CACHE_DIR', // dsh 的 native 模块缓存放到 agent 写不了的目录，不然在 /tmp 里能被 agent 换掉
   'NODE_DISABLE_COMPILE_CACHE', // 关掉 dsh 打开的 Node 字节码缓存：默认在 /tmp，没有完整性校验
@@ -210,7 +213,7 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'COREPACK_HOME', // 同上，corepack 下载的 pnpm、yarn
 ]
 
-export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_') || name.startsWith('DSH_')
+export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_')
 
 export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => ({
   ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
@@ -343,7 +346,7 @@ export const replyFromRun = (r: RunLike, sessionId: string, ms: number): Reply =
 
 export class DshExecutor implements Executor {
   /** 按「工作目录 + 模型路由」区分的 dsh 进程。 */
-  private readonly harnesses = new Map<string, { cwd: string; h: Harness }>()
+  private readonly harnesses = new Map<string, { cwd: string; h: Harness; keyId: string }>()
   /** 本进程里已经打开（新建或续接）的会话，以及它在哪个工作目录的进程里。 */
   private readonly open = new Map<string, { cwd: string; s: HarnessSession }>()
   private readonly asks = new Map<string, AskHandler>()
@@ -353,7 +356,7 @@ export class DshExecutor implements Executor {
   constructor(private readonly opts: {
     dshHome: string
     dshBin: string
-    /** 模型 API key：每起一个 dsh 进程时取一次（在 Web 上换了 key，之后起的进程就用新的）。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
+    /** 模型 API key：每次调用前取一次；和这个工作目录的 dsh 进程启动时用的不一样（在 Web 上换了或删了），就关掉旧进程用新 key 重起。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
     modelKey: () => string
     /** 从中按白名单挑出交给 dsh 的变量；默认是平台进程的环境。 */
     env?: NodeJS.ProcessEnv
@@ -361,7 +364,7 @@ export class DshExecutor implements Executor {
     createHarness?: (options: DeepSeekHarnessOptions) => Harness
   }) {}
 
-  private harness(spec: AgentSpec): Harness {
+  private harness(spec: AgentSpec, modelKey: string, keyId: string): Harness {
     const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
@@ -375,11 +378,11 @@ export class DshExecutor implements Executor {
         cwd: spec.cwd, processCwd: this.processCwd, patches: [patch],
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        env: agentEnv(this.opts.env ?? process.env, this.opts.modelKey()),
+        env: agentEnv(this.opts.env ?? process.env, modelKey),
         initializeTimeoutMs: 60_000,
         onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
       })
-      this.harnesses.set(route, { cwd: spec.cwd, h })
+      this.harnesses.set(route, { cwd: spec.cwd, h, keyId })
     }
     return h
   }
@@ -476,10 +479,14 @@ export class DshExecutor implements Executor {
 
   private async session(key: string, spec: AgentSpec): Promise<HarnessSession> {
     const id = sessionIdFor(key)
+    const modelKey = this.opts.modelKey()
+    const keyId = createHash('sha256').update(modelKey).digest('hex')
+    // 换了 key：这个工作目录的旧进程还拿着旧 key，关掉重起（会话从日志续接）。同一个工作目录的调用一个接一个，这时它没有在跑的调用。
+    if ([...this.harnesses.values()].some(v => v.cwd === spec.cwd && v.keyId !== keyId)) await this.release(spec.cwd)
     const known = this.open.get(id)
     if (known !== undefined) return known.s
     await this.closing.get(spec.cwd)
-    const h = this.harness(spec)
+    const h = this.harness(spec, modelKey, keyId)
     let s: HarnessSession
     if (this.logFile(id) !== undefined) {
       const workspace = this.workspaceOf(id)
