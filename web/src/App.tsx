@@ -186,6 +186,7 @@ function TaskPage(props: { id: string }) {
           <dt>分支</dt><dd className="mono">{task.branch}</dd>
           <dt>工作目录（worktree）</dt><dd className="mono">{task.worktree}</dd>
           <dt>基线提交</dt><dd className="mono">{task.baseSha.slice(0, 12)}</dd>
+          {task.links.length > 0 && <><dt>链接</dt><dd>{task.links.map((l, i) => <span key={l.url}>{i > 0 && '、'}<a href={l.url} target="_blank" rel="noreferrer">{l.label}</a></span>)}</dd></>}
         </dl>
         {task.question && (
           <Answer

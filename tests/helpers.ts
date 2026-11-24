@@ -9,7 +9,7 @@ import type { Workflow } from '../src/workflow/types.ts'
  * checks：none 没有检查；review 开发节点有交付物（最多补齐 maxFixes 次），评审对话每轮先跑测试；
  * only 开发节点有交付物，对话只有测试、没有评审方。
  */
-export const workflow = (opts: { maxRounds: number; escalate: boolean; checks?: 'none' | 'review' | 'only'; maxFixes?: number }): Workflow => {
+export const workflow = (opts: { maxRounds: number; escalate: boolean; checks?: 'none' | 'review' | 'only'; maxFixes?: number; ship?: number }): Workflow => {
   const checks = opts.checks ?? 'none'
   const build = checks === 'none' ? '' : `, maxFixes: ${opts.maxFixes ?? 1}, deliverables: [{ path: NOTES.md, sections: [改动] }]`
   const review = checks === 'none' ? ', role: rev' : checks === 'review' ? ', role: rev, checks: [{ run: [npm, test] }]' : ', checks: [{ run: [npm, test] }]'
@@ -23,7 +23,7 @@ nodes:
   - { id: plan, kind: agent, role: planner, task: 写方案 }
   - { id: build, kind: agent, role: dev, task: 实现, inputs: [plan]${build} }
   - { id: review, kind: dialog${review}, with: build, maxRounds: ${opts.maxRounds}, task: 评审, inputs: [plan]${opts.escalate ? ', escalate: plan' : ''} }
-`)
+${opts.ship === undefined ? '' : `  - { id: ship, kind: dialog, with: build, maxRounds: ${opts.ship}, task: 交付, checks: [{ run: [npm, test] }, { platform: push }] }\n`}`)
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   return r.workflow
 }
@@ -34,9 +34,14 @@ export const GARBAGE = '我觉得还行'
 export const REVISE = '```json\n{"decision":"revise","plan":"新方案：先写测试"}\n```'
 export const ASK = '```json\n{"decision":"ask_user","question":"要不要支持负数？"}\n```'
 
-/** 检查结果：passed 为 false 时每条都不通过。 */
-export const results = (run: CheckRun, passed: boolean, detail = passed ? '' : '1 个测试失败'): CheckResult[] =>
-  run.checks.map(check => ({ check, passed, detail }))
+/** 检查结果：passed 为 false 时每条都不通过；'platform' 时只有平台动作没完成，别的都通过。 */
+export const results = (run: CheckRun, passed: boolean | 'platform', detail = passed === true ? '' : '1 个测试失败'): CheckResult[] =>
+  run.checks.map(check => {
+    if (passed === 'platform') return { check, passed: check.kind !== 'platform', detail: check.kind === 'platform' ? detail : '' }
+    // 别的检查没过时，平台动作被跳过：和 runChecks 给的说明一样。
+    if (!passed && check.kind === 'platform') return { check, passed: false, detail: '前面的检查没有通过，这一步没有做' }
+    return { check, passed, detail }
+  })
 
 /** 测试用的驱动：每个事件都必须被接受，时间每步加一。 */
 export class Driver {

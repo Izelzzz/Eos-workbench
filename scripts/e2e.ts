@@ -4,7 +4,8 @@
 // 3. 开发第一次完成后 SIGKILL 掉 runner，再用 `eos resume` 续跑；
 // 4. 跑完后从存储里逐条检查，结果写到 .eos/e2e/report.json，完整输出在 .eos/e2e/run.log。
 // 设置 EOS_E2E_REPO=https://github.com/<owner>/<repo> 时不建本地示例仓库，在这个远程仓库上跑（它要有同样的 package.json 和 src/math.js）：
-// 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY），跑完多核对任务记下了远程仓库、数据目录里找不到令牌。
+// 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY）。工作流用 feature-push：feature 加一个交付节点，平台推送任务分支。
+// 跑完多核对任务记下了远程仓库、数据目录里找不到令牌、远程的任务分支和本地一致。
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,6 +16,7 @@ import { MODEL_KEY_CREDENTIAL } from '../src/credentials/model-key.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { defaultForges, parseRemote } from '../src/forge/forges.ts'
+import { Conventions } from '../src/conventions/conventions.ts'
 import { Store } from '../src/store/store.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -121,9 +123,18 @@ else {
     c.close()
     if (!put.ok) throw new Error(put.error)
   }
+  // feature 加一个交付节点：平台把任务分支推到远程。
+  const feature = readFileSync(join(ROOT, 'src', 'workflow', 'templates', 'feature.yaml'), 'utf8')
+  const push = `${feature.replace(/^name: feature$/m, 'name: feature-push').trimEnd()}\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支。\n    maxRounds: 2\n    checks:\n      - { platform: push }\n`
+  const seedStore = new Store(join(DATA, 'eos.db'))
+  const conventions = new Conventions(seedStore)
+  conventions.seed(Date.now())
+  const saved = conventions.save({ kind: 'workflow', name: 'feature-push', content: push, actor: 'e2e' }, Date.now())
+  seedStore.close()
+  if (!saved.ok) throw new Error(`保存 feature-push 失败：${JSON.stringify(saved)}`)
 }
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
-const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', 'feature', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', remote === undefined ? 'feature' : 'feature-push', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
 await drive(['resume', first.id])
 
@@ -145,11 +156,17 @@ function remoteChecks(): Record<string, boolean> {
   // 原始令牌，和它在认证头里的 base64 形式。
   const forms = GIT_TOKEN === undefined ? [] : [GIT_TOKEN, Buffer.from(`x-access-token:${GIT_TOKEN}`).toString('base64')]
   const leaked = files(DATA).filter(f => { const b = readFileSync(f); return forms.some(x => b.includes(x)) })
+  const localHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim()
+  const remoteHead = execFileSync('git', ['ls-remote', remote!.repo.cloneUrl, `refs/heads/${meta.branch}`], { encoding: 'utf8' }).split('\t')[0]!.trim()
+  const pushResult = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(r => r.check.kind === 'platform').at(-1)
+  record(`\n[e2e] 本地任务分支 ${localHead}，远程 ${remoteHead}；推送检查：${pushResult?.detail ?? '（没有）'}\n`)
   if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)
   return {
     '任务记下了远程仓库': JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
     'worktree 建在平台数据目录里的镜像上': meta.repo.startsWith(join(DATA, 'repos')),
     '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
+    '远程的任务分支和本地任务分支是同一个提交': remoteHead === localHead && localHead !== '',
+    '推送检查通过并带着分支链接': pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === remote!.forge.branchUrl(remote!.repo, meta.branch)),
   }
 }
 
