@@ -36,7 +36,7 @@ docker compose exec eos node --import tsx src/cli.ts doctor
 
 - 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos node --import tsx src/cli.ts doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
 - `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
-- 「凭据隔离」一项现在是 ⚠：agent 和检查命令还和平台是同一个用户，这是路线图第 3 项下一个 PR 要做的事。
+- 「凭据隔离」一项现在是 ⚠：agent 和检查命令还和平台是同一个用户，这是路线图第 3 项下一个 PR 要做的事。**这一项的说明目前不准确**：它只看 `bwrap --version` 能不能运行，而镜像里装了 bwrap 却用不了，dsh 实际用的是 Landlock。实际情况以本文「沙箱」一节和顶部的警告为准：agent 读不到平台和 dsh 进程的环境，检查命令读得到。下一个 PR 会让 doctor 按实际生效的沙箱后端给说明。
 
 ## 访问
 
