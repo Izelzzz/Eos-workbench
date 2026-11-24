@@ -62,7 +62,9 @@ export class Credentials {
   list(owner: Owner): CredentialInfo[] {
     return this.db.prepare('SELECT name, kind, key_id, created_at, updated_at FROM credentials WHERE owner = ? ORDER BY name').all(owner).flatMap(raw => {
       const r = infoRow.safeParse(raw).data
-      return r === undefined ? [] : [{ name: r.name, kind: isKind(r.kind) ? r.kind : 'unknown' as const, keyId: r.key_id, createdAt: r.created_at, updatedAt: r.updated_at }]
+      // 格式不对的行也列出来（类型标成 unknown），让人能找到并删掉。
+      if (r === undefined) return [{ name: String((raw as { name?: unknown }).name), kind: 'unknown' as const, keyId: '', createdAt: 0, updatedAt: 0 }]
+      return [{ name: r.name, kind: isKind(r.kind) ? r.kind : 'unknown' as const, keyId: r.key_id, createdAt: r.created_at, updatedAt: r.updated_at }]
     })
   }
 
