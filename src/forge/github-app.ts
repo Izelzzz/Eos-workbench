@@ -4,13 +4,15 @@
 // - 查安装用 GET /repos/<owner>/<repo>/installation：App 没装到这个仓库时 GitHub 返回 404，调用方退回别的认证方式。
 import { createPrivateKey, createSign, type KeyObject } from 'node:crypto'
 import { z } from 'zod'
-import { ForgeError, NotInstalled, type RemoteRepo } from './types.ts'
+import { ForgeError, NotInstalled, type AppRegistration, type RemoteRepo } from './types.ts'
 
 /** 凭据存储里 github-app 凭据的值：JSON。slug 用来给出"安装到仓库"的地址（清单流程注册时拿到）。 */
 export const appCredential = z.object({
   appId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).transform(String),
   privateKey: z.string().includes('PRIVATE KEY', { message: '不是 PEM 格式的私钥' }),
   slug: z.string().optional(),
+  /** App 在托管平台上的页面（清单流程注册时拿到），安装页在它下面。GitHub Enterprise 的路径和 github.com 不同，所以记下原样的地址。 */
+  htmlUrl: z.string().url().optional(),
 }).passthrough()
 export type AppCredential = z.infer<typeof appCredential>
 
@@ -128,3 +130,76 @@ export class GitHubApp {
     return { token: parsed.token, expiresAt }
   }
 }
+
+/** App 的安装页：在 App 页面地址下面；老凭据没有页面地址时按 github.com 的路径用短名拼。 */
+const installUrlOf = (web: string, c: AppCredential): string | undefined =>
+  c.htmlUrl !== undefined ? `${c.htmlUrl.replace(/\/$/, '')}/installations/new` : c.slug === undefined ? undefined : `${web}/apps/${encodeURIComponent(c.slug)}/installations/new`
+
+/** App 名字的上限（GitHub 的限制）。 */
+export const APP_NAME_MAX = 34
+const conversion = z.object({ id: z.number().int().positive(), slug: z.string().min(1), pem: z.string(), html_url: z.string().url(), name: z.string().optional() })
+
+/**
+ * 清单流程注册 GitHub App（https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest）。
+ * web 是浏览器访问 GitHub 的根地址（https://github.com），api 是 API 的根地址。
+ * App 的权限只要平台用到的：Contents 读写（推任务分支）、Pull requests 读写（开 PR）、Metadata 只读（GitHub 必带）。
+ * 不带 hook_attributes：平台不收 webhook；带上时 GitHub 会检查它的地址，本机地址注册不了。
+ */
+export const githubAppRegistration = (o: { host: string; web: string; api: string; fetch?: typeof fetch }): AppRegistration => ({
+  credentialName: appCredentialName(o.host),
+  host: o.host,
+  appNameMax: APP_NAME_MAX,
+  form: p => {
+    const manifest = {
+      name: p.appName,
+      url: p.origin,
+      redirect_url: p.callbackUrl,
+      public: false,
+      default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+      default_events: [],
+    }
+    const where = p.org === undefined ? '/settings/apps/new' : `/organizations/${encodeURIComponent(p.org)}/settings/apps/new`
+    return { action: `${o.web}${where}?state=${encodeURIComponent(p.state)}`, fields: { manifest: JSON.stringify(manifest) } }
+  },
+  complete: async code => {
+    let res: Response
+    let text: string
+    try {
+      // 换凭据的接口不需要认证：code 本身就是凭证（一小时内有效，只能用一次）。
+      res = await (o.fetch ?? fetch)(`${o.api}/app-manifests/${encodeURIComponent(code)}/conversions`, {
+        method: 'POST',
+        headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'eos-workbench' },
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      })
+      text = await res.text()
+    } catch (e) {
+      const err = e as Error & { cause?: { code?: string; message?: string } }
+      throw new ForgeError(`访问 ${new URL(o.api).host} 失败：${[err.name === 'TimeoutError' ? `${API_TIMEOUT_MS / 1000} 秒没有响应` : err.message, err.cause?.code ?? err.cause?.message].filter(Boolean).join('：')}`)
+    }
+    if (res.status === 404 || res.status === 422) throw new ForgeError(`${o.host} 不认这次注册返回的 code（一小时内有效，只能用一次）：重新注册一次`)
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = undefined
+    }
+    // 返回的内容里有私钥和 client secret：报错里不写响应内容。
+    const got = conversion.safeParse(body).data
+    if (res.status !== 201 || got === undefined) throw new ForgeError(`换 App 凭据失败（HTTP ${res.status}）`)
+    // 只留平台用得到的：App id、私钥、短名、页面地址。client secret、webhook secret 用不到，不存。
+    const parsed = appCredential.safeParse({ appId: got.id, privateKey: got.pem, slug: got.slug, htmlUrl: got.html_url })
+    if (!parsed.success) throw new ForgeError(`${o.host} 返回的 App 凭据格式不对（${parsed.error.issues.map(i => i.path.join('.')).join('、')}）：在 ${got.html_url} 删掉这个 App 后重新注册`)
+    // 私钥要能签名：读不出来或不是 RSA 时这里就报错，不存一条用不了的凭据。
+    new GitHubApp({ apiUrl: o.api, credential: parsed.data, credentialName: appCredentialName(o.host) })
+    return { value: JSON.stringify(parsed.data), appName: got.name ?? got.slug, appUrl: got.html_url, installUrl: installUrlOf(o.web, parsed.data) }
+  },
+  installUrl: value => {
+    try {
+      const c = appCredential.safeParse(JSON.parse(value)).data
+      return c === undefined ? undefined : installUrlOf(o.web, c)
+    } catch {
+      return undefined
+    }
+  },
+})
+

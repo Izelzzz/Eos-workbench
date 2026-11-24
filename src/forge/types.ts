@@ -23,6 +23,8 @@ export interface Forge {
   appToken?(repo: RemoteRepo, credential: { name: string; value: string }): Promise<string>
   /** 作废这个仓库缓存的 App 令牌：用它访问被拒时调用，下次重新换（App 被卸载重装、改了权限之后不用等令牌过期）。 */
   forgetAppToken?(repo: RemoteRepo): void
+  /** 用清单流程注册托管平台的 App（例如 GitHub App）；不支持时没有。 */
+  readonly appRegistration?: AppRegistration
   /** 浏览器里打开这个分支的地址。 */
   branchUrl(repo: RemoteRepo, branch: string): string
   /**
@@ -31,6 +33,24 @@ export interface Forge {
    * head 和 base 没有差别时返回 { empty: true }。出错时抛 ForgeError（消息是给用户看的中文）。
    */
   openPullRequest(repo: RemoteRepo, token: string | undefined, p: { head: string; base: string; sha: string; title: string; body: string; credential?: string }): Promise<PullRequest | { empty: true } | { merged: { number: number; url: string } }>
+}
+
+/**
+ * 清单流程注册 App：平台给浏览器一个表单，浏览器提交到托管平台；用户在那里确认后，托管平台带着 code 跳回平台的回调地址，
+ * 平台用 code 换回 App 的凭据（id、私钥），存进凭据存储。整个过程平台不需要任何已有的凭据。
+ */
+export interface AppRegistration {
+  /** App 凭据在凭据存储里的名字（按主机，和 appCredentialName 一致）。 */
+  readonly credentialName: string
+  readonly host: string
+  /** App 名字最长多少个字符。 */
+  readonly appNameMax: number
+  /** 浏览器提交清单用的表单。origin 是浏览器访问平台用的地址，callbackUrl 是注册完跳回的地址，state 原样带回。org 不给时注册在个人账号下。 */
+  form(p: { appName: string; origin: string; callbackUrl: string; state: string; org?: string }): { action: string; fields: Record<string, string> }
+  /** 用回调里的 code 换 App 的凭据：value 是存进凭据存储的值；installUrl 是把 App 安装到仓库的页面。出错时抛 ForgeError。 */
+  complete(code: string): Promise<{ value: string; appName: string; appUrl: string; installUrl: string | undefined }>
+  /** 已保存的 App 凭据对应的安装页面；凭据里没有记下 App 的短名时没有。 */
+  installUrl(value: string): string | undefined
 }
 
 export type PullRequest = { number: number; url: string; reused: boolean }
