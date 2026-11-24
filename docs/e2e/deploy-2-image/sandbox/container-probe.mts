@@ -42,11 +42,14 @@ try {
 } finally {
   await ex.close()
 }
+// 正对照：同一个容器、同一个用户、不在沙箱里时能读到几处标记。
+const unsandboxedHits = execFileSync('bash', ['-c', `grep -sl ${MARK} /proc/[0-9]*/environ | wc -l`], { encoding: 'utf8' }).trim()
 const report = {
   whoami: execFileSync('id', [], { encoding: 'utf8' }).trim(),
   writes: { ownWorktree: existsSync(join(dirs.mine, 'w.txt')), otherWorktree: existsSync(join(dirs.other, 'w.txt')), dataDirRoot: existsSync(join(dirs.data, 'w.txt')), realTmp: existsSync('/tmp/probe-w.txt') },
+  unsandboxedMarkerHits: unsandboxedHits,
   proc: existsSync(procFile) ? execFileSync('cat', [procFile], { encoding: 'utf8' }).trim() : '（没写出来）',
   reply,
 }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
-console.log(JSON.stringify({ writes: report.writes, proc: report.proc }, null, 2))
+console.log(JSON.stringify({ whoami: report.whoami, writes: report.writes, unsandboxedMarkerHits: report.unsandboxedMarkerHits, proc: report.proc }, null, 2))

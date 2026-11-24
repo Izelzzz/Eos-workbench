@@ -7,7 +7,7 @@
 // 结果写到 .eos/deploy-e2e/report.json，过程写到 run.log。
 // 用法：DEEPSEEK_API_KEY=<key> node --import tsx scripts/deploy-e2e.ts
 // 环境变量：EOS_E2E_COMPOSE_FILES 用冒号分隔的额外 compose 文件（例如构建机需要的网络设置）；EOS_E2E_URL 默认 http://127.0.0.1:4317。
-// 会占用宿主机的 4317 端口，不要在已经跑着 Eos 的服务器上运行；compose 项目名是 eos-deploy-e2e，结束时连数据卷一起删掉。
+// 会占用宿主机的 4317 端口，不要在已经跑着 Eos 的服务器上运行。compose 项目名是 eos-deploy-e2e、镜像标签是 eos-workbench:e2e，结束时连数据卷一起删掉。
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,7 +27,8 @@ const log = (line: string) => {
 }
 const compose = (...a: string[]) => {
   log(`$ docker compose ${a.join(' ')}`)
-  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  // 用自己的镜像标签，不覆盖服务器上正在用的 eos-workbench:local。
+  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e' } })
   if (out.trim() !== '') appendFileSync(LOG, `${out}\n`)
   return out
 }
@@ -63,8 +64,8 @@ const REPO = '/data/repos/demo'
 
 compose('build')
 compose('down', '-v')
-compose('up', '-d')
 try {
+  compose('up', '-d')
   await until('Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
   const doctor = inContainer('node --import tsx src/cli.ts doctor')
   log(doctor.out)
@@ -105,6 +106,7 @@ try {
   await until('重建后 Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
   const after = (await api(`/api/tasks/${id}`)).body
   const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
+  const head = commits.out.trim().split('\n')[0]?.split(' ')[0] ?? ''
 
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
@@ -112,13 +114,23 @@ try {
     'worktree 里 npm test 通过': tests.code === 0 && /ℹ fail 0/.test(tests.out),
     'agent 的改动提交到了任务分支': commits.code === 0 && commits.out.trim() !== '',
     'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
-    'down 再 up 之后 worktree 还在': afterWorktree.code === 0,
+    'down 再 up 之后 worktree 还在，最新提交不变': afterWorktree.code === 0 && head !== '' && afterWorktree.out.startsWith(head),
   }
   const report = { task: id, status: task.status, answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
   process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1
+} catch (e) {
+  // 失败时留下容器日志再清理，方便查原因。
+  try {
+    appendFileSync(LOG, compose('logs', '--no-color', 'eos'))
+  } catch {}
+  throw e
 } finally {
-  // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。
-  compose('down', '-v')
+  // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。清理本身失败时不盖掉原来的错误。
+  try {
+    compose('down', '-v')
+  } catch (e) {
+    log(`清理失败：${(e as Error).message}`)
+  }
 }

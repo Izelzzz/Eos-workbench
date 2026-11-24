@@ -3,7 +3,8 @@
 services:
   eos:
     build: .
-    image: eos-workbench:local
+    # deploy-e2e 用 EOS_IMAGE 换一个标签，不覆盖正在用的镜像。
+    image: ${EOS_IMAGE:-eos-workbench:local}
     init: true
     restart: unless-stopped
     environment:
@@ -17,8 +18,8 @@ services:
     volumes:
       - eos-data:/data
     tmpfs:
-      # exec：dsh 的 native 加载器把预编译的 .node 缓存到 /tmp 再加载，Docker 的 tmpfs 默认 noexec，dsh 会起不来。
-      - /tmp:exec
+      # exec：agent 跑测试、编译时要执行自己生成的文件（Docker 的 tmpfs 默认 noexec）。size：依赖缓存和测试产物都占内存，按服务器内存调整。
+      - /tmp:exec,size=4g
     cap_drop:
       - ALL
     security_opt:

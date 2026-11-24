@@ -6,7 +6,8 @@
 |---|---|
 | `e2e-report.json` | 6 项核对全部为 true；容器里的工具版本、doctor 输出、worktree 里 `npm test` 的结果、任务分支的提交、重建容器后的 `/data` |
 | `e2e-run.log` | 每一步执行的 docker compose 命令和输出、agent 的提问和回答 |
-| `doctor-with-master-key.txt` | 由 compose 注入 `EOS_MASTER_KEY` 时容器里的 doctor 输出，以及在 `/data`、`/app` 里搜主密钥值的结果（0 处）。用的是加缓存相关 ENV 之前的镜像，这些 ENV 和 doctor 无关 |
+| `doctor-with-master-key.txt` | 由 compose 注入 `EOS_MASTER_KEY` 时容器里的 doctor 输出（只显示指纹），以及在 `/data`、`/app`、`/tmp` 里搜主密钥的值，各 0 处 |
+| `backup-restore.txt` | `docs/deploy.md` 里备份和恢复命令的实际运行：备份、`down -v`、恢复到新卷、启动后数据和属主都在、接口返回 200 |
 | `sandbox/` | 容器里沙箱的实测记录，见 `sandbox/README.md`；`deps-probe.*` 是最终镜像里依赖安装和缓存位置的探针 |
 
 ## 结论

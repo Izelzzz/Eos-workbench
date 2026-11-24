@@ -1,4 +1,5 @@
-// 部署镜像里的依赖安装探针：真实 dsh + 真实模型，agent 在沙箱里装 npm、pnpm、pip 依赖，以磁盘上的结果为准。
+// 部署镜像里的依赖安装探针：真实 dsh + 真实模型，agent 在沙箱里装 npm、pnpm、pip 依赖（含按 package.json 装 devDependencies），以磁盘上的结果为准。
+// 用法：docker compose run --rm -v <本目录>:/probe:ro eos node --import tsx /probe/deps-probe.mts
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,6 +19,7 @@ const steps = [
   `cd ${wt} && mkdir -p p && cd p && npm init -y >/dev/null && npm pkg set packageManager=pnpm@9.15.0 && pnpm add is-odd@3.0.1 2>&1 | tail -2`,
   `cd ${wt} && python3 -m venv .venv && .venv/bin/pip install -q six==1.16.0 2>&1 | tail -2; .venv/bin/python -c "import six; print('six', six.__version__)"`,
   `mkdir -p /tmp/cache/native-plant && echo planted > /home/eos/.cache/native-addons/planted.txt; echo exit=$?`,
+  `cd ${wt} && mkdir -p q && cd q && printf '%s' '{"name":"q","devDependencies":{"is-number":"7.0.0"}}' > package.json && npm install --no-audit --no-fund 2>&1 | tail -2; echo "NODE_ENV=[$NODE_ENV]"`,
 ]
 const prompt = `这是一次环境探针。严格按顺序用 bash 工具执行下面每一条命令，某一步失败也继续下一步；不要申请提升权限，不要换别的写法绕过。最后把每条命令的原始输出贴出来。\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
 let reply = ''
@@ -30,6 +32,7 @@ const ls = (d: string) => { try { return execFileSync('ls', ['-A', d], { encodin
 console.log(JSON.stringify({
   npm: existsSync(join(wt, 'node_modules', 'is-number', 'package.json')),
   pnpm: existsSync(join(wt, 'p', 'node_modules', 'is-odd', 'package.json')),
+  npmDevDeps: existsSync(join(wt, 'q', 'node_modules', 'is-number', 'package.json')),
   pip: existsSync(join(wt, '.venv')) && execFileSync('bash', ['-c', `${wt}/.venv/bin/python -c "import six" && echo ok || echo no`], { encoding: 'utf8' }).trim() === 'ok',
   agentWroteNativeCache: existsSync('/home/eos/.cache/native-addons/planted.txt'),
   tmp: ls('/tmp'), tmpCache: ls('/tmp/cache'), nativeCache: ls('/home/eos/.cache/native-addons'),
