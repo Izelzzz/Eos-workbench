@@ -1,29 +1,29 @@
-[05:39:18] eos web 已启动（提交 471a22a，Node v24.22.3）
-[05:39:18] 任务 A：t261124053918j74
-[05:39:21] A：结掉了 dsh 进程 22443
-[05:39:22] A（dsh 进程被结掉） 失败原因：
+[05:46:53] eos web 已启动（提交 e02866d，Node v24.22.3）
+[05:46:53] 任务 A：t261124054653hsm
+[05:46:56] A：结掉了 dsh 进程 1022
+[05:46:57] A（dsh 进程被结掉） 失败原因：
 哪一步：[spec] spec-writer · produce（调用 c1）
 原因：dsh profile "sdk": DeepSeek Harness runtime exited
-怎么修：agent 进程意外退出：直接重试；反复出现时看日志里 dsh 的报错。处理后在任务页点「重试」，或运行 npm run eos -- retry t261124053918j74
-[05:39:23] A：点了重试
-[05:40:34] 任务 B：t26112405403473p
-[05:40:51] B：删掉了 worktree /home/user/eos-pr3/.eos/logs-e2e/data/worktrees/t26112405403473p
-[05:40:55] B（worktree 被删） 失败原因：
+怎么修：agent 进程意外退出：直接重试；反复出现时看日志里 dsh 的报错。处理后在任务页点「重试」，或运行 npm run eos -- retry t261124054653hsm
+[05:46:57] A：点了重试
+[05:47:46] 任务 B：t261124054746ygg
+[05:48:06] B：删掉了 worktree /home/user/eos-pr3/.eos/logs-e2e/data/worktrees/t261124054746ygg
+[05:48:08] B（worktree 被删） 失败原因：
 哪一步：[build] developer · produce（调用 c3）
-原因：working-directory: directory does not exist: "/home/user/eos-pr3/.eos/logs-e2e/data/worktrees/t26112405403473p"
-怎么修：任务的 worktree 被删除或损坏：确认 worktree 目录还在、主仓库里还有它的登记（git worktree list）。处理后在任务页点「重试」，或运行 npm run eos -- retry t26112405403473p
-[05:40:55] 14/14 通过
-[05:40:55] ✓ A（dsh 进程被结掉）：失败原因分三段（哪一步、原因、怎么修）
-[05:40:55] ✓ A（dsh 进程被结掉）：认出了这个错误，给出具体修法
-[05:40:55] ✓ A（dsh 进程被结掉）：任务详情给出日志路径，在数据目录的 logs/ 下
-[05:40:55] ✓ A（dsh 进程被结掉）：日志文件每行带时间、有失败的那一行和完整错误
-[05:40:55] ✓ A（dsh 进程被结掉）：网页接口返回的日志和文件一致
-[05:40:55] ✓ A（dsh 进程被结掉）：命令行 status 显示失败原因和日志路径
-[05:40:55] ✓ A：重试后任务跑完
-[05:40:55] ✓ B（worktree 被删）：失败原因分三段（哪一步、原因、怎么修）
-[05:40:55] ✓ B（worktree 被删）：认出了这个错误，给出具体修法
-[05:40:55] ✓ B（worktree 被删）：任务详情给出日志路径，在数据目录的 logs/ 下
-[05:40:55] ✓ B（worktree 被删）：日志文件每行带时间、有失败的那一行和完整错误
-[05:40:55] ✓ B（worktree 被删）：网页接口返回的日志和文件一致
-[05:40:55] ✓ B（worktree 被删）：命令行 status 显示失败原因和日志路径
-[05:40:55] ✓ Web 服务进程的输出写进 logs/eos.log
+原因：working-directory: directory does not exist: "/home/user/eos-pr3/.eos/logs-e2e/data/worktrees/t261124054746ygg"
+怎么修：任务的 worktree 被删除或损坏：确认 worktree 目录还在、主仓库里还有它的登记（git worktree list）。处理后在任务页点「重试」，或运行 npm run eos -- retry t261124054746ygg
+[05:48:09] 14/14 通过
+[05:48:09] ✓ A（dsh 进程被结掉）：失败原因分三段（哪一步、原因、怎么修）
+[05:48:09] ✓ A（dsh 进程被结掉）：认出了这个错误，给出具体修法
+[05:48:09] ✓ A（dsh 进程被结掉）：任务详情给出日志路径，在数据目录的 logs/ 下
+[05:48:09] ✓ A（dsh 进程被结掉）：日志文件每行带时间、有失败的那一行和完整错误
+[05:48:09] ✓ A（dsh 进程被结掉）：网页接口返回的日志和文件一致
+[05:48:09] ✓ A（dsh 进程被结掉）：命令行 status 显示失败原因和日志路径
+[05:48:09] ✓ A：重试后任务跑完
+[05:48:09] ✓ B（worktree 被删）：失败原因分三段（哪一步、原因、怎么修）
+[05:48:09] ✓ B（worktree 被删）：认出了这个错误，给出具体修法
+[05:48:09] ✓ B（worktree 被删）：任务详情给出日志路径，在数据目录的 logs/ 下
+[05:48:09] ✓ B（worktree 被删）：日志文件每行带时间、有失败的那一行和完整错误
+[05:48:09] ✓ B（worktree 被删）：网页接口返回的日志和文件一致
+[05:48:09] ✓ B（worktree 被删）：命令行 status 显示失败原因和日志路径
+[05:48:09] ✓ Web 服务进程的输出写进 logs/eos.log
