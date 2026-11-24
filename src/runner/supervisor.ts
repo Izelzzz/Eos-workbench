@@ -3,7 +3,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Conventions } from '../conventions/conventions.ts'
-import { redactDeep } from '../credentials/redact.ts'
+import { redactDeep, rememberSecret } from '../credentials/redact.ts'
 import type { CheckResult, Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
@@ -13,7 +13,7 @@ import { killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
-import { ForgeError, type Forge, type RemoteRepo } from '../forge/types.ts'
+import { ForgeError, NotInstalled, type Forge, type RemoteRepo } from '../forge/types.ts'
 import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, type Worktree } from './git.ts'
 import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
@@ -42,6 +42,7 @@ export class Supervisor {
   private readonly active = new Map<string, Promise<Task>>()
   readonly locksDir: string
   readonly conventions: Conventions
+  private readonly forges: Forge[]
 
   constructor(private readonly o: {
     store: Store
@@ -60,6 +61,8 @@ export class Supervisor {
     forges?: Forge[]
   }) {
     this.locksDir = join(o.dataDir, 'locks')
+    // 托管平台只建一次：GitHub App 的安装令牌缓存在它里面。
+    this.forges = o.forges ?? defaultForges()
     this.conventions = new Conventions(o.store)
     this.conventions.seed(Date.now())
   }
@@ -74,7 +77,7 @@ export class Supervisor {
     if (request === '') return { ok: false, error: '需求不能为空' }
     const where = input.repo.trim()
     if (where === '') return { ok: false, error: '需要仓库：平台所在机器上的路径，或 https://github.com/<owner>/<repo>' }
-    const remote = parseRemote(this.o.forges ?? defaultForges(), where)
+    const remote = parseRemote(this.forges, where)
     if (remote === undefined && looksRemote(where)) return { ok: false, error: `认不出仓库地址：${where}。目前支持 https://github.com/<owner>/<repo>（或 git@github.com:<owner>/<repo>.git）` }
     const repo = resolve(where)
     if (remote === undefined && (!existsSync(repo) || !statSync(repo).isDirectory())) return { ok: false, error: `找不到目录：${input.repo}` }
@@ -104,36 +107,37 @@ export class Supervisor {
 
   /**
    * 访问这个仓库用的认证，按顺序：托管平台的 App（装到了这个仓库）→ 凭据存储里的令牌 → 匿名。
-   * error：没用上的凭据和原因（App 没装到这个仓库、凭据读不出来、App 换令牌失败），失败时附在报错后面。
+   * App 只在"没装到这个仓库"时退回令牌；App 别的错误（私钥不对、接口超时……）不悄悄换成个人令牌的身份，直接不带令牌并报出原因。
+   * error：没用上的凭据和原因，失败时附在报错后面；令牌真的用上了时，不附"App 没装"。
    */
   private async authFor(repo: RemoteRepo, forge: Forge): Promise<{ auth: RemoteAuth; error?: string }> {
-    const notes: string[] = []
+    let notInstalled: string | undefined
     const appName = forge.appCredentialName?.(repo)
     if (appName !== undefined && forge.appToken !== undefined && this.o.credentials !== undefined) {
       const app = this.o.credentials.get(LOCAL_OWNER, appName)
+      if (app.kind === 'error') return { auth: { credential: appName }, error: app.error }
       if (app.kind === 'ok') {
         try {
           const token = await forge.appToken(repo, { name: appName, value: app.value })
+          rememberSecret(token)
           return { auth: { credential: appName, header: forge.gitAuthHeader(token), secret: token } }
         } catch (e) {
-          // App 没装到这个仓库：退回令牌。App 自己出错（私钥不对等）：也退回，但把原因带上，配错了能看出来。
-          if (!(e instanceof ForgeError)) throw e
-          notes.push(e.message)
+          if (e instanceof NotInstalled) notInstalled = e.message
+          else if (e instanceof ForgeError) return { auth: { credential: appName }, error: e.message }
+          else throw e
         }
-      } else if (app.kind === 'error') notes.push(app.error)
+      }
     }
     const credential = forge.credentialName(repo)
     const got = this.o.credentials?.get(LOCAL_OWNER, credential) ?? { kind: 'absent' as const }
-    if (got.kind === 'error') notes.push(got.error)
-    const error = notes.length === 0 ? undefined : notes.join('；')
-    const auth: RemoteAuth = got.kind === 'ok' ? { credential, header: forge.gitAuthHeader(got.value), secret: got.value } : { credential }
-    return { auth, ...(error === undefined ? {} : { error }) }
+    if (got.kind === 'ok') return { auth: { credential, header: forge.gitAuthHeader(got.value), secret: got.value } }
+    const notes = [notInstalled, got.kind === 'error' ? got.error : undefined].filter((x): x is string => x !== undefined)
+    return { auth: { credential }, ...(notes.length === 0 ? {} : { error: notes.join('；') }) }
   }
-
 
   /** 任务的远程仓库对应的托管平台：按记下的种类和地址找回来。 */
   private forgeOf(repo: RemoteRepo): Forge | undefined {
-    return (this.o.forges ?? defaultForges()).find(f => f.kind === repo.forge && f.parse(repo.webUrl) !== undefined)
+    return this.forges.find(f => f.kind === repo.forge && f.parse(repo.webUrl) !== undefined)
   }
 
   /**
@@ -184,7 +188,7 @@ export class Supervisor {
       }
     }
     try {
-      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base, sha, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      const pr = await forge.openPullRequest(meta.remote, auth.secret, { credential: auth.credential, head: meta.branch, base, sha, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
       if ('merged' in pr) {
         return { check: c, passed: true, detail: `${pushed}。这个提交已经通过 PR #${pr.merged.number} 合并了：${pr.merged.url}`, links: [branchLink, { label: `PR #${pr.merged.number}（已合并）`, url: pr.merged.url, kind: 'pull-request' }] }
       }
@@ -199,10 +203,7 @@ export class Supervisor {
     }
   }
 
-  /**
-   * 取这个仓库的令牌（凭据存储里没有就匿名访问），更新镜像。
-   * 凭据存在但读不出来（没有主密钥、换了主密钥）时先匿名试一次：公开仓库照样能用；匿名也不行时两个原因都报出来。
-   */
+  /** 按 authFor 的顺序取认证（App → 令牌 → 匿名），更新镜像；失败时把没用上的凭据和原因附在后面。 */
   private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string; branch: string } | { ok: false; error: string }> {
     const { auth, error } = await this.authFor(repo, forge)
     try {

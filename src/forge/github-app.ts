@@ -113,7 +113,7 @@ export class GitHubApp {
     const parsed = accessToken.safeParse(got.body).data
     if (got.status !== 201 || parsed === undefined) {
       throw new ForgeError(got.status === 403 || got.status === 422
-        ? `App 在 ${where} 的安装没有授权这个仓库，或者缺少权限（HTTP ${got.status}）：在 App 的安装设置里勾选这个仓库，并给 Contents 读写、Pull requests 读写`
+        ? `App 在 ${where} 的安装没有授权这个仓库、缺少权限，或者仓库改过名（HTTP ${got.status}）：在 App 的安装设置里勾选这个仓库，并给 Contents 读写、Pull requests 读写；仓库改过名时，用 GitHub 上现在的地址建任务`
         : `换 App 的安装令牌失败（HTTP ${got.status}）`)
     }
     const expiresAt = Date.parse(parsed.expires_at)

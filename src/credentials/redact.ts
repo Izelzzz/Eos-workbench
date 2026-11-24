@@ -78,8 +78,28 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
   close: () => ex.close(),
 })
 
+/** 平台运行时换来的短期凭据（例如 GitHub App 的安装令牌）：不在凭据存储里，用的地方登记进来。只留最近的 256 个。 */
+const runtime = new Set<string>()
+export const rememberSecret = (s: string): void => {
+  if (runtime.has(s)) return
+  runtime.add(s)
+  if (runtime.size > 256) runtime.delete(runtime.values().next().value!)
+}
+
+/** 一条凭据的值，加上它是 JSON 对象时里面的每个字符串字段（例如 GitHub App 凭据里的私钥，单独出现时也要遮住）。 */
+const valuesOf = (value: string): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return [value, ...Object.values(parsed).filter((v): v is string => typeof v === 'string')]
+  } catch {
+    // 不是 JSON：原值就够了
+  }
+  return [value]
+}
+
 /**
- * 当前已知的凭据值：凭据存储里能解密的全部，加上 extra（例如来自环境变量的模型 key、主密钥）。
+ * 当前已知的凭据值：凭据存储里能解密的全部（JSON 凭据也拆出里面的字段），运行时登记的短期凭据，
+ * 加上 extra（例如来自环境变量的模型 key、主密钥）。
  * 每条 trace 事件的每个字符串都要遮蔽，所以最多每秒查一次凭据列表；列表的名字或更新时间变了才重新解密。
  * 在 Web 上增删改凭据之后，最迟一秒后生效。
  */
@@ -88,7 +108,7 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
   let checkedAt = -Infinity
   let reported = false
   return () => {
-    if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...extra]
+    if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...runtime, ...extra]
     checkedAt = now()
     let items
     try {
@@ -97,10 +117,10 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
       // 读不了凭据列表（例如数据库损坏）：沿用上次的值，遮蔽不能让写日志的地方出错；报一次错，不悄悄降级。
       if (!reported) onError(e)
       reported = true
-      return [...(cache?.values ?? []), ...extra]
+      return [...(cache?.values ?? []), ...runtime, ...extra]
     }
     const sig = items.map(i => `${i.name}@${i.updatedAt}`).join('\n')
-    if (cache?.sig !== sig) cache = { sig, values: items.flatMap(i => { const r = credentials.get(LOCAL_OWNER, i.name); return r.kind === 'ok' ? [r.value] : [] }) }
-    return [...cache.values, ...extra]
+    if (cache?.sig !== sig) cache = { sig, values: items.flatMap(i => { const r = credentials.get(LOCAL_OWNER, i.name); return r.kind === 'ok' ? valuesOf(r.value) : [] }) }
+    return [...cache.values, ...runtime, ...extra]
   }
 }

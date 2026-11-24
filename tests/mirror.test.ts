@@ -716,10 +716,34 @@ test('GitHub App 的私钥不对、凭据格式不对：报中文原因', async 
   const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'] } })
   // 用别的私钥签：GitHub 不认这个 App。
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appId: app.id, privateKey: other.privateKey })), { ok: true })
+  // 同时也配了个人令牌：App 出错时不悄悄换成个人令牌的身份。
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const before = r.requests().length
   const wrongKey = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
   assert.match(wrongKey.error, /不认凭据「github-app\..*」的 App：App id 或私钥不对/)
+  assert.ok(r.requests().slice(before).every(q => !(q.auth ?? '').includes(Buffer.from(`x-access-token:${TOKEN}`).toString('base64'))), '没有用个人令牌')
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', '{"appId": 1}'), { ok: true })
   const badJson = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
   assert.match(badJson.error, /不是有效的 GitHub App 凭据：privateKey/)
   assert.ok(!badJson.error.includes(app.privateKey.slice(40, 80)))
+})
+
+test('GitHub App 没装到这个仓库、用了个人令牌：别的原因失败时，报错里不附"App 没装"', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/other'] } })
+  appCred(r, app)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const c = (await r.sup.create({ repo: r.url.replace('/app', '/nope'), workflow: 'feature', request: '需求' })) as { error: string }
+  assert.match(c.error, /找不到仓库/)
+  assert.doesNotMatch(c.error, /没有安装/)
+})
+
+test('用 GitHub App 开 PR 被拒（403）：报错指向 App 的 Pull requests 权限', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'] } })
+  appCred(r, app)
+  await control(r, 'fail-post?status=403')
+  const { task } = await runPr(r)
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', /开 PR 失败：.*凭据「github-app\..*」的 GitHub App 没有 Pull requests 的写权限/)
 })

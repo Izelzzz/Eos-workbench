@@ -20,7 +20,9 @@ export function Credentials() {
   useEffect(() => { void load() }, [])
 
   const existing = data?.items.find(i => i.name === name)?.kind
-  const kind: CredentialKind = kindChoice ?? (existing === undefined || existing === 'unknown' ? 'token' : existing)
+  // GitHub App 的凭据（id 和私钥）由 GitHub 接入的注册流程写入，这里只能删除，不能用表单覆盖。
+  const appLocked = existing === 'github-app'
+  const kind: CredentialKind = kindChoice ?? (existing === undefined || existing === 'unknown' || existing === 'github-app' ? 'token' : existing)
 
   const save = async () => {
     setBusy(true)
@@ -89,7 +91,8 @@ export function Credentials() {
         </label>
         {error && <p className="error" role="alert">{error}</p>}
         {notice && <p className="notice" role="status">{notice}</p>}
-        <div><button type="submit" className="primary" disabled={busy || data?.usable === false}>{busy ? '保存中…' : '保存'}</button></div>
+        {appLocked && <p className="muted">「{name}」是 GitHub App 的凭据，不能在这里替换；要换就删掉后重新注册。</p>}
+        <div><button type="submit" className="primary" disabled={busy || data?.usable === false || appLocked}>{busy ? '保存中…' : '保存'}</button></div>
       </form>
     </div>
   )
