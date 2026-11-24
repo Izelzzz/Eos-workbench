@@ -127,10 +127,19 @@ test('不调用模型的命令不做启动检查', () => {
 })
 
 test('Node 版本不够时只提示，命令照常执行；版本够时不提示', () => {
-  const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], { DEEPSEEK_API_KEY: 'k', EOS_MASTER_KEY: KEY })
+  const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], { DEEPSEEK_API_KEY: 'k' })
   assert.doesNotMatch(r.stderr, /没有启动/)
   assert.match(r.stderr, /找不到目录/, '通过了启动检查，走到了创建任务')
   const old = !atLeast(process.versions.node, '24.9.0')
   if (old) assert.match(r.stderr, /^启动前检查有提示（照常启动）：\n⚠ Node：/)
-  else assert.doesNotMatch(r.stderr, /⚠ Node/)
+  else assert.doesNotMatch(r.stderr, /启动前检查有提示/)
+})
+
+test('凭据主密钥没设置、凭据隔离的 ⚠ 只在 doctor 里列出，启动时不提示', () => {
+  for (const env of [{ DEEPSEEK_API_KEY: 'k' }, { DEEPSEEK_API_KEY: 'k', EOS_MASTER_KEY: KEY }]) {
+    const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], env)
+    assert.doesNotMatch(r.stderr, /凭据主密钥|凭据隔离/)
+    const d = cli(['doctor', '--data', join(tmp(), 'data')], env)
+    assert.match(d.stdout, 'EOS_MASTER_KEY' in env ? /⚠ 凭据隔离/ : /⚠ 凭据主密钥/)
+  }
 })

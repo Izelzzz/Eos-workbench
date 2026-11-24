@@ -69,7 +69,7 @@ if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
   const items = evaluate(gather({ root: ROOT, dataDir, env: process.env, masterKey }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
-  const warned = items.filter(i => i.status === 'warn')
+  const warned = items.filter(i => i.status === 'warn' && i.doctorOnly !== true)
   if (warned.length > 0) process.stderr.write(`启动前检查有提示（照常启动）：\n${formatItems(warned)}\n\n`)
 }
 mkdirSync(dataDir, { recursive: true })

@@ -10,7 +10,8 @@ import { dshInstall } from '../executor/dsh.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
 export type Status = 'ok' | 'warn' | 'fail'
-export type Item = { name: string; status: Status; detail: string; fix?: string }
+/** doctorOnly：只在 eos doctor 里列出，启动前检查不提示（总会出现的 ⚠ 会让人习惯性忽略真正的提示）。 */
+export type Item = { name: string; status: Status; detail: string; fix?: string; doctorOnly?: true }
 
 /** 收集到的事实。evaluate 只看它，不做 IO，可单测。 */
 export type Facts = {
@@ -54,7 +55,7 @@ const masterKeyItem = (f: Facts): Item =>
   f.masterKey.kind === 'ok'
     ? { name: '凭据主密钥', status: 'ok', detail: `已设置 ${MASTER_KEY_ENV}（指纹 ${f.masterKey.id}）` }
     : f.masterKey.kind === 'missing'
-      ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT }
+      ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT, doctorOnly: true }
       : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
 
 /**
@@ -64,7 +65,7 @@ const masterKeyItem = (f: Facts): Item =>
  */
 const isolationItem = (f: Facts): Item[] =>
   f.masterKey.kind !== 'ok' ? [] : [{
-    name: '凭据隔离', status: 'warn',
+    name: '凭据隔离', status: 'warn', doctorOnly: true,
     detail: f.bwrap
       ? '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥'
       : '没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥',
