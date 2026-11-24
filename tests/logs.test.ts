@@ -68,7 +68,7 @@ test('任务的进度行和完整错误写进 logs/<任务>.log；任务详情�
   })
   const terminal: string[] = []
   const sup = new Supervisor({ store: s.store, executor, dataDir: s.data, pollMs: 2, log: (_id, l) => terminal.push(l) })
-  const created = sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
+  const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
   assert.ok(created.ok)
   const started = sup.start(created.id)
   assert.ok(started.ok)
@@ -96,7 +96,7 @@ test('任务的进度行和完整错误写进 logs/<任务>.log；任务详情�
     assert.match(res.headers.get('content-type') ?? '', /^text\/plain/)
     assert.equal(await res.text(), readFileSync(path, 'utf8'))
     assert.equal((await fetch(`${base}/api/tasks/nope/log`)).status, 404)
-    const other = sup.create({ repo: s.repo, workflow: 'feature', request: '还没跑' })
+    const other = await sup.create({ repo: s.repo, workflow: 'feature', request: '还没跑' })
     assert.ok(other.ok)
     assert.ok(!existsSync(sup.logPath(other.id)))
     assert.match(await (await fetch(`${base}/api/tasks/${other.id}/log`)).text(), /^（还没有日志：/)

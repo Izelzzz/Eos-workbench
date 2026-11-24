@@ -68,13 +68,16 @@ location / {
 
 ## 仓库放在哪里
 
-任务在服务器上的 git 仓库里运行：每个任务在 `/data/worktrees/<任务id>` 建自己的 worktree 和分支 `eos/<任务id>`。新建任务时填的仓库路径是**容器里的路径**，约定放在 `/data/repos` 下：
+每个任务在 `/data/worktrees/<任务id>` 建自己的 worktree 和分支 `eos/<任务id>`。新建任务时，「仓库」一栏填下面两种之一：
 
-```bash
-docker compose exec eos git clone https://github.com/<组织>/<仓库>.git /data/repos/<仓库>
-```
+- **GitHub 地址**（`https://github.com/<owner>/<repo>`）：平台自己克隆到 `/data/repos/github.com/<owner>/<repo>.git`，在默认分支的最新提交上建分支。私有仓库要先在 Web 的凭据页添加名字为 `github.com` 的 Git 令牌（需要设置 `EOS_MASTER_KEY`）。令牌只由平台的 git 进程使用，不进数据目录。推分支和开 PR 是路线图第 2 项后面的 PR。
+- **容器里的路径**：自己先克隆进去。为了不和平台的镜像混在一起，建议放在 `/data/repos/local/` 下：
 
-私有仓库的克隆和推送要等路线图第 2 项（GitHub 接入）由平台持有令牌来做。在那之前，不要把令牌写进仓库的 remote URL，agent 能读到它。
+  ```bash
+  docker compose exec eos git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>
+  ```
+
+  不要把令牌写进这种仓库的 remote URL：agent 能读整个 `/data`（见下面的「沙箱」）。
 
 ## 执行器环境
 

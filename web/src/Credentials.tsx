@@ -74,7 +74,7 @@ export function Credentials() {
         <label>
           <span>名字</span>
           <input value={name} onChange={e => setName(e.target.value.trim())} placeholder="例如 deepseek、github.com" required spellCheck={false} />
-          <small className="muted">小写字母、数字和 . _ -；和已有的名字相同时替换它（类型默认沿用原来的）。</small>
+          <small className="muted">小写字母、数字和 . _ - :；和已有的名字相同时替换它（类型默认沿用原来的）。</small>
         </label>
         <label>
           <span>类型</span>
