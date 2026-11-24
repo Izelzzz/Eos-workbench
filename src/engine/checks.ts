@@ -2,7 +2,7 @@
 import type { Check, PlatformAction } from '../workflow/types.ts'
 import type { CheckResult } from './types.ts'
 
-const PLATFORM: Record<PlatformAction, string> = { push: '平台把任务分支推到远程仓库' }
+const PLATFORM: Record<PlatformAction, string> = { push: '平台把任务分支推到远程仓库', 'pull-request': '平台推送任务分支并开 PR（已经有就复用）' }
 
 export const describeCheck = (c: Check): string =>
   c.kind === 'file'

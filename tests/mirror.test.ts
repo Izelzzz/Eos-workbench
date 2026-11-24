@@ -318,7 +318,7 @@ test('平台动作 push：任务跑完后远程有同名分支，提交和任务
   const check = task.log.filter(e => e.type === 'check').at(-1) as Extract<(typeof task.log)[number], { type: 'check' }>
   const push = check.results.find(x => x.check.kind === 'platform')!
   assert.equal(push.passed, true)
-  assert.deepEqual(push.links, [{ label: `分支 ${meta.branch}`, url: `${r.url}/tree/eos/${id}` }])
+  assert.deepEqual(push.links, [{ label: `分支 ${meta.branch}`, url: `${r.url}/tree/eos/${id}`, kind: 'branch' }])
   assert.deepEqual(linksOf(task), push.links, '任务页显示这个链接')
   assert.match(push.detail, new RegExp(`已把分支 ${meta.branch}（${local.slice(0, 12)}）推到`))
   const header = Buffer.from(`x-access-token:${TOKEN}`).toString('base64')
@@ -355,7 +355,7 @@ test('平台动作：本机仓库的任务跳过推送并写明原因；前面�
   const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-push-'))
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
   let pushed = 0
-  const platform = async (c: { kind: 'platform'; action: 'push' }) => { pushed++; return { check: c, passed: true, detail: '' } }
+  const platform = async (c: { kind: 'platform'; action: 'push' | 'pull-request' }) => { pushed++; return { check: c, passed: true, detail: '' } }
   const failed = await runChecks(dir, [{ kind: 'run', run: ['false'], timeoutSec: 5 }, { kind: 'platform', action: 'push' }], process.env, undefined, platform)
   assert.deepEqual(failed.map(x => [x.passed, x.detail]), [[false, failed[0]!.detail], [false, '前面的检查没有通过，这一步没有做']])
   assert.equal(pushed, 0)
@@ -480,4 +480,79 @@ test('agent 把任务分支移到别的历史上：基线不再是祖先，不�
   assert.equal(task.status, 'failed')
   assert.match(task.failure ?? '', new RegExp(`任务分支 ${branch} 已经不在基线 .* 之后`))
   assert.throws(() => remoteSha(r, branch))
+})
+
+const PR_FLOW = SHIP.replace('name: ship', 'name: ship-pr').replace('      - { platform: push }', '      - { platform: pull-request }')
+
+/** 跑一个开 PR 的任务：write 为 false 时开发不改任何文件。 */
+const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean; request?: string } = {}) => {
+  assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship-pr', content: PR_FLOW, actor: 'test' }, Date.now()).ok, true)
+  const executor = new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/review')) return PASS
+    if (o.write !== false) writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'feature.txt'), 'new\n')
+    return '改好了'
+  })
+  const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: o.request ?? '给首页加一个按钮\n点了以后跳到设置页' })) as { id: string }
+  const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  const result = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(x => x.check.kind === 'platform').at(-1)!
+  return { task, result, meta: r.store.meta(c.id), id: c.id }
+}
+const apiCalls = (r: Awaited<ReturnType<typeof remote>>) => r.requests().filter(q => q.path.startsWith('/api/')) as { path: string; method: string; auth: string | null; body?: Record<string, string> }[]
+
+test('平台动作 pull-request：推送后向默认分支开 PR，标题是需求第一行，检查结果带分支和 PR 两个链接', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const { task, result, meta, id } = await runPr(r)
+  assert.equal(task.status, 'done', task.failure)
+  assert.equal(meta.baseBranch, 'main')
+  assert.equal(result.passed, true)
+  assert.match(result.detail, /已开 PR #1：http:\/\/127\.0\.0\.1:\d+\/acme\/app\/pull\/1/)
+  assert.deepEqual(result.links?.map(l => [l.kind, l.label]), [['branch', `分支 ${meta.branch}`], ['pull-request', 'PR #1']])
+  assert.deepEqual(linksOf(task).map(l => l.kind), ['branch', 'pull-request'])
+  const posts = apiCalls(r).filter(q => q.method === 'POST')
+  assert.equal(posts.length, 1)
+  assert.deepEqual({ ...posts[0]!.body, body: undefined }, { title: '给首页加一个按钮', head: meta.branch, base: 'main', body: undefined })
+  assert.match(posts[0]!.body!.body!, new RegExp(`点了以后跳到设置页[\\s\\S]*由 Eos 平台开的 PR：任务 ${id}，分支 ${meta.branch}`))
+  assert.ok(apiCalls(r).every(q => q.auth === `Bearer ${TOKEN}`))
+  assert.equal(remoteSha(r, meta.branch), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim())
+})
+
+test('分支已经有打开的 PR（例如崩溃后重跑、人工先开了）：复用它，不开第二个', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const first = await runPr(r)
+  assert.equal(first.task.status, 'done')
+  // 同一个分支再开一次（重跑交付时平台就是这样调用的）。
+  const again = await r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: first.meta.branch, base: 'main', title: 'x', body: 'y' })
+  assert.deepEqual(again, { number: 1, url: first.result.links![1]!.url, reused: true })
+  assert.equal(apiCalls(r).filter(q => q.method === 'POST').length, 1, '只开过一个 PR')
+})
+
+test('任务没有改动：推送了，但不开 PR，算通过并写明原因；本机仓库的任务跳过推送和开 PR', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const { task, result } = await runPr(r, { write: false })
+  assert.equal(task.status, 'done', task.failure)
+  assert.match(result.detail, /任务分支和 main 没有差别，没有开 PR/)
+  assert.deepEqual(result.links?.map(l => l.kind), ['branch'])
+})
+
+test('开 PR 被拒（令牌不对）：报中文原因，不含令牌；推送已经做了，分支链接照样给出', async () => {
+  const r = await remote(TOKEN)
+  const repo = r.forge.parse(r.url)!
+  await assert.rejects(r.forge.openPullRequest(repo, 'wrong-token', { head: 'x', base: 'main', title: 't', body: 'b' }), (e: Error) => {
+    assert.match(e.message, new RegExp(`${r.credential} 拒绝了令牌：凭据「${r.credential}」里的令牌无效或已过期`))
+    assert.ok(!e.message.includes('wrong-token'))
+    return true
+  })
+  await assert.rejects(r.forge.openPullRequest(repo, undefined, { head: 'x', base: 'main', title: 't', body: 'b' }), /凭据「.*」不存在，开 PR 需要令牌/)
+})
+
+test('standard 工作流的交付阶段是平台开 PR；它能通过解析', async () => {
+  const r = await remote(undefined)
+  const resolved = r.sup.conventions.resolve('standard')
+  assert.ok(resolved.ok, JSON.stringify(resolved))
+  const deliver = resolved.workflow.nodes.find(n => n.id === 'deliver')!
+  assert.deepEqual(deliver.checks, [{ kind: 'platform', action: 'pull-request' }])
 })

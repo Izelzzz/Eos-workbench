@@ -154,6 +154,7 @@ function TaskPage(props: { id: string }) {
     walk(task.trace)
     setOpen(all)
   }
+  const prLink = task.links.findLast(l => l.kind === 'pull-request')
   return (
     <div className="task-page">
       <section className="summary">
@@ -217,7 +218,7 @@ function TaskPage(props: { id: string }) {
         </div>
       </section>
       <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />
-      <Changes id={task.id} version={r.calls} />
+      <Changes id={task.id} version={r.calls} {...(prLink === undefined ? {} : { pr: prLink })} />
       <div className="toolbar">
         <button onClick={expandAll}>全部展开</button>
         <button onClick={() => setOpen(defaultOpen(task.trace))}>收起到调用</button>

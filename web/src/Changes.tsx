@@ -42,8 +42,15 @@ function FileDiffView(props: { id: string; head: string; file: FileChange }) {
   )
 }
 
-/** version 变了就重新加载（平台在开发每次回复后提交，用已完成的调用数作为版本）；加载失败每 3 秒重试。 */
-export function Changes(props: { id: string; version: number }) {
+/** 改动超过这么多文件或行，有 PR 时提示到 PR 页面看 diff（那里有逐行评论、按文件折叠等）。 */
+export const LARGE_FILES = 20
+export const LARGE_LINES = 1000
+
+/**
+ * version 变了就重新加载（平台在开发每次回复后提交，用已完成的调用数作为版本）；加载失败每 3 秒重试。
+ * pr：平台开的 PR 的地址，改动很大时提示去那里看。
+ */
+export function Changes(props: { id: string; version: number; pr?: { label: string; url: string } }) {
   const [data, setData] = useState<TaskChanges>()
   const [error, setError] = useState<string>()
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -77,6 +84,9 @@ export function Changes(props: { id: string; version: number }) {
               相对基线 <span className="mono">{data.base.slice(0, 12)}</span>：{data.files.length + data.omitted} 个文件，<span className="diff-add">+{add}</span> <span className="diff-del">-{del}</span>
               {data.omitted > 0 && `（文件太多，只列出前 ${data.files.length} 个，增删行数也只算这些）`}
             </p>
+            {props.pr !== undefined && (data.files.length + data.omitted > LARGE_FILES || add + del > LARGE_LINES) && (
+              <p className="notice">改动较大，建议到 <a href={props.pr.url} target="_blank" rel="noreferrer">{props.pr.label}</a> 的页面看 diff（可以逐行评论）。</p>
+            )}
             <ul className="change-files">
               {data.files.map(f => (
                 <li key={f.path}>
