@@ -1,6 +1,6 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
 import { describeCheck } from './engine/checks.ts'
-import { existsSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -8,7 +8,8 @@ import { describePosition } from './engine/machine.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { DshExecutor } from './executor/dsh.ts'
+import { DshExecutor, dshInstall } from './executor/dsh.ts'
+import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
@@ -26,13 +27,15 @@ const HELP = `用法：
   eos log <任务>                                          完整对话记录与耗时、token 统计
   eos abort <任务>                                        中止任务
   eos workflows                                           列出内置工作流
+  eos doctor                                              检查运行环境（Node、API key、git、数据目录、dsh）
   eos web [--port 4317]                                   打开 Web 界面（任务列表与 trace 详情）
   eos improve [--workflow standard] [--tasks <id,…>]      从已结束的任务归纳证据，生成改进提案（待审批）
   eos proposals                                           列出改进提案
   eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
   eos reject <提案号> "<理由>"                             拒绝
 
-选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）`
+选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
+run、resume、retry、improve、web 启动前会做同样的环境检查：有 ✗ 不启动，只有 ⚠ 时提示后照常启动。`
 
 const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_user: '等待回答', done: '已完成', failed: '失败', aborted: '已中止' }
 
@@ -42,19 +45,33 @@ const { values, positionals } = parseArgs({
 })
 
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
-mkdirSync(dataDir, { recursive: true })
-const store = new Store(join(dataDir, 'eos.db'))
 const say = (s: string): void => void process.stdout.write(`${s}\n`)
 const fail = (s: string): never => {
   process.stderr.write(`${s}\n`)
   process.exit(1)
 }
 
-const dshBin = (): string => {
-  const bin = join(import.meta.dirname, '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
-  if (!existsSync(bin)) fail(`找不到 dsh：${bin}，先运行 npm install`)
-  return bin
+// 启动检查在打开数据库之前做：数据目录不可写时也能给出看得懂的说明。
+const ROOT = join(import.meta.dirname, '..')
+/** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
+const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
+if (positionals[0] === 'doctor' && !values.help) {
+  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
+  say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
+  // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
+  process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
+if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
+  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
+  const bad = items.filter(i => i.status === 'fail')
+  if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
+  const warned = items.filter(i => i.status === 'warn')
+  if (warned.length > 0) process.stderr.write(`启动前检查有提示（照常启动）：\n${formatItems(warned)}\n\n`)
+}
+mkdirSync(dataDir, { recursive: true })
+const store = new Store(join(dataDir, 'eos.db'))
+
+const dshBin = (): string => dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install')
 
 const taskOf = (id: string | undefined): Task => {
   if (id === undefined) return fail('需要任务 id')

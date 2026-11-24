@@ -22,6 +22,21 @@ import type { ToolGroup } from '../workflow/types.ts'
 import type { AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
+
+/**
+ * 装在 root/node_modules 里的 dsh：启动文件和版本。没装好（启动文件或 package.json 缺失、读不出版本）时返回 undefined。
+ * 启动检查和命令行都从这里拿 dsh 的位置，别的模块不自己拼 dsh 的路径。
+ */
+export const dshInstall = (root: string): { bin: string; version: string } | undefined => {
+  const dir = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+  const bin = join(dir, 'lib', 'bin.js')
+  try {
+    const version: unknown = (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: unknown }).version
+    return existsSync(bin) && typeof version === 'string' ? { bin, version } : undefined
+  } catch {
+    return undefined
+  }
+}
 const PRESET: Record<AgentSpec['write'], string> = { none: 'read-only', worktree: 'workspace-write' }
 
 /**
