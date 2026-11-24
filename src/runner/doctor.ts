@@ -68,12 +68,12 @@ const masterKeyItem = (f: Facts): Item =>
 const sandboxItem = (f: Facts): Item => {
   const name = '沙箱'
   switch (f.sandbox.backend) {
-    case 'bwrap': return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间和私有 /tmp 里' }
+    case 'bwrap': return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
     case 'landlock': return f.sandbox.enforcement === 'full'
       ? { name, status: 'ok', detail: 'Landlock（bwrap 用不了）：agent 只能写自己的 worktree 和 /tmp，读不到别的进程的环境；看得到进程列表，各任务共用 /tmp' }
       : { name, status: 'warn', detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）', fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）' }
     case 'none': return { name, status: 'fail', detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来', fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）' }
-    case 'platform': return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱，这里不探测` }
+    case 'platform': return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
   }
 }
 

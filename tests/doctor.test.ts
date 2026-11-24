@@ -59,7 +59,7 @@ test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显�
 test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分）、都不可用、非 Linux', () => {
   const sandbox = (s: Facts['sandbox']) => evaluate({ ...good, sandbox: s }).find(i => i.name === '沙箱')!
   assert.equal(sandbox({ backend: 'bwrap' }).status, 'ok')
-  assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间和私有 \/tmp/)
+  assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间里；能写的 agent 有私有的 \/tmp，只读的 agent 看到的是共用的 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'full' }).status, 'ok')
   assert.match(sandbox({ backend: 'landlock', enforcement: 'full' }).detail, /^Landlock（bwrap 用不了）.*读不到别的进程的环境.*各任务共用 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'partial' }).status, 'warn')

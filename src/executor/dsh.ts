@@ -55,7 +55,7 @@ export const dshSandbox = (platform: string = process.platform): DshSandbox => {
   if (platform !== 'linux') return { backend: 'platform', platform }
   const bwrap = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'true'], { stdio: 'ignore', timeout: 5000 })
   if (bwrap.status === 0) return { backend: 'bwrap' }
-  const landlock = probeLandlock()
+  const landlock = probeLandlock(undefined, { timeoutMs: 5000 }) // 和 dsh 自己探测的超时一致（probeTimeoutMs 默认 5000），机器忙时不会误判成不可用
   return landlock === 'unusable' ? { backend: 'none' } : { backend: 'landlock', enforcement: landlock }
 }
 
