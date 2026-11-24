@@ -125,7 +125,7 @@ test('a live call returns its reply only when the last turn completed, trusting 
 })
 
 /** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
-const fakeHarnesses = (closeMs = 0) => {
+const fakeHarnesses = (closeMs = 0, block: (cwd: string | undefined) => Promise<void> | undefined = () => undefined) => {
   const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; key?: string; closed: boolean; resumed: string[] }[] = []
   const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; env?: NodeJS.ProcessEnv }) => {
     const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, key: o.env?.DEEPSEEK_API_KEY, closed: false, resumed: [] as string[] }
@@ -133,7 +133,7 @@ const fakeHarnesses = (closeMs = 0) => {
     const session = (id: string) => ({
       id,
       setWorkingDirectory: async () => {},
-      run: async (input: string) => ({ finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
+      run: async (input: string) => (input.startsWith('/') ? undefined : await block(o.cwd), { finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
         events: [{ type: 'turn/end', time: 1, data: { reason: { kind: 'completed' } } }] }),
     })
     const resumeSession = async (id: string) => {
@@ -149,7 +149,7 @@ const fakeHarnesses = (closeMs = 0) => {
   return { created, createHarness }
 }
 
-test('after the model key changes, the next call closes the old dsh process for that worktree and starts one with the new key', async () => {
+test('after the model key changes, the next call closes every idle dsh process holding the old key and starts one with the new key', async () => {
   const { created, createHarness } = fakeHarnesses()
   let key = 'sk-old-key-000000'
   const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => key, createHarness })
@@ -160,15 +160,46 @@ test('after the model key changes, the next call closes the old dsh process for 
   assert.equal(created.length, 2, '同一个 key：进程复用')
   key = 'sk-new-key-111111'
   await send('/data/worktrees/t1', 'c3')
-  assert.equal(created.length, 3)
   assert.deepEqual(created.map(c => [c.cwd, c.key, c.closed]), [
     ['/data/worktrees/t1', 'sk-old-key-000000', true],
-    ['/data/worktrees/t2', 'sk-old-key-000000', false],
+    ['/data/worktrees/t2', 'sk-old-key-000000', true],
     ['/data/worktrees/t1', 'sk-new-key-111111', false],
-  ])
+  ], '别的工作目录里空闲的旧 key 进程也关掉')
   await send('/data/worktrees/t2', 'c2')
-  assert.equal(created[1]!.closed, true, 't2 的下一次调用也换成新 key')
   assert.equal(created[3]!.key, 'sk-new-key-111111')
+  await ex.close()
+})
+
+test('a key change does not close a process with a call still running; that worktree switches on its next call', async () => {
+  let open: () => void = () => {}
+  const gate = new Promise<void>(r => { open = r })
+  const { created, createHarness } = fakeHarnesses(0, cwd => (cwd === '/data/worktrees/t2' ? gate : undefined))
+  let key = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => key, createHarness })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  const waiting = send('/data/worktrees/t2', 'c1')
+  await new Promise(r => setTimeout(r, 10))
+  key = 'sk-new-key-111111'
+  await send('/data/worktrees/t1', 'c1')
+  assert.equal(created[0]!.closed, false, 't2 的调用还在跑，不打断')
+  open()
+  await waiting
+  await send('/data/worktrees/t2', 'c2')
+  assert.equal(created[0]!.closed, true)
+  assert.equal(created.at(-1)!.key, 'sk-new-key-111111')
+  await ex.close()
+})
+
+test('when the model key is deleted (no fallback), idle dsh processes are closed and the call fails', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  let key: string | undefined = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness, modelKey: () => { if (key === undefined) throw new Error('没有可用的模型 API key'); return key } })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  await send('/data/worktrees/t1', 'c1')
+  await send('/data/worktrees/t2', 'c1')
+  key = undefined
+  await assert.rejects(send('/data/worktrees/t1', 'c2'), /没有可用的模型 API key/)
+  assert.deepEqual(created.map(c => c.closed), [true, true])
   await ex.close()
 })
 

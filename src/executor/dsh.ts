@@ -7,7 +7,7 @@
 // - 续接会话前核对会话头里记录的工作区：不是这个任务的 worktree（例如修复写入范围之前创建的会话）就拒绝续接。
 // - 会话 id 由 key 确定性地算出，进程崩溃后总能找回同一个会话。
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -352,6 +352,10 @@ export class DshExecutor implements Executor {
   private readonly asks = new Map<string, AskHandler>()
   /** 正在关闭的进程，按工作目录：同一个 worktree 的新进程要等旧进程退出（否则会话锁还被它占着）。 */
   private readonly closing = new Map<string, Promise<unknown>>()
+  /** 每个工作目录正在跑的调用数：换 key 时只关掉没有调用在跑的旧进程，不打断进行中的调用。 */
+  private readonly running = new Map<string, number>()
+  /** key 的指纹用 HMAC 加本进程的随机盐：不在内存里留一个能拿来比对猜测的、稳定的 key 哈希。 */
+  private readonly keySalt = randomBytes(32)
 
   constructor(private readonly opts: {
     dshHome: string
@@ -479,10 +483,18 @@ export class DshExecutor implements Executor {
 
   private async session(key: string, spec: AgentSpec): Promise<HarnessSession> {
     const id = sessionIdFor(key)
-    const modelKey = this.opts.modelKey()
-    const keyId = createHash('sha256').update(modelKey).digest('hex')
-    // 换了 key：这个工作目录的旧进程还拿着旧 key，关掉重起（会话从日志续接）。同一个工作目录的调用一个接一个，这时它没有在跑的调用。
-    if ([...this.harnesses.values()].some(v => v.cwd === spec.cwd && v.keyId !== keyId)) await this.release(spec.cwd)
+    let modelKey: string
+    try {
+      modelKey = this.opts.modelKey()
+    } catch (e) {
+      // key 被删了（或读不出来）：没有调用在跑的进程都关掉，不让它们继续拿着旧 key，再报错。
+      await this.releaseIdle(() => true, spec.cwd)
+      throw e
+    }
+    const keyId = createHmac('sha256', this.keySalt).update(modelKey).digest('hex')
+    // 换了 key：没有调用在跑的旧 key 进程都关掉（包括别的工作目录的），之后的调用用新 key 重起，会话从日志续接。
+    // 有调用在跑的进程（例如 agent 在等用户回答）等它的调用结束后，下一次调用时再换。
+    if ([...this.harnesses.values()].some(v => v.keyId !== keyId)) await this.releaseIdle(v => v.keyId !== keyId, spec.cwd)
     const known = this.open.get(id)
     if (known !== undefined) return known.s
     await this.closing.get(spec.cwd)
@@ -509,6 +521,24 @@ export class DshExecutor implements Executor {
   }
 
   async send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
+    const cwd = p.spec.cwd
+    this.running.set(cwd, (this.running.get(cwd) ?? 0) + 1)
+    try {
+      return await this.sendIn(p)
+    } finally {
+      const n = (this.running.get(cwd) ?? 1) - 1
+      if (n === 0) this.running.delete(cwd)
+      else this.running.set(cwd, n)
+    }
+  }
+
+  /** 关掉满足条件、而且所在工作目录没有调用在跑的进程（调用自己的工作目录计数里不算它自己）。 */
+  private async releaseIdle(match: (v: { cwd: string; keyId: string }) => boolean, self?: string): Promise<void> {
+    const cwds = new Set([...this.harnesses.values()].filter(v => match(v) && (this.running.get(v.cwd) ?? 0) <= (v.cwd === self ? 1 : 0)).map(v => v.cwd))
+    await Promise.all([...cwds].map(cwd => this.release(cwd)))
+  }
+
+  private async sendIn(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     const s = await this.session(p.key, p.spec)
     this.asks.set(s.id, p.ask)
     const started = Date.now()
