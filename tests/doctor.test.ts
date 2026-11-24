@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { atLeast, evaluate, formatItems, gather, type Facts } from '../src/runner/doctor.ts'
 
 const ROOT = join(import.meta.dirname, '..')
-const tmp = () => mkdtempSync(join(ROOT, 'node_modules', '.eos-doctor-'))
+const dirs: string[] = []
+after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) })
+const tmp = () => {
+  const d = mkdtempSync(join(ROOT, 'node_modules', '.eos-doctor-'))
+  dirs.push(d)
+  return d
+}
 const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', apiKey: true, git: { version: '2.43.0' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
 
 test('版本比较按主、次、修订号', () => {
@@ -68,7 +74,9 @@ test('eos doctor 逐项列出结果，有 ✗ 时退出码不为 0', () => {
   assert.match(r.stdout, new RegExp(`^Eos 环境检查（数据目录 ${data.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}）`))
   for (const name of ['Node', 'DeepSeek API key', 'git', '数据目录', 'dsh']) assert.match(r.stdout, new RegExp(`[✓⚠✗] ${name}：`))
   assert.match(r.stdout, /✗ DeepSeek API key[\s\S]*怎么修/)
-  assert.match(cli(['doctor', '--data', data], { DEEPSEEK_API_KEY: 'k' }).stdout, /✓ DeepSeek API key/)
+  const withKey = cli(['doctor', '--data', data], { DEEPSEEK_API_KEY: 'k' })
+  assert.match(withKey.stdout, /✓ DeepSeek API key/)
+  assert.equal(withKey.status, 0, '没有 ✗ 时退出码为 0（Node 版本不够只是 ⚠）')
 })
 
 test('doctor --help 显示帮助，不跑检查', () => {
