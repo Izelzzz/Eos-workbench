@@ -78,7 +78,6 @@ const sameOrigin = (req: IncomingMessage): boolean => {
   return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
 }
 
-/** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
 export const LOG_TAIL = 2 * 1024 * 1024
 
@@ -96,6 +95,7 @@ const tail = (path: string, max: number): string => {
   }
 }
 
+/** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
 export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string } }): Server => {
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
   const replayed = new Map<string, TraceEvent[]>()
@@ -121,6 +121,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...summaryOf(task), request: task.request, position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
+      logPath: o.supervisor.logPath(id),
       branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),

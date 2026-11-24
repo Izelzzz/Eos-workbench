@@ -107,13 +107,12 @@ test('a failing call leaves the task failed and retryable', async () => {
   const ex = new FakeExecutor(async () => { throw new Error('连接被重置\n    at socket (net.js:1)') })
   const details: string[] = []
   const lines: string[] = []
-  const task: Task = await runTask('t', { store, executor: ex, pollMs: 1, logPath: '/data/logs/t.log', detail: d => details.push(d), log: l => lines.push(l) })
+  const task: Task = await runTask('t', { store, executor: ex, pollMs: 1, detail: d => details.push(d), log: l => lines.push(l) })
   assert.equal(task.status, 'failed')
   assert.equal(task.failure, [
     '哪一步：[plan] planner · produce（调用 c1）',
     '原因：连接被重置',
     '怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t',
-    '日志：/data/logs/t.log',
   ].join('\n'))
   assert.deepEqual(lines.filter(l => l.startsWith('✗')), ['✗ [plan] planner · produce（调用 c1）：连接被重置'], '终端只打一行')
   assert.match(details.join('\n'), /完整错误：\n[\s\S]*at socket \(net\.js:1\)/, '完整错误只进日志文件')
@@ -157,10 +156,10 @@ test('a trace write that fails does not break the agent call', async () => {
 test('a commit that fails after a developer turn fails the call visibly instead of stopping the runner silently', async () => {
   (reviewOnce as any).n = 0
   const { store } = setup()
-  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw new Error('fatal: not a git repository') } })
+  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw Object.assign(new Error('git failed'), { stderr: 'hint: something\nfatal: not a git repository' }) } })
   assert.equal(task.status, 'failed')
   assert.match(task.failure ?? '', /^哪一步：\[build\] dev · produce（调用 c2）\n原因：提交改动失败：fatal: not a git repository\n怎么修：任务的 worktree 被删除或损坏/)
-  assert.match(task.failure ?? '', /\n日志：（没有日志文件）$/)
+  assert.doesNotMatch(task.failure ?? '', /日志：/)
   assert.equal(task.pending?.node, 'build', 'the developer call is kept for retry')
 })
 

@@ -88,7 +88,7 @@ export class Supervisor {
     }
     appendLog(logPath, `runner 开始（进程 ${process.pid}，${this.o.actor ?? 'cli'}）`)
     const done = runTask(id, {
-      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, logPath, detail: text => appendLog(logPath, text),
+      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, detail: text => appendLog(logPath, text),
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
       // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。

@@ -10,7 +10,7 @@ import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor, dshInstall } from './executor/dsh.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
-import { appendLog, processLogPath } from './runner/logs.ts'
+import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
@@ -87,7 +87,7 @@ const showQuestion = (t: Task) => {
 
 const summary = (t: Task) => {
   say(`\n任务 ${t.id}：${STATUS[t.status]} · ${describePosition(t)}`)
-  if (t.failure !== undefined) say(`失败原因\n${t.failure}${t.failure.includes('eos -- retry') ? '' : `\n重试：npm run eos -- retry ${t.id}`}`)
+  if (t.failure !== undefined) say(`失败原因\n${t.failure}${t.failure.includes('eos -- retry') ? '' : `\n重试：npm run eos -- retry ${t.id}`}\n日志：${taskLogPath(dataDir, t.id)}`)
   showQuestion(t)
   if (t.status === 'done') {
     const meta = store.meta(t.id)
