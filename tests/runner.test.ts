@@ -104,10 +104,18 @@ test('after a crash while waiting for an answer, the resent call reuses the open
 
 test('a failing call leaves the task failed and retryable', async () => {
   const { store } = setup()
-  const ex = new FakeExecutor(async () => { throw new Error('连接被重置') })
-  const task: Task = await runTask('t', { store, executor: ex, pollMs: 1 })
+  const ex = new FakeExecutor(async () => { throw new Error('连接被重置\n    at socket (net.js:1)') })
+  const details: string[] = []
+  const lines: string[] = []
+  const task: Task = await runTask('t', { store, executor: ex, pollMs: 1, detail: d => details.push(d), log: l => lines.push(l) })
   assert.equal(task.status, 'failed')
-  assert.equal(task.failure, '连接被重置')
+  assert.equal(task.failure, [
+    '哪一步：[plan] planner · produce（调用 c1）',
+    '原因：连接被重置',
+    '怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t',
+  ].join('\n'))
+  assert.deepEqual(lines.filter(l => l.startsWith('✗')), ['✗ [plan] planner · produce（调用 c1）：连接被重置'], '终端只打一行')
+  assert.match(details.join('\n'), /完整错误：\n[\s\S]*at socket \(net\.js:1\)/, '完整错误只进日志文件')
   assert.equal(store.dispatch('t', { kind: 'retry' }, 9, 'cli').accepted, true)
 })
 
@@ -148,9 +156,10 @@ test('a trace write that fails does not break the agent call', async () => {
 test('a commit that fails after a developer turn fails the call visibly instead of stopping the runner silently', async () => {
   (reviewOnce as any).n = 0
   const { store } = setup()
-  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw new Error('fatal: not a git repository') } })
+  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw Object.assign(new Error('git failed'), { stderr: 'hint: something\nfatal: not a git repository' }) } })
   assert.equal(task.status, 'failed')
-  assert.equal(task.failure, '提交改动失败：fatal: not a git repository')
+  assert.match(task.failure ?? '', /^哪一步：\[build\] dev · produce（调用 c2）\n原因：提交改动失败：fatal: not a git repository\n怎么修：任务的 worktree 被删除或损坏/)
+  assert.doesNotMatch(task.failure ?? '', /日志：/)
   assert.equal(task.pending?.node, 'build', 'the developer call is kept for retry')
 })
 
@@ -261,4 +270,20 @@ test('before reverting a writer’s changes the runner first ends the agent’s 
   assert.ok(order.length >= 4, order.join(' / '))
   for (let i = 0; i < order.length; i += 2) assert.deepEqual(order.slice(i, i + 2), ['end processes dev', 'revert dev'])
   assert.ok(!order.some(o => / (planner|rev)$/.test(o)), 'read-only roles neither end processes nor revert')
+})
+
+test('检查起不来：原因只取关键的一行并保留前缀，修法对应检查命令；worktree 不在时认成 worktree 损坏', async () => {
+  for (const [message, reason, fix] of [
+    ['spawn failed\nerror: npm not found', '检查无法执行：error: npm not found', /检查命令起不来/],
+    ['worktree 不存在：/w', '检查无法执行：worktree 不存在：/w', /worktree 被删除或损坏/],
+  ] as const) {
+    const path = dbPath()
+    const store = new Store(path)
+    store.create({ id: 't', request: '需求', workflow: workflow({ maxRounds: 2, escalate: true, checks: 'only' }), workflowSource: 'yaml', meta }, 0)
+    const task = await runTask('t', { store, executor: new FakeExecutor(async () => '回复'), pollMs: 1, afterWrite: () => [], checker: async () => { throw new Error(message) } })
+    assert.equal(task.status, 'failed')
+    const lines = (task.failure ?? '').split('\n')
+    assert.equal(lines[1], `原因：${reason}`)
+    assert.match(lines[2] ?? '', fix)
+  }
 })

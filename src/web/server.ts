@@ -1,6 +1,6 @@
 // Web 服务：JSON 接口 + 前端静态文件。只监听本机地址；第一版没有登录。
 // 写接口（新建任务、回答、继续、重试、中止）都要求 JSON 请求体和同源 Origin，挡住其他网页向 127.0.0.1 发的跨站请求。
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
@@ -78,6 +78,26 @@ const sameOrigin = (req: IncomingMessage): boolean => {
   return origin !== undefined && req.headers.host !== undefined && origin === `http://${req.headers.host}`
 }
 
+/** 日志接口最多返回的字节数（从文件末尾算）。 */
+export const LOG_TAIL = 2 * 1024 * 1024
+
+export const tail = (path: string, max: number): string => {
+  const size = statSync(path).size
+  if (size <= max) return readFileSync(path, 'utf8')
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.alloc(max)
+    const n = readSync(fd, buf, 0, max, size - max)
+    const text = buf.subarray(0, n).toString('utf8')
+    // 从中间截断：丢掉第一个换行之前的半行；没有换行时去掉开头被截断的半个字符（解码成的替换字符）。
+    const nl = text.indexOf('\n')
+    const body = nl < 0 ? text.replace(/^\uFFFD+/, '') : text.slice(nl + 1)
+    return `（日志共 ${size} 字节，只显示最后 ${max} 字节；完整日志：${path}）\n${body}`
+  } finally {
+    closeSync(fd)
+  }
+}
+
 /** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
 export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string } }): Server => {
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
@@ -104,6 +124,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...summaryOf(task), request: task.request, position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
+      logPath: o.supervisor.logPath(id),
       branch: meta.branch, worktree: meta.worktree, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
@@ -324,6 +345,15 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
           return task === undefined ? [] : [{ task, metrics: taskMetrics(task, sampleAt(task, now), s.createdAt) }]
         })
         return json(res, 200, insights(samples))
+      }
+      const lg = /^\/api\/tasks\/([\w-]+)\/log$/.exec(url.pathname)
+      if (lg) {
+        if (o.store.get(lg[1]!) === undefined) return json(res, 404, { error: `没有任务 ${lg[1]}` })
+        // 日志在平台所在的机器上：浏览器里直接看，团队成员不用登录服务器。只返回最后 LOG_TAIL 字节。
+        const path = o.supervisor.logPath(lg[1]!)
+        const text = existsSync(path) ? tail(path, LOG_TAIL) : `（还没有日志：${path}）\n`
+        res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
+        return void res.end(text)
       }
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
       if (m) {

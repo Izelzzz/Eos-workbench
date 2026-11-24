@@ -1,0 +1,28 @@
+2026-11-24T05:46:52.373Z Eos Web：http://127.0.0.1:4341（数据目录 /home/user/eos-pr3/.eos/logs-e2e/data，日志 /home/user/eos-pr3/.eos/logs-e2e/data/logs/eos.log，Ctrl+C 退出）
+2026-11-24T05:46:53.105Z [t261124054653hsm] → [spec] spec-writer · produce
+2026-11-24T05:46:56.152Z [t261124054653hsm] ✗ [spec] spec-writer · produce（调用 c1）：dsh profile "sdk": DeepSeek Harness runtime exited
+2026-11-24T05:46:57.989Z [t261124054653hsm] → [spec] spec-writer · produce
+2026-11-24T05:47:15.167Z [t261124054653hsm]   已提交 693e558
+2026-11-24T05:47:15.168Z [t261124054653hsm] ✓ [spec] spec-writer · produce：14.6s，输入 2324，输出 1701，缓存读 38016
+2026-11-24T05:47:15.170Z [t261124054653hsm] → [spec] 检查（1 项）
+2026-11-24T05:47:15.171Z [t261124054653hsm] ✓ [spec] 检查：1/1 项通过
+2026-11-24T05:47:15.172Z [t261124054653hsm] → [build] developer · produce
+2026-11-24T05:47:29.726Z [t261124054653hsm]   已提交 a747349
+2026-11-24T05:47:29.726Z [t261124054653hsm] ✓ [build] developer · produce：12.2s，输入 3004，输出 1242，缓存读 39040
+2026-11-24T05:47:29.728Z [t261124054653hsm] → [build] 检查（1 项）
+2026-11-24T05:47:29.729Z [t261124054653hsm] ✓ [build] 检查：1/1 项通过
+2026-11-24T05:47:29.730Z [t261124054653hsm] → [test 第 1 轮] 检查（1 项）
+2026-11-24T05:47:29.906Z [t261124054653hsm] ✓ [test 第 1 轮] 检查：1/1 项通过
+2026-11-24T05:47:29.909Z [t261124054653hsm] → [review 第 1 轮] 检查（1 项）
+2026-11-24T05:47:30.090Z [t261124054653hsm] ✓ [review 第 1 轮] 检查：1/1 项通过
+2026-11-24T05:47:30.093Z [t261124054653hsm] → [review 第 1 轮] reviewer · critique
+2026-11-24T05:47:45.797Z [t261124054653hsm] ✓ [review 第 1 轮] reviewer · critique：13.4s，输入 3604，输出 1711，缓存读 24576
+2026-11-24T05:47:45.801Z [t261124054653hsm] → [deliver 第 1 轮] 检查（1 项）
+2026-11-24T05:47:45.804Z [t261124054653hsm] ✓ [deliver 第 1 轮] 检查：1/1 项通过
+2026-11-24T05:47:46.215Z [t261124054746ygg] → [spec] spec-writer · produce
+2026-11-24T05:48:05.763Z [t261124054746ygg]   已提交 dc10d56
+2026-11-24T05:48:05.763Z [t261124054746ygg] ✓ [spec] spec-writer · produce：17.0s，输入 2055，输出 1941，缓存读 34048
+2026-11-24T05:48:05.764Z [t261124054746ygg] → [spec] 检查（1 项）
+2026-11-24T05:48:05.765Z [t261124054746ygg] ✓ [spec] 检查：1/1 项通过
+2026-11-24T05:48:05.766Z [t261124054746ygg] → [build] developer · produce
+2026-11-24T05:48:08.026Z [t261124054746ygg] ✗ [build] developer · produce（调用 c3）：working-directory: directory does not exist: "/home/user/eos-pr3/.eos/logs-e2e/data/worktrees/t261124054746ygg"

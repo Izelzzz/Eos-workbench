@@ -17,6 +17,8 @@ export type TaskDetail = {
   position: string
   question?: Question
   failure?: string
+  /** 这个任务的日志文件（平台所在机器上的路径，只用来显示；内容用 /api/tasks/:id/log 看）。 */
+  logPath: string
   branch: string
   worktree: string
   report: Report

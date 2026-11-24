@@ -193,11 +193,17 @@ function TaskPage(props: { id: string }) {
         {LIVE.has(task.status) && !task.runnerAlive && (
           <p className="notice warn">没有程序在运行这个任务{task.question?.source === 'agent' ? '（这个提问来自上一次运行，回答后点「继续」）' : ''}。点「继续」接着跑。</p>
         )}
-        {task.failure && <div className="failure"><b>失败原因</b>：{task.failure}</div>}
+        {task.failure && (
+          <div className="failure" role="alert">
+            <b>失败原因</b>
+            <div className="failure-text">{task.failure}{'\n'}日志：<span className="mono">{task.logPath}</span>（<a href={`/api/tasks/${encodeURIComponent(task.id)}/log`} target="_blank" rel="noreferrer">查看日志</a>）</div>
+          </div>
+        )}
         <div className="actions">
           {LIVE.has(task.status) && !task.runnerAlive && <button className="primary" disabled={acting} onClick={() => void act('resume')}>继续</button>}
           {task.status === 'failed' && <button className="primary" disabled={acting} onClick={() => void act('retry')}>重试</button>}
           {LIVE.has(task.status) && <button disabled={acting} onClick={() => { if (confirm('中止这个任务？正在进行的这一轮会跑完，之后不再继续。')) void act('abort') }}>中止</button>}
+          <a className="button" href={`/api/tasks/${encodeURIComponent(task.id)}/log`} target="_blank" rel="noreferrer">查看日志</a>
         </div>
       </section>
       <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />

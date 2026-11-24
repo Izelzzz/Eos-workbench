@@ -11,6 +11,7 @@ import { runChecks } from './checks.ts'
 import { killProcessesIn } from './procs.ts'
 import { commitInScope, contextFor, createWorktree } from './git.ts'
 import { acquire, holder } from './lock.ts'
+import { appendLog, taskLogPath } from './logs.ts'
 import { runTask } from './runner.ts'
 
 export type CreateInput = { repo: string; workflow: string; request: string }
@@ -63,6 +64,11 @@ export class Supervisor {
     return { ok: true, id }
   }
 
+  /** 这个任务的日志文件（数据目录下的 logs/<任务>.log）。 */
+  logPath(id: string): string {
+    return taskLogPath(this.o.dataDir, id)
+  }
+
   /** 这个任务现在有没有 runner（本进程或别的进程）。 */
   running(id: string): boolean {
     return this.active.has(id) || holder(this.locksDir, id) !== undefined
@@ -74,9 +80,15 @@ export class Supervisor {
     if (this.active.has(id)) return { ok: false, error: '任务已经在运行' }
     const lock = acquire(this.locksDir, id)
     if ('heldBy' in lock) return { ok: false, error: `任务正在被进程 ${lock.heldBy} 运行` }
-    const log = (line: string) => this.o.log?.(id, line)
+    // 进度行既交给调用方（终端），也写进数据目录下的 logs/<任务>.log；详细错误只写文件。
+    const logPath = this.logPath(id)
+    const log = (line: string) => {
+      appendLog(logPath, line)
+      this.o.log?.(id, line)
+    }
+    appendLog(logPath, `runner 开始（进程 ${process.pid}，${this.o.actor ?? 'cli'}）`)
     const done = runTask(id, {
-      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log,
+      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, detail: text => appendLog(logPath, text),
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
       // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。
@@ -107,7 +119,10 @@ export class Supervisor {
       this.active.delete(id)
     })
     this.active.set(id, done)
-    done.catch(e => log(`✗ runner 出错：${(e as Error).message}`))
+    done.then(t => appendLog(logPath, `runner 结束：${t.status}`), e => {
+      log(`✗ runner 出错：${(e as Error).message}`)
+      appendLog(logPath, (e as Error).stack ?? String(e))
+    })
     return { ok: true, done }
   }
 

@@ -1,5 +1,6 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
 import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
+import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeFailures } from './checks.ts'
 import {
@@ -140,7 +141,8 @@ const reformat = (task: Task, d: DialogNode, at: number, again: (t: Task) => Tas
   const retries = task.dialog!.formatRetries
   const next = again(withDialog(task, { formatRetries: retries >= MAX_FORMAT_RETRIES ? 0 : retries + 1 }))
   if (retries < MAX_FORMAT_RETRIES) return next
-  return append({ ...next, status: 'failed', failure: `「${d.id}」的回复连续 ${retries + 1} 次无法解析` }, { type: 'note', at, node: d.id, text: '回复格式无法解析，任务暂停，等人工重试' })
+  return append({ ...next, status: 'failed', failure: explain({ where: `「${d.id}」的回复`, error: `连续 ${retries + 1} 次无法解析成要求的 JSON 格式`, task: task.id,
+    fix: '模型偶尔会这样：直接重试；反复出现时在日志里看它的原始回复，必要时调整这个角色的提示词' }) }, { type: 'note', at, node: d.id, text: '回复格式无法解析，任务暂停，等人工重试' })
 }
 
 /** 一轮评审没过：还有轮次就交回被评审方；用完了先请上游重新确认（一次），再问用户。 */
@@ -247,7 +249,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 
     case 'call_failed':
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
-      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${event.error}` }))
+      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${failureFacts(event.error)}` }))
 
     case 'asked': {
       if (task.pending === undefined || isCheck(task.pending) || task.pending.id !== event.call) return ignore(task, '不是当前这次调用')

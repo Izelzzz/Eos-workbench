@@ -125,6 +125,7 @@ test('an unparseable verdict is asked again, then the task fails with a ready ca
   }
   d.reply(GARBAGE)
   assert.equal(d.task.status, 'failed')
+  assert.match(d.task.failure ?? '', new RegExp(`^哪一步：「review」的回复\\n原因：连续 ${MAX_FORMAT_RETRIES + 1} 次无法解析成要求的 JSON 格式\\n怎么修：模型偶尔会这样：直接重试；.+npm run eos -- retry `), '和 runner 的失败用同一种三段格式')
   const ready = d.pending
   d.send({ kind: 'retry' })
   assert.equal(d.task.status, 'running')
@@ -262,4 +263,12 @@ test('整个 worktree 可写时不列 glob，也不附加核对路径的规则�
 
 test('要改的就是范围外的已有文件时，规则要求说明没做，不另造替代文件', () => {
   assert.match(scopeNotice(['ci.yml'], ['src/**']), /要改的就是范围外某个已有文件本身、换个位置没有意义时，不要另造替代文件，在回复里说明这一项没做和原因/)
+})
+
+test('调用失败时，日志里的说明只记哪一步和原因，不带修法', () => {
+  const d = new Driver(workflow({ maxRounds: 2, escalate: true }))
+  d.send({ kind: 'call_failed', call: d.pending.id, error: '哪一步：[plan] planner · produce（调用 c1）\n原因：网络断了\n怎么修：检查网络。处理后在任务页点「重试」' })
+  assert.equal(d.task.failure, '哪一步：[plan] planner · produce（调用 c1）\n原因：网络断了\n怎么修：检查网络。处理后在任务页点「重试」')
+  const note = d.task.log.findLast(e => e.type === 'note')
+  assert.equal(note?.type === 'note' ? note.text : '', '调用失败：哪一步：[plan] planner · produce（调用 c1）；原因：网络断了')
 })
