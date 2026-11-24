@@ -10,7 +10,9 @@ import type { AddressInfo } from 'node:net'
 const [root, token, record] = process.argv.slice(2) as [string, string, string]
 const expected = token === '-' ? undefined : `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
 
-type Pull = { number: number; head: string; base: string; title: string; body: string; state: 'open' }
+type Pull = { number: number; head: string; base: string; title: string; body: string; state: 'open' | 'closed'; merged_at: string | null; sha: string }
+/** 测试用的开关：hideNextList 让下一次查打开的 PR 返回空（模拟查和开之间别人刚开了一个）；failPost 让开 PR 返回这个状态码。 */
+const control = { hideNextList: false, failPost: 0 }
 const pulls: Pull[] = []
 let port = 0
 
@@ -26,9 +28,18 @@ const api = (req: import('node:http').IncomingMessage, res: import('node:http').
     const url = new URL(req.url ?? '/', 'http://localhost')
     const head = url.searchParams.get('head')
     const base = url.searchParams.get('base')
-    return reply(200, pulls.filter(p => (head === null || `${owner}:${p.head}` === head) && (base === null || p.base === base)).map(p => ({ number: p.number, html_url: html(p.number) })))
+    const state = url.searchParams.get('state') ?? 'open'
+    if (state === 'open' && control.hideNextList) {
+      control.hideNextList = false
+      return reply(200, [])
+    }
+    return reply(200, pulls.filter(p => (head === null || `${owner}:${p.head}` === head) && (base === null || p.base === base) && (state === 'all' || p.state === state))
+      .map(p => ({ number: p.number, html_url: html(p.number), merged_at: p.merged_at, head: { sha: p.sha } })))
   }
+  if (control.failPost !== 0) return reply(control.failPost, { message: 'Resource not accessible by integration' })
   const p = JSON.parse(body) as { title: string; head: string; base: string; body: string }
+  // 真实 GitHub：同一个分支已经有打开的 PR 时返回 422 "already exists"。
+  if (pulls.some(x => x.head === p.head && x.state === 'open')) return reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: `A pull request already exists for ${owner}:${p.head}.` }] })
   let ahead = 0
   try {
     ahead = Number(execFileSync('git', ['--git-dir', gitDir, 'rev-list', '--count', `refs/heads/${p.base}..refs/heads/${p.head}`], { encoding: 'utf8' }).trim())
@@ -36,12 +47,25 @@ const api = (req: import('node:http').IncomingMessage, res: import('node:http').
     return reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', field: 'head', code: 'invalid' }] })
   }
   if (ahead === 0) return reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: `No commits between ${p.base} and ${p.head}` }] })
-  const pr: Pull = { number: pulls.length + 1, head: p.head, base: p.base, title: p.title, body: p.body, state: 'open' }
+  const sha = execFileSync('git', ['--git-dir', gitDir, 'rev-parse', `refs/heads/${p.head}`], { encoding: 'utf8' }).trim()
+  const pr: Pull = { number: pulls.length + 1, head: p.head, base: p.base, title: p.title, body: p.body, state: 'open', merged_at: null, sha }
   pulls.push(pr)
   return reply(201, { number: pr.number, html_url: html(pr.number) })
 }
 
 const server = createServer((req, res) => {
+  // 测试用的控制接口：/__control/<hide-next-list | fail-post?status=N | close?n=N | merge?n=N>。
+  const ctl = /^\/__control\/([a-z-]+)(?:\?(.*))?$/.exec(req.url ?? '')
+  if (ctl !== null) {
+    const q = new URLSearchParams(ctl[2] ?? '')
+    const pr = pulls.find(x => x.number === Number(q.get('n')))
+    if (ctl[1] === 'hide-next-list') control.hideNextList = true
+    else if (ctl[1] === 'fail-post') control.failPost = Number(q.get('status'))
+    else if (ctl[1] === 'close' && pr !== undefined) pr.state = 'closed'
+    else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
+    res.writeHead(204)
+    return void res.end()
+  }
   const apiPath = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/pulls(?:\?.*)?$/.exec(req.url ?? '')
   if (apiPath !== null) {
     const chunks: Buffer[] = []

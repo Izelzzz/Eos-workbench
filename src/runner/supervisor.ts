@@ -163,7 +163,10 @@ export class Supervisor {
       }
     }
     try {
-      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      const pr = await forge.openPullRequest(meta.remote, auth.secret, { head: meta.branch, base, sha, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      if ('merged' in pr) {
+        return { check: c, passed: true, detail: `${pushed}。这个提交已经通过 PR #${pr.merged.number} 合并了：${pr.merged.url}`, links: [branchLink, { label: `PR #${pr.merged.number}（已合并）`, url: pr.merged.url, kind: 'pull-request' }] }
+      }
       if ('empty' in pr) return { check: c, passed: true, detail: `${pushed}。任务分支和 ${base} 没有差别，没有开 PR`, links: [branchLink] }
       return {
         check: c, passed: true, detail: `${pushed}。${pr.reused ? '复用已经打开的' : '已开'} PR #${pr.number}：${pr.url}`,

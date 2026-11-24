@@ -487,7 +487,8 @@ const PR_FLOW = SHIP.replace('name: ship', 'name: ship-pr').replace('      - { p
 
 /** 跑一个开 PR 的任务：write 为 false 时开发不改任何文件。 */
 const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean; request?: string } = {}) => {
-  assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship-pr', content: PR_FLOW, actor: 'test' }, Date.now()).ok, true)
+  const saved = r.sup.conventions.save({ kind: 'workflow', name: 'ship-pr', content: PR_FLOW, actor: 'test' }, Date.now())
+  assert.ok(saved.ok || JSON.stringify(saved).includes('完全一样'), JSON.stringify(saved))
   const executor = new FakeExecutor(async ({ key }) => {
     if (key.endsWith('/review')) return PASS
     if (o.write !== false) writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'feature.txt'), 'new\n')
@@ -525,7 +526,7 @@ test('分支已经有打开的 PR（例如崩溃后重跑、人工先开了）�
   const first = await runPr(r)
   assert.equal(first.task.status, 'done')
   // 同一个分支再开一次（重跑交付时平台就是这样调用的）。
-  const again = await r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: first.meta.branch, base: 'main', title: 'x', body: 'y' })
+  const again = await r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: first.meta.branch, base: 'main', sha: 'x'.repeat(40), title: 'x', body: 'y' })
   assert.deepEqual(again, { number: 1, url: first.result.links![1]!.url, reused: true })
   assert.equal(apiCalls(r).filter(q => q.method === 'POST').length, 1, '只开过一个 PR')
 })
@@ -539,15 +540,15 @@ test('任务没有改动：推送了，但不开 PR，算通过并写明原因�
   assert.deepEqual(result.links?.map(l => l.kind), ['branch'])
 })
 
-test('开 PR 被拒（令牌不对）：报中文原因，不含令牌；推送已经做了，分支链接照样给出', async () => {
+test('开 PR 时令牌不对、没有令牌：报中文原因，不含令牌', async () => {
   const r = await remote(TOKEN)
   const repo = r.forge.parse(r.url)!
-  await assert.rejects(r.forge.openPullRequest(repo, 'wrong-token', { head: 'x', base: 'main', title: 't', body: 'b' }), (e: Error) => {
-    assert.match(e.message, new RegExp(`${r.credential} 拒绝了查已有的 PR的请求：凭据「${r.credential}」里的令牌无效或已过期`))
+  await assert.rejects(r.forge.openPullRequest(repo, 'wrong-token', { head: 'x', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), (e: Error) => {
+    assert.match(e.message, new RegExp(`${r.credential} 拒绝了查已有的 PR 的请求：凭据「${r.credential}」里的令牌无效或已过期`))
     assert.ok(!e.message.includes('wrong-token'))
     return true
   })
-  await assert.rejects(r.forge.openPullRequest(repo, undefined, { head: 'x', base: 'main', title: 't', body: 'b' }), /没有带令牌（凭据「.*」不存在或读不出来），开 PR 需要令牌/)
+  await assert.rejects(r.forge.openPullRequest(repo, undefined, { head: 'x', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), /没有带令牌，开 PR 需要令牌。在凭据页添加名字为「.*」/)
 })
 
 test('standard 工作流的交付阶段是平台开 PR；它能通过解析', async () => {
@@ -558,13 +559,13 @@ test('standard 工作流的交付阶段是平台开 PR；它能通过解析', as
   assert.deepEqual(deliver.checks, [{ kind: 'platform', action: 'pull-request' }])
 })
 
-test('分支已经有指向别的分支的 PR：也复用它；旧任务没记下默认分支时现问远程', async () => {
+test('分支已经有打开的 PR、要开的目标分支不同：也复用它；旧任务没记下默认分支时现问远程', async () => {
   const r = await remote(TOKEN)
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
   const repo = r.forge.parse(r.url)!
-  // 先在远程建一个 develop 分支，并手动从任务分支开一个指向 develop 的 PR。
+  // 任务开出的 PR 指向 main；再要求开一个指向 develop 的：这个分支已经有打开的 PR，复用它。
   const first = await runPr(r)
-  const reused = await r.forge.openPullRequest(repo, TOKEN, { head: first.meta.branch, base: 'develop', title: 'x', body: 'y' })
+  const reused = await r.forge.openPullRequest(repo, TOKEN, { head: first.meta.branch, base: 'develop', sha: 'x'.repeat(40), title: 'x', body: 'y' })
   assert.deepEqual(reused, { number: 1, url: first.result.links![1]!.url, reused: true })
   // 旧任务：meta 里没有 baseBranch（直接改数据库模拟旧版本建的任务）。
   const sup = new Supervisor({ store: r.store, executor: new FakeExecutor(async ({ key }) => {
@@ -587,5 +588,57 @@ test('分支已经有指向别的分支的 PR：也复用它；旧任务没记�
 
 test('GitHub 的 422 只给 field 和 code 时，报错里写出来', async () => {
   const r = await remote(TOKEN)
-  await assert.rejects(r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: 'no-such-branch', base: 'main', title: 't', body: 'b' }), /开 PR失败（HTTP 422）：Validation Failed；head invalid/)
+  await assert.rejects(r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: 'no-such-branch', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), /开 PR 失败（HTTP 422）：Validation Failed；head invalid/)
+})
+
+const control = (r: Awaited<ReturnType<typeof remote>>, what: string) => fetch(`${r.url.replace('/acme/app', '')}/__control/${what}`)
+
+test('推送成功、开 PR 失败：任务失败，原因写明已推送和开 PR 失败的原因，保留分支链接，不含令牌', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  await control(r, 'fail-post?status=403')
+  const { task, result, meta } = await runPr(r)
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', new RegExp(`已把分支 ${meta.branch}（[0-9a-f]{12}）推到 .*，但开 PR 失败：.* 不允许在 .*acme/app 开 PR：令牌没有 Pull requests 的写权限`))
+  assert.deepEqual(result.links?.map(l => l.kind), ['branch'])
+  assert.ok(!JSON.stringify(task).includes(TOKEN))
+  assert.equal(remoteSha(r, meta.branch), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim(), '推送已经做了')
+})
+
+test('查和开之间别人刚开了一个（422 already exists）：再查一次，复用它', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const first = await runPr(r)
+  await control(r, 'hide-next-list')
+  const again = await r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: first.meta.branch, base: 'main', sha: 'x'.repeat(40), title: 'x', body: 'y' })
+  assert.deepEqual(again, { number: 1, url: first.result.links![1]!.url, reused: true })
+  const posts = apiCalls(r).filter(q => q.method === 'POST')
+  assert.equal(posts.length, 2, '第二次 POST 收到 422 已存在')
+})
+
+test('之前的 PR 已经合并：再开时如实报告已合并，不当成没有差别；PR 被关掉（没合并）时开一个新的', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const first = await runPr(r)
+  const repo = r.forge.parse(r.url)!
+  const sha = remoteSha(r, first.meta.branch)
+  await control(r, 'merge?n=1')
+  assert.deepEqual(await r.forge.openPullRequest(repo, TOKEN, { head: first.meta.branch, base: 'main', sha, title: 'x', body: 'y' }), { merged: { number: 1, url: first.result.links![1]!.url } })
+  // 另一个任务的 PR 被关掉、没合并：再开时开新的。
+  const second = await runPr(r, { request: '第二个任务' })
+  const prNumber = Number(/#(\d+)/.exec(second.result.links![1]!.label)![1])
+  await control(r, `close?n=${prNumber}`)
+  const reopened = await r.forge.openPullRequest(repo, TOKEN, { head: second.meta.branch, base: 'main', sha: remoteSha(r, second.meta.branch), title: 'x', body: 'y' })
+  assert.ok('number' in reopened && reopened.number === prNumber + 1 && reopened.reused === false, JSON.stringify(reopened))
+})
+
+test('GitHub API 连不上：报中文原因和底层原因', async () => {
+  // 找一个没人监听的端口。
+  const { createServer } = await import('node:net')
+  const probe = createServer()
+  await new Promise<void>(res => probe.listen(0, '127.0.0.1', res))
+  const port = (probe.address() as import('node:net').AddressInfo).port
+  await new Promise(res => probe.close(res))
+  const forge = githubForge({ host: `127.0.0.1:${port}`, scheme: 'http' })
+  await assert.rejects(forge.openPullRequest(forge.parse(`http://127.0.0.1:${port}/a/b`)!, TOKEN, { head: 'h', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), new RegExp(`访问 127\\.0\\.0\\.1:${port} 失败：fetch failed：ECONNREFUSED`))
 })
