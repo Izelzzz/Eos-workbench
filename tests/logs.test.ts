@@ -34,6 +34,9 @@ test('常见错误都有对应的修法，认不出的让人看日志', () => {
     ['检查无法执行：spawn npm ENOENT', /检查命令起不来/],
     ['dsh process exited with code 1', /agent 进程意外退出/],
     ['other side closed', /连不上模型服务/],
+    // E2E 里的真实报错：dsh 进程被结掉、worktree 被删。
+    ['dsh profile "sdk": DeepSeek Harness runtime exited', /agent 进程意外退出/],
+    ['working-directory: directory does not exist: "/data/worktrees/t1"', /worktree 被删除或损坏/],
     ['任务正在被进程 123 运行', /看日志/],
     ['奇怪的错误', /看日志/],
   ]
