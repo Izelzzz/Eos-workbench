@@ -3,15 +3,18 @@
 // 2. agent 提问时用 `eos answer`（另一个进程）回答；
 // 3. 开发第一次完成后 SIGKILL 掉 runner，再用 `eos resume` 续跑；
 // 4. 跑完后从存储里逐条检查，结果写到 .eos/e2e/report.json，完整输出在 .eos/e2e/run.log。
+// 设置 EOS_E2E_REPO=https://github.com/<owner>/<repo> 时不建本地示例仓库，在这个远程仓库上跑（它要有同样的 package.json 和 src/math.js）：
+// 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY），跑完多核对任务记下了远程仓库、数据目录里找不到令牌。
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
 import { keyOf } from '../src/runner/runner.ts'
-import { parseMasterKey } from '../src/credentials/key.ts'
+import { parseMasterKey, takeMasterKey } from '../src/credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL } from '../src/credentials/model-key.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
+import { defaultForges, parseRemote } from '../src/forge/forges.ts'
 import { Store } from '../src/store/store.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -32,6 +35,9 @@ const storeKey = process.env.EOS_E2E_STORE_KEY
 const env: NodeJS.ProcessEnv = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
 delete env.EOS_E2E_STORE_KEY
 if (storeKey !== undefined) delete env.DEEPSEEK_API_KEY
+const REMOTE = process.env.EOS_E2E_REPO
+const GIT_TOKEN = process.env.EOS_E2E_GIT_TOKEN
+const MASTER_KEY = process.env.EOS_MASTER_KEY
 const record = (s: string) => {
   process.stdout.write(s)
   appendFileSync(LOG, s)
@@ -101,9 +107,23 @@ const drive = (args: string[], opts: { killAfter?: RegExp } = {}) => new Promise
   child.on('exit', () => resolve({ id, killed }))
 })
 
-setupRepo()
+const remote = REMOTE === undefined ? undefined : parseRemote(defaultForges(), REMOTE)
+if (REMOTE !== undefined && remote === undefined) throw new Error(`认不出 EOS_E2E_REPO：${REMOTE}`)
+if (remote === undefined) setupRepo()
+else {
+  rmSync(E2E, { recursive: true, force: true })
+  mkdirSync(DATA, { recursive: true })
+  if (GIT_TOKEN !== undefined) {
+    const key = takeMasterKey({ EOS_MASTER_KEY: MASTER_KEY })
+    if (key.kind !== 'ok') throw new Error('EOS_E2E_GIT_TOKEN 需要有效的 EOS_MASTER_KEY')
+    const c = new Credentials(join(DATA, 'eos.db'), key.key)
+    const put = c.put(LOCAL_OWNER, remote.forge.credentialName(remote.repo), 'token', GIT_TOKEN)
+    c.close()
+    if (!put.ok) throw new Error(put.error)
+  }
+}
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
-const first = await drive(['run', '--repo', REPO, '--workflow', 'feature', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', 'feature', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
 await drive(['resume', first.id])
 
@@ -119,6 +139,20 @@ const testRun = (() => {
     return { ok: false, out: String((e as { stdout?: string }).stdout ?? e).slice(-400) }
   }
 })()
+/** 远程仓库：任务记下了远程仓库，worktree 建在镜像上；数据目录里的任何文件都找不到令牌。 */
+function remoteChecks(): Record<string, boolean> {
+  const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? files(join(d, e.name)) : e.isFile() ? [join(d, e.name)] : []))
+  // 原始令牌，和它在认证头里的 base64 形式。
+  const forms = GIT_TOKEN === undefined ? [] : [GIT_TOKEN, Buffer.from(`x-access-token:${GIT_TOKEN}`).toString('base64')]
+  const leaked = files(DATA).filter(f => { const b = readFileSync(f); return forms.some(x => b.includes(x)) })
+  if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)
+  return {
+    '任务记下了远程仓库': JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
+    'worktree 建在平台数据目录里的镜像上': meta.repo.startsWith(join(DATA, 'repos')),
+    '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
+  }
+}
+
 /** dsh 会话日志里，每个会话收到过哪些调用（按消息里的 nonce）以及它的权限档位变化。 */
 const sessionLog = (session: string) => {
   const sid = sessionIdFor(keyOf(first.id, session))
@@ -141,6 +175,7 @@ const checks = {
   '杀进程后续跑：没有重复记录同一个调用': new Set(ids).size === ids.length,
   '耗时和 token 都有记录': calls.every(c => c.ms > 0 && c.usage.input + c.usage.cacheRead > 0),
   'worktree 里 npm test 通过': testRun.ok,
+  ...(remote === undefined ? {} : remoteChecks()),
 }
 const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
 const result = { task: first.id, killed: first.killed, checks, sessions, rejectedReplies: resent, calls: calls.map(c => `${c.call} ${c.purpose}@${c.node}${c.round ? `#${c.round}` : ''} ${c.ms}ms`), commits: execFileSync('git', ['log', '--oneline', `${meta.baseSha}..HEAD`], { cwd: meta.worktree, encoding: 'utf8' }), npmTest: testRun.out }

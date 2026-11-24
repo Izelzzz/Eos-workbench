@@ -49,9 +49,9 @@ export function NewTask() {
       <a href="#/" className="back">← 任务列表</a>
       <h1>新建任务</h1>
       <label>
-        <span>仓库路径</span>
-        <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="/path/to/your/repo（本机上的 git 仓库）" required spellCheck={false} />
-        <small className="muted">任务会在这个仓库上新建分支 eos/&lt;任务id&gt; 和独立的 worktree，不会改动你当前的工作目录。</small>
+        <span>仓库</span>
+        <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="https://github.com/<owner>/<repo>，或平台所在机器上的仓库路径" required spellCheck={false} />
+        <small className="muted">GitHub 仓库：平台克隆到自己的数据目录，在默认分支的最新提交上新建分支 eos/&lt;任务id&gt;；私有仓库要先在<a href="#/credentials">凭据页</a>添加名字为 github.com 的 Git 令牌。本机路径：在这个仓库上新建分支和独立的 worktree，不改动它的工作目录。</small>
       </label>
       <label>
         <span>工作流</span>

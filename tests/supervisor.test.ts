@@ -29,7 +29,7 @@ export const happy = new FakeExecutor(async ({ key }) => (key.endsWith('/review'
 
 const supervisor = (s: ReturnType<typeof sandbox>, executor = happy) => new Supervisor({ store: s.store, executor, dataDir: s.data, pollMs: 2 })
 
-test('create refuses bad input in Chinese and creates nothing', () => {
+test('create refuses bad input in Chinese and creates nothing', async () => {
   const s = sandbox()
   const sup = supervisor(s)
   const cases: [Parameters<Supervisor['create']>[0], RegExp][] = [
@@ -39,7 +39,7 @@ test('create refuses bad input in Chinese and creates nothing', () => {
     [{ repo: s.repo, workflow: 'nope', request: '需求' }, /平台上没有工作流「nope」/],
   ]
   for (const [input, error] of cases) {
-    const r = sup.create(input)
+    const r = await sup.create(input)
     assert.equal(r.ok, false)
     assert.match(!r.ok ? r.error : '', error)
   }
@@ -49,7 +49,7 @@ test('create refuses bad input in Chinese and creates nothing', () => {
 test('a created task gets its own branch and worktree under the data directory and runs to done', async () => {
   const s = sandbox()
   const sup = supervisor(s)
-  const created = sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
+  const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
   assert.ok(created.ok)
   const meta = s.store.meta(created.id)
   assert.equal(meta.branch, `eos/${created.id}`)
@@ -69,10 +69,10 @@ test('a created task gets its own branch and worktree under the data directory a
   assert.ok(happy.released.filter(w => w === meta.worktree).length >= writerCalls + 1, 'and before every revert of a writer’s changes (Izelzzz/Eos-workbench#28)')
 })
 
-test('a task held by another live process is not started here', () => {
+test('a task held by another live process is not started here', async () => {
   const s = sandbox()
   const sup = supervisor(s)
-  const created = sup.create({ repo: s.repo, workflow: 'feature', request: '需求' })
+  const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '需求' })
   assert.ok(created.ok)
   const other = acquire(sup.locksDir, created.id) // 模拟命令行的 runner 已经在跑
   assert.ok('release' in other)
@@ -86,11 +86,12 @@ test('a task held by another live process is not started here', () => {
 test('resumeAll picks up unfinished tasks that nobody runs and leaves failed and finished ones alone', async () => {
   const s = sandbox()
   const sup = supervisor(s)
-  const ids = ['running', 'failed', 'done', 'held'].map(() => {
-    const c = sup.create({ repo: s.repo, workflow: 'feature', request: '需求' })
+  const ids: string[] = []
+  for (const _ of ['running', 'failed', 'done', 'held']) {
+    const c = await sup.create({ repo: s.repo, workflow: 'feature', request: '需求' })
     assert.ok(c.ok)
-    return c.id
-  })
+    ids.push(c.id)
+  }
   const [running, failed, done, held] = ids as [string, string, string, string]
   s.store.dispatch(failed, { kind: 'call_failed', call: 'c1' as never, error: '网络错误' }, 1, 'executor')
   s.store.dispatch(done, { kind: 'abort' }, 1, 'cli')
@@ -129,7 +130,7 @@ nodes:
   - { id: review, kind: dialog, role: rev, with: build, maxRounds: 2, task: 评审 }
 `
   assert.ok(sup.conventions.save({ kind: 'workflow', name: 'scoped', content: wf, actor: 'web' }, 1).ok)
-  const created = sup.create({ repo: s.repo, workflow: 'scoped', request: '加一个求和函数' })
+  const created = await sup.create({ repo: s.repo, workflow: 'scoped', request: '加一个求和函数' })
   assert.ok(created.ok)
   const started = sup.start(created.id)
   assert.ok(started.ok)
@@ -173,7 +174,7 @@ nodes:
 `
   const saved = sup.conventions.save({ kind: 'workflow', name: 'notes', content: wf, actor: 'web' }, 2)
   assert.ok(saved.ok, JSON.stringify(!saved.ok && saved.errors))
-  const created = sup.create({ repo: s.repo, workflow: 'notes', request: '加一个求和函数' })
+  const created = await sup.create({ repo: s.repo, workflow: 'notes', request: '加一个求和函数' })
   assert.ok(created.ok)
   assert.deepEqual(s.store.meta(created.id).conventions, { workflow: { name: 'notes', version: 1 }, docs: [{ name: '小组约定', version: 1 }], templates: [], skills: [] })
   // 任务创建之后再改约定，不影响这个任务。

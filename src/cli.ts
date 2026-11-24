@@ -24,7 +24,7 @@ import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
 
 const HELP = `用法：
-  eos run --repo <仓库路径> [--workflow standard] "<需求>"   创建任务并运行
+  eos run --repo <仓库路径或 GitHub 地址> [--workflow standard] "<需求>"   创建任务并运行
   eos resume <任务>                                       续跑（进程中断后）
   eos retry <任务>                                        重试失败的任务
   eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
@@ -144,7 +144,7 @@ const currentModelKey = (): string => {
 const executor = () => redacting(new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin(), modelKey: currentModelKey }), redact)
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
-const run = async (id: string | ((sup: Supervisor) => string)) => {
+const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
   const ex = executor()
   const shutdown = () => {
     void ex.close().finally(() => process.exit(130))
@@ -152,8 +152,8 @@ const run = async (id: string | ((sup: Supervisor) => string)) => {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'cli', log: (_id, line) => say(line), redact })
-    const started = sup.start(typeof id === 'string' ? id : id(sup), { wait: !values['no-wait'] })
+    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'cli', log: (_id, line) => say(line), redact })
+    const started = sup.start(typeof id === 'string' ? id : await id(sup), { wait: !values['no-wait'] })
     if (!started.ok) return fail(started.error)
     summary(await started.done)
   } finally {
@@ -163,9 +163,9 @@ const run = async (id: string | ((sup: Supervisor) => string)) => {
 
 const commands: Record<string, () => Promise<void> | void> = {
   async run() {
-    if (values.repo === undefined) fail('需要 --repo <仓库路径>')
-    await run(sup => {
-      const created = sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
+    if (values.repo === undefined) fail('需要 --repo <仓库路径或 https://github.com/<owner>/<repo>>')
+    await run(async sup => {
+      const created = await sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
       if (!created.ok) return fail(created.error)
       const meta = store.meta(created.id)
       say(`任务 ${created.id}：工作流 ${store.get(created.id)!.workflow.name}，分支 ${meta.branch}，worktree ${meta.worktree}`)
@@ -261,7 +261,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       appendLog(processLog, line)
       say(line)
     }
-    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact })
+    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), credentials, improve: { executor: ex, dataDir }, ...(publicUrl === undefined ? {} : { publicUrl }) })
     const plan = listenPlan(values.host, port, publicUrl)
     if (typeof plan === 'string') return fail(plan)
@@ -307,4 +307,5 @@ if (values.help || command === undefined || commands[command] === undefined) {
   process.exit(command === undefined || values.help ? 0 : 1)
 }
 await commands[command]!()
+credentials.close()
 store.close()

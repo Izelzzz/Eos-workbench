@@ -167,7 +167,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       logPath: o.supervisor.logPath(id),
-      repo: meta.repo, branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
+      repo: meta.repo, ...(meta.remote === undefined ? {} : { remote: meta.remote }), branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }
@@ -203,9 +203,9 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     return [200, { ok: true, resumeNeeded }]
   }
 
-  const create = (body: Record<string, unknown>): [number, CreateResponse] => {
+  const create = async (body: Record<string, unknown>): Promise<[number, CreateResponse]> => {
     const field = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : '')
-    const created = o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'standard', request: field('request') })
+    const created = await o.supervisor.create({ repo: field('repo'), workflow: field('workflow') || 'standard', request: field('request') })
     if (!created.ok) return [400, created]
     const started = o.supervisor.start(created.id)
     return started.ok ? [201, { ok: true, id: created.id }] : [500, { ok: false, error: started.error }]
@@ -385,7 +385,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
           const name = decodeName(conv[2]!)
           return name === undefined ? json(res, 400, { ok: false, error: '名字的 URL 编码不对' }) : json(res, ...saveConvention(conv[1] as ConventionKind, name, g.body))
         }
-        if (action === null) return json(res, ...create(g.body))
+        if (action === null) return json(res, ...(await create(g.body)))
         return json(res, ...(action[2] === 'answer' ? answer(action[1]!, g.body) : act(action[1]!, action[2]!)))
       }
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
