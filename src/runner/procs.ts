@@ -56,14 +56,14 @@ const exited = (proc: Procfs, pid: number, started: string): boolean => {
   return f[19] !== started || ((f[0] === 'Z' || f[0] === 'X') && Number(f[17]) <= 1)
 }
 
+/** 默认最多等多久（毫秒）。 */
+export const KILL_WAIT_MS = 2000
+
 /**
  * 杀掉工作目录在 dir 里的全部进程，等它们真正退出（最多 waitMs），返回被杀的进程（号、名字、等到截止时有没有退出）。
  * 不是 Linux 时什么都不做。
  * 注意：用户自己的终端、编辑器只要工作目录在任务的 worktree 里也会被杀——不要在平台数据目录里的 worktree 里工作。
  */
-/** 默认最多等多久（毫秒）。 */
-export const KILL_WAIT_MS = 2000
-
 export const killProcessesIn = async (dir: string, waitMs = KILL_WAIT_MS, proc: Procfs = linux): Promise<{ pid: number; name: string; exited: boolean }[]> => {
   if (proc === linux && process.platform !== 'linux') return []
   const root = realpathSync(dir)

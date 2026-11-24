@@ -6,11 +6,14 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { killProcessesIn, type Procfs } from '../src/runner/procs.ts'
 
-/** 进程还在运行：/proc 里有它、而且不是僵尸（Z）。被杀的子进程在被回收之前是僵尸，kill(pid, 0) 仍然成功，不能用它判断。 */
+/**
+ * 进程还在运行：/proc 里有它、而且不是僵尸（Z）或正在被回收（X）。和 killProcessesIn 判断「已退出」用同样的状态。
+ * 被杀的子进程在被回收之前是僵尸，kill(pid, 0) 仍然成功，不能用它判断。
+ */
 const alive = (pid: number) => {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z'
+    return !['Z', 'X'].includes(stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3))
   } catch {
     return false
   }
@@ -57,7 +60,11 @@ const fakeProc = (stages: ('inside' | 'cwd-gone' | 'zombie' | 'zombie-leader' | 
   const stat = (state: string, threads: number) => `77 (sl eep) ${state} ${Array.from({ length: 16 }, () => '0').join(' ')} ${threads} 0 ${started} 0`
   const proc: Procfs = {
     pids: () => (stage() === 'gone' ? [] : [77]),
-    cwdOf: () => (stage() === 'inside' ? '/wt' : undefined),
+    // 读工作目录和读 stat 都算查了一次：不管等待条件看哪一个，假进程都按查询的次数往下走。
+    cwdOf: () => {
+      polls++
+      return stage() === 'inside' ? '/wt' : undefined
+    },
     stat: () => {
       polls++
       const s = stage()
