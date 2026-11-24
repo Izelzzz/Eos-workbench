@@ -86,8 +86,8 @@ export function ForgeApps({ query }: { query: string }) {
                 <form className="new-task" aria-label="注册 App" autoComplete="off" onSubmit={e => { e.preventDefault(); void register(a.name) }}>
                   <label>
                     <span>App 名字</span>
-                    <input value={appName} onChange={e => setAppName(e.target.value)} required maxLength={34} spellCheck={false} />
-                    <small className="muted">在 {a.host} 上全局唯一，到那边还能再改。</small>
+                    <input value={appName} onChange={e => setAppName(e.target.value)} required spellCheck={false} />
+                    <small className="muted">最多 {a.appNameMax} 个字符，在 {a.host} 上全局唯一，到那边还能再改。</small>
                   </label>
                   <label>
                     <span>组织（可选）</span>

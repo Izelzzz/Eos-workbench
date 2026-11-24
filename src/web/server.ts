@@ -380,10 +380,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       apps: appRegistrations().map(a => {
         // 和发起注册时的判断一致：这个名字已经有凭据（不管能不能读出来），就算已注册，不再给注册表单。
         const saved = items.find(i => i.name === a.credentialName)
-        if (saved === undefined) return { name: a.credentialName, host: a.host }
+        if (saved === undefined) return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax }
         const value = o.credentials.get(LOCAL_OWNER, a.credentialName)
         const installUrl = value.kind === 'ok' ? a.installUrl(value.value) : undefined
-        return { name: a.credentialName, host: a.host, registered: { updatedAt: saved.updatedAt, ...(installUrl === undefined ? {} : { installUrl }) } }
+        return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax, registered: { updatedAt: saved.updatedAt, ...(installUrl === undefined ? {} : { installUrl }) } }
       }),
     }
   }
@@ -392,7 +392,8 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const reg = appRegistrations().find(a => a.credentialName === body.name)
     if (reg === undefined) return [400, { ok: false, error: '没有这个托管平台' }]
     const appName = typeof body.appName === 'string' ? body.appName.trim() : ''
-    if (appName === '' || appName.length > reg.appNameMax) return [400, { ok: false, error: `App 名字要 1 到 ${reg.appNameMax} 个字符` }]
+    // 按字符数算（emoji 等算一个），和页面上的输入框一致。
+    if (appName === '' || Array.from(appName).length > reg.appNameMax) return [400, { ok: false, error: `App 名字要 1 到 ${reg.appNameMax} 个字符` }]
     const org = typeof body.org === 'string' && body.org.trim() !== '' ? body.org.trim() : undefined
     if (org !== undefined && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(org)) return [400, { ok: false, error: `组织名不对：${org}` }]
     if (!o.credentials.usable) return [409, { ok: false, error: `平台没有主密钥，注册后存不了 App 的凭据。${GENERATE_HINT}` }]
@@ -414,7 +415,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const p = pending.get(state)
     // 先删掉：同一个 state 只能用一次，并发的第二次也拿不到。
     pending.delete(state)
-    if (p === undefined || p.expires <= Date.now()) return back({ error: '这次注册不是从本页面发起的，或者已经过期、已经用过：在本页面重新注册' })
+    if (p === undefined || p.expires <= Date.now()) {
+      // 带着 code 回来，说明托管平台那边已经建好了 App，只是这边认不出这次注册：提醒去删掉，免得留下没人用的 App。
+      const orphan = url.searchParams.has('code') ? '。如果你刚在托管平台上确认了注册，那边已经建好了一个 App：到托管平台的 App 设置里删掉它' : ''
+      return back({ error: `这次注册不是从本页面发起的，或者已经过期、已经用过（发起后 ${PENDING_MS / 60_000} 分钟内有效，平台重启后失效）：在本页面重新注册${orphan}` })
+    }
     const code = url.searchParams.get('code') ?? ''
     if (!/^[\w-]{1,200}$/.test(code)) return back({ error: '托管平台没有带回 code（可能在那边取消了注册）：重新注册' })
     const reg = appRegistrations().find(a => a.credentialName === p.name)!

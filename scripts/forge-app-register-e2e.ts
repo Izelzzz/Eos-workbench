@@ -66,6 +66,11 @@ page.on('pageerror', (e: Error) => errors.push(`pageerror: ${e.message}`))
 page.on('console', (m: any) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`) })
 page.on('response', async (r: any) => { if (r.url().startsWith(base) && r.url().includes('/api/')) responses.push(await r.text().catch(() => '')) })
 
+// 先走一次失败的回调（不是本页面发起的 state）：页面显示原因，不存任何东西。
+await page.goto(`${base}/api/forge-apps/callback?code=x&state=forged`)
+await page.waitForSelector('text=注册没有完成')
+checks['回调失败时页面写明原因和要去删 App'] = (await page.locator('.error').innerText()).includes('到托管平台的 App 设置里删掉它') && credentials.list(LOCAL_OWNER).length === 0
+await page.screenshot({ path: join(out, '0-callback-error.png') })
 await page.goto(`${base}/#/forges`)
 await page.waitForSelector(`text=GitHub App · ${host}`)
 await page.getByLabel('App 名字').fill('Eos-E2E')
@@ -111,8 +116,11 @@ const filesUnder = (d: string): string[] => readdirSync(d).flatMap(n => {
   return statSync(f, { throwIfNoEntry: false })?.isDirectory() ? filesUnder(f) : [f]
 })
 const secret = value?.privateKey ?? 'missing'
-// 私钥在数据库里是密文；数据目录里任何文件都不该有它的明文（或它在 JSON 里的转义写法）。
-const leak = (s: string | Buffer) => redactText(s.toString(), [secret]) !== s.toString()
+// 私钥在数据库里是密文；数据目录里任何文件都不该有它的明文（或它在 JSON 里的转义写法、base64 写法）。
+// 只漏一部分也要查出来：去掉头尾的 base64 正文，以及正文的每一行（64 个字符）。
+const body = secret.split('\n').filter(l => l !== '' && !l.startsWith('-----'))
+const parts = [secret, body.join(''), body.join('\n'), ...body.filter(l => l.length >= 40)]
+const leak = (s: string | Buffer) => redactText(s.toString(), parts) !== s.toString()
 checks['接口响应里没有私钥'] = responses.length > 0 && !responses.some(leak)
 checks['数据目录里没有私钥的明文'] = !filesUnder(data).some(f => leak(readFileSync(f)))
 checks['任务日志里没有私钥'] = !lines.some(leak)

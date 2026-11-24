@@ -789,7 +789,7 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   const web = await webOn(r)
   const name = `github-app.${r.credential}`
   const before = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
-  assert.deepEqual(before, { usable: true, callbackUrl: `${web.base}/api/forge-apps/callback`, apps: [{ name, host: r.credential }] })
+  assert.deepEqual(before, { usable: true, callbackUrl: `${web.base}/api/forge-apps/callback`, apps: [{ name, host: r.credential, appNameMax: 34 }] })
 
   // 写接口照样只接受同源请求。
   assert.equal((await fetch(`${web.base}/api/forge-apps/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, appName: 'eos-test' }) })).status, 403)
@@ -838,7 +838,8 @@ test('清单流程的回调：不是本平台发起的 state、没带 code、cod
   const name = `github-app.${r.credential}`
   /** 回调跳回页面时带的错误说明。 */
   const page = async (url: string) => new URLSearchParams((await fetch(url, { redirect: 'manual' })).headers.get('location')!.split('?')[1]).get('error') ?? ''
-  assert.match(await page(`${web.base}/api/forge-apps/callback?code=abc&state=forged`), /这次注册不是从本页面发起的/)
+  assert.match(await page(`${web.base}/api/forge-apps/callback?code=abc&state=forged`), /这次注册不是从本页面发起的.*那边已经建好了一个 App：到托管平台的 App 设置里删掉它/)
+  assert.doesNotMatch(await page(`${web.base}/api/forge-apps/callback?state=forged`), /删掉它/, '没带 code：托管平台上没有建 App，不提示删')
 
   const start = async () => new URL(((await (await web.post('/api/forge-apps/register', { name, appName: 'eos-x' })).json()) as { action: string }).action).searchParams.get('state')!
   assert.match(await page(`${web.base}/api/forge-apps/callback?state=${await start()}`), /没有带回 code/)
@@ -855,6 +856,7 @@ test('清单流程的回调：不是本平台发起的 state、没带 code、cod
 
   // 输入的检查：名字太长、组织名不对、没有这个托管平台。
   assert.equal((await web.post('/api/forge-apps/register', { name, appName: 'x'.repeat(35) })).status, 400)
+  assert.equal((await web.post('/api/forge-apps/register', { name, appName: '😀'.repeat(34) })).status, 200, '按字符数算：34 个 emoji 不超长')
   assert.equal((await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'bad/org' })).status, 400)
   assert.equal((await web.post('/api/forge-apps/register', { name: 'github-app.gitlab.com', appName: 'eos' })).status, 400)
   // 注册在组织下：表单提交到组织的页面。

@@ -190,7 +190,11 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
     const parsed = appCredential.safeParse({ appId: got.id, privateKey: got.pem, slug: got.slug, htmlUrl: got.html_url })
     if (!parsed.success) throw new ForgeError(`${o.host} 返回的 App 凭据格式不对（${parsed.error.issues.map(i => i.path.join('.')).join('、')}）：在 ${got.html_url} 删掉这个 App 后重新注册`)
     // 私钥要能签名：读不出来或不是 RSA 时这里就报错，不存一条用不了的凭据。
-    new GitHubApp({ apiUrl: o.api, credential: parsed.data, credentialName: appCredentialName(o.host) })
+    try {
+      new GitHubApp({ apiUrl: o.api, credential: parsed.data, credentialName: appCredentialName(o.host) })
+    } catch (e) {
+      throw new ForgeError(`${(e as Error).message}：在 ${got.html_url} 删掉这个 App 后重新注册`)
+    }
     return { value: JSON.stringify(parsed.data), appName: got.name ?? got.slug, appUrl: got.html_url, installUrl: installUrlOf(o.web, parsed.data) }
   },
   installUrl: value => {
