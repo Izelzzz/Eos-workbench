@@ -114,6 +114,16 @@ test('deliverables and command checks become one list of checks; dialogs may che
 
 test('平台动作 { platform: push } 解析成检查；不认识的动作、多余的字段报中文原因', () => {
   const src = withChecks.replace('checks: [{ run: [npm, test], timeoutSec: 120 }]', 'checks: [{ run: [npm, test], timeoutSec: 120 }, { platform: push }]')
+  // 平台动作只能在没有评审角色的对话节点里，排在命令检查后面。
+  const misplaced = [
+    [withChecks.replace('checks: [{ run: [npm, test], timeoutSec: 120 }]', 'checks: [{ platform: push }, { run: [npm, test] }]'), 'nodes[2].checks', /要排在命令检查后面/],
+    [withChecks.replace('checks: [{ run: [npm, run, lint] }]', 'checks: [{ platform: push }]'), 'nodes[1].checks', /只能放在没有评审角色的对话节点里/],
+    [withChecks.replace('{ id: review, kind: dialog, role: rev, with: build, task: 评审 }', '{ id: review, kind: dialog, role: rev, with: build, task: 评审, checks: [{ platform: push }] }'), 'nodes[3].checks', /只能放在没有评审角色的对话节点里/],
+  ] as const
+  for (const [text, path, message] of misplaced) {
+    const errors = errorsOf(text)
+    assert.ok(errors.some(e => e.path === path && message.test(e.message)), JSON.stringify(errors))
+  }
   const r = parseWorkflow(src)
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   assert.deepEqual(r.workflow.nodes[2]?.checks, [{ kind: 'run', run: ['npm', 'test'], timeoutSec: 120 }, { kind: 'platform', action: 'push' }])

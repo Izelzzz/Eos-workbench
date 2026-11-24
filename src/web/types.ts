@@ -25,7 +25,7 @@ export type TaskDetail = {
   repo: string
   /** 任务来自托管平台上的仓库时：是哪个仓库（repo 是平台里的镜像）。 */
   remote?: RemoteRepo
-  /** 检查产出的链接（推上去的分支、开出的 PR 等），按出现的先后，同一个地址只保留最后一次。 */
+  /** 检查产出的链接（推上去的分支、开出的 PR 等）：同一个地址只保留一条，按最后一次出现的先后排列。 */
   links: CheckLink[]
   branch: string
   worktree: string

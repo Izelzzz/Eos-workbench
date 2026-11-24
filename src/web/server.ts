@@ -43,7 +43,7 @@ const decodeName = (raw: string): string | undefined => {
   }
 }
 
-/** 检查产出的链接：按出现的先后，同一个地址只保留最后一次（标签用最新的）。 */
+/** 检查产出的链接：同一个地址只保留一条，排在它最后一次出现的位置，标签用最新的。 */
 export const linksOf = (t: Task): CheckLink[] => {
   const byUrl = new Map<string, CheckLink>()
   for (const e of t.log) if (e.type === 'check') for (const r of e.results) for (const l of r.links ?? []) {

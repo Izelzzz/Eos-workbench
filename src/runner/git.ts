@@ -483,6 +483,19 @@ export const onBranch = (w: Worktree, head: string): boolean => {
   }
 }
 
+/**
+ * 任务分支相对基线改到的、不在 writePaths 里的路径（改名两边都算）。名字不是合法 UTF-8 的一律算越界（显示成转义后的样子）。
+ * 平台提交前会撤销越界改动，但 agent 能在 worktree 里自己提交、移动分支，所以推送前按整个分支再核对一次。
+ */
+export const outOfScopeOnBranch = (w: Worktree, writePaths: string[]): string[] => {
+  const loc = locate(w.worktree, w.repo)
+  const out = splitNul(wgit(loc, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', '--no-renames', w.baseSha, `refs/heads/${w.branch}`]))
+  return out.flatMap(raw => {
+    const path = utf8(raw)
+    return path === undefined ? [shown(raw)] : matchesAny(writePaths, path) ? [] : [path]
+  })
+}
+
 /** 单个文件的 diff 最多读这么多字节：超过的部分 git 输出了也不读进内存（页面本来也只显示前面一部分）。 */
 export const MAX_DIFF_BYTES = 8 * 1024 * 1024
 

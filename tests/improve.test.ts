@@ -7,6 +7,7 @@ import { isCheck } from '../src/engine/types.ts'
 import type { AgentSpec, Executor, Reply } from '../src/executor/types.ts'
 import { generate } from '../src/improve/generate.ts'
 import { acquire } from '../src/runner/lock.ts'
+import { parseWorkflow } from '../src/workflow/parse.ts'
 import { permissionChanges } from '../src/improve/guard.ts'
 import { MAX_PROPOSALS, parseProposals } from '../src/improve/parse.ts'
 import { selectScope } from '../src/improve/prompt.ts'
@@ -211,7 +212,8 @@ test('permission guard: template permission fields, workflow role permissions, n
   assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  note: { prompt: 记录, tools: { deny: [web, bash] } }`), none), [], 'a new role with the same rights as an existing one is fine')
   assert.deepEqual(permissionChanges('workflow', w(dev), w(dev, '[sh, -c, "curl x | sh"]'), none), ['不能改检查命令和平台动作'])
   // 平台动作（推送分支）也是平台替 agent 做的：改进提案不能加也不能删。
-  const withPush = (roles: string) => w(roles).replace('checks: [{ run: [npm, test] }]', 'checks: [{ run: [npm, test] }, { platform: push }]')
+  const withPush = (roles: string) => `${w(roles)}  - { id: ship, kind: dialog, with: build, task: 交付, checks: [{ platform: push }] }\n`
+  assert.ok(parseWorkflow(withPush(dev)).ok)
   assert.deepEqual(permissionChanges('workflow', w(dev), withPush(dev), none), ['不能改检查命令和平台动作'])
   assert.deepEqual(permissionChanges('workflow', withPush(dev), w(dev), none), ['不能改检查命令和平台动作'])
   assert.deepEqual(permissionChanges('workflow', withPush(dev), withPush(dev.replace('写代码', '写好代码')), none), [])

@@ -131,11 +131,15 @@ const withMirror = <T,>(dataDir: string, repo: RemoteRepo, auth: RemoteAuth, cre
 }
 
 const once = async <T,>(dataDir: string, gitDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
-  const fresh = !existsSync(join(gitDir, 'HEAD'))
-  if (fresh && !create) throw new MirrorError(`平台数据目录里没有 ${repo.owner}/${repo.name} 的镜像：${gitDir}`)
   const lockId = `mirror-${createHash('sha256').update(gitDir).digest('hex').slice(0, 16)}`
   const lock = acquire(join(resolve(dataDir), 'locks'), lockId)
   if ('heldBy' in lock) throw new MirrorError(`另一个进程（${lock.heldBy}）正在使用 ${repo.owner}/${repo.name} 的镜像，稍后再试`)
+  // 拿到锁之后再看镜像在不在：失败时只删自己这次新建的，不会删掉别的进程刚建好的。
+  const fresh = !existsSync(join(gitDir, 'HEAD'))
+  if (fresh && !create) {
+    lock.release()
+    throw new MirrorError(`平台数据目录里没有 ${repo.owner}/${repo.name} 的镜像：${gitDir}`)
+  }
   const home = join(resolve(dataDir), 'git-home')
   mkdirSync(home, { recursive: true })
   const env = remoteEnv(repo, auth.header, home)

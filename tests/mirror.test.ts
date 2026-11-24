@@ -328,11 +328,13 @@ test('远程的任务分支被别人推过：不强推，检查失败并说明�
   // 别人先往同名分支推了一个提交。
   const other = r.commit('OTHER.md')
   execFileSync('git', ['--git-dir', join(r.dir, 'remote', 'acme', 'app.git'), 'update-ref', `refs/heads/${meta.branch}`, other])
-  // 推送失败、对话打满轮次后会问用户：不等回答，停在那里。
   const started = sup.start(c.id, { wait: false })
   assert.ok(started.ok)
   const task = await started.done
-  assert.equal(task.status, 'waiting_user')
+  // agent 改不了：不交回开发，任务失败等人处理，重试时重新跑这一轮检查。
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', /平台替任务做的动作，agent 改不了/)
+  assert.equal(task.log.filter(e => e.type === 'call' && e.node === 'deliver').length, 0, '没有交回开发')
   const results = task.log.filter(e => e.type === 'check').flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results)
   const push = results.find(x => x.check.kind === 'platform' && !x.passed)!
   assert.match(push.detail, new RegExp(`分支 ${meta.branch} 已经有平台没有的提交（被别人推过或改过），平台不强推`))
@@ -363,4 +365,57 @@ test('平台动作：本机仓库的任务跳过推送并写明原因；前面�
   const push = task.log.filter(e => e.type === 'check').flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results).find(x => x.check.kind === 'platform')!
   assert.match(push.detail, /任务用的是本机仓库 .*，没有远程仓库，跳过推送/)
   assert.equal(r.requests().length, 0)
+})
+
+test('agent 自己提交了可写范围外的文件：不推送，列出这些文件', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const content = SHIP.replace('    write: worktree\n', '    write: worktree\n    writePaths: [src/**]\n').replace('name: ship', 'name: ship-src')
+  assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship-src', content, actor: 'test' }, Date.now()).ok, true)
+  // 开发在范围内写 src/a.js，又绕过平台自己提交了一个 CI 配置。
+  const executor = new FakeExecutor(async ({ key }) => {
+    const wt = r.store.meta(key.split('/')[0]!).worktree
+    mkdirSync(join(wt, 'src'), { recursive: true })
+    writeFileSync(join(wt, 'src', 'a.js'), 'x\n')
+    mkdirSync(join(wt, '.github', 'workflows'), { recursive: true })
+    writeFileSync(join(wt, '.github', 'workflows', 'x.yml'), 'on: push\n')
+    execFileSync('git', ['-c', 'user.name=agent', '-c', 'user.email=a@x', 'add', '.github'], { cwd: wt })
+    execFileSync('git', ['-c', 'user.name=agent', '-c', 'user.email=a@x', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'sneak'], { cwd: wt })
+    return '改好了'
+  })
+  const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship-src', request: '需求' })) as { id: string }
+  const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', /不在可写范围（src\/\*\*）内：\.github\/workflows\/x\.yml。这些提交不是平台做的，没有推送/)
+  assert.throws(() => remoteSha(r, r.store.meta(c.id).branch), '远程没有这个分支')
+})
+
+test('平台动作失败后人工重试：重新跑这一轮检查，推送成功后任务完成', async () => {
+  const r = await remote(TOKEN)
+  const sup = shipper(r)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship', request: '需求' })) as { id: string }
+  // 推送前凭据被删了：推送被拒，任务失败。
+  assert.equal(r.credentials.delete(LOCAL_OWNER, r.credential), true)
+  const first = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(first.status, 'failed', first.failure)
+  assert.match(first.failure ?? '', /这是私有仓库或需要登录/)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  assert.equal(r.store.dispatch(c.id, { kind: 'retry' }, Date.now(), 'web').accepted, true)
+  const second = await (sup.start(c.id) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(second.status, 'done', second.failure)
+  assert.equal(remoteSha(r, r.store.meta(c.id).branch), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: r.store.meta(c.id).worktree, encoding: 'utf8' }).trim())
+})
+
+test('任务中止后不做平台动作', async () => {
+  const { runChecks } = await import('../src/runner/checks.ts')
+  const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-push-'))
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
+  const ac = new AbortController()
+  ac.abort()
+  let pushed = 0
+  const out = await runChecks(dir, [{ kind: 'platform', action: 'push' }], process.env, ac.signal, async c => { pushed++; return { check: c, passed: true, detail: '' } })
+  assert.deepEqual(out.map(x => x.detail), ['任务已中止，这一步没有做'])
+  assert.equal(pushed, 0)
 })

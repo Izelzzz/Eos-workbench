@@ -137,6 +137,7 @@ export const runChecks = async (worktree: string, checks: Check[], env: NodeJS.P
   for (const c of checks) {
     if (c.kind === 'file') results.push(checkFile(worktree, c))
     else if (c.kind === 'run') results.push(await checkRun(worktree, c, env, signal))
+    else if (signal?.aborted === true) results.push({ check: c, passed: false, detail: '任务已中止，这一步没有做' })
     else if (results.some(r => !r.passed)) results.push({ check: c, passed: false, detail: '前面的检查没有通过，这一步没有做' })
     else if (platform === undefined) results.push({ check: c, passed: false, detail: '这里不能执行平台动作' })
     else results.push(await platform(c))

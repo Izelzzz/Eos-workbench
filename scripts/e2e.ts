@@ -152,7 +152,7 @@ function remoteChecks(): Record<string, boolean> {
     'worktree 建在平台数据目录里的镜像上': meta.repo.startsWith(join(DATA, 'repos')),
     '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
     '远程的任务分支和本地任务分支是同一个提交': remoteHead === localHead && localHead !== '',
-    '推送检查通过并带着分支链接': pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === `${remote!.repo.webUrl}/tree/${meta.branch}`),
+    '推送检查通过并带着分支链接': pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === remote!.forge.branchUrl(remote!.repo, meta.branch)),
   }
 }
 
