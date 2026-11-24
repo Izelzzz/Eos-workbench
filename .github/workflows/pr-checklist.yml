@@ -1,0 +1,39 @@
+# 检查 PR 有没有走完 CLAUDE.md 自检里的流程（只查形式），见 .github/scripts/pr-checklist.ts。
+# job 名字（pr-checklist）会设成必需检查，改名前先改分支保护。
+#
+# 安全：用 pull_request（不是 pull_request_target）。来自 fork 的 PR 拿到的是只读令牌、
+# 没有仓库密钥；描述经环境变量传给脚本，不拼进 shell 命令。
+name: PR checklist
+
+on:
+  pull_request:
+    # edited：改了描述就重新检查
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checklist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-checklist:
+    name: pr-checklist
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # 检出合并提交；取两层历史，脚本用 HEAD^1..HEAD 得到这个 PR 相对 base 的改动
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+      - name: 检查脚本自己的测试
+        run: node --test '.github/scripts/*.test.ts'
+      - name: 检查描述和 E2E 证据
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node .github/scripts/pr-checklist.ts
