@@ -1,5 +1,5 @@
 {
-  "task": "t261124101426h5g",
+  "task": "t261124134658z83",
   "killed": true,
   "checks": {
     "任务完成": true,
@@ -13,7 +13,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-35dbad60045207bab8eb09ac7bb93f87",
+      "sid": "session-f7589af245b3bc4dd5355def6956c7c5",
       "calls": [
         "c1"
       ],
@@ -21,10 +21,10 @@
         "workspace-write",
         "read-only"
       ],
-      "asks": 1
+      "asks": 2
     },
     "build": {
-      "sid": "session-2300e979bfc855a12f2bca58fd2569fb",
+      "sid": "session-56242f9e6e89b4300a619965ee96b4e9",
       "calls": [
         "c2",
         "c4"
@@ -35,7 +35,7 @@
       "asks": 1
     },
     "review": {
-      "sid": "session-cf64c727f2e4666df86edcab10a2b67b",
+      "sid": "session-dd6546ec48c9e8a9ceee37542e9694f9",
       "calls": [
         "c3",
         "c5"
@@ -49,12 +49,12 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 68532ms",
-    "c2 produce@build 19169ms",
-    "c3 critique@review#1 25882ms",
-    "c4 respond@review#1 13282ms",
-    "c5 critique@review#2 9140ms"
+    "c1 produce@plan 55689ms",
+    "c2 produce@build 25671ms",
+    "c3 critique@review#1 25559ms",
+    "c4 respond@review#1 10917ms",
+    "c5 critique@review#2 6486ms"
   ],
-  "commits": "f4c8c6d eos: review respond (c4)\n3b39bea eos: build produce (c2)\n",
-  "npmTest": "uration_ms: 0.367618\n  type: 'test'\n  ...\n# Subtest: sum：Infinity 作为合法 number 参与求和\nok 10 - sum：Infinity 作为合法 number 参与求和\n  ---\n  duration_ms: 0.273487\n  type: 'test'\n  ...\n# Subtest: sum：稀疏数组空洞按非数字抛 TypeError\nok 11 - sum：稀疏数组空洞按非数字抛 TypeError\n  ---\n  duration_ms: 0.159143\n  type: 'test'\n  ...\n1..11\n# tests 11\n# suites 0\n# pass 11\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 68.121324\n"
+  "commits": "2013bdd eos: review respond (c4)\ned84193 eos: build produce (c2)\n",
+  "npmTest": "y 与 -Infinity 参与求和\n  ---\n  duration_ms: 0.094386\n  type: 'test'\n  ...\n# Subtest: Infinity 与 -Infinity 相加结果为 NaN，不抛错\nok 13 - Infinity 与 -Infinity 相加结果为 NaN，不抛错\n  ---\n  duration_ms: 0.122023\n  type: 'test'\n  ...\n# Subtest: 较大数组求和\nok 14 - 较大数组求和\n  ---\n  duration_ms: 0.213982\n  type: 'test'\n  ...\n1..14\n# tests 14\n# suites 0\n# pass 14\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 93.008396\n"
 }

@@ -10,8 +10,9 @@
     "数据目录里没有 key 的明文": true
   },
   "e2eExit": 0,
-  "platformProcesses": 6,
+  "platformProcesses": 5,
   "platformEnvHasModelKey": false,
+  "platformWithModelKey": [],
   "dsh": [
     {
       "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/89c13ab90926b870/cordis.patch.yml",
@@ -119,19 +120,20 @@
       "keyFromStore": true
     }
   ],
-  "otherChildrenSeen": 36,
+  "otherChildrenSeen": 39,
   "otherChildrenSample": [
-    "bash",
     "npm",
-    "node",
-    "tail",
+    "systemd-run",
+    "bash",
     "sh",
+    "node",
     "/opt/node22/bin/node",
     "git",
     "/tmp/code-sign",
-    "node\nconst t=(label,fn)=>{try{console.log(label,'=>',JSON.stringify(fn()))}catch(e){console.log(label,'=> throws',e.name,e.message)}};\nt('sum("
+    "tail",
+    "node\nimport {sum} from './src/math.js';\nconst cases = [new Float64Array([1,2]), {length:2,0:1,1:2}, (function(){return arguments})(1,2), new Number(2), Symbol('x'), ()=>1, new "
   ],
   "otherChildrenWithKey": [],
-  "doctor": "Eos 环境检查（数据目录 /home/user/Eos-workbench/.eos/e2e/data）\n⚠ Node：22.23.5，低于 Eos 要求的 >=24.9.0（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24.9.0 或更新的版本，再用它启动平台\n✓ DeepSeek API key：来自凭据存储（凭据 deepseek）\n✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 a3bea8f27abf23be）\n⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥\n  怎么修：安装 bubblewrap（bwrap）；团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）\n✓ git：2.43.0\n✓ 数据目录：/home/user/Eos-workbench/.eos/e2e/data 可写\n✓ dsh：0.2.2-rc.5\n",
+  "doctor": "Eos 环境检查（数据目录 /home/user/Eos-workbench/.eos/e2e/data）\n⚠ Node：22.23.5，低于 Eos 要求的 >=24.9.0（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24.9.0 或更新的版本，再用它启动平台\n✓ DeepSeek API key：来自凭据存储（凭据 deepseek）\n✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 2426af51439cf8b0）\n⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：安装 bubblewrap（bwrap）；团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）\n✓ git：2.43.0\n✓ 数据目录：/home/user/Eos-workbench/.eos/e2e/data 可写\n✓ dsh：0.2.2-rc.5\n",
   "plaintextFiles": []
 }

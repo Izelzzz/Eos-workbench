@@ -72,6 +72,7 @@ const finish = (code: number | null, error?: string) => {
     e2eExit: code, ...(error === undefined ? {} : { error }),
     platformProcesses: platform.length,
     platformEnvHasModelKey: platform.some(p => p.names.has('DEEPSEEK_API_KEY')),
+    platformWithModelKey: platform.filter(p => p.names.has('DEEPSEEK_API_KEY')).map(p => p.cmd),
     dsh: dsh.map(p => ({ cmd: p.cmd, envNames: [...p.names].sort(), notAllowed: [...p.names].filter(n => !allowed(n)), keyFromStore: p.dshKey === storeKey })),
     otherChildrenSeen: others.length,
     otherChildrenSample: [...new Set(others.map(p => p.cmd.replace(/\s.*/, '')))],
