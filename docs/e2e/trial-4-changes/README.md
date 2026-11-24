@@ -1,0 +1,21 @@
+# 试用反馈第 4 条：任务页显示仓库、分支、worktree 和改动（真实模型 E2E）
+
+脚本：`scripts/changes-e2e.ts`。在 Node 24.22.3 上启动 `eos web`，在页面上新建任务（内置 standard 工作流，真实模型）。agent 提问时在页面上点第一个选项回答。任务结束后打开任务页，点开第一个 `src/` 下的文件看 diff，截图。页面上显示的内容和 git 的结果逐个比对。
+
+6/6，见 `report.json`。
+
+| 检查 | 依据 |
+|---|---|
+| 任务完成 | 任务状态 done |
+| 页面显示仓库、分支、工作目录（worktree）、基线提交，和任务详情接口一致 | 页面上 `.where` 的每一项 |
+| 改动区的文件和每个文件的 +/- 行数，与 `git diff --numstat 基线 任务分支` 一致 | `rows` 和 `numstat` 字段 |
+| 点开的 diff 与 `git diff 基线 任务分支 -- <文件>` 的 @@ 段逐行一致 | 脚本里逐行比对 |
+| 390 宽没有横向滚动 | `scrollWidth - clientWidth <= 0` |
+| 页面没有报错 | 没有 pageerror 和 console error |
+
+截图：`1-task-desktop.png`（1440 宽）、`2-task-390.png`（390 宽）。
+
+## 说明
+
+- 这次的改动只有新增文件。修改、删除、改名、二进制、空文件、截断这些情况，只有 `tests/changes.test.ts` 的单元测试覆盖，在真实任务里没出现过。
+- 处理代码评审之前（diff 和列表一起返回的版本）也跑过一次，同样 6/6。这份报告是改成「点开时才取 diff」、rebase 到 main 之后的最终代码。

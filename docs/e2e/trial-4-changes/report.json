@@ -1,0 +1,63 @@
+{
+  "commit": "efc4210",
+  "task": "t261124055810v1a",
+  "status": "done",
+  "answers": [
+    "需求只说“把数字限制在 [min, max]”，没有说明非 number 或 NaN 入参的行为。规格应按哪种口径约定？ → 只处理 number，NaN 一律返回 NaN（推荐）"
+  ],
+  "checks": {
+    "任务完成": true,
+    "页面显示仓库、分支、worktree、基线": true,
+    "改动区的文件和增删行数与 git numstat 一致": true,
+    "展开的 diff 和 git diff 的内容一致": true,
+    "390 宽没有横向滚动": true,
+    "页面没有报错": true
+  },
+  "where": {
+    "仓库": "/home/user/eos-pr4/.eos/changes-e2e/repo",
+    "分支": "eos/t261124055810v1a",
+    "工作目录（worktree）": "/home/user/eos-pr4/.eos/changes-e2e/data/worktrees/t261124055810v1a",
+    "基线提交": "c82326292b00"
+  },
+  "rows": [
+    {
+      "status": "新增",
+      "path": "docs/changes.md",
+      "count": "+17 -0"
+    },
+    {
+      "status": "新增",
+      "path": "docs/spec.md",
+      "count": "+75 -0"
+    },
+    {
+      "status": "新增",
+      "path": "src/clamp.js",
+      "count": "+37 -0"
+    },
+    {
+      "status": "新增",
+      "path": "test/clamp.test.js",
+      "count": "+53 -0"
+    }
+  ],
+  "numstat": [
+    {
+      "path": "docs/changes.md",
+      "count": "+17 -0"
+    },
+    {
+      "path": "docs/spec.md",
+      "count": "+75 -0"
+    },
+    {
+      "path": "src/clamp.js",
+      "count": "+37 -0"
+    },
+    {
+      "path": "test/clamp.test.js",
+      "count": "+53 -0"
+    }
+  ],
+  "errors": []
+}
