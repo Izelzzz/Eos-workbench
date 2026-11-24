@@ -221,13 +221,13 @@ const CONFIGS = [
   { maxRounds: 2, escalate: true }, { maxRounds: 1, escalate: true }, { maxRounds: 2, escalate: false },
   { maxRounds: 2, escalate: true, checks: 'review' as const }, { maxRounds: 2, escalate: false, checks: 'only' as const },
   { maxRounds: 1, escalate: true, checks: 'only' as const, maxFixes: 0 }, { maxRounds: 1, escalate: false, checks: 'review' as const, maxFixes: 2 },
-  { maxRounds: 1, escalate: false, checks: 'review' as const, ship: true },
+  { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 1 }, { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 2 },
 ]
 const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试', only: '有交付物、只有测试' }
 
 for (const config of CONFIGS) {
   const result = explore(workflow(config), 200)
-  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}${'ship' in config ? '，评审后交付：测试通过再推送' : ''}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
+  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}${'ship' in config ? `，评审后交付（${config.ship} 轮）：测试通过再推送` : ''}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
     assert.deepEqual(result.violations.slice(0, 5), [])
     assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')

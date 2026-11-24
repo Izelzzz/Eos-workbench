@@ -261,11 +261,19 @@ roles:
     model: deepseek-flash
     write: worktree
     prompt: 按需求实现。
+  reviewer:
+    model: deepseek-flash
+    prompt: 评审。
 nodes:
   - id: build
     kind: agent
     role: developer
     task: 实现需求。
+  - id: review
+    kind: dialog
+    role: reviewer
+    with: build
+    task: 评审。
   - id: deliver
     kind: dialog
     with: build
@@ -281,6 +289,7 @@ const shipper = (r: Awaited<ReturnType<typeof remote>>, credentials = r.credenti
   assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship', content: SHIP, actor: 'test' }, Date.now()).ok, true)
   let n = 0
   const executor = new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/review')) return PASS
     const id = key.split('/')[0]!
     writeFileSync(join(r.store.meta(id).worktree, `change-${++n}.txt`), `${n}\n`)
     return '改好了'
@@ -374,6 +383,7 @@ test('agent 自己提交了可写范围外的文件：不推送，列出这些�
   assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship-src', content, actor: 'test' }, Date.now()).ok, true)
   // 开发在范围内写 src/a.js，又绕过平台自己提交了一个 CI 配置。
   const executor = new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/review')) return PASS
     const wt = r.store.meta(key.split('/')[0]!).worktree
     mkdirSync(join(wt, 'src'), { recursive: true })
     writeFileSync(join(wt, 'src', 'a.js'), 'x\n')
@@ -387,7 +397,7 @@ test('agent 自己提交了可写范围外的文件：不推送，列出这些�
   const c = (await sup.create({ repo: r.url, workflow: 'ship-src', request: '需求' })) as { id: string }
   const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
   assert.equal(task.status, 'failed')
-  assert.match(task.failure ?? '', /不在可写范围（src\/\*\*）内：\.github\/workflows\/x\.yml。这些提交不是平台做的，没有推送/)
+  assert.match(task.failure ?? '', /提交里有改动不在可写范围（src\/\*\*）内：\.github\/workflows\/x\.yml。这些提交不是平台做的，没有推送/)
   assert.throws(() => remoteSha(r, r.store.meta(c.id).branch), '远程没有这个分支')
 })
 
@@ -418,4 +428,56 @@ test('任务中止后不做平台动作', async () => {
   const out = await runChecks(dir, [{ kind: 'platform', action: 'push' }], process.env, ac.signal, async c => { pushed++; return { check: c, passed: true, detail: '' } })
   assert.deepEqual(out.map(x => x.detail), ['任务已中止，这一步没有做'])
   assert.equal(pushed, 0)
+})
+
+/** 带可写范围的推送工作流，开发每次回复时执行 sneak（在 worktree 里自己动 git）。 */
+const scoped = async (sneak: (wt: string) => void) => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const content = SHIP.replace('    write: worktree\n', '    write: worktree\n    writePaths: [src/**]\n').replace('name: ship', 'name: ship-src')
+  assert.equal(r.sup.conventions.save({ kind: 'workflow', name: 'ship-src', content, actor: 'test' }, Date.now()).ok, true)
+  const executor = new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/review')) return PASS
+    const wt = r.store.meta(key.split('/')[0]!).worktree
+    mkdirSync(join(wt, 'src'), { recursive: true })
+    writeFileSync(join(wt, 'src', 'a.js'), 'x\n')
+    sneak(wt)
+    return '改好了'
+  })
+  const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship-src', request: '需求' })) as { id: string }
+  const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  return { r, task, branch: r.store.meta(c.id).branch }
+}
+const g = (wt: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=agent', '-c', 'user.email=a@x', '-c', 'commit.gpgsign=false', ...a], { cwd: wt, stdio: 'ignore' })
+
+test('agent 先自己提交越界文件、再提交删掉它：最终的树里没有，但历史里有，照样不推送', async () => {
+  const { r, task, branch } = await scoped(wt => {
+    writeFileSync(join(wt, '.env'), 'SECRET=1\n')
+    g(wt, 'add', '.env')
+    g(wt, 'commit', '-q', '-m', 'add')
+    g(wt, 'rm', '-q', '.env')
+    g(wt, 'commit', '-q', '-m', 'remove')
+  })
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', /提交里有改动不在可写范围（src\/\*\*）内：\.env/)
+  assert.throws(() => remoteSha(r, branch))
+})
+
+test('agent 把任务分支移到别的历史上：基线不再是祖先，不推送', async () => {
+  const { r, task, branch } = await scoped(wt => {
+    const current = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim()
+    g(wt, 'checkout', '-q', '--orphan', 'tmp')
+    g(wt, 'rm', '-rq', '--cached', '.')
+    mkdirSync(join(wt, 'src'), { recursive: true })
+    writeFileSync(join(wt, 'src', 'b.js'), 'y\n')
+    g(wt, 'add', 'src/b.js')
+    g(wt, 'commit', '-q', '-m', 'unrelated')
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim()
+    g(wt, 'checkout', '-q', '-f', current)
+    g(wt, 'reset', '-q', '--hard', sha)
+  })
+  assert.equal(task.status, 'failed')
+  assert.match(task.failure ?? '', new RegExp(`任务分支 ${branch} 已经不在基线 .* 之后`))
+  assert.throws(() => remoteSha(r, branch))
 })

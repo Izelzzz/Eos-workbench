@@ -108,11 +108,14 @@ const semantic = (wf: Workflow): WorkflowError[] => {
         }
       })
     }
-    // 平台动作（推送等）会改到远程：只在评审之后、单独的交付节点（没有评审角色的对话节点）里做，而且排在检查最后，
-    // 这样只有测试等检查都通过、评审也已经通过时才会做。
+    // 平台动作（推送等）会改到远程：只放在评审之后单独的交付节点里（没有评审角色的对话节点，前面有带评审角色的对话节点），
+    // 而且排在命令检查后面：评审通过、测试等检查也都通过了才做。交付节点的检查没过、交回开发改过之后不会再评审，
+    // 所以交付节点的 maxRounds 越小，推出去的未评审改动越少。
     if (n.checks.some(c => c.kind === 'platform')) {
       if (n.kind !== 'dialog' || n.role !== undefined) {
         errors.push({ path: at('checks'), message: '平台动作（platform）只能放在没有评审角色的对话节点里：评审通过之后单独加一个交付节点，例如 { id: deliver, kind: dialog, with: build, checks: [{ platform: push }] }' })
+      } else if (![...seen.values()].some(p => p.kind === 'dialog' && p.role !== undefined)) {
+        errors.push({ path: at('checks'), message: '平台动作（platform）所在的交付节点前面要有带评审角色的对话节点：先评审，通过了再推送' })
       }
       const firstPlatform = n.checks.findIndex(c => c.kind === 'platform')
       if (n.checks.slice(firstPlatform).some(c => c.kind !== 'platform')) {

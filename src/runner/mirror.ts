@@ -185,14 +185,14 @@ export const syncMirror = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth):
   })
 
 /**
- * 把镜像里的任务分支推到远程的同名分支，不强推。返回推上去的提交。
+ * 把核对过的提交 sha 推到远程的 branch 分支，不强推。推的是这个提交，不是推送时分支指向的提交：核对和推送之间分支被移动也不影响。
  * 远程的这个分支有平台没有的提交（被别人改过）时失败：平台不覆盖别人的提交。
  */
-export const pushBranch = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth, branch: string): Promise<{ sha: string }> =>
+export const pushBranch = (dataDir: string, repo: RemoteRepo, auth: RemoteAuth, branch: string, sha: string): Promise<{ sha: string }> =>
   withMirror(dataDir, repo, auth, false, async git => {
-    const sha = await git(['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])
+    if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) throw new MirrorError(`不是提交号：${sha}`)
     try {
-      await git(['push', '-q', '--no-verify', repo.cloneUrl, `refs/heads/${branch}:refs/heads/${branch}`])
+      await git(['push', '-q', '--no-verify', repo.cloneUrl, `${sha}:refs/heads/${branch}`])
     } catch (e) {
       if (e instanceof MirrorError && /\[rejected\]|non-fast-forward|fetch first/.test(e.raw)) {
         throw new MirrorError(`${repo.host} 上的分支 ${branch} 已经有平台没有的提交（被别人推过或改过），平台不强推，没有覆盖它。请人工处理这个分支（例如合并后再推，或删掉远程分支），然后重试`)

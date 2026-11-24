@@ -14,7 +14,7 @@ import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
 import type { Forge, RemoteRepo } from '../forge/types.ts'
-import { addWorktree, commitInScope, contextFor, createWorktree, outOfScopeOnBranch, type Worktree } from './git.ts'
+import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, type Worktree } from './git.ts'
 import { MirrorError, pushBranch, type RemoteAuth, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
@@ -111,13 +111,20 @@ export class Supervisor {
     if (forge === undefined) return { check: c, passed: false, detail: `平台不认得任务的远程仓库 ${meta.remote.webUrl}（${meta.remote.forge}）` }
     // agent 能在 worktree 里自己提交：推送前按整个任务分支核对，改到的文件都要在可写角色的范围内。
     const writable = Object.values(this.o.store.get(id)!.workflow.roles).filter(r => r.write === 'worktree').flatMap(r => r.writePaths)
-    const outside = outOfScopeOnBranch(meta, writable)
+    let scope: ReturnType<typeof scopeOfBranch>
+    try {
+      scope = scopeOfBranch(meta, writable)
+    } catch (e) {
+      return { check: c, passed: false, detail: `核对任务分支失败，没有推送：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}` }
+    }
+    if ('error' in scope) return { check: c, passed: false, detail: scope.error }
+    const { outside } = scope
     if (outside.length > 0) {
-      return { check: c, passed: false, detail: `任务分支上有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支` }
+      return { check: c, passed: false, detail: `任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支` }
     }
     const { auth, error } = this.authFor(meta.remote, forge)
     try {
-      const { sha } = await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch)
+      const { sha } = await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)
       const url = forge.branchUrl(meta.remote, meta.branch)
       return { check: c, passed: true, detail: `已把分支 ${meta.branch}（${sha.slice(0, 12)}）推到 ${url}`, links: [{ label: `分支 ${meta.branch}`, url }] }
     } catch (e) {

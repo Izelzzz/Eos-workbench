@@ -11,9 +11,17 @@ const permissionFields = (a: AgentConfig): Record<string, string> => ({
 })
 const permissionOf = (a: AgentConfig) => JSON.stringify(permissionFields(a))
 
-/** 检查命令和平台动作：都是平台替 agent 执行的，改进提案不能增删改。 */
+/**
+ * 检查命令和平台动作：都是平台替 agent 执行的，改进提案不能增删改。平台动作连同它前面有哪些评审节点一起比较：
+ * 提案不能删掉推送前的评审、也不能把交付节点挪到评审前面。
+ */
 const commandsOf = (w: Workflow): string[] =>
-  w.nodes.flatMap(n => n.checks.flatMap(c => (c.kind === 'run' ? [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`] : c.kind === 'platform' ? [`${n.id}：平台动作 ${c.action}`] : []))).sort()
+  w.nodes.flatMap((n, i) => n.checks.flatMap(c => {
+    if (c.kind === 'run') return [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`]
+    if (c.kind !== 'platform') return []
+    const reviews = w.nodes.slice(0, i).filter(p => p.kind === 'dialog' && p.role !== undefined).map(p => p.id).sort()
+    return [`${n.id}：平台动作 ${c.action}（之前的评审：${reviews.join('、')}）`]
+  })).sort()
 
 const UNPARSABLE = '当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'
 

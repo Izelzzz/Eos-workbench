@@ -484,16 +484,29 @@ export const onBranch = (w: Worktree, head: string): boolean => {
 }
 
 /**
- * 任务分支相对基线改到的、不在 writePaths 里的路径（改名两边都算）。名字不是合法 UTF-8 的一律算越界（显示成转义后的样子）。
- * 平台提交前会撤销越界改动，但 agent 能在 worktree 里自己提交、移动分支，所以推送前按整个分支再核对一次。
+ * 推送前核对任务分支：定下分支现在指向的提交（推送只推这个提交），基线必须是它的祖先，
+ * 基线之后的每一个提交（合并提交对每个父提交分别算）改到的路径都要在 writePaths 里，改名两边都算。
+ * 名字不是合法 UTF-8 的一律算越界（显示成转义后的样子）。
+ * 平台提交前会撤销越界改动，但 agent 能在 worktree 里自己提交、移动分支：只看最终的树不够（先加后删的文件照样在历史里）。
  */
-export const outOfScopeOnBranch = (w: Worktree, writePaths: string[]): string[] => {
+export const scopeOfBranch = (w: Worktree, writePaths: string[]): { sha: string; outside: string[] } | { error: string } => {
   const loc = locate(w.worktree, w.repo)
-  const out = splitNul(wgit(loc, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', '--no-renames', w.baseSha, `refs/heads/${w.branch}`]))
-  return out.flatMap(raw => {
-    const path = utf8(raw)
-    return path === undefined ? [shown(raw)] : matchesAny(writePaths, path) ? [] : [path]
-  })
+  const sha = wgitText(loc, ['rev-parse', '--verify', `refs/heads/${w.branch}^{commit}`])
+  try {
+    wgit(loc, ['merge-base', '--is-ancestor', w.baseSha, sha])
+  } catch {
+    return { error: `任务分支 ${w.branch} 已经不在基线 ${w.baseSha.slice(0, 12)} 之后（分支被移到了别的历史上），没有推送；请人工检查这个任务的分支` }
+  }
+  const out = splitNul(wgit(loc, ['log', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-merges=separate', '--name-only', '-z', '--format=', `${w.baseSha}..${sha}`]))
+  const outside = new Set<string>()
+  for (const raw of out) {
+    const field = raw.subarray(raw[0] === 0x0a ? 1 : 0)
+    if (field.length === 0) continue
+    const path = utf8(field)
+    if (path === undefined) outside.add(shown(field))
+    else if (!matchesAny(writePaths, path)) outside.add(path)
+  }
+  return { sha, outside: [...outside] }
 }
 
 /** 单个文件的 diff 最多读这么多字节：超过的部分 git 输出了也不读进内存（页面本来也只显示前面一部分）。 */
