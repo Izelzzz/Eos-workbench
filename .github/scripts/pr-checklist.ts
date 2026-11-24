@@ -63,6 +63,12 @@ export function sections(body: string): { title: string; content: string }[] {
   return out.map((s) => ({ title: s.title, content: s.lines.join('\n').trim() }))
 }
 
+/** 决定 CI 查什么、放行什么的文件。PR 改它们就能放宽自己的检查，所以要醒目地提示。 */
+export function isGuardFile(path: string): boolean {
+  return path === '.gitleaksignore' || path === '.gitleaks.toml' || path === '.github/e2e-paths.txt' ||
+    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/')
+}
+
 export type Result = { errors: string[]; warnings: string[]; notes: string[] }
 
 export function check(input: { body: string; changed: string[]; rules: Rule[] }): Result {
@@ -78,6 +84,11 @@ export function check(input: { body: string; changed: string[]; rules: Rule[] })
     const s = find(pred)
     if (!s) r.errors.push(`描述里缺少「${name}」一节（CLAUDE.md 自检第 7 条）`)
     else if (s.content === '') r.errors.push(`「${s.title}」一节是空的`)
+  }
+
+  const guards = input.changed.filter(isGuardFile)
+  if (guards.length > 0) {
+    r.warnings.push(`这个 PR 改了检查规则或允许清单（${guards.join('、')}）。放宽规则要人批：独立审查核实，合并卡片上单独列出`)
   }
 
   const needed = input.changed.filter((p) => needsE2E(p, input.rules))
@@ -117,7 +128,7 @@ function main(): void {
   const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
   const r = check({ body, changed, rules })
   for (const n of r.notes) console.log(n)
-  for (const w of r.warnings) console.log(`::warning title=E2E 豁免::${w}`)
+  for (const w of r.warnings) console.log(`::warning title=需要人确认::${w}`)
   for (const e of r.errors) console.log(`::error title=PR 流程检查::${e}`)
   if (r.errors.length > 0) process.exit(1)
   console.log('PR 流程检查通过')

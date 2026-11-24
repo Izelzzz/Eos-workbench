@@ -12,7 +12,7 @@ test('仓库的规则文件：平台代码和构建、依赖、部署需要 E2E�
     'web/src/App.tsx', 'web/vite.config.ts', 'tsconfig.json', 'package.json', 'package-lock.json',
     'vendor/dsh-sdk-client/client.ts', 'Dockerfile', 'compose.yaml', 'compose.override.yaml', '.dockerignore', 'newdir/x.ts', 'Makefile']
   const skip = ['docs/roadmap.md', 'docs/e2e/b1/run.log', 'tests/engine.test.ts', 'poc/run-all.sh', 'scripts/e2e.ts',
-    '.github/workflows/ci.yml', '.claude/settings.json', 'README.md', 'CLAUDE.md', 'LICENSE', '.gitignore']
+    '.github/workflows/ci.yml', '.gitleaksignore', '.gitleaks.toml', '.claude/settings.json', 'README.md', 'CLAUDE.md', 'LICENSE', '.gitignore']
   for (const p of need) assert.equal(needsE2E(p, rules), true, p)
   for (const p of skip) assert.equal(needsE2E(p, rules), false, p)
 })
@@ -40,7 +40,7 @@ test('缺少或空着「能用证据证明的」「证明不了的」时报错�
 })
 
 test('没碰需要 E2E 的路径：不要求「端到端验证」一节', () => {
-  const r = check({ body: proof, changed: ['docs/roadmap.md', 'tests/x.test.ts', '.github/workflows/ci.yml'], rules })
+  const r = check({ body: proof, changed: ['docs/roadmap.md', 'tests/x.test.ts', 'poc/run-all.sh'], rules })
   assert.deepEqual(r.errors, [])
   assert.deepEqual(r.warnings, [])
 })
@@ -68,4 +68,15 @@ test('写了「不需要」和理由：通过，但给出豁免提示；只写�
   assert.equal(r.warnings.length, 1)
   assert.match(r.warnings[0]!, /只改了注释/)
   assert.equal(check({ body: `${proof}\n## 端到端验证\n\n不需要\n`, changed: ['src/a.ts'], rules }).errors.length, 1)
+})
+
+test('改了检查规则或允许清单：给出提示，提示里列出是哪些文件；只改别的不提示', () => {
+  const r = check({ body: proof, changed: ['.gitleaksignore', '.github/workflows/ci.yml', 'docs/a.md'], rules })
+  assert.deepEqual(r.errors, [])
+  assert.equal(r.warnings.length, 1)
+  assert.match(r.warnings[0]!, /\.gitleaksignore、\.github\/workflows\/ci\.yml/)
+  for (const p of ['.gitleaks.toml', '.github/e2e-paths.txt', '.github/scripts/pr-checklist.ts']) {
+    assert.equal(check({ body: proof, changed: [p], rules }).warnings.length, 1, p)
+  }
+  assert.deepEqual(check({ body: proof, changed: ['docs/a.md', '.github/README.md'], rules }).warnings, [])
 })
