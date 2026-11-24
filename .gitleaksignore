@@ -13,6 +13,3 @@ e1e6b17f06c2180f4dd55ab9c42d32a3a2bf2106:tests/logs.test.ts:generic-api-key:110
 # 值里有 0123456789、abc 这样的顺序片段，长度 19。CI 第一批 2/3 判断，测试假值。
 e1e6b17f06c2180f4dd55ab9c42d32a3a2bf2106:tests/redact.test.ts:generic-api-key:27
 
-# ci-deliberate-fake-secret.txt 的 token：CI 第一批 2/3 故意提交的明显假值（ghp_CIdeliberateFAKEtoken 加 15 个 0），
-# 用来证明 gitleaks 会变红；文件已在下一个提交删除。历史改写不在这个 PR 的权限内，所以按指纹放行。
-7c6a31725305e1118e1933da8d0546216baa5d73:ci-deliberate-fake-secret.txt:github-pat:2
