@@ -52,6 +52,17 @@ ADR-006 的沙箱结论来自这里。宿主机内核 6.18，Docker 29.9，cgrou
 
 这次运行用的镜像里还设着 `npm_config_devdir`，之后删掉了，因为 npm 会对它打警告。它和这个探针的结论无关。
 
+## 4. agent 能不能读到 dsh 进程环境里的模型 key（最终配置）
+
+探针：`modelkey-probe.mts`，用 `docker compose run` 运行（最终镜像，提交 0119338）。dsh 进程的环境里有模型 key。探针用唯一的标记 `MODELKEY_MARKER_9c1e` 当 key，让 agent 的 bash 在所有可见进程的 `/proc/<pid>/environ` 里找它。
+
+结果在 `modelkey-probe.json`：
+- dsh 用的是 Landlock：agent 写进了真实的 `/tmp`。
+- agent 能看到 9 个进程，但在它们的 environ 里找到标记 0 处；读父进程（dsh）的 environ 被拒绝；agent 自己的环境里也没有 key。
+- 正对照：dsh 退出后，同一容器里一个不在沙箱里、环境带标记的同一用户进程，用同样的 grep 找到 4 处。
+
+结论：在这个容器和这个内核（6.18）上，Landlock 挡住了 agent 读 dsh 的环境。另一个会话在别的环境里观察到「没有 bwrap 时 agent 能读到 dsh 环境里的模型 key」，那次的环境和方法见路线图第 3 项的讨论记录，这里没有复现。别的内核、或 Landlock 没有生效的环境，不能套用这里的结论。
+
 ## 局限
 
 - 这些是一次性的手动运行，命令写在上面，探针源码在本目录，但没有接进 `npm run` 脚本。第 1 节的 bwrap 结果只有这里的表格，没有保存命令输出。
