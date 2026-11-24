@@ -88,15 +88,25 @@ export const parsePublicUrl = (raw: string): URL | string => {
 export const originFor = (host: string | undefined, port: number | undefined, publicUrl: URL | undefined): string | undefined => {
   if (host === undefined) return undefined
   if (['127.0.0.1', 'localhost', '[::1]'].some(h => host === `${h}:${port}`)) return `http://${host}`
-  if (publicUrl === undefined || /[/?#@\\]/.test(host)) return undefined
-  // 按外部地址的协议规范化：反向代理可能传来大写或带默认端口（eos.example.com:443）的 Host。
-  let normalized: string
-  try {
-    normalized = new URL(`${publicUrl.protocol}//${host}`).host
-  } catch {
-    return undefined
-  }
-  return normalized === publicUrl.host ? publicUrl.origin : undefined
+  if (publicUrl === undefined) return undefined
+  // 精确比较，只放宽大小写和默认端口：反向代理可能传来 EOS.example.com 或 eos.example.com:443。
+  const h = host.toLowerCase()
+  return h === publicUrl.host || h === `${publicUrl.host}:${publicUrl.protocol === 'https:' ? 443 : 80}` ? publicUrl.origin : undefined
+}
+
+const WILDCARD = ['0.0.0.0', '::']
+const LOOPBACK: Record<string, string> = { '127.0.0.1': 'http://127.0.0.1', localhost: 'http://localhost', '::1': 'http://[::1]' }
+
+/**
+ * 按监听地址算出浏览器该打开的地址，以及要不要警告（监听了非本机地址）。
+ * 不设外部地址时只能通过本机地址访问，所以监听某个具体的非本机地址（或 127.0.0.2 这类）就没人能用：直接报错。
+ */
+export const listenPlan = (host: string, port: number, publicUrl: URL | undefined): { url: string; exposed: boolean } | string => {
+  const exposed = LOOPBACK[host] === undefined
+  if (publicUrl !== undefined) return { url: publicUrl.origin, exposed }
+  if (LOOPBACK[host] !== undefined) return { url: `${LOOPBACK[host]}:${port}`, exposed }
+  if (WILDCARD.includes(host)) return { url: `http://localhost:${port}`, exposed }
+  return `监听 ${host} 时浏览器的 Host 是 ${host}:${port}，不是本机地址；要么改用 --host 0.0.0.0，要么把浏览器用的地址设成 EOS_PUBLIC_URL`
 }
 
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
@@ -162,7 +172,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
 
   /** 写接口的公共检查：同源、JSON、大小。通过时返回解析后的请求体。 */
   const guarded = async (req: IncomingMessage): Promise<{ body: Record<string, unknown> } | [number, { ok: false; error: string }]> => {
-    if (req.headers.origin === undefined || req.headers.origin !== allowedOrigin(req)) return [403, { ok: false, error: '只接受来自本页面的请求' }]
+    if (req.headers.origin === undefined || req.headers.origin !== allowedOrigin(req)) {
+      // 浏览器在外部地址上，Host 却是本机地址：反向代理把 Host 改写了。
+      const rewritten = o.publicUrl !== undefined && req.headers.origin === o.publicUrl.origin
+      return [403, { ok: false, error: rewritten ? `只接受来自本页面的请求：Origin 是 ${o.publicUrl!.origin}，Host 却是 ${req.headers.host ?? '（空）'}，反向代理要把原始 Host 传过来` : '只接受来自本页面的请求' }]
+    }
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
     const read = await readJson(req)
     if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]

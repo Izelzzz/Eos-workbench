@@ -15,7 +15,7 @@ import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
-import { createWebServer, parsePublicUrl } from './web/server.ts'
+import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
@@ -223,10 +223,21 @@ const commands: Record<string, () => Promise<void> | void> = {
     }
     const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`) })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir }, ...(publicUrl === undefined ? {} : { publicUrl }) })
-    await new Promise<void>(r => server.once('error', (e: NodeJS.ErrnoException) => fail(`Web 服务没能监听 ${values.host}:${port}：${e.code ?? e.message}`)).listen(port, values.host, r))
-    const loopback = ['127.0.0.1', 'localhost', '::1'].includes(values.host)
-    if (!loopback) note(`注意：监听 ${values.host}，能连到这台机器 ${port} 端口的人都能用 Eos（没有登录）。浏览器只能通过 ${publicUrl === undefined ? `localhost:${port} 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL` : `localhost:${port} 或 ${publicUrl.origin} 访问`}`)
-    note(`Eos Web：${publicUrl?.origin ?? `http://127.0.0.1:${port}`}（监听 ${values.host}:${port}，数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
+    const plan = listenPlan(values.host, port, publicUrl)
+    if (typeof plan === 'string') return fail(plan)
+    await new Promise<void>(r => {
+      const failed = (e: NodeJS.ErrnoException) => {
+        const line = `Web 服务没能监听 ${values.host}:${port}：${e.code ?? e.message}`
+        appendLog(processLog, line)
+        fail(line)
+      }
+      server.once('error', failed).listen(port, values.host, () => {
+        server.off('error', failed)
+        r()
+      })
+    })
+    if (plan.exposed) note(`注意：监听 ${values.host}，能连到这台机器 ${port} 端口的人都能用 Eos（没有登录）。浏览器只能通过 ${publicUrl === undefined ? `localhost:${port} 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL` : `localhost:${port} 或 ${publicUrl.origin} 访问`}`)
+    note(`Eos Web：${plan.url}（监听 ${values.host}:${port}，数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
