@@ -6,6 +6,7 @@ import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
+import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
 import { dshInstall } from '../executor/dsh.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
@@ -18,7 +19,8 @@ export type Facts = {
   node: string
   /** Eos 的 package.json 里 engines.node，例如 ">=24.9.0"；读不出来时是 undefined。 */
   nodeRequired?: string
-  apiKey: boolean
+  /** 模型 API key 的来源：只有来源，没有 key 本身。 */
+  modelKey: { source: 'credentials' | 'env' | 'missing' } | { source: 'error'; error: string }
   /** 凭据主密钥：只有状态和指纹，没有密钥本身。 */
   masterKey: { kind: 'ok'; id: string } | { kind: 'missing' } | { kind: 'invalid'; error: string }
   /** git 的版本号，或者 git 找不到、运行失败的原因。 */
@@ -72,11 +74,22 @@ const isolationItem = (f: Facts): Item[] =>
     fix: `${f.bwrap ? '' : '安装 bubblewrap（bwrap）；'}团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）`,
   }]
 
+const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
+
+/** 凭据存储优先；里面没有才用环境变量。只检查有没有，不检查是否有效。 */
+const modelKeyItem = (f: Facts): Item => {
+  const name = 'DeepSeek API key'
+  switch (f.modelKey.source) {
+    case 'credentials': return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'env': return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'missing': return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
+    case 'error': return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
+  }
+}
+
 export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
-  f.apiKey
-    ? { name: 'DeepSeek API key', status: 'ok', detail: '已设置环境变量 DEEPSEEK_API_KEY（只检查是否设置，不检查是否有效）' }
-    : { name: 'DeepSeek API key', status: 'fail', detail: '没有设置环境变量 DEEPSEEK_API_KEY', fix: '在启动平台的环境里设置 DEEPSEEK_API_KEY=<你的 key>（命令行里 export，或写进服务的环境配置）' },
+  modelKeyItem(f),
   masterKeyItem(f),
   ...isolationItem(f),
   'version' in f.git
@@ -139,12 +152,12 @@ const nodeRequired = (root: string): string | undefined => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; env: NodeJS.ProcessEnv; masterKey: MasterKeyState }): Facts => {
+export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState }): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
   return {
-    node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), apiKey: (o.env.DEEPSEEK_API_KEY ?? '').trim() !== '',
+    node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
     git: gitState(), bwrap: hasBwrap(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
   }

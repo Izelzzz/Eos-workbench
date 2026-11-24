@@ -194,12 +194,22 @@ export const parseSessionLog = (buf: Buffer): LogEvent[] | undefined => {
 const marker = (nonce: string) => `<!-- eos:${nonce} -->`
 
 /**
- * 交给 dsh 进程的环境。宿主机用 GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n 注入 git 配置时，
- * dsh 会把名字像凭据的 GIT_CONFIG_KEY_n 清掉、留下另外两组，agent 沙箱里的 git 就全部报
- * "missing config key"。三组一起去掉：agent 的 shell 不需要宿主机注入的 git 配置。
+ * 交给 dsh 进程的环境变量：只有白名单里的，加上模型 key。平台进程环境里别的变量（其他服务的令牌、
+ * 宿主机注入的 GIT_CONFIG_*、部署方加的各种配置）都不交给 dsh，也就到不了 agent 的工具子进程。
+ * 代理和证书变量要留着：服务器经代理访问模型时，没有它们 dsh 连不上模型。LC_* 和 dsh 自己的配置（DSH_*，例如 DSH_TELEMETRY_DISABLED）也留着。
  */
-export const agentEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(env).filter(([k]) => !/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(k)))
+export const AGENT_ENV_KEEP: readonly string[] = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LANGUAGE', 'TMPDIR', 'TZ',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+  'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+]
+
+export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_') || name.startsWith('DSH_')
+
+export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
+  DEEPSEEK_API_KEY: modelKey,
+})
 
 export const sessionIdFor = (key: string): string => `session-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`
 
@@ -337,6 +347,9 @@ export class DshExecutor implements Executor {
   constructor(private readonly opts: {
     dshHome: string
     dshBin: string
+    /** 模型 API key：每起一个 dsh 进程时取一次（在 Web 上换了 key，之后起的进程就用新的）。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
+    modelKey: () => string
+    /** 从中按白名单挑出交给 dsh 的变量；默认是平台进程的环境。 */
     env?: NodeJS.ProcessEnv
     /** 测试用：替换真正启动 dsh 进程的构造。 */
     createHarness?: (options: DeepSeekHarnessOptions) => Harness
@@ -356,7 +369,7 @@ export class DshExecutor implements Executor {
         cwd: spec.cwd, processCwd: this.processCwd, patches: [patch],
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        env: agentEnv(this.opts.env ?? process.env),
+        env: agentEnv(this.opts.env ?? process.env, this.opts.modelKey()),
         initializeTimeoutMs: 60_000,
         onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
       })

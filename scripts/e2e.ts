@@ -8,6 +8,10 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSyn
 import { join } from 'node:path'
 import { parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
 import { keyOf } from '../src/runner/runner.ts'
+import { parseMasterKey } from '../src/credentials/key.ts'
+import { MODEL_KEY_CREDENTIAL } from '../src/credentials/model-key.ts'
+import { Credentials } from '../src/credentials/store.ts'
+import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { Store } from '../src/store/store.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -23,7 +27,11 @@ const REQUEST = [
   '（E2E 验证要求：评审第一轮必须至少提出一条 major 意见，例如补充边界情况的测试，以验证对话循环。）',
 ].join('\n')
 
-const env = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
+// 设置了 EOS_E2E_STORE_KEY 时，模型 key 只放进凭据存储（名为 deepseek，用 EOS_MASTER_KEY 加密），平台进程的环境里没有 DEEPSEEK_API_KEY。
+const storeKey = process.env.EOS_E2E_STORE_KEY
+const env: NodeJS.ProcessEnv = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
+delete env.EOS_E2E_STORE_KEY
+if (storeKey !== undefined) delete env.DEEPSEEK_API_KEY
 const record = (s: string) => {
   process.stdout.write(s)
   appendFileSync(LOG, s)
@@ -38,6 +46,15 @@ const setupRepo = () => {
   git('init', '-q', '-b', 'main')
   git('add', '-A')
   git('-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init')
+  if (storeKey !== undefined) {
+    const master = parseMasterKey(process.env.EOS_MASTER_KEY)
+    if (master.kind !== 'ok') throw new Error('EOS_E2E_STORE_KEY 需要同时设置有效的 EOS_MASTER_KEY')
+    mkdirSync(DATA, { recursive: true })
+    const c = new Credentials(join(DATA, 'eos.db'), master.key)
+    const put = c.put(LOCAL_OWNER, MODEL_KEY_CREDENTIAL, 'api-key', storeKey)
+    c.close()
+    if (!put.ok) throw new Error(put.error)
+  }
 }
 
 const cli = (args: string[]) => spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env })

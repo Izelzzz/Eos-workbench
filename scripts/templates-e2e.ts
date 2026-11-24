@@ -198,7 +198,7 @@ const changes = (() => {
     return ''
   }
 })()
-const reader = new DshExecutor({ dshHome: join(DATA, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js') })
+const reader = new DshExecutor({ dshHome: join(DATA, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'), modelKey: () => '' })
 const offered = (session: string) => reader.toolsOffered(keyOf(id, session))
 const skillsSeen = (session: string) => reader.skillsOffered(keyOf(id, session))
 const npmTest = (() => {

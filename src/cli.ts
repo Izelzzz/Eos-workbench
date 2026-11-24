@@ -1,6 +1,6 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
 import { describeCheck } from './engine/checks.ts'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -10,6 +10,9 @@ import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
 import { DshExecutor, dshInstall } from './executor/dsh.ts'
 import { takeMasterKey } from './credentials/key.ts'
+import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
+import { knownSecrets, redacting, redactText } from './credentials/redact.ts'
+import { Credentials } from './credentials/store.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
@@ -48,7 +51,27 @@ const { values, positionals } = parseArgs({
 
 // 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（dsh、git、检查命令）都继承不到它。
 const masterKey = takeMasterKey(process.env)
+// 环境变量里的模型 key 也一样：读出后删掉，只交给 dsh 进程，git 和检查命令都拿不到。
+const envModelKey = takeModelKeyEnv(process.env)
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
+const dbPath = join(dataDir, 'eos.db')
+const openCredentials = () => new Credentials(dbPath, masterKey.kind === 'ok' ? masterKey.key : undefined)
+/**
+ * 启动时的模型 key（给启动检查和 doctor 看）。凭据存储先于环境变量；数据库还不存在时（第一次运行）凭据存储一定是空的，不为此建数据目录。
+ * 数据库打不开（损坏、没有权限）时记成读不出来，由检查项报出，而不是直接崩溃。
+ */
+const startupModelKey = ((): ModelKey => {
+  if (!existsSync(dbPath)) return resolveModelKey(undefined, envModelKey)
+  let c: Credentials | undefined
+  try {
+    c = openCredentials()
+    return resolveModelKey(c, envModelKey)
+  } catch (e) {
+    return { source: 'error', error: `打不开凭据存储（${dbPath}）：${(e as Error).message}` }
+  } finally {
+    c?.close()
+  }
+})()
 const say = (s: string): void => void process.stdout.write(`${s}\n`)
 const fail = (s: string): never => {
   process.stderr.write(`${s}\n`)
@@ -60,20 +83,27 @@ const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
 const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
 if (positionals[0] === 'doctor' && !values.help) {
-  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env, masterKey }))
+  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey }))
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
 if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
-  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env, masterKey }))
+  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
   const warned = items.filter(i => i.status === 'warn' && i.doctorOnly !== true)
   if (warned.length > 0) process.stderr.write(`启动前检查有提示（照常启动）：\n${formatItems(warned)}\n\n`)
 }
 mkdirSync(dataDir, { recursive: true })
-const store = new Store(join(dataDir, 'eos.db'))
+const store = new Store(dbPath)
+const credentials = openCredentials()
+/** 遮蔽已知凭据值：日志、检查输出、agent 的回复和 trace 写下来之前都经过它。 */
+const redact = (() => {
+  const extra = [...(envModelKey === undefined ? [] : [envModelKey]), ...(masterKey.kind === 'ok' ? [masterKey.key.key.toString('base64')] : [])]
+  const secrets = knownSecrets(credentials, extra)
+  return (text: string) => redactText(text, secrets())
+})()
 
 const dshBin = (): string => dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install')
 
@@ -101,7 +131,14 @@ const summary = (t: Task) => {
 
 const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
 
-const executor = () => new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin() })
+/** 每起一个 dsh 进程时重新取模型 key：在 Web 上添加、替换或删除 deepseek 凭据后，之后起的进程就用新的。 */
+const currentModelKey = (): string => {
+  const k = resolveModelKey(credentials, envModelKey)
+  if (k.source === 'credentials' || k.source === 'env') return k.value
+  throw new Error(k.source === 'error' ? `模型 API key 读不出来：${k.error}` : '没有可用的模型 API key：凭据存储里没有 deepseek，也没有设置 DEEPSEEK_API_KEY')
+}
+
+const executor = () => redacting(new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin(), modelKey: currentModelKey }), redact)
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
 const run = async (id: string | ((sup: Supervisor) => string)) => {
@@ -112,7 +149,7 @@ const run = async (id: string | ((sup: Supervisor) => string)) => {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'cli', log: (_id, line) => say(line) })
+    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'cli', log: (_id, line) => say(line), redact })
     const started = sup.start(typeof id === 'string' ? id : id(sup), { wait: !values['no-wait'] })
     if (!started.ok) return fail(started.error)
     summary(await started.done)
@@ -214,11 +251,12 @@ const commands: Record<string, () => Promise<void> | void> = {
     const ex = executor()
     // Web 服务进程的输出也写进 logs/eos.log：服务器上没人盯着终端。
     const processLog = processLogPath(dataDir)
-    const note = (line: string) => {
+    const note = (raw: string) => {
+      const line = redact(raw)
       appendLog(processLog, line)
       say(line)
     }
-    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`) })
+    const sup = new Supervisor({ store, executor: ex, dataDir, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), improve: { executor: ex, dataDir } })
     await new Promise<void>(r => server.listen(port, '127.0.0.1', r))
     note(`Eos Web：http://127.0.0.1:${port}（数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
