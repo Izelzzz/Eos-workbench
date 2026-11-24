@@ -110,6 +110,12 @@ checks['没有主密钥时页面写明怎么设置'] = (await page.locator('.err
 checks['没有主密钥时保存按钮不可用'] = await page.getByRole('button', { name: '保存' }).isDisabled()
 checks['没有主密钥时仍能列出已有凭据'] = (await page.locator('table.tasks tbody tr').count()) === 1
 await page.screenshot({ path: join(out, '5-no-master-key.png') })
+const narrowNoKey = await browser.newPage({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 2 })
+await narrowNoKey.goto('http://127.0.0.1:4392/#/credentials')
+await narrowNoKey.waitForSelector('text=平台没有主密钥，不能保存凭据')
+checks['没有主密钥时 390 宽没有横向滚动'] = await narrowNoKey.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth <= 0)
+checks['没有主密钥时不把凭据标成"主密钥不同"'] = !(await page.locator('table.tasks').innerText()).includes('⚠')
+await narrowNoKey.screenshot({ path: join(out, '6-no-master-key-390.png'), fullPage: true })
 b.p.kill('SIGTERM')
 await new Promise(r => b.p.once('exit', r))
 await browser.close()

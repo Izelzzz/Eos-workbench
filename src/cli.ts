@@ -227,8 +227,8 @@ const commands: Record<string, () => Promise<void> | void> = {
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
-      server.close()
-      credentials.close()
+      // 等已经进来的请求处理完再关凭据存储。
+      server.close(() => credentials.close())
       void ex.close().finally(() => process.exit(130))
     }
     process.once('SIGINT', shutdown)

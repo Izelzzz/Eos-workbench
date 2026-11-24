@@ -61,7 +61,7 @@ export function Credentials() {
               <tr key={i.name}>
                 <td className="mono">{i.name}</td>
                 <td>{KIND[i.kind]}</td>
-                <td className="mono fp">{i.keyId === data.keyId ? i.keyId : <span title="和当前主密钥不同：换回原来的主密钥，或重新录入">{i.keyId || '—'} ⚠</span>}</td>
+                <td className="mono fp">{data.keyId === undefined || i.keyId === data.keyId ? (i.keyId || '—') : <span title="和当前主密钥不同：换回原来的主密钥，或重新录入">{i.keyId || '—'} ⚠</span>}</td>
                 <td>{i.updatedAt > 0 ? ago(i.updatedAt) : '—'}</td>
                 <td><button type="button" onClick={() => void remove(i.name)}>删除</button></td>
               </tr>
