@@ -12,9 +12,10 @@
 
 ## 结论
 
-- 用最终的 `Dockerfile` 和 `compose.yaml`（提交 1ec1d78）构建并启动。任务 `t261124135447pe9`（standard 工作流，deepseek-flash）完成，agent 提了 2 个问题，脚本经接口回答。
+- 用最终的 `Dockerfile` 和 `compose.yaml`（提交 7737850）构建并启动。任务 `t261124141141ibm`（standard 工作流，deepseek-flash）完成：agent 提了 2 个问题，脚本经接口回答；评审打回一次，开发回应后通过（提交 c1、c3、c8）。
+- 之前在 1ec1d78 和更早的镜像上也各跑通过一次，那两次的报告被这次覆盖了。
 - worktree 里 `npm test` 通过，改动提交到了任务分支。
-- `docker compose down`（删掉容器，保留卷）再 `up` 之后，任务状态和 worktree 都还在。
+- `docker compose down`（删掉容器，保留卷）再 `up` 之后，任务状态不变，worktree 的最新提交和重建前一致。
 
 ## 第一次运行失败的记录
 
