@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS credentials (
   PRIMARY KEY (owner, name)
 );`
 
-/** 凭据名：小写字母、数字开头，可以有 . _ -，例如 deepseek、github.com。 */
-export const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/
+/** 凭据名：小写字母、数字开头，可以有 . _ - :，例如 deepseek、github.com、git.example.com:8443。 */
+export const NAME = /^[a-z0-9][a-z0-9._:-]{0,63}$/
 
 /** 值的上限：GitHub App 的私钥（PEM）也放得下。 */
 export const MAX_VALUE_BYTES = 16 * 1024
@@ -77,7 +77,7 @@ export class Credentials {
   put(owner: Owner, name: string, kind: CredentialKind, value: string): PutResult {
     if (this.key === undefined) return { ok: false, error: NO_KEY }
     // 不回显名字：用户可能把值误填进了名字。
-    if (!NAME.test(name)) return { ok: false, error: '凭据名不合规：只能用小写字母、数字和 . _ -，以字母或数字开头，最长 64 个字符' }
+    if (!NAME.test(name)) return { ok: false, error: '凭据名不合规：只能用小写字母、数字和 . _ - :，以字母或数字开头，最长 64 个字符' }
     if (!isKind(kind)) return { ok: false, error: `不认识的凭据类型「${String(kind)}」，可选：${CREDENTIAL_KINDS.join('、')}` }
     if (value.trim() === '') return { ok: false, error: '凭据的值不能为空' }
     if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) return { ok: false, error: `凭据的值超过 ${MAX_VALUE_BYTES / 1024}KB` }

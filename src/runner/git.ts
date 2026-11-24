@@ -9,7 +9,7 @@ import { matchesAny } from '../workflow/glob.ts'
  * 平台自己调 git 时关掉能触发执行命令的配置（fsmonitor、hooks），也不进入子模块（子模块目录里 agent 能放自己的仓库和配置）。
  * agent 能写 worktree，不能让平台以平台的权限替它执行命令。
  */
-const SAFE = ['-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false']
+export const SAFE = ['-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'submodule.recurse=false', '-c', 'diff.ignoreSubmodules=all', '-c', 'status.submoduleSummary=false']
 
 /** 改动很多时 git 的输出会超过默认的 1MB 缓冲区。 */
 const MAX_BUFFER = 1024 * 1024 * 1024
@@ -44,9 +44,14 @@ const splitNul = (b: Buffer): Buffer[] => {
 
 export type Worktree = { repo: string; worktree: string; branch: string; baseSha: string }
 
+/** 在本机仓库的 HEAD 上建任务的 worktree。 */
 export const createWorktree = (repoPath: string, dataDir: string, taskId: string): Worktree => {
   const repo = git(resolve(repoPath), ['rev-parse', '--show-toplevel'])
-  const baseSha = git(repo, ['rev-parse', 'HEAD'])
+  return addWorktree(repo, git(repo, ['rev-parse', 'HEAD']), dataDir, taskId)
+}
+
+/** 在 repo（工作仓库或 bare 仓库，例如远程仓库的镜像）的 baseSha 上建任务的分支和 worktree。重复调用不会重建。 */
+export const addWorktree = (repo: string, baseSha: string, dataDir: string, taskId: string): Worktree => {
   const branch = `eos/${taskId}`
   const worktree = join(resolve(dataDir), 'worktrees', taskId)
   if (!existsSync(worktree)) {
