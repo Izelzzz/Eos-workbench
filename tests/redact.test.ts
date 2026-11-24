@@ -173,12 +173,13 @@ test('takeModelKeyEnv reads the env key and removes it from the environment; bla
   assert.equal(takeModelKeyEnv({ [MODEL_KEY_ENV]: '  ' }), undefined)
 })
 
-test('knownSecrets：JSON 凭据里的字符串字段（例如 GitHub App 的私钥）单独出现也遮住；运行时登记的短期令牌也遮住', () => {
+test('knownSecrets：JSON 凭据里的机密字段（例如 GitHub App 的私钥）单独出现也遮住，slug、App id 不遮；运行时登记的短期令牌也遮住', () => {
   const c = new Credentials(db(), newKey())
   const pem = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n'
-  assert.deepEqual(c.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', JSON.stringify({ appId: '42', privateKey: pem })), { ok: true })
+  assert.deepEqual(c.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', JSON.stringify({ appId: '4242424242', slug: 'eos-workbench-app', privateKey: pem })), { ok: true })
   const secrets = knownSecrets(c, [])
   assert.equal(redactText(`私钥：${pem}`, secrets()), `私钥：${MASK}`)
+  assert.equal(redactText('安装 eos-workbench-app（App 4242424242）', secrets()), '安装 eos-workbench-app（App 4242424242）', 'slug 和 App id 不是机密，不遮')
   const minted = `ghs_${randomBytes(12).toString('hex')}`
   rememberSecret(minted)
   assert.equal(redactText(`令牌 ${minted} 和认证头 ${Buffer.from(`x-access-token:${minted}`).toString('base64')}`, secrets()).includes(minted.slice(4)), false)

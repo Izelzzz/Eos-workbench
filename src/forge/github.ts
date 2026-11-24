@@ -122,6 +122,9 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       return { number: pr.data.number, url: pr.data.html_url, reused: false }
     },
     appCredentialName: repo => appCredentialName(repo.host),
+    forgetAppToken: repo => {
+      for (const app of apps.values()) app.forget(repo)
+    },
     async appToken(repo, credential) {
       const key = createHash('sha256').update(credential.value).digest('hex')
       let app = apps.get(key)

@@ -86,11 +86,16 @@ export const rememberSecret = (s: string): void => {
   if (runtime.size > 256) runtime.delete(runtime.values().next().value!)
 }
 
-/** 一条凭据的值，加上它是 JSON 对象时里面的每个字符串字段（例如 GitHub App 凭据里的私钥，单独出现时也要遮住）。 */
+/** JSON 凭据里算机密的字段：私钥、secret、令牌、密码。App id、slug、名字这些不遮（遮了会把页面和日志里的正常文字变成 ***）。 */
+const SECRET_FIELD = /key|secret|token|password|pem/i
+
+/** 一条凭据的值，加上它是 JSON 对象时里面的机密字段（例如 GitHub App 凭据里的私钥，单独出现时也要遮住）。 */
 const valuesOf = (value: string): string[] => {
   try {
     const parsed: unknown = JSON.parse(value)
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return [value, ...Object.values(parsed).filter((v): v is string => typeof v === 'string')]
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return [value, ...Object.entries(parsed).flatMap(([k, v]) => (SECRET_FIELD.test(k) && typeof v === 'string' ? [v] : []))]
+    }
   } catch {
     // 不是 JSON：原值就够了
   }

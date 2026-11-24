@@ -720,11 +720,12 @@ test('GitHub App 的私钥不对、凭据格式不对：报中文原因', async 
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
   const before = r.requests().length
   const wrongKey = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
-  assert.match(wrongKey.error, /不认凭据「github-app\..*」的 App：App id 或私钥不对/)
+  assert.match(wrongKey.error, /^127\.0\.0\.1:\d+ 不认凭据「github-app\..*」的 App：App id 或私钥不对/)
+  assert.doesNotMatch(wrongKey.error, /添加名字为/, '不叫人去加令牌')
   assert.ok(r.requests().slice(before).every(q => !(q.auth ?? '').includes(Buffer.from(`x-access-token:${TOKEN}`).toString('base64'))), '没有用个人令牌')
-  assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', '{"appId": 1}'), { ok: true })
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appid: 1, privateKey: app.privateKey })), { ok: true })
   const badJson = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
-  assert.match(badJson.error, /不是有效的 GitHub App 凭据：privateKey/)
+  assert.match(badJson.error, /不是有效的 GitHub App 凭据：appId/)
   assert.ok(!badJson.error.includes(app.privateKey.slice(40, 80)))
 })
 
@@ -746,4 +747,18 @@ test('用 GitHub App 开 PR 被拒（403）：报错指向 App 的 Pull requests
   const { task } = await runPr(r)
   assert.equal(task.status, 'failed')
   assert.match(task.failure ?? '', /开 PR 失败：.*凭据「github-app\..*」的 GitHub App 没有 Pull requests 的写权限/)
+})
+
+test('App 令牌被吊销（例如 App 卸载重装）：用它访问失败后作废缓存，下次重新换，不用等令牌过期', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'] } })
+  appCred(r, app)
+  assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request: '一' })).ok, true)
+  await control(r, 'revoke')
+  const failed = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '二' })) as { ok: boolean; error: string }
+  assert.equal(failed.ok, false)
+  assert.match(failed.error, /GitHub App 换来的令牌没有权限.*改好后重试会重新换令牌/)
+  assert.equal(mints(r).length, 1)
+  assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request: '三' })).ok, true, '重试时换了新令牌')
+  assert.equal(mints(r).length, 2)
 })

@@ -35,7 +35,8 @@ const validJwt = (auth: string | undefined): boolean => {
   if (!v.verify(appKey, Buffer.from(m[3]!, 'base64url'))) return false
   const body = JSON.parse(Buffer.from(m[2]!, 'base64url').toString('utf8')) as { iss?: string; exp?: number; iat?: number }
   const now = Date.now() / 1000
-  return body.iss === appId && (body.exp ?? 0) > now && (body.iat ?? Infinity) <= now
+  // 真实 GitHub：exp 最多是现在加 10 分钟，exp - iat 也不能超过 10 分钟。
+  return body.iss === appId && (body.exp ?? 0) > now && (body.iat ?? Infinity) <= now && (body.exp ?? Infinity) <= now + 600 && (body.exp ?? 0) - (body.iat ?? 0) <= 600
 }
 
 /** git 走 HTTPS 时的认证头（Basic x-access-token:<令牌>）认不认。 */
@@ -100,6 +101,7 @@ const server = createServer((req, res) => {
     if (ctl[1] === 'hide-next-list') control.hideNextList = true
     else if (ctl[1] === 'fail-post') control.failPost = Number(q.get('status'))
     else if (ctl[1] === 'close' && pr !== undefined) pr.state = 'closed'
+    else if (ctl[1] === 'revoke') issued.clear()
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)
     return void res.end()
@@ -120,7 +122,8 @@ const server = createServer((req, res) => {
       if (!validJwt(req.headers.authorization)) return reply(401, { message: 'A JSON web token could not be decoded' })
       if (inst !== null) {
         const repo = `${decodeURIComponent(inst[1]!)}/${decodeURIComponent(inst[2]!)}`
-        const i = installed.indexOf(repo)
+        // GitHub 的 owner 和仓库名不分大小写。
+        const i = installed.findIndex(x => x.toLowerCase() === repo.toLowerCase())
         return i < 0 ? reply(404, { message: 'Not Found' }) : reply(200, { id: 1000 + i })
       }
       const i = Number(mint![1]) - 1000

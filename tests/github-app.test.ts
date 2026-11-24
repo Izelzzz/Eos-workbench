@@ -67,3 +67,8 @@ test('凭据里的私钥不是 PEM、读不出来：报中文原因', async () =
   assert.equal(appCredential.safeParse({ appId: 1, privateKey: 'nope' }).success, false)
   assert.throws(() => new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 1, privateKey: '-----BEGIN PRIVATE KEY-----\nxx\n-----END PRIVATE KEY-----' }), credentialName: 'github-app.github.com' }), /凭据「github-app\.github\.com」里的私钥读不出来/)
 })
+
+test('私钥不是 RSA：报中文原因（签出来的不是 RS256）', () => {
+  const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+  assert.throws(() => new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 1, privateKey: ec }), credentialName: 'github-app.github.com' }), /私钥是 ec 类型，GitHub App 的私钥应该是 RSA/)
+})

@@ -21,6 +21,8 @@ export interface Forge {
    * App 没装到这个仓库时抛 NotInstalled，别的错误抛 ForgeError。
    */
   appToken?(repo: RemoteRepo, credential: { name: string; value: string }): Promise<string>
+  /** 作废这个仓库缓存的 App 令牌：用它访问被拒时调用，下次重新换（App 被卸载重装、改了权限之后不用等令牌过期）。 */
+  forgetAppToken?(repo: RemoteRepo): void
   /** 浏览器里打开这个分支的地址。 */
   branchUrl(repo: RemoteRepo, branch: string): string
   /**

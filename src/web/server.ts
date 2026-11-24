@@ -353,6 +353,9 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const name = body.name
     if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
     if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
+    // github-app. 开头的名字留给 GitHub App 的凭据：平台按这个名字找 App，放成别的类型会挡住 App 和令牌。
+    if (name.startsWith('github-app.') !== (body.kind === 'github-app')) return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app') return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
     const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
     return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
   }

@@ -52,6 +52,8 @@ export class GitHubApp {
     } catch (e) {
       throw new ForgeError(`凭据「${o.credentialName}」里的私钥读不出来：${(e as Error).message}`)
     }
+    // GitHub App 的私钥是 RSA；别的类型签出来的不是 RS256，GitHub 只会回一句 401。
+    if (this.key.asymmetricKeyType !== 'rsa') throw new ForgeError(`凭据「${o.credentialName}」里的私钥是 ${this.key.asymmetricKeyType ?? '未知'} 类型，GitHub App 的私钥应该是 RSA`)
   }
 
   private now(): number {
@@ -80,6 +82,11 @@ export class GitHubApp {
       body = undefined
     }
     return { status: res.status, body }
+  }
+
+  /** 作废这个仓库缓存的令牌：用它访问被拒（App 被卸载重装、改了权限）时，下次重新换。 */
+  forget(repo: RemoteRepo): void {
+    this.cache.delete(`${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`)
   }
 
   /** 这个仓库的安装令牌；App 没装到这个仓库时抛 NotInstalled，别的错误抛 ForgeError（中文原因）。 */

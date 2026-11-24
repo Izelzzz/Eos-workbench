@@ -107,15 +107,16 @@ export class Supervisor {
 
   /**
    * 访问这个仓库用的认证，按顺序：托管平台的 App（装到了这个仓库）→ 凭据存储里的令牌 → 匿名。
-   * App 只在"没装到这个仓库"时退回令牌；App 别的错误（私钥不对、接口超时……）不悄悄换成个人令牌的身份，直接不带令牌并报出原因。
+   * App 只在"没装到这个仓库"时退回令牌。配了 App 但它出错（凭据读不出来、私钥不对、接口超时……）时返回 fatal：
+   * 不悄悄换成个人令牌的身份，也不匿名再试（匿名失败的提示会叫人去加令牌，误导）。
    * error：没用上的凭据和原因，失败时附在报错后面；令牌真的用上了时，不附"App 没装"。
    */
-  private async authFor(repo: RemoteRepo, forge: Forge): Promise<{ auth: RemoteAuth; error?: string }> {
+  private async authFor(repo: RemoteRepo, forge: Forge): Promise<{ auth: RemoteAuth; error?: string } | { fatal: string }> {
     let notInstalled: string | undefined
     const appName = forge.appCredentialName?.(repo)
     if (appName !== undefined && forge.appToken !== undefined && this.o.credentials !== undefined) {
       const app = this.o.credentials.get(LOCAL_OWNER, appName)
-      if (app.kind === 'error') return { auth: { credential: appName }, error: app.error }
+      if (app.kind === 'error') return { fatal: app.error }
       if (app.kind === 'ok') {
         try {
           const token = await forge.appToken(repo, { name: appName, value: app.value })
@@ -123,7 +124,7 @@ export class Supervisor {
           return { auth: { credential: appName, header: forge.gitAuthHeader(token), secret: token } }
         } catch (e) {
           if (e instanceof NotInstalled) notInstalled = e.message
-          else if (e instanceof ForgeError) return { auth: { credential: appName }, error: e.message }
+          else if (e instanceof ForgeError) return { fatal: e.message }
           else throw e
         }
       }
@@ -134,6 +135,12 @@ export class Supervisor {
     const notes = [notInstalled, got.kind === 'error' ? got.error : undefined].filter((x): x is string => x !== undefined)
     return { auth: { credential }, ...(notes.length === 0 ? {} : { error: notes.join('；') }) }
   }
+
+  /** 用 App 令牌访问失败：作废这个仓库缓存的令牌，人改了 App 的安装或权限之后重试，不用等旧令牌过期。 */
+  private forgetIfApp(repo: RemoteRepo, forge: Forge, auth: RemoteAuth): void {
+    if (auth.credential === forge.appCredentialName?.(repo)) forge.forgetAppToken?.(repo)
+  }
+
 
   /** 任务的远程仓库对应的托管平台：按记下的种类和地址找回来。 */
   private forgeOf(repo: RemoteRepo): Forge | undefined {
@@ -164,13 +171,16 @@ export class Supervisor {
     if (outside.length > 0) {
       return fail(`任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支`)
     }
-    const { auth, error } = await this.authFor(meta.remote, forge)
+    const got = await this.authFor(meta.remote, forge)
+    if ('fatal' in got) return fail(`没有推送：${got.fatal}`)
+    const { auth, error } = got
     const withCredential = (message: string) => (error === undefined ? message : `${message}（没用上的凭据：${error}）`)
     let sha: string
     try {
       sha = (await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)).sha
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
+      this.forgetIfApp(meta.remote, forge, auth)
       return fail(withCredential(e.message))
     }
     const branchUrl = forge.branchUrl(meta.remote, meta.branch)
@@ -199,18 +209,22 @@ export class Supervisor {
       }
     } catch (e) {
       if (!(e instanceof ForgeError)) throw e
+      this.forgetIfApp(meta.remote, forge, auth)
       return { ...fail(withCredential(`${pushed}，但开 PR 失败：${scrub(e.message, secretsOf(auth))}`)), links: [branchLink] }
     }
   }
 
   /** 按 authFor 的顺序取认证（App → 令牌 → 匿名），更新镜像；失败时把没用上的凭据和原因附在后面。 */
   private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string; branch: string } | { ok: false; error: string }> {
-    const { auth, error } = await this.authFor(repo, forge)
+    const got = await this.authFor(repo, forge)
+    if ('fatal' in got) return { ok: false, error: got.fatal }
+    const { auth, error } = got
     try {
       const m = await syncMirror(this.o.dataDir, repo, auth)
       return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha, branch: m.branch }
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
+      this.forgetIfApp(repo, forge, auth)
       return { ok: false, error: error === undefined ? e.message : `${e.message}（没用上的凭据：${error}）` }
     }
   }
