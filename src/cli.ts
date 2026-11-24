@@ -1,6 +1,6 @@
 // eos 命令行：创建任务、运行、续跑、回答、查看。数据目录默认 ~/.eos，可用 --data 或 EOS_HOME 指定。
 import { describeCheck } from './engine/checks.ts'
-import { existsSync, mkdirSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -8,7 +8,7 @@ import { describePosition } from './engine/machine.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { DshExecutor } from './executor/dsh.ts'
+import { DshExecutor, dshInstall } from './executor/dsh.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
@@ -55,7 +55,7 @@ const fail = (s: string): never => {
 const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
 const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
-if (positionals[0] === 'doctor') {
+if (positionals[0] === 'doctor' && !values.help) {
   const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
   process.exit(items.every(i => i.ok) ? 0 : 1)
@@ -67,11 +67,7 @@ if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
 mkdirSync(dataDir, { recursive: true })
 const store = new Store(join(dataDir, 'eos.db'))
 
-const dshBin = (): string => {
-  const bin = join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
-  if (!existsSync(bin)) fail(`找不到 dsh：${bin}，先运行 npm install`)
-  return bin
-}
+const dshBin = (): string => dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install')
 
 const taskOf = (id: string | undefined): Task => {
   if (id === undefined) return fail('需要任务 id')
