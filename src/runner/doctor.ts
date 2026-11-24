@@ -69,8 +69,8 @@ const isolationItem = (f: Facts): Item[] =>
   f.masterKey.kind !== 'ok' ? [] : [{
     name: '凭据隔离', status: 'warn', doctorOnly: true,
     detail: f.bwrap
-      ? '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥'
-      : '没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥',
+      ? '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
+      : '没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key',
     fix: `${f.bwrap ? '' : '安装 bubblewrap（bwrap）；'}团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）`,
   }]
 

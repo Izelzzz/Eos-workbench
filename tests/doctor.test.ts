@@ -56,7 +56,7 @@ test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显�
 })
 
 test('设置了主密钥时提示还没隔离的地方：有没有 bwrap 说法不同；没设置主密钥时不提示', () => {
-  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥\n  怎么修：团队共用的服务器上，用独立的用户运行/)
+  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：团队共用的服务器上，用独立的用户运行/)
   assert.match(formatItems(evaluate({ ...good, bwrap: false })), /⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到.*\n  怎么修：安装 bubblewrap（bwrap）；/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
 })

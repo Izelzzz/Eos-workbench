@@ -100,7 +100,9 @@ const store = new Store(dbPath)
 const credentials = openCredentials()
 /** 遮蔽已知凭据值：日志、检查输出、agent 的回复和 trace 写下来之前都经过它。 */
 const redact = (() => {
-  const extra = [...(envModelKey === undefined ? [] : [envModelKey]), ...(masterKey.kind === 'ok' ? [masterKey.key.key.toString('base64')] : [])]
+  // 主密钥两种写法都算：部署方可能省略了末尾的 =，泄露出来的是原文。
+  const master = masterKey.kind === 'ok' ? masterKey.key.key.toString('base64') : undefined
+  const extra = [...(envModelKey === undefined ? [] : [envModelKey]), ...(master === undefined ? [] : [master, master.replace(/=+$/, '')])]
   const secrets = knownSecrets(credentials, extra)
   return (text: string) => redactText(text, secrets())
 })()
