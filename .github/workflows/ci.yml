@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 env:
-  # 和 Dockerfile 用的 Node 版本保持一致；package.json 要求 >=24.9.0
+  # 和 #56 的 Dockerfile（node:24.22.3）保持一致，升级时两处一起改；package.json 要求 >=24.9.0
   NODE_VERSION: 24.22.3
 
 jobs:
