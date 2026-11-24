@@ -1,0 +1,2 @@
+{"number": 1, "state": "open", "title": "在 src/math.js 里实现并导出一个求和函数，接收一个数字数组，返回总和；空数组返回 0；数组里有非数字时抛出 TypeError。", "html_url": "https://github.com/Izelzzz/eos-e2e-sandbox/pull/1"}
+{"head": "eos/t2611241540022ri", "base": "main"}
