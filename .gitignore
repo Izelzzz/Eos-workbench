@@ -6,3 +6,5 @@ node_modules/
 !docs/e2e/**/*.log
 dist/
 .claude/worktrees/
+.env
+.env.*

@@ -1,0 +1,30 @@
+# Eos 的 Docker Compose 部署。用法、限制和升级步骤见 docs/deploy.md。
+# 机密从同目录的 .env 读（chmod 600，不要提交）：DEEPSEEK_API_KEY、EOS_MASTER_KEY。
+services:
+  eos:
+    build: .
+    # deploy-e2e 用 EOS_IMAGE 换一个标签，不覆盖正在用的镜像。
+    image: ${EOS_IMAGE:-eos-workbench:local}
+    init: true
+    restart: unless-stopped
+    environment:
+      # 模型 key：第一次启动从这里读。之后可以改存到 Web 的凭据页（名字 deepseek），再从 .env 删掉；两边都没有时平台不启动。
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      EOS_MASTER_KEY: ${EOS_MASTER_KEY:-}
+      # 浏览器用 localhost:4317 以外的地址访问时设置，例如 https://eos.example.com（见 docs/deploy.md「访问」）。
+      EOS_PUBLIC_URL: ${EOS_PUBLIC_URL:-}
+    # 没有登录：默认只绑宿主机的 127.0.0.1，团队成员用 SSH 隧道访问。改绑 0.0.0.0 之前先读 docs/deploy.md。
+    ports:
+      - "127.0.0.1:4317:4317"
+    volumes:
+      - eos-data:/data
+    tmpfs:
+      # exec：agent 跑测试、编译时要执行自己生成的文件（Docker 的 tmpfs 默认 noexec）。size：依赖缓存和测试产物都占内存，按服务器内存调整。
+      - /tmp:exec,size=4g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  eos-data:
