@@ -1,0 +1,14 @@
+# gitleaks 的允许清单：每条是一个具体发现的指纹（提交:文件:规则:行号），不按路径整个忽略。
+# 新增一条之前先判断它是不是真的凭据；真的凭据要作废并轮换，不能只加到这里。
+# 每条上面写清楚：是什么、为什么不是真的凭据、谁判断的。
+# 同一行以后被改动会产生新的指纹，CI 会重新报出来，需要重新判断。
+
+# tests/logs.test.ts 的 SECRET：日志遮蔽测试里故意造的「像密钥的字符串」。
+# 值里有 0123456789、abc 这样的顺序片段，长度 24，真的 DeepSeek key 是 sk- 加 32 位十六进制。
+# 同一个值，e1e6b17 在第 110 行加入，8ee2ccc 挪到第 132 行。CI 第一批 2/3 判断，测试假值。
+e1e6b17f06c2180f4dd55ab9c42d32a3a2bf2106:tests/logs.test.ts:generic-api-key:110
+8ee2ccc67f8b459c8d21ce8bf39f1cead56356ab:tests/logs.test.ts:generic-api-key:132
+
+# tests/redact.test.ts 的 KEY：redactText 单元测试里故意造的「像密钥的字符串」。
+# 值里有 0123456789、abc 这样的顺序片段，长度 19。CI 第一批 2/3 判断，测试假值。
+e1e6b17f06c2180f4dd55ab9c42d32a3a2bf2106:tests/redact.test.ts:generic-api-key:27
