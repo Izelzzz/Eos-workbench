@@ -1,0 +1,20 @@
+{
+  "npm": false,
+  "pnpm": false,
+  "npmDevDeps": false,
+  "pip": true,
+  "agentWroteNativeCache": false,
+  "tmp": [
+    "cache",
+    "dsh-spill-hCbbyV",
+    "node-addon-native-custom-loader-10001",
+    "node-compile-cache"
+  ],
+  "tmpCache": [
+    "native-plant"
+  ],
+  "nativeCache": [
+    "（不存在）"
+  ],
+  "reply": "written due to an error writing to the directory: /home/eos/.npm/_logs\nnpm error You can rerun the command with `--loglevel=verbose` to see the logs in your terminal\n```\n\n**2.**\n```\ncd /data/deps-probe/worktrees/t1 && mkdir -p p && cd p && npm init -y >/dev/null && npm pkg set packageManager=pnpm@9.15.0 && pnpm add is-odd@3.0.1 2>&1 | tail -2\n```\n```\nNode.js v24.22.3\n```\n（由于命令最后接了 `tail -2`，只截到了 pnpm 报错信息末尾的那一行。）\n\n**3.**\n```\ncd /data/deps-probe/worktrees/t1 && python3 -m venv .venv && .venv/bin/pip install -q six==1.16.0 2>&1 | tail -2; .venv/bin/python -c \"import six; print('six', six.__version__)\"\n```\n```\nsix 1.16.0\n```\n\n**4.**\n```\nmkdir -p /tmp/cache/native-plant && echo planted > /home/eos/.cache/native-addons/planted.txt; echo exit=$?\n```\n```\nexit=1\n[stderr]\nbash: line 1: /home/eos/.cache/native-addons/planted.txt: No such file or directory\n```\n\n**5.**\n```\ncd /data/deps-probe/worktrees/t1 && mkdir -p q && cd q && printf '%s' '{\"name\":\"q\",\"devDependencies\":{\"is-number\":\"7.0.0\"}}' > package.json && npm install --no-audit --no-fund 2>&1 | tail -2; echo \"NODE_ENV=[$NODE_ENV]\"\n```\n```\nnpm error Log files were not written due to an error writing to the directory: /home/eos/.npm/_logs\nnpm error You can rerun the command with `--loglevel=verbose` to see the logs in your terminal\nNODE_ENV=[]\n```\n\n结果概要：第 3 步成功；第 1、5 步都在 npm 写入 `/home/eos/.npm/_logs` 时失败；第 2 步中 pnpm 直接以 Node 崩溃的形式退出；第 4 步中 `mkdir -p` 成功，`/home/eos/.cache/native-addons/` 这一级目录不存在，因此写入返回 ENOENT（并非沙箱拒绝）；`NODE_ENV` 为空。"
+}

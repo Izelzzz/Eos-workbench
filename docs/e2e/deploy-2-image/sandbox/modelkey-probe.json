@@ -1,0 +1,11 @@
+{
+  "agentReport": [
+    "visible_pids=9",
+    "key_hits=0",
+    "key_hit_pids=",
+    "parent_environ_readable=no",
+    "self_has_key=0"
+  ],
+  "agentWroteRealTmp": true,
+  "positiveControlHits": "4"
+}

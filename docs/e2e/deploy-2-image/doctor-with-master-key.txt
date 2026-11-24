@@ -1,0 +1,15 @@
+# 最终镜像（提交 6775304）。docker compose run --rm eos node --import tsx src/cli.ts doctor
+# EOS_MASTER_KEY 由 compose 从宿主机环境注入，值是本次随机生成的，没有记录；DEEPSEEK_API_KEY 是占位值
+Eos 环境检查（数据目录 /data）
+✓ Node：24.22.3（要求 >=24.9.0）
+✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）
+✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 f3bc3d02c99cb1be）
+⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key
+  怎么修：团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）
+✓ git：2.43.0
+✓ 数据目录：/data 可写
+✓ dsh：0.2.2-rc.5
+# 在容器里搜主密钥的值（grep -rlF，命中的文件数）
+/data: 0
+/app: 0
+/tmp: 0

@@ -1,0 +1,57 @@
+{
+  "checkEnvKeys": [
+    "CI",
+    "HOME",
+    "PATH"
+  ],
+  "results": [
+    {
+      "check": {
+        "kind": "run",
+        "run": [
+          "npm",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        "timeoutSec": 300
+      },
+      "passed": false,
+      "detail": "退出码 1。输出：\nnpm error code SELF_SIGNED_CERT_IN_CHAIN\nnpm error errno SELF_SIGNED_CERT_IN_CHAIN\nnpm error request to https://registry.npmjs.org/is-number failed, reason: self-signed certificate in certificate chain\nnpm error A complete log of this run can be found in: /home/eos/.npm/_logs/2026-11-24T15_42_02_056Z-debug-0.log",
+      "output": ""
+    },
+    {
+      "check": {
+        "kind": "run",
+        "run": [
+          "npm",
+          "test"
+        ],
+        "timeoutSec": 120
+      },
+      "passed": false,
+      "detail": "退出码 1。输出：\n> test\n> node --test\n\nnode:internal/modules/package_json_reader:331\n  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n        ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find package 'is-number' imported from /data/checks-probe/wt/test/a.test.js\n    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:331:9)\n    at packageResolve (node:internal/modules/esm/resolve:784:25)\n    at moduleResolve (node:internal/modules/esm/resolve:873:18)\n    at defaultResolve (node:internal/modules/esm/resolve:1006:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:705:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:725:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:763:56)\n    at #resolve (node:internal/modules/esm/loader:687:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:607:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:276:33) {\n  code: 'ERR_MODULE_NOT_FOUND'\n}\n\nNode.js v24.22.3\n✖ test/a.test.js (33.530187ms)\nℹ tests 1\nℹ suites 0\nℹ pass 0\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 43.725617\n\n✖ failing tests:\n\ntest at test/a.test.js:1:1\n✖ test/a.test.js (33.530187ms)\n  'test failed'",
+      "output": ""
+    }
+  ],
+  "before": {
+    "tmp": [],
+    "homeCache": [
+      "（不存在）"
+    ],
+    "homeNpm": [
+      "（不存在）"
+    ]
+  },
+  "after": {
+    "tmp": [
+      "node-compile-cache"
+    ],
+    "homeCache": [
+      "（不存在）"
+    ],
+    "homeNpm": [
+      "_logs"
+    ]
+  }
+}
