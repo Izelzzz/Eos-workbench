@@ -1,0 +1,12 @@
+# 镜像的配置文件 .eos/e2e/data/repos/github.com/izelzzz/eos-e2e-sandbox.git/config
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+
+# 镜像里的引用
+refs/heads/eos/t261124135307f67 8db9560
+refs/remotes/origin/main 86149f8
+
+# worktree 的 .git 文件
+gitdir: /home/user/Eos-workbench/.eos/e2e/data/repos/github.com/izelzzz/eos-e2e-sandbox.git/worktrees/t261124135307f67
