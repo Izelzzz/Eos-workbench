@@ -8,7 +8,8 @@ services:
     init: true
     restart: unless-stopped
     environment:
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?在 .env 里设置 DEEPSEEK_API_KEY}
+      # 模型 key：第一次启动从这里读。之后可以改存到 Web 的凭据页（名字 deepseek），再从 .env 删掉；两边都没有时平台不启动。
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       EOS_MASTER_KEY: ${EOS_MASTER_KEY:-}
       # 浏览器用 localhost:4317 以外的地址访问时设置，例如 https://eos.example.com（见 docs/deploy.md「访问」）。
       EOS_PUBLIC_URL: ${EOS_PUBLIC_URL:-}
