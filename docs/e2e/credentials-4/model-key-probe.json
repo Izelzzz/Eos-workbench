@@ -1,0 +1,148 @@
+{
+  "checks": {
+    "E2E 通过": true,
+    "平台进程的环境里没有 DEEPSEEK_API_KEY": true,
+    "看到了 dsh 进程": true,
+    "每个 dsh 进程的 DEEPSEEK_API_KEY 都等于凭据存储里的值": true,
+    "dsh 进程的环境变量都在白名单里": true,
+    "其他子进程（git、检查命令、工具命令）的环境里没有这个 key": true,
+    "eos doctor 显示 key 来自凭据存储": true,
+    "数据目录里没有 key 的明文": true
+  },
+  "e2eExit": 0,
+  "platformProcesses": 5,
+  "platformEnvHasModelKey": false,
+  "platformWithModelKey": [],
+  "dsh": [
+    {
+      "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/89c13ab90926b870/cordis.patch.yml",
+      "envNames": [
+        "DEEPSEEK_API_KEY",
+        "DSH_HOME",
+        "HOME",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMPDIR",
+        "https_proxy",
+        "no_proxy",
+        "npm_config_cache"
+      ],
+      "notAllowed": [],
+      "keyFromStore": true
+    },
+    {
+      "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/0b9e24d5c285e617/cordis.patch.yml",
+      "envNames": [
+        "DEEPSEEK_API_KEY",
+        "DSH_HOME",
+        "HOME",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMPDIR",
+        "https_proxy",
+        "no_proxy",
+        "npm_config_cache"
+      ],
+      "notAllowed": [],
+      "keyFromStore": true
+    },
+    {
+      "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/89c13ab90926b870/cordis.patch.yml",
+      "envNames": [
+        "DEEPSEEK_API_KEY",
+        "DSH_HOME",
+        "HOME",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMPDIR",
+        "https_proxy",
+        "no_proxy",
+        "npm_config_cache"
+      ],
+      "notAllowed": [],
+      "keyFromStore": true
+    },
+    {
+      "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/0b9e24d5c285e617/cordis.patch.yml",
+      "envNames": [
+        "DEEPSEEK_API_KEY",
+        "DSH_HOME",
+        "HOME",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMPDIR",
+        "https_proxy",
+        "no_proxy",
+        "npm_config_cache"
+      ],
+      "notAllowed": [],
+      "keyFromStore": true
+    },
+    {
+      "cmd": "/opt/node22/bin/node /home/user/Eos-workbench/node_modules/@deepseek-ai/dsh/lib/bin.js --profile sdk --patch /home/user/Eos-workbench/.eos/e2e/data/dsh/profiles/89c13ab90926b870/cordis.patch.yml",
+      "envNames": [
+        "DEEPSEEK_API_KEY",
+        "DSH_HOME",
+        "HOME",
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_USE_ENV_PROXY",
+        "NO_PROXY",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMPDIR",
+        "https_proxy",
+        "no_proxy",
+        "npm_config_cache"
+      ],
+      "notAllowed": [],
+      "keyFromStore": true
+    }
+  ],
+  "otherChildrenSeen": 40,
+  "otherChildrenSample": [
+    "git",
+    "/usr/lib/git-core/git",
+    "bash",
+    "npm",
+    "tail",
+    "sh",
+    "node",
+    "tee",
+    "/opt/node22/bin/node",
+    "node\nimport { sum } from './src/math.js';\nconsole.log('typeof sum:', typeof sum);\nconsole.log('empty:', sum([]));\nconsole.log('mixed:', sum([-1, 2, -3, 0]));\nconsole.log('singl",
+    "/tmp/code-sign",
+    "node\nimport('./src/math.js').then((m) => {\n  console.log('typeof sum:', typeof m.sum);\n  const cases = [\n    ['[]', () => m.sum([])],\n    ['[1,2,3]', () => m.sum([1,2,3])],\n   ",
+    "systemd-run",
+    "grep"
+  ],
+  "otherChildrenWithKey": [],
+  "doctor": "Eos 环境检查（数据目录 /home/user/Eos-workbench/.eos/e2e/data）\n⚠ Node：22.23.5，低于 Eos 要求的 >=24.9.0（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24.9.0 或更新的版本，再用它启动平台\n✓ DeepSeek API key：来自凭据存储（凭据 deepseek）\n✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 d41156326b14a15f）\n⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：安装 bubblewrap（bwrap）；团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）\n✓ git：2.43.0\n✓ 数据目录：/home/user/Eos-workbench/.eos/e2e/data 可写\n✓ dsh：0.2.2-rc.5\n",
+  "plaintextFiles": []
+}
