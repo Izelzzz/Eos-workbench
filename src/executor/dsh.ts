@@ -202,6 +202,13 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LANGUAGE', 'TMPDIR', 'TZ',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  // 缓存的位置和开关，部署镜像设定（见 Dockerfile、ADR-006）。agent 在沙箱里能写 /tmp、写不了家目录：
+  'NARB_NATIVE_CACHE_DIR', // dsh 的 native 模块缓存放到 agent 写不了的目录，不然在 /tmp 里能被 agent 换掉
+  'NODE_DISABLE_COMPILE_CACHE', // 关掉 dsh 打开的 Node 字节码缓存：默认在 /tmp，没有完整性校验
+  'npm_config_cache', // npm 缓存放到 agent 能写的位置，不然 agent 的 npm install 去写不可写的家目录而失败（只放行这一项，不放行别的 npm_config_*，其中可能有 registry 认证）
+  'PIP_CACHE_DIR', // 同上，pip
+  'COREPACK_HOME', // 同上，corepack 下载的 pnpm、yarn
+  'XDG_CACHE_HOME', // 同上，遵循 XDG 的工具（例如 node-gyp）
 ]
 
 export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_') || name.startsWith('DSH_')
