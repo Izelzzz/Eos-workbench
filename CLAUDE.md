@@ -1,6 +1,11 @@
 # 本仓库的工作约定
 
-Eos 是一个自部署的多 agent 工作流平台，以 DeepSeek Harness（dsh）为执行内核。设计见 `docs/adr/001-self-hosted-multi-agent-platform.md`。
+Eos 是一个自部署的多 agent 工作流平台。方向和优先级见 `docs/roadmap.md`；`docs/adr/` 001–004 是 PoC 阶段的验证记录，和路线图冲突时以路线图为准。
+
+## 按路线图做
+
+- 做哪一项、先后顺序见 `docs/roadmap.md`。开始前读它的「方向」一节。
+- 做完一项，在路线图里把状态改成「完成」并写上 PR 号。
 
 ## 需要用户确认或决定的事项，一律用选择卡片
 
@@ -35,11 +40,14 @@ Eos 是一个自部署的多 agent 工作流平台，以 DeepSeek Harness（dsh�
 4. 用 `/engineering:code-review` 评审本次改动，修掉确认的问题再提交；评审结论写进 PR 描述
 5. 升级 dsh 版本时，先重跑 `poc/run-all.sh`
 6. 合并前做一次独立子 agent 审查（见上面「唯一的例外」），修掉确认的问题
+7. PR 描述里分开列出：能用证据证明的（测试、运行结果、截图、源文件位置），以及证明不了的和原因
 
 ## 代码约定
 
 - `src/workflow/`、`src/engine/` 是纯逻辑：不读写文件、不访问网络、不读时钟，可单测
 - 外部数据（YAML、dsh 事件、模型输出、数据库行）只在边界解析成类型，内部信任类型
-- dsh 只通过 `src/executor/dsh.ts` 接入；别的模块不直接引用 dsh 的包
+- 每种执行器只在 `src/executor/` 下自己的文件里接入（dsh 是 `dsh.ts`）；别的模块只认 `src/executor/types.ts` 的 `Executor` 接口，不直接引用任何执行器的包
+- 凭据（模型 key、Git 令牌、MCP 密钥）只由平台持有：不进 agent 进程的环境变量、不写进 worktree、不出现在 trace 和日志里；提交、推送、开 PR 由平台完成
+- 平台部署在团队共用的服务器上：实现不依赖「平台和用户在同一台电脑上」（例如不做打开本机目录的按钮）
 - 任务 worktree 放在平台数据目录下，不放在 `/tmp`（没有 bwrap 时 `/tmp` 不受沙箱限制）
 - 面向用户的文字用中文
