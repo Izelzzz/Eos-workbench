@@ -52,7 +52,7 @@ button:hover { background: var(--hover); }
 .muted { color: var(--muted); }
 .error, .failure { color: var(--error); }
 
-.topbar { display: flex; align-items: baseline; gap: 12px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.topbar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; font-size: 16px; color: var(--text); }
 main { padding: 16px 20px; }
 
@@ -144,9 +144,12 @@ a.button.primary { background: var(--running); border-color: var(--running); col
 .new-task input { font-family: var(--mono); font-size: 13px; }
 
 /* 顶部导航 */
-.topnav { display: flex; gap: 16px; margin-left: 12px; }
-.topnav a { color: var(--muted); padding-bottom: 2px; }
+.topnav { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-left: 12px; }
+.topnav a { color: var(--muted); padding-bottom: 2px; white-space: nowrap; }
 .topnav a.active { color: var(--text); font-weight: 600; border-bottom: 2px solid var(--k-call); }
+
+/* 代码托管页 */
+.forge-app { margin-top: 20px; }
 
 /* 团队约定页 */
 .conventions { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }
