@@ -5,11 +5,14 @@ import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
   ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
   FileChange, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  CredentialsResponse, DeleteCredentialResponse, SaveCredentialRequest, SaveCredentialResponse,
 } from '../../src/web/types.ts'
+import type { CredentialKind } from '../../src/credentials/types.ts'
 
 export type { Insights }
 export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
 export type { FileChange, FileDiff, TaskChanges }
+export type { CredentialKind, CredentialsResponse }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -55,3 +58,7 @@ export const generateProposals = (workflow: string, tasks: string[]) => post<Gen
 export const decideProposal = (id: number, action: 'approve' | 'reject', text: string) =>
   post<DecideResponse>(`/api/improve/proposals/${id}/${action}`, action === 'approve' ? { note: text } : { reason: text })
 export const listComparisons = () => get<ImprovementComparison[]>('/api/improve/comparisons')
+
+export const listCredentials = () => get<CredentialsResponse>('/api/credentials')
+export const saveCredential = (body: SaveCredentialRequest) => post<SaveCredentialResponse>('/api/credentials', body)
+export const deleteCredential = (name: string) => post<DeleteCredentialResponse>('/api/credentials/delete', { name })

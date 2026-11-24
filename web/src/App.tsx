@@ -4,6 +4,7 @@ import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { Changes } from './Changes.tsx'
+import { Credentials } from './Credentials.tsx'
 import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
 import { Detail } from './Detail.tsx'
 import { Improve, parseImproveRoute } from './Improve.tsx'
@@ -236,14 +237,15 @@ export function App() {
       <header className="topbar">
         <a href="#/" className="brand">Eos Workbench</a>
         <nav className="topnav">
-          <a href="#/" className={conv === undefined && improve === undefined && hash !== '#/insights' ? 'active' : ''}>任务</a>
+          <a href="#/" className={conv === undefined && improve === undefined && hash !== '#/insights' && hash !== '#/credentials' ? 'active' : ''}>任务</a>
           <a href="#/insights" className={hash === '#/insights' ? 'active' : ''}>统计</a>
           <a href="#/improve" className={improve !== undefined ? 'active' : ''}>改进</a>
           <a href="#/conventions" className={conv !== undefined ? 'active' : ''}>团队约定</a>
+          <a href="#/credentials" className={hash === '#/credentials' ? 'active' : ''}>凭据</a>
         </nav>
       </header>
       <main className={conv === undefined ? '' : 'wide'}>
-        {conv !== undefined ? <Conventions route={conv} /> : improve !== undefined ? <Improve route={improve} /> : hash === '#/insights' ? <Insights /> : hash === '#/new' ? <NewTask /> : id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}
+        {conv !== undefined ? <Conventions route={conv} /> : improve !== undefined ? <Improve route={improve} /> : hash === '#/insights' ? <Insights /> : hash === '#/credentials' ? <Credentials /> : hash === '#/new' ? <NewTask /> : id === undefined ? <TaskList /> : <TaskPage key={id} id={id} />}
       </main>
     </>
   )

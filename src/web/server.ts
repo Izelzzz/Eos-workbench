@@ -11,6 +11,9 @@ import type { Task } from '../engine/types.ts'
 import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
+import { GENERATE_HINT } from '../credentials/key.ts'
+import type { Credentials } from '../credentials/store.ts'
+import { CREDENTIAL_KINDS, type CredentialKind, LOCAL_OWNER } from '../credentials/types.ts'
 import { evidence } from '../engine/evidence.ts'
 import { compare, versionUsed, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
@@ -21,7 +24,7 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -30,6 +33,7 @@ const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$
 /** /api/improve/proposals/<id>，以及审批：/api/improve/proposals/<id>/(approve|reject)。 */
 const PROPOSAL = /^\/api\/improve\/proposals\/(\d{1,15})$/
 const DECIDE = /^\/api\/improve\/proposals\/(\d{1,15})\/(approve|reject)$/
+
 
 const decodeName = (raw: string): string | undefined => {
   try {
@@ -130,8 +134,12 @@ export const tail = (path: string, max: number): string => {
 }
 
 /** improve：生成改进提案要用的执行器和数据目录；不给就没有生成接口（返回 503）。 */
-/** publicUrl：外部地址，见 parsePublicUrl；不给时只接受本机地址。 */
-export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; improve?: { executor: Executor; dataDir: string }; publicUrl?: URL }): Server => {
+/**
+ * publicUrl：外部地址，见 parsePublicUrl；不给时只接受本机地址。
+ * credentials：凭据存储。凭据的值只写不读：接口不返回值，错误信息里也不带值。
+ * 现在没有登录，所有凭据都属于 LOCAL_OWNER；接上登录后按登录的用户取 owner。
+ */
+export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; credentials: Credentials; improve?: { executor: Executor; dataDir: string }; publicUrl?: URL }): Server => {
   const allowedOrigin = (req: IncomingMessage) => originFor(req.headers.host, req.socket.localPort, o.publicUrl)
 
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
@@ -325,6 +333,25 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     return [r.row === undefined ? 404 : 409, { ok: false, error: r.error }]
   }
 
+  const credentialList = (): CredentialsResponse => ({
+    usable: o.credentials.usable, ...(o.credentials.keyId === undefined ? { hint: GENERATE_HINT } : { keyId: o.credentials.keyId }), items: o.credentials.list(LOCAL_OWNER),
+  })
+
+  // 名字放在请求体里、不放进 URL：用户把值误填进名字时，值也不会进 URL 和访问记录。
+  const saveCredential = (body: Record<string, unknown>): [number, SaveCredentialResponse] => {
+    if (typeof body.name !== 'string') return [400, { ok: false, error: '需要 name（凭据名）' }]
+    const name = body.name
+    if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
+    if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
+    const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
+    return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
+  }
+
+  const deleteCredential = (body: Record<string, unknown>): [number, DeleteCredentialResponse] => {
+    if (typeof body.name !== 'string') return [400, { ok: false, error: '需要 name（凭据名）' }]
+    return o.credentials.delete(LOCAL_OWNER, body.name) ? [200, { ok: true }] : [404, { ok: false, error: '没有这条凭据' }]
+  }
+
   const root = resolve(o.staticDir)
   const serveStatic = (path: string, res: ServerResponse) => {
     const file = normalize(join(root, path))
@@ -347,9 +374,11 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
         const conv = CONVENTION.exec(url.pathname)
         const dec = DECIDE.exec(url.pathname)
         const gen = url.pathname === '/api/improve/generate'
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen) return json(res, 404, { error: '没有这个接口' })
+        const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined) return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (cred !== undefined) return json(res, ...(cred === 'save' ? saveCredential(g.body) : deleteCredential(g.body)))
         if (gen) return json(res, ...(await startGenerate(g.body)))
         if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
         if (conv !== null) {
@@ -362,6 +391,7 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })
       if (url.pathname === '/api/workflows') return json(res, 200, workflows())
       if (url.pathname === '/api/conventions') return json(res, 200, conventions())
+      if (url.pathname === '/api/credentials') return json(res, 200, credentialList())
       const conv = CONVENTION.exec(url.pathname)
       if (conv) {
         const name = decodeName(conv[2]!)
