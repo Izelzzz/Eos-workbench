@@ -2,13 +2,50 @@
 // 用法：node --import tsx tests/git-server-main.ts <仓库根目录> <令牌或 -> <记录文件>
 // 令牌不是 - 时，只接受 "Authorization: Basic base64(x-access-token:<令牌>)"，否则 401。每个请求的认证头追加到记录文件。
 // 另外模拟 GitHub 的 PR 接口（/api/v3/repos/<owner>/<repo>/pulls 的 GET 和 POST），要求 "Authorization: Bearer <令牌>"；PR 存在内存里。
+// 再模拟 GitHub App：环境变量 EOS_TEST_APP_ID、EOS_TEST_APP_KEY（公钥 PEM 文件）、EOS_TEST_APP_INSTALLED（装了 App 的 owner/repo，逗号分隔）、
+// EOS_TEST_APP_TTL_MS（安装令牌的有效期）。查安装和换令牌要用 App 私钥签的 JWT；换出的令牌在有效期内，git 和 PR 接口都认。
 import { execFileSync, spawn } from 'node:child_process'
+import { createPublicKey, createVerify, randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { appendFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 const [root, token, record] = process.argv.slice(2) as [string, string, string]
-const expected = token === '-' ? undefined : `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`
+const appId = process.env.EOS_TEST_APP_ID
+const appKey = process.env.EOS_TEST_APP_KEY === undefined ? undefined : createPublicKey(readFileSync(process.env.EOS_TEST_APP_KEY))
+const installed = (process.env.EOS_TEST_APP_INSTALLED ?? '').split(',').filter(Boolean)
+const ttl = Number(process.env.EOS_TEST_APP_TTL_MS ?? 3600_000)
+/** 换出去的安装令牌：令牌 → 到期时间和授权的仓库。 */
+const issued = new Map<string, { expires: number; repos: string[] }>()
+
+/** 认这个令牌吗：固定的令牌，或在有效期内、授权了这个仓库的安装令牌。 */
+const accepts = (t: string, repo: string): boolean => {
+  if (token !== '-' && t === token) return true
+  const i = issued.get(t)
+  return i !== undefined && i.expires > Date.now() && i.repos.includes(repo)
+}
+
+/** App 的 JWT：签名用 App 的公钥验证，iss 是 App id，没过期。 */
+const validJwt = (auth: string | undefined): boolean => {
+  const m = /^Bearer ([\w-]+)\.([\w-]+)\.([\w-]+)$/.exec(auth ?? '')
+  if (m === null || appKey === undefined) return false
+  const v = createVerify('RSA-SHA256')
+  v.update(`${m[1]}.${m[2]}`)
+  if (!v.verify(appKey, Buffer.from(m[3]!, 'base64url'))) return false
+  const body = JSON.parse(Buffer.from(m[2]!, 'base64url').toString('utf8')) as { iss?: string; exp?: number; iat?: number }
+  const now = Date.now() / 1000
+  return body.iss === appId && (body.exp ?? 0) > now && (body.iat ?? Infinity) <= now
+}
+
+/** git 走 HTTPS 时的认证头（Basic x-access-token:<令牌>）认不认。 */
+const gitAccepts = (auth: string | undefined, repo: string): boolean => {
+  if (token === '-') return true
+  const m = /^Basic (.+)$/.exec(auth ?? '')
+  if (m === null) return false
+  const [user, pass] = Buffer.from(m[1]!, 'base64').toString('utf8').split(':')
+  return user === 'x-access-token' && pass !== undefined && accepts(pass, repo)
+}
 
 type Pull = { number: number; head: string; base: string; title: string; body: string; state: 'open' | 'closed'; merged_at: string | null; sha: string }
 /** 测试用的开关：hideNextList 让下一次查打开的 PR 返回空（模拟查和开之间别人刚开了一个）；failPost 让开 PR 返回这个状态码。 */
@@ -21,7 +58,8 @@ const api = (req: import('node:http').IncomingMessage, res: import('node:http').
     res.writeHead(status, { 'content-type': 'application/json' })
     res.end(JSON.stringify(value))
   }
-  if (token !== '-' && req.headers.authorization !== `Bearer ${token}`) return reply(401, { message: 'Bad credentials' })
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
+  if (token !== '-' && (bearer === undefined || !accepts(bearer, `${owner}/${name}`))) return reply(401, { message: 'Bad credentials' })
   const gitDir = `${root}/${owner}/${name}.git`
   const html = (n: number) => `http://127.0.0.1:${port}/${owner}/${name}/pull/${n}`
   if (req.method === 'GET') {
@@ -66,6 +104,38 @@ const server = createServer((req, res) => {
     res.writeHead(204)
     return void res.end()
   }
+  // GitHub App：查安装、换安装令牌。
+  const inst = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(req.url ?? '')
+  const mint = /^\/api\/v3\/app\/installations\/(\d+)\/access_tokens$/.exec(req.url ?? '')
+  if (inst !== null || mint !== null) {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8')
+      appendFileSync(record, `${JSON.stringify({ path: req.url, method: req.method, auth: req.headers.authorization === undefined ? null : 'jwt', ...(body === '' ? {} : { body: JSON.parse(body) }) })}\n`)
+      const reply = (status: number, value: unknown) => {
+        res.writeHead(status, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(value))
+      }
+      if (!validJwt(req.headers.authorization)) return reply(401, { message: 'A JSON web token could not be decoded' })
+      if (inst !== null) {
+        const repo = `${decodeURIComponent(inst[1]!)}/${decodeURIComponent(inst[2]!)}`
+        const i = installed.indexOf(repo)
+        return i < 0 ? reply(404, { message: 'Not Found' }) : reply(200, { id: 1000 + i })
+      }
+      const i = Number(mint![1]) - 1000
+      const repos = (JSON.parse(body || '{}') as { repositories?: string[] }).repositories ?? []
+      const owner = installed[i]?.split('/')[0]
+      if (owner === undefined) return reply(404, { message: 'Not Found' })
+      const allowed = repos.map(r => `${owner}/${r}`).filter(r => installed.includes(r))
+      if (allowed.length !== repos.length) return reply(422, { message: 'There is at least one repository that does not exist or is not accessible' })
+      const t = `ghs_${randomBytes(12).toString('hex')}`
+      const expires = Date.now() + ttl
+      issued.set(t, { expires, repos: allowed })
+      return reply(201, { token: t, expires_at: new Date(expires).toISOString() })
+    })
+    return
+  }
   const apiPath = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/pulls(?:\?.*)?$/.exec(req.url ?? '')
   if (apiPath !== null) {
     const chunks: Buffer[] = []
@@ -78,7 +148,8 @@ const server = createServer((req, res) => {
     return
   }
   appendFileSync(record, `${JSON.stringify({ path: req.url, auth: req.headers.authorization ?? null })}\n`)
-  if (expected !== undefined && req.headers.authorization !== expected) {
+  const gitRepo = /^\/([^/]+)\/([^/]+?)\.git\//.exec(req.url ?? '')
+  if (!gitAccepts(req.headers.authorization, gitRepo === null ? '' : `${gitRepo[1]}/${gitRepo[2]}`)) {
     res.writeHead(401, { 'www-authenticate': 'Basic realm="eos-test"' })
     return res.end()
   }

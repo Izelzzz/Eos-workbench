@@ -1,5 +1,7 @@
 // GitHub：仓库地址的写法、令牌的名字、git 的认证头、开 PR。
 import { z } from 'zod'
+import { createHash } from 'node:crypto'
+import { appCredential, appCredentialName, GitHubApp } from './github-app.ts'
 import { ForgeError, type Forge, type PullRequest, type RemoteRepo } from './types.ts'
 
 /** 一次 API 请求最多等这么久。 */
@@ -36,6 +38,8 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
   const scheme = o.scheme ?? 'https'
   // github.com 的 API 在 api.github.com；GitHub Enterprise 在 /api/v3。
   const api = host === 'github.com' ? 'https://api.github.com' : `${scheme}://${host}/api/v3`
+  /** 按凭据内容缓存 App：凭据被替换后用新的，旧的令牌缓存跟着丢掉。 */
+  const apps = new Map<string, GitHubApp>()
   const call = async (repo: RemoteRepo, token: string | undefined, credential: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<{ status: number; body: unknown }> => {
     let res: Response
     let text: string
@@ -109,6 +113,25 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       const pr = pull.safeParse(created.body)
       if (!pr.success) throw new ForgeError(`${repo.host} 返回的 PR 格式不对`)
       return { number: pr.data.number, url: pr.data.html_url, reused: false }
+    },
+    appCredentialName: repo => appCredentialName(repo.host),
+    async appToken(repo, credential) {
+      const key = createHash('sha256').update(credential.value).digest('hex')
+      let app = apps.get(key)
+      if (app === undefined) {
+        let json: unknown
+        try {
+          json = JSON.parse(credential.value)
+        } catch {
+          throw new ForgeError(`凭据「${credential.name}」不是 GitHub App 的凭据（应该是包含 appId 和 privateKey 的 JSON）`)
+        }
+        const parsed = appCredential.safeParse(json)
+        if (!parsed.success) throw new ForgeError(`凭据「${credential.name}」不是有效的 GitHub App 凭据：${parsed.error.issues.map(i => `${i.path.join('.') || '（整体）'} ${i.message}`).join('；')}`)
+        app = new GitHubApp({ apiUrl: api, credential: parsed.data, credentialName: credential.name })
+        apps.clear()
+        apps.set(key, app)
+      }
+      return (await app.token(repo)).token
     },
     branchUrl: (repo, branch) => `${repo.webUrl}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`,
   }

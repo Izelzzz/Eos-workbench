@@ -14,6 +14,13 @@ export interface Forge {
   credentialName(repo: RemoteRepo): string
   /** git 走 HTTPS 时带的认证头（整行，例如 "Authorization: Basic …"）。 */
   gitAuthHeader(token: string): string
+  /** 托管平台 App（例如 GitHub App）的凭据在凭据存储里的名字；不支持 App 时没有。 */
+  appCredentialName?(repo: RemoteRepo): string
+  /**
+   * 用 App 的凭据换一个能访问这个仓库的短期令牌（同一个仓库在有效期内重复调用只换一次）。
+   * App 没装到这个仓库时抛 NotInstalled，别的错误抛 ForgeError。
+   */
+  appToken?(repo: RemoteRepo, credential: { name: string; value: string }): Promise<string>
   /** 浏览器里打开这个分支的地址。 */
   branchUrl(repo: RemoteRepo, branch: string): string
   /**
@@ -28,3 +35,6 @@ export type PullRequest = { number: number; url: string; reused: boolean }
 
 /** 托管平台的接口出错：消息是给用户看的中文，不含令牌。 */
 export class ForgeError extends Error {}
+
+/** 托管平台的 App 没装到这个仓库：调用方据此退回个人访问令牌或匿名访问。 */
+export class NotInstalled extends ForgeError {}

@@ -4,7 +4,7 @@ import type { CredentialKind, CredentialsResponse } from './api.ts'
 import { deleteCredential, listCredentials, saveCredential } from './api.ts'
 import { ago } from './format.ts'
 
-const KIND: Record<CredentialKind | 'unknown', string> = { 'api-key': '模型 API key', token: 'Git 令牌', unknown: '无法识别（请删掉重新录入）' }
+const KIND: Record<CredentialKind | 'unknown', string> = { 'api-key': '模型 API key', token: 'Git 令牌', 'github-app': 'GitHub App', unknown: '无法识别（请删掉重新录入）' }
 
 export function Credentials() {
   const [data, setData] = useState<CredentialsResponse>()

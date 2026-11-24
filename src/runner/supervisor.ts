@@ -102,13 +102,34 @@ export class Supervisor {
     return { ok: true, id }
   }
 
-  /** 访问这个仓库用的认证：凭据存储里有令牌就带上；读不出来时 error 写明原因（调用方决定要不要匿名试）。 */
-  private authFor(repo: RemoteRepo, forge: Forge): { auth: RemoteAuth; error?: string } {
+  /**
+   * 访问这个仓库用的认证，按顺序：托管平台的 App（装到了这个仓库）→ 凭据存储里的令牌 → 匿名。
+   * error：没用上的凭据和原因（App 没装到这个仓库、凭据读不出来、App 换令牌失败），失败时附在报错后面。
+   */
+  private async authFor(repo: RemoteRepo, forge: Forge): Promise<{ auth: RemoteAuth; error?: string }> {
+    const notes: string[] = []
+    const appName = forge.appCredentialName?.(repo)
+    if (appName !== undefined && forge.appToken !== undefined && this.o.credentials !== undefined) {
+      const app = this.o.credentials.get(LOCAL_OWNER, appName)
+      if (app.kind === 'ok') {
+        try {
+          const token = await forge.appToken(repo, { name: appName, value: app.value })
+          return { auth: { credential: appName, header: forge.gitAuthHeader(token), secret: token } }
+        } catch (e) {
+          // App 没装到这个仓库：退回令牌。App 自己出错（私钥不对等）：也退回，但把原因带上，配错了能看出来。
+          if (!(e instanceof ForgeError)) throw e
+          notes.push(e.message)
+        }
+      } else if (app.kind === 'error') notes.push(app.error)
+    }
     const credential = forge.credentialName(repo)
     const got = this.o.credentials?.get(LOCAL_OWNER, credential) ?? { kind: 'absent' as const }
-    if (got.kind === 'ok') return { auth: { credential, header: forge.gitAuthHeader(got.value), secret: got.value } }
-    return { auth: { credential }, ...(got.kind === 'error' ? { error: got.error } : {}) }
+    if (got.kind === 'error') notes.push(got.error)
+    const error = notes.length === 0 ? undefined : notes.join('；')
+    const auth: RemoteAuth = got.kind === 'ok' ? { credential, header: forge.gitAuthHeader(got.value), secret: got.value } : { credential }
+    return { auth, ...(error === undefined ? {} : { error }) }
   }
+
 
   /** 任务的远程仓库对应的托管平台：按记下的种类和地址找回来。 */
   private forgeOf(repo: RemoteRepo): Forge | undefined {
@@ -139,8 +160,8 @@ export class Supervisor {
     if (outside.length > 0) {
       return fail(`任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支`)
     }
-    const { auth, error } = this.authFor(meta.remote, forge)
-    const withCredential = (message: string) => (error === undefined ? message : `${message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）`)
+    const { auth, error } = await this.authFor(meta.remote, forge)
+    const withCredential = (message: string) => (error === undefined ? message : `${message}（没用上的凭据：${error}）`)
     let sha: string
     try {
       sha = (await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)).sha
@@ -183,13 +204,13 @@ export class Supervisor {
    * 凭据存在但读不出来（没有主密钥、换了主密钥）时先匿名试一次：公开仓库照样能用；匿名也不行时两个原因都报出来。
    */
   private async syncRemote(repo: RemoteRepo, forge: Forge): Promise<{ ok: true; gitDir: string; baseSha: string; branch: string } | { ok: false; error: string }> {
-    const { auth, error } = this.authFor(repo, forge)
+    const { auth, error } = await this.authFor(repo, forge)
     try {
       const m = await syncMirror(this.o.dataDir, repo, auth)
       return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha, branch: m.branch }
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
-      return { ok: false, error: error === undefined ? e.message : `${e.message}（凭据「${auth.credential}」读不出来，所以没带令牌：${error}）` }
+      return { ok: false, error: error === undefined ? e.message : `${e.message}（没用上的凭据：${error}）` }
     }
   }
 

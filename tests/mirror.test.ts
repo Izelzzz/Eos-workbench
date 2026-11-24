@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
 import { DatabaseSync } from 'node:sqlite'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
@@ -64,7 +66,7 @@ test('访问远程的环境：不继承宿主机的 GIT_CONFIG_PARAMETERS、GIT_
 })
 
 /** 一个"远程"：bare 仓库放在 <root>/acme/app.git，由单独进程里的 git HTTP 服务提供，可以要求令牌。 */
-const remote = async (token: string | undefined, o: { empty?: boolean } = {}) => {
+const remote = async (token: string | undefined, o: { empty?: boolean; app?: { id: string; publicKeyPath: string; installed: string[]; ttlMs?: number } } = {}) => {
   const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-mirror-'))
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
   const root = join(dir, 'remote')
@@ -85,7 +87,8 @@ const remote = async (token: string | undefined, o: { empty?: boolean } = {}) =>
   const first = o.empty ? '' : commit('README.md')
   const record = join(dir, 'requests.jsonl')
   writeFileSync(record, '')
-  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'tests', 'git-server-main.ts'), root, token ?? '-', record], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'] })
+  const appEnv = o.app === undefined ? {} : { EOS_TEST_APP_ID: o.app.id, EOS_TEST_APP_KEY: o.app.publicKeyPath, EOS_TEST_APP_INSTALLED: o.app.installed.join(','), ...(o.app.ttlMs === undefined ? {} : { EOS_TEST_APP_TTL_MS: String(o.app.ttlMs) }) }
+  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'tests', 'git-server-main.ts'), root, token ?? '-', record], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, ...appEnv } })
   cleanup.push(() => child.kill())
   const port = await new Promise<number>(r => child.stdout!.on('data', (b: Buffer) => { const m = /port (\d+)/.exec(b.toString()); if (m) r(Number(m[1])) }))
   const forge = githubForge({ host: `127.0.0.1:${port}`, scheme: 'http' })
@@ -209,7 +212,7 @@ test('凭据存在但读不出来（没有主密钥）：先匿名试；私有�
   cleanup.push(() => noKey.close())
   const sup = new Supervisor({ store: r.store, executor: new FakeExecutor(async () => '回复'), dataDir: r.data, credentials: noKey, forges: [r.forge] })
   const err = (await sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
-  assert.match(err.error, new RegExp(`这是私有仓库或需要登录.*（凭据「${r.credential}」读不出来，所以没带令牌：没有设置主密钥`))
+  assert.match(err.error, new RegExp(`这是私有仓库或需要登录.*（没用上的凭据：没有设置主密钥`))
   assert.ok(r.requests().every(q => q.auth === null), '没带令牌')
   const pub = await remote(undefined)
   assert.deepEqual(pub.credentials.put(LOCAL_OWNER, pub.credential, 'token', TOKEN), { ok: true })
@@ -641,4 +644,82 @@ test('GitHub API 连不上：报中文原因和底层原因', async () => {
   await new Promise(res => probe.close(res))
   const forge = githubForge({ host: `127.0.0.1:${port}`, scheme: 'http' })
   await assert.rejects(forge.openPullRequest(forge.parse(`http://127.0.0.1:${port}/a/b`)!, TOKEN, { head: 'h', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), new RegExp(`访问 127\\.0\\.0\\.1:${port} 失败：fetch failed：ECONNREFUSED`))
+})
+
+/** 一个 GitHub App：现场生成的 RSA 密钥对，公钥写到文件交给测试服务。 */
+const makeApp = (id = '424242') => {
+  const { generateKeyPairSync } = require('node:crypto') as typeof import('node:crypto')
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-app-'))
+  cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
+  const publicKeyPath = join(dir, 'app.pub.pem')
+  writeFileSync(publicKeyPath, publicKey.export({ type: 'spki', format: 'pem' }))
+  return { id, publicKeyPath, privateKey: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() }
+}
+const appCred = (r: Awaited<ReturnType<typeof remote>>, app: ReturnType<typeof makeApp>, extra: Record<string, unknown> = {}) =>
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appId: app.id, privateKey: app.privateKey, ...extra })), { ok: true })
+const mints = (r: Awaited<ReturnType<typeof remote>>) => r.requests().filter(q => /access_tokens$/.test(q.path)) as { path: string; body?: { repositories?: string[] } }[]
+
+test('GitHub App：只配 App、不配令牌，克隆、推送、开 PR 都用换来的安装令牌；令牌只授权这个仓库，不落盘', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app', 'acme/other'] } })
+  appCred(r, app)
+  const { task, result } = await runPr(r)
+  assert.equal(task.status, 'done', task.failure)
+  assert.match(result.detail, /已开 PR #1/)
+  // 只换了一次令牌，只授权 app 这一个仓库（App 也装在 acme/other 上）。
+  assert.deepEqual(mints(r).map(m => m.body), [{ repositories: ['app'] }])
+  const tokens = new Set(r.requests().flatMap(q => {
+    const a = q.auth ?? ''
+    if (a.startsWith('Basic ')) return [Buffer.from(a.slice(6), 'base64').toString('utf8').split(':')[1]!]
+    if (a.startsWith('Bearer ghs_')) return [a.slice(7)]
+    return []
+  }))
+  assert.equal(tokens.size, 1, `git 和 PR 接口用的是同一个安装令牌：${[...tokens].join(',')}`)
+  const ghs = [...tokens][0]!
+  assert.match(ghs, /^ghs_/)
+  for (const f of filesUnder(r.data)) {
+    const b = readFileSync(f)
+    assert.ok(!b.includes(ghs) && !b.includes(Buffer.from(`x-access-token:${ghs}`).toString('base64')), f)
+  }
+})
+
+test('GitHub App：令牌在有效期内只换一次；离到期不到 5 分钟时换新的', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'] } })
+  appCred(r, app)
+  for (const request of ['一', '二']) assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request })).ok, true)
+  assert.equal(mints(r).length, 1, '1 小时有效：复用')
+  // 有效期只有 4 分钟的令牌：一换来就离到期不到 5 分钟，下次用之前换新的。
+  const short = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'], ttlMs: 4 * 60 * 1000 } })
+  appCred(short, app)
+  for (const request of ['一', '二']) assert.equal((await short.sup.create({ repo: short.url, workflow: 'feature', request })).ok, true)
+  assert.equal(mints(short).length, 2, '快到期：换新的')
+})
+
+test('GitHub App 没装到这个仓库：退回个人访问令牌；没有令牌时报出 App 没装和安装地址', async () => {
+  const app = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/other'] } })
+  appCred(r, app, { slug: 'eos-test' })
+  const failed = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { ok: boolean; error: string }
+  assert.equal(failed.ok, false)
+  assert.match(failed.error, /这是私有仓库或需要登录.*（没用上的凭据：凭据「github-app\..*」的 GitHub App 没有安装到 acme\/app：到 https:\/\/.*\/apps\/eos-test\/installations\/new 把它安装到这个仓库）/)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const ok = await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })
+  assert.equal(ok.ok, true, JSON.stringify(ok))
+  assert.equal(mints(r).length, 0)
+})
+
+test('GitHub App 的私钥不对、凭据格式不对：报中文原因', async () => {
+  const app = makeApp()
+  const other = makeApp()
+  const r = await remote(TOKEN, { app: { id: app.id, publicKeyPath: app.publicKeyPath, installed: ['acme/app'] } })
+  // 用别的私钥签：GitHub 不认这个 App。
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appId: app.id, privateKey: other.privateKey })), { ok: true })
+  const wrongKey = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
+  assert.match(wrongKey.error, /不认凭据「github-app\..*」的 App：App id 或私钥不对/)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', '{"appId": 1}'), { ok: true })
+  const badJson = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
+  assert.match(badJson.error, /不是有效的 GitHub App 凭据：privateKey/)
+  assert.ok(!badJson.error.includes(app.privateKey.slice(40, 80)))
 })
