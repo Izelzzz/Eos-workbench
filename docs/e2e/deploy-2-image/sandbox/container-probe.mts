@@ -23,7 +23,7 @@ if (process.env.PROBE_CHOWN) { execFileSync('chown', ['-R', process.env.PROBE_CH
 const { PROBE_SECRET: _, ...env } = process.env
 const ex = new DshExecutor({
   dshHome: join(OUT, 'dsh'), dshBin: process.env.PROBE_DSH_BIN ?? '/app/node_modules/@deepseek-ai/dsh/lib/bin.js',
-  env: { ...env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  env: { ...env, NODE_USE_ENV_PROXY: '1' }, modelKey: () => env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
 
 const procFile = join(dirs.mine, 'proc-report.txt')
