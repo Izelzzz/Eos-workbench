@@ -35,7 +35,7 @@ const HELP = `用法：
   eos reject <提案号> "<理由>"                             拒绝
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
-run、resume、retry、improve、web 启动前会做同样的环境检查，不通过就不启动。`
+run、resume、retry、improve、web 启动前会做同样的环境检查：有 ✗ 不启动，只有 ⚠ 时提示后照常启动。`
 
 const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_user: '等待回答', done: '已完成', failed: '失败', aborted: '已中止' }
 
@@ -58,11 +58,15 @@ const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
 if (positionals[0] === 'doctor' && !values.help) {
   const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
-  process.exit(items.every(i => i.ok) ? 0 : 1)
+  // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
+  process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
 if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
-  const bad = evaluate(gather({ root: ROOT, dataDir, env: process.env })).filter(i => !i.ok)
+  const items = evaluate(gather({ root: ROOT, dataDir, env: process.env }))
+  const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
+  const warned = items.filter(i => i.status === 'warn')
+  if (warned.length > 0) process.stderr.write(`启动前检查有提示（照常启动）：\n${formatItems(warned)}\n\n`)
 }
 mkdirSync(dataDir, { recursive: true })
 const store = new Store(join(dataDir, 'eos.db'))

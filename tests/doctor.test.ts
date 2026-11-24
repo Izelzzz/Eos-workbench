@@ -19,25 +19,26 @@ test('版本比较按主、次、修订号', () => {
 
 test('环境都满足时每项都通过', () => {
   const items = evaluate(good)
-  assert.deepEqual(items.map(i => [i.name, i.ok]), [['Node', true], ['DeepSeek API key', true], ['git', true], ['数据目录', true], ['dsh', true]])
+  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
 })
 
-test('每一项不满足时都是 ✗，并写清怎么修', () => {
+test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
   const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', apiKey: false, git: { missing: true }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
   const items = evaluate(bad)
-  assert.ok(items.every(i => !i.ok && i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
+  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail'])
+  assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
   const text = formatItems(items)
-  assert.match(text, /✗ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0[\s\S]*怎么修：安装 Node 24\.9\.0/)
+  assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
   assert.match(text, /✗ DeepSeek API key：没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/)
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
   assert.match(text, /✗ dsh：没有安装，或安装不完整\n  怎么修：在仓库目录运行 npm install/)
 })
 
-test('engines 读不出或写法认不出时不放行；git 运行失败和找不到分开说', () => {
-  assert.match(formatItems(evaluate({ ...good, nodeRequired: '>=24.9.0 <27' })), /✗ Node：24\.10\.0；认不出 engines\.node 的写法「>=24\.9\.0 <27」/)
+test('engines 读不出或写法认不出时给出提示；git 运行失败和找不到分开说', () => {
+  assert.match(formatItems(evaluate({ ...good, nodeRequired: '>=24.9.0 <27' })), /⚠ Node：24\.10\.0；认不出 engines\.node 的写法「>=24\.9\.0 <27」/)
   const { nodeRequired: _dropped, ...noEngines } = good
-  assert.match(formatItems(evaluate(noEngines)), /✗ Node：24\.10\.0；读不出 Eos 的 package\.json 里的 engines\.node/)
+  assert.match(formatItems(evaluate(noEngines)), /⚠ Node：24\.10\.0；读不出 Eos 的 package\.json 里的 engines\.node/)
   assert.match(formatItems(evaluate({ ...good, git: { error: 'permission denied' } })), /✗ git：git 运行失败：permission denied\n  怎么修：/)
 })
 
@@ -65,7 +66,7 @@ test('eos doctor 逐项列出结果，有 ✗ 时退出码不为 0', () => {
   const r = cli(['doctor', '--data', data], {})
   assert.equal(r.status, 1)
   assert.match(r.stdout, new RegExp(`^Eos 环境检查（数据目录 ${data.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}）`))
-  for (const name of ['Node', 'DeepSeek API key', 'git', '数据目录', 'dsh']) assert.match(r.stdout, new RegExp(`[✓✗] ${name}：`))
+  for (const name of ['Node', 'DeepSeek API key', 'git', '数据目录', 'dsh']) assert.match(r.stdout, new RegExp(`[✓⚠✗] ${name}：`))
   assert.match(r.stdout, /✗ DeepSeek API key[\s\S]*怎么修/)
   assert.match(cli(['doctor', '--data', data], { DEEPSEEK_API_KEY: 'k' }).stdout, /✓ DeepSeek API key/)
 })
@@ -90,4 +91,13 @@ test('不调用模型的命令不做启动检查', () => {
   const r = cli(['status', '--data', join(tmp(), 'data')], {})
   assert.equal(r.status, 0)
   assert.match(r.stdout, /还没有任务/)
+})
+
+test('Node 版本不够时只提示，命令照常执行；版本够时不提示', () => {
+  const r = cli(['run', '--repo', join(tmp(), 'not-there'), '--data', join(tmp(), 'data'), '需求'], { DEEPSEEK_API_KEY: 'k' })
+  assert.doesNotMatch(r.stderr, /没有启动/)
+  assert.match(r.stderr, /找不到目录/, '通过了启动检查，走到了创建任务')
+  const old = !atLeast(process.versions.node, '24.9.0')
+  if (old) assert.match(r.stderr, /^启动前检查有提示（照常启动）：\n⚠ Node：/)
+  else assert.doesNotMatch(r.stderr, /启动前检查有提示/)
 })
