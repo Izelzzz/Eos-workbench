@@ -104,7 +104,7 @@ const redact = (() => {
   // 主密钥两种写法都算：部署方可能省略了末尾的 =，泄露出来的是原文。
   const master = masterKey.kind === 'ok' ? masterKey.key.key.toString('base64') : undefined
   const extra = [...(envModelKey === undefined ? [] : [envModelKey]), ...(master === undefined ? [] : [master, master.replace(/=+$/, '')])]
-  const secrets = knownSecrets(credentials, extra)
+  const secrets = knownSecrets(credentials, extra, Date.now, e => process.stderr.write(`读不到凭据列表，遮蔽暂时沿用上次的凭据值：${(e as Error).message}\n`))
   return (text: string) => redactText(text, secrets())
 })()
 
@@ -281,9 +281,12 @@ const commands: Record<string, () => Promise<void> | void> = {
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
-      // 等已经进来的请求处理完再关凭据存储。
-      server.close(() => credentials.close())
-      void ex.close().finally(() => process.exit(130))
+      // 凭据存储最后关：执行器关闭期间，任务还可能要取模型 key（新起 dsh）、写遮蔽过的日志。
+      server.close()
+      void ex.close().finally(() => {
+        credentials.close()
+        process.exit(130)
+      })
     }
     process.once('SIGINT', shutdown)
     process.once('SIGTERM', shutdown)

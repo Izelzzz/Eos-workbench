@@ -61,17 +61,20 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
  * 每条 trace 事件的每个字符串都要遮蔽，所以最多每秒查一次凭据列表；列表的名字或更新时间变了才重新解密。
  * 在 Web 上增删改凭据之后，最迟一秒后生效。
  */
-export const knownSecrets = (credentials: Credentials, extra: readonly string[], now: () => number = Date.now): (() => readonly string[]) => {
+export const knownSecrets = (credentials: Credentials, extra: readonly string[], now: () => number = Date.now, onError: (e: unknown) => void = () => {}): (() => readonly string[]) => {
   let cache: { sig: string; values: string[] } | undefined
   let checkedAt = -Infinity
+  let reported = false
   return () => {
     if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...extra]
     checkedAt = now()
     let items
     try {
       items = credentials.list(LOCAL_OWNER)
-    } catch {
-      // 凭据存储已经关闭（服务退出时）或暂时读不了：沿用上次的值，遮蔽不能让写日志的地方出错。
+    } catch (e) {
+      // 读不了凭据列表（例如数据库损坏）：沿用上次的值，遮蔽不能让写日志的地方出错；报一次错，不悄悄降级。
+      if (!reported) onError(e)
+      reported = true
       return [...(cache?.values ?? []), ...extra]
     }
     const sig = items.map(i => `${i.name}@${i.updatedAt}`).join('\n')

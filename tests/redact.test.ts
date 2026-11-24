@@ -97,15 +97,19 @@ test('knownSecrets: all decryptable credentials plus extra values; picks up chan
   assert.deepEqual([...secrets()].sort(), [TOKEN, 'env-model-key-value'].sort())
 })
 
-test('knownSecrets keeps the last known values when the credential store is closed (service shutdown), instead of throwing', () => {
+test('knownSecrets keeps the last known values when the credential list cannot be read, and reports the error once', () => {
   const c = new Credentials(db(), newKey())
   c.put(LOCAL_OWNER, 'deepseek', 'api-key', KEY)
   let t = 0
-  const secrets = knownSecrets(c, ['extra-value-123'], () => t)
+  const errors: unknown[] = []
+  const secrets = knownSecrets(c, ['extra-value-123'], () => t, e => errors.push(e))
   assert.deepEqual([...secrets()].sort(), [KEY, 'extra-value-123'].sort())
   c.close()
   t = 5000
   assert.deepEqual([...secrets()].sort(), [KEY, 'extra-value-123'].sort())
+  t = 10000
+  secrets()
+  assert.equal(errors.length, 1, '读不了时报一次错，不重复刷屏')
 })
 
 test('model key: the credential wins over the env var; env is the fallback; an unreadable credential is an error, not a silent fallback', () => {
