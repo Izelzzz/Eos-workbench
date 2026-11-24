@@ -91,8 +91,9 @@ agent 跑任务时的环境，就是这个镜像：
 
 agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任务时装不了系统包**（`apt-get` 会失败）。
 
-- **项目自己的依赖**照常装进 worktree：`npm install`、`pnpm install`、`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。包管理器的缓存在容器的家目录里，不进数据卷，重建容器后会重新下载。
-- **需要别的系统依赖**（某个版本的 Python、Go、Java、系统库）时，写一个基于 Eos 镜像的 Dockerfile，并在 `compose.yaml` 里改用它：
+- **项目自己的依赖**照常装进 worktree：`npm install`、`pnpm install`、`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。在沙箱里实测过这三种（`docs/e2e/deploy-2-image/sandbox/deps-probe.json`）。
+- 包管理器的缓存在 `/tmp/cache`（npm、pip、corepack），因为家目录在沙箱里不可写。`/tmp` 是 tmpfs，重启容器后缓存清空，依赖会重新下载。
+- **需要别的系统依赖**（某个版本的 Python、Go、Java、系统库）时，写一个基于 Eos 镜像的 Dockerfile，例如 `Dockerfile.team`：
 
   ```dockerfile
   FROM eos-workbench:local
@@ -100,6 +101,17 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
   RUN apt-get update && apt-get install -y --no-install-recommends golang-go libpq-dev && rm -rf /var/lib/apt/lists/*
   USER eos
   ```
+
+  再写一个 `compose.override.yaml`（compose 会自动读它），给派生镜像一个**不同的标签**：
+
+  ```yaml
+  services:
+    eos:
+      build: { context: ., dockerfile: Dockerfile.team }
+      image: eos-workbench:team
+  ```
+
+  升级时先重建基础镜像，再重建派生镜像：`docker compose -f compose.yaml build && docker compose up -d --build`。派生镜像沿用 `eos-workbench:local` 这个标签的话，它会盖掉基础镜像，以后升级拿不到新的 Eos 代码。
 
 - agent 访问网络不受限制（拉依赖要用到）。需要限制出网时，在宿主机或 Docker 网络这一层做。
 
@@ -109,8 +121,9 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 - 镜像里装了 bubblewrap，但在 Docker 默认权限下用不了。要用它就得放宽容器的 seccomp 和 `/proc` 屏蔽，所以没有这样做（见 ADR-006）。
 - 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 现在还不检查这一项，也不检查 dsh 能不能真正启动：例如 `/tmp` 挂成 `noexec` 时，dsh 的 native 模块加载不了，doctor 照样全是 ✓，任务一开始就失败。
 - 和 bwrap 相比的差别：
-  - 同一个容器里的任务共用 `/tmp`（tmpfs）。
+  - 同一个容器里的任务共用 `/tmp`（tmpfs）：能读到别的任务的临时文件、dsh 的输出暂存文件（`/tmp/dsh-spill-*`）和依赖缓存。
   - agent 能看到进程列表。
+- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
 
 ## 数据和升级
 

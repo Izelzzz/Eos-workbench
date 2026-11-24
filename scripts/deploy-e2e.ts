@@ -7,6 +7,7 @@
 // 结果写到 .eos/deploy-e2e/report.json，过程写到 run.log。
 // 用法：DEEPSEEK_API_KEY=<key> node --import tsx scripts/deploy-e2e.ts
 // 环境变量：EOS_E2E_COMPOSE_FILES 用冒号分隔的额外 compose 文件（例如构建机需要的网络设置）；EOS_E2E_URL 默认 http://127.0.0.1:4317。
+// 会占用宿主机的 4317 端口，不要在已经跑着 Eos 的服务器上运行；compose 项目名是 eos-deploy-e2e，结束时连数据卷一起删掉。
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -61,58 +62,63 @@ const REQUEST = [
 const REPO = '/data/repos/demo'
 
 compose('build')
+compose('down', '-v')
 compose('up', '-d')
-await until('Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
-const doctor = inContainer('node --import tsx src/cli.ts doctor')
-log(doctor.out)
-const env = inContainer('id; node -v; npm -v; pnpm -v; git --version; python3 --version; gcc --version | head -1; bwrap --version; echo "EOS_HOME=$EOS_HOME"')
+try {
+  await until('Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
+  const doctor = inContainer('node --import tsx src/cli.ts doctor')
+  log(doctor.out)
+  const env = inContainer('id; node -v; npm -v; pnpm -v; git --version; python3 --version; gcc --version | head -1; bwrap --version; echo "EOS_HOME=$EOS_HOME"')
 
-inContainer([
-  `rm -rf ${REPO} && mkdir -p ${REPO} && cd ${REPO}`,
-  'git init -q -b main',
-  `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "test": "node --test" } }' > package.json`,
-  'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
-].join(' && '))
+  inContainer([
+    `rm -rf ${REPO} && mkdir -p ${REPO} && cd ${REPO}`,
+    'git init -q -b main',
+    `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "test": "node --test" } }' > package.json`,
+    'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
+  ].join(' && '))
 
-const created = await api('/api/tasks', { repo: REPO, workflow: 'standard', request: REQUEST })
-log(`POST /api/tasks → ${created.status} ${JSON.stringify(created.body)}`)
-if (created.status !== 201) throw new Error('任务没有建起来')
-const id = created.body.id as string
-const answered: string[] = []
-let task: any
-await until('任务结束', async () => {
-  task = (await api(`/api/tasks/${id}`)).body
-  if (task.status === 'waiting_user' && task.question !== undefined && !answered.includes(task.question.id)) {
-    const text = task.question.options?.[0] ?? '按你的建议做'
-    const a = await api(`/api/tasks/${id}/answer`, { questionId: task.question.id, text })
-    log(`回答「${task.question.text}」：${text} → ${a.status}`)
-    answered.push(task.question.id)
-    if (a.body.resumeNeeded === true) log(`继续 → ${(await api(`/api/tasks/${id}/resume`, {})).status}`)
+  const created = await api('/api/tasks', { repo: REPO, workflow: 'standard', request: REQUEST })
+  log(`POST /api/tasks → ${created.status} ${JSON.stringify(created.body)}`)
+  if (created.status !== 201) throw new Error('任务没有建起来')
+  const id = created.body.id as string
+  const answered: string[] = []
+  let task: any
+  await until('任务结束', async () => {
+    task = (await api(`/api/tasks/${id}`)).body
+    if (task.status === 'waiting_user' && task.question !== undefined && !answered.includes(task.question.id)) {
+      const text = task.question.options?.[0] ?? '按你的建议做'
+      const a = await api(`/api/tasks/${id}/answer`, { questionId: task.question.id, text })
+      log(`回答「${task.question.text}」：${text} → ${a.status}`)
+      answered.push(task.question.id)
+      if (a.body.resumeNeeded === true) log(`继续 → ${(await api(`/api/tasks/${id}/resume`, {})).status}`)
+    }
+    return ['done', 'failed', 'aborted'].includes(task.status)
+  }, 40 * 60_000)
+  log(`任务 ${id}：${task.status}`)
+
+  const worktree = task.worktree as string
+  const tests = inContainer(`set -o pipefail; cd ${worktree} && npm test 2>&1 | tail -8`)
+  const commits = inContainer(`git -C ${worktree} log --oneline ${task.baseSha}..HEAD`)
+
+  compose('down')
+  compose('up', '-d')
+  await until('重建后 Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
+  const after = (await api(`/api/tasks/${id}`)).body
+  const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
+
+  const checks = {
+    '容器里 eos doctor 没有 ✗': doctor.code === 0,
+    '任务完成': task.status === 'done',
+    'worktree 里 npm test 通过': tests.code === 0 && /ℹ fail 0/.test(tests.out),
+    'agent 的改动提交到了任务分支': commits.code === 0 && commits.out.trim() !== '',
+    'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
+    'down 再 up 之后 worktree 还在': afterWorktree.code === 0,
   }
-  return ['done', 'failed', 'aborted'].includes(task.status)
-}, 40 * 60_000)
-log(`任务 ${id}：${task.status}`)
-
-const worktree = task.worktree as string
-const tests = inContainer(`cd ${worktree} && npm test 2>&1 | tail -8`)
-const commits = inContainer(`git -C ${worktree} log --oneline ${task.baseSha}..HEAD`)
-
-compose('down')
-compose('up', '-d')
-await until('重建后 Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
-const after = (await api(`/api/tasks/${id}`)).body
-const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
-compose('down')
-
-const checks = {
-  '容器里 eos doctor 没有 ✗': doctor.code === 0,
-  '任务完成': task.status === 'done',
-  'worktree 里 npm test 通过': tests.code === 0 && /ℹ fail 0/.test(tests.out),
-  'agent 的改动提交到了任务分支': commits.code === 0 && commits.out.trim() !== '',
-  'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
-  'down 再 up 之后 worktree 还在': afterWorktree.code === 0,
+  const report = { task: id, status: task.status, answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
+  writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
+  for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
+  process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1
+} finally {
+  // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。
+  compose('down', '-v')
 }
-const report = { task: id, status: task.status, answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
-writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
-for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
-process.exit(Object.values(checks).every(Boolean) ? 0 : 1)

@@ -34,6 +34,11 @@ RUN useradd --create-home --uid 10001 --shell /bin/bash eos \
 COPY --from=build --chown=root:root /app /app
 WORKDIR /app
 ENV EOS_HOME=/data NODE_ENV=production
+# agent 在 Landlock 下能写 /tmp。平台和 dsh 会加载的缓存不能放在那里，否则 agent 能往里放代码、在沙箱外运行：
+# 关掉平台 tsx 的编译缓存和 Node 的字节码缓存（dsh 会打开它，默认放在 /tmp）；dsh 的 native 模块缓存放到平台用户的家目录（agent 写不了）。
+ENV TSX_DISABLE_CACHE=1 NODE_DISABLE_COMPILE_CACHE=1 NARB_NATIVE_CACHE_DIR=/home/eos/.cache/native-addons
+# 反过来，agent 装依赖时用的缓存要放在 agent 能写的地方：家目录在沙箱里不可写。
+ENV npm_config_cache=/tmp/cache/npm PIP_CACHE_DIR=/tmp/cache/pip COREPACK_HOME=/tmp/cache/corepack
 USER eos
 VOLUME /data
 EXPOSE 4317

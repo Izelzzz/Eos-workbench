@@ -6,3 +6,5 @@ web/dist
 docs
 poc/logs
 *.log
+.env
+.env.*

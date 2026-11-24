@@ -1,5 +1,5 @@
 // 容器里的沙箱探针：真实 dsh + 真实模型。看 agent 能写哪里、能不能看到平台进程的环境。
-// 用法（容器内）：node --import tsx /probe/container-probe.ts <输出目录>
+// 用法（容器内）：node --import tsx /probe/container-probe.mts <输出目录>
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

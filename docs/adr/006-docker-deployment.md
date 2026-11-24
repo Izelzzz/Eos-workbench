@@ -51,7 +51,8 @@
 ### 数据：一个命名卷挂到 `/data`
 
 - `/data` 里有 `eos.db`、`dsh/`、`worktrees/`、`logs/`、`locks/`，用户的仓库放在 `repos/`。
-- 升级镜像就是换容器，卷不动。`/tmp` 用 tmpfs，不进卷。tmpfs 必须带 `exec`：dsh 的 native 加载器把预编译的 `.node` 缓存到 `/tmp` 再加载，Docker 的 tmpfs 默认是 `noexec`，dsh 会起不来。部署 E2E 第一次运行就是这样失败的。
+- 升级镜像就是换容器，卷不动。`/tmp` 用 tmpfs，不进卷。
+- Landlock 下 agent 能写 `/tmp`。平台和 dsh 会加载的缓存不能放在那里，否则 agent 往里放的代码会在沙箱外运行：关掉 tsx 的编译缓存和 Node 的字节码缓存；dsh 的 native 模块缓存放到平台用户的家目录。反过来，npm、pip、corepack 的缓存放到 `/tmp/cache`，因为 agent 写不了家目录。tmpfs 必须带 `exec`：dsh 的 native 加载器把预编译的 `.node` 缓存到 `/tmp` 再加载，Docker 的 tmpfs 默认是 `noexec`，dsh 会起不来。部署 E2E 第一次运行就是这样失败的。
 
 ## 为什么不选其他方案
 
@@ -71,7 +72,8 @@
 ## 已知限制
 
 - **Landlock 比 bwrap 弱的地方**：
-  - `/tmp` 是同一个 tmpfs，同一个容器里的任务能看到彼此的临时文件。
+  - `/tmp` 是同一个 tmpfs，同一个容器里的任务能看到彼此的临时文件、dsh 的输出暂存文件和依赖缓存。
+  - 不放在 `/tmp` 的缓存是按已知的几种列出来的（tsx、Node 字节码、dsh 的 native 模块）。以后的依赖再往 `os.tmpdir()` 放会被加载的文件时，需要重新检查。
   - agent 能看到进程列表（只是读不到别的进程的环境）。
 - **宿主机内核要支持 Landlock**：Linux 5.13 以上，并且 LSM 列表里启用了 landlock。较旧的 ABI 会报告 `partial`；完全没有时 dsh 拒绝执行命令（fail closed），任务会失败而不是不受限制地运行。`eos doctor` 还不检查这一项。
 - **没有登录**：非浏览器客户端可以伪造 Host，网络上能连到端口的人都能用。默认只绑 127.0.0.1 就是因为这个。
