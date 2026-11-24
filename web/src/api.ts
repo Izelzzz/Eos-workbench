@@ -4,11 +4,12 @@ import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
   ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
-  SaveConventionResponse, TaskDetail, WorkflowInfo,
+  FileChange, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
 } from '../../src/web/types.ts'
 
 export type { Insights }
 export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
+export type { FileChange, FileDiff, TaskChanges }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
 const get = async <T,>(path: string): Promise<T> => {
@@ -20,6 +21,9 @@ const get = async <T,>(path: string): Promise<T> => {
 
 export const listTasks = () => get<TaskSummary[]>('/api/tasks')
 export const getTask = (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`)
+export const getChanges = (id: string) => get<TaskChanges>(`/api/tasks/${encodeURIComponent(id)}/changes`)
+export const getFileDiff = (id: string, head: string, path: string) =>
+  get<FileDiff>(`/api/tasks/${encodeURIComponent(id)}/changes/diff?${new URLSearchParams({ head, path })}`)
 export const getInsights = () => get<Insights>('/api/insights')
 
 /** 写接口统一走这里：JSON 请求体，浏览器自动带上同源 Origin。网络或服务端错误都变成 { ok: false, error }。 */

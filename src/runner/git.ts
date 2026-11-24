@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
+import { type FileChange, type FileDiff, hunks, MAX_FILES, type TaskChanges, truncate } from './changes.ts'
 import { matchesAny } from '../workflow/glob.ts'
 
 /**
@@ -420,3 +421,84 @@ export const diffStat = (w: Worktree): string => wgitText(locate(w.worktree, w.r
 export const contextFor = (w: Worktree): string =>
   `工作目录是任务的 git worktree：${w.worktree}（分支 ${w.branch}）。基线提交是 ${w.baseSha.slice(0, 12)}。` +
   `平台会在开发每次回复后自动提交，查看全部改动用 \`git diff ${w.baseSha.slice(0, 12)}\`，查看提交历史用 \`git log --oneline ${w.baseSha.slice(0, 12)}..HEAD\`。`
+
+const STATUS: Record<string, FileChange['status']> = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', T: 'modified' }
+
+/** 平台读 diff 时的公共参数：不用外部 diff 驱动和 textconv（它们会按 worktree 里的 .gitattributes 执行命令）。 */
+const diffArgs = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-M']
+
+/**
+ * 任务分支相对基线的改动，按文件（不含 diff 内容）。head 不给时解析当前 HEAD，之后的 git 调用都用这个提交，
+ * 文件列表和增删行数来自同一个提交。外部数据只在这里解析：name-status 和 numstat 的 -z 输出（路径不转义）。
+ * 路径不是合法 UTF-8 的文件跳过（平台不会提交这种文件）；改名前的路径不合法时当作新增。
+ */
+export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
+  const loc = locate(w.worktree, w.repo)
+  // 以任务分支这个 ref 为准，不看 worktree 的 HEAD：agent 能在 worktree 里切到别的提交。
+  const at = head ?? wgitText(loc, ['rev-parse', '--verify', `refs/heads/${w.branch}^{commit}`])
+  const diff = (args: string[]) => wgit(loc, [...diffArgs, ...args, w.baseSha, at])
+  const counts = new Map<string, { add: number; del: number; binary: boolean }>()
+  const num = splitNul(diff(['--numstat', '-z']))
+  for (let i = 0; i < num.length; i++) {
+    // 一段是「增\t删\t路径」；改名时路径为空，后面跟两段：改名前、改名后。路径里可能有 tab，只按前两个 tab 切。
+    const f = num[i]!
+    const t1 = f.indexOf(9)
+    const t2 = f.indexOf(9, t1 + 1)
+    const [add, del, rest] = [f.subarray(0, t1).toString('utf8'), f.subarray(t1 + 1, t2).toString('utf8'), f.subarray(t2 + 1)]
+    const path = rest.length === 0 ? (i += 2, utf8(num[i]!)) : utf8(rest)
+    if (path !== undefined) counts.set(path, { add: Number(add) || 0, del: Number(del) || 0, binary: add === '-' })
+  }
+  const files: FileChange[] = []
+  const names = splitNul(diff(['--name-status', '-z']))
+  for (let i = 0; i < names.length; i++) {
+    const code = names[i]!.toString('utf8')[0]!
+    const from = code === 'R' || code === 'C' ? utf8(names[++i]!) : undefined
+    const path = utf8(names[++i]!)
+    if (path === undefined) continue
+    const renamed = code === 'R' && from !== undefined
+    const status = renamed ? 'renamed' : code === 'R' || code === 'C' ? 'added' : STATUS[code] ?? 'modified'
+    files.push({ path, ...(renamed ? { from } : {}), status, ...(counts.get(path) ?? { add: 0, del: 0, binary: false }) })
+  }
+  return { base: w.baseSha, head: at, files: files.slice(0, MAX_FILES), omitted: Math.max(0, files.length - MAX_FILES) }
+}
+
+/**
+ * head 是不是任务自己的提交：在基线和任务分支之间（基线是 head 的祖先，head 是任务分支的祖先）。
+ * 取单个文件的 diff 前核对，不让请求读仓库里别的提交（包括基线之前的历史）。
+ */
+export const onBranch = (w: Worktree, head: string): boolean => {
+  if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(head)) return false
+  const loc = locate(w.worktree, w.repo)
+  try {
+    wgit(loc, ['merge-base', '--is-ancestor', w.baseSha, head])
+    wgit(loc, ['merge-base', '--is-ancestor', head, `refs/heads/${w.branch}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 单个文件的 diff 最多读这么多字节：超过的部分 git 输出了也不读进内存（页面本来也只显示前面一部分）。 */
+export const MAX_DIFF_BYTES = 8 * 1024 * 1024
+
+/** 带输出上限的 git 调用：超过上限时返回已经读到的部分，不报错。 */
+const wgitCapped = (loc: Loc, args: string[], max: number): { out: Buffer; capped: boolean } => {
+  try {
+    return { out: execFileSync('git', [...SAFE, '--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], { cwd: loc.worktree, maxBuffer: max, stdio: ['ignore', 'pipe', 'pipe'] }), capped: false }
+  } catch (e) {
+    const stdout = (e as { stdout?: unknown }).stdout
+    if ((e as NodeJS.ErrnoException).code === 'ENOBUFS' && Buffer.isBuffer(stdout)) return { out: stdout, capped: true }
+    throw e
+  }
+}
+
+/** 一个文件在 head 时相对基线的 diff。文件不在改动列表里时返回 undefined。 */
+export const fileDiff = (w: Worktree, head: string, path: string): FileDiff | undefined => {
+  const f = committedChanges(w, head).files.find(x => x.path === path)
+  if (f === undefined) return undefined
+  if (f.binary) return { diff: '' }
+  const loc = locate(w.worktree, w.repo)
+  const { out, capped } = wgitCapped(loc, [...diffArgs, w.baseSha, head, '--', ...(f.from === undefined ? [] : [literal(f.from)]), literal(f.path)], MAX_DIFF_BYTES)
+  const d = truncate(hunks(out.toString('utf8')))
+  return capped ? { diff: d.diff, truncated: { bytes: MAX_DIFF_BYTES } } : d
+}
