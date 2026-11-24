@@ -5,8 +5,10 @@
 //     写了「不需要，理由……」的，通过但给出醒目的提示
 // 只能证明「有这几节、证据文件存在」，证明不了 E2E 真的覆盖了这次改动。
 //
-// 用法（在 PR 的合并提交上）：PR_BODY="..." node .github/scripts/pr-checklist.ts
+// 用法（在 PR 的合并提交上）：PR_BODY="..." node <脚本>
 // 改动列表取 HEAD^1..HEAD，即 actions/checkout 检出的合并提交相对 base 的改动。
+// 规则文件取脚本旁边的 ../e2e-paths.txt。工作流从 base（HEAD^1）取出脚本和规则来跑，
+// 这样 PR 不能靠改脚本或规则放宽对自己的检查；改动要等合并后才对后面的 PR 生效。
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -46,10 +48,12 @@ export function needsE2E(path: string, rules: Rule[]): boolean {
 /** 按标题切分描述。代码块里的「#」不算标题，HTML 注释不算内容。 */
 export function sections(body: string): { title: string; content: string }[] {
   const out: { title: string; level: number; open: boolean; lines: string[] }[] = []
-  let fenced = false
+  // 代码块只由开始时的那种标记（``` 或 ~~~）结束
+  let fence: string | null = null
   for (const line of body.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
-    const h = fenced ? null : /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
+    const marker = /^\s*(```|~~~)/.exec(line)?.[1]
+    if (marker && (fence === null || fence === marker)) fence = fence === null ? marker : null
+    const h = fence !== null || marker ? null : /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
     if (h) {
       // 同级或更高级的标题结束前面的节；更低级的标题（连同标题行）算在外层节的内容里
       const level = h[1]!.length
@@ -71,14 +75,17 @@ export function isGuardFile(path: string): boolean {
 
 export type Result = { errors: string[]; warnings: string[]; notes: string[] }
 
-export function check(input: { body: string; changed: string[]; rules: Rule[] }): Result {
+/** 这个 PR 改动的一个文件。删掉的文件算「改动」（要不要 E2E），但不能当证据。 */
+export type Change = { path: string; deleted: boolean }
+
+export function check(input: { body: string; changed: Change[]; rules: Rule[] }): Result {
   const r: Result = { errors: [], warnings: [], notes: [] }
   const all = sections(input.body)
   const find = (pred: (t: string) => boolean) => all.find((s) => pred(s.title))
 
   const required: [string, (t: string) => boolean][] = [
-    ['能用证据证明的', (t) => t.includes('能用证据证明的') || t.includes('能证明的')],
-    ['证明不了的', (t) => t.includes('证明不了的')],
+    ['能用证据证明的', (t) => /^(能用证据证明的|能证明的)/.test(t)],
+    ['证明不了的', (t) => t.startsWith('证明不了的')],
   ]
   for (const [name, pred] of required) {
     const s = find(pred)
@@ -86,35 +93,39 @@ export function check(input: { body: string; changed: string[]; rules: Rule[] })
     else if (s.content === '') r.errors.push(`「${s.title}」一节是空的`)
   }
 
-  const guards = input.changed.filter(isGuardFile)
+  const paths = input.changed.map((c) => c.path)
+  const present = input.changed.filter((c) => !c.deleted).map((c) => c.path)
+  const guards = paths.filter(isGuardFile)
   if (guards.length > 0) {
     r.warnings.push(`这个 PR 改了检查规则或允许清单（${guards.join('、')}）。放宽规则要人批：独立审查核实，合并卡片上单独列出`)
   }
 
-  const needed = input.changed.filter((p) => needsE2E(p, input.rules))
+  const needed = paths.filter((p) => needsE2E(p, input.rules))
   if (needed.length === 0) {
     r.notes.push('改动没有碰到需要 E2E 的路径（.github/e2e-paths.txt），不要求「端到端验证」一节')
     return r
   }
   r.notes.push(`需要 E2E 的改动：${needed.slice(0, 10).join('、')}${needed.length > 10 ? ` 等 ${needed.length} 个文件` : ''}`)
 
-  const e2e = find((t) => t.includes('端到端验证'))
+  const e2e = find((t) => t.startsWith('端到端验证'))
   if (!e2e || e2e.content === '') {
     r.errors.push('改动碰到了需要 E2E 的路径，描述里要有非空的「端到端验证」一节：写 docs/e2e/ 下的证据路径，或写「不需要，理由是……」（CLAUDE.md 自检第 3 条）')
     return r
   }
-  const paths = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
-  if (paths.length > 0) {
-    for (const p of new Set(paths)) {
+  // 路径里的 * 不当通配：截到它前面的目录，按目录匹配
+  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、*]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
+  if (evidence.length > 0) {
+    for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
-      if (!input.changed.some((c) => c === p || c.startsWith(dir))) {
+      if (!present.some((c) => c === p || c.startsWith(dir))) {
         r.errors.push(`「端到端验证」写的证据 ${p} 不在这个 PR 新增或修改的文件里`)
       }
     }
     return r
   }
-  if (/不需要[\s，,：:]*\S{2,}/.test(e2e.content)) {
-    r.warnings.push(`这个 PR 豁免了 E2E，理由由独立审查核实、在合并卡片上由用户批准：${e2e.content.split('\n')[0]}`)
+  // 豁免：这一节以「不需要」开头，后面跟理由（可以换行写）
+  if (/^不需要[\s，,：:。.]*\S{2,}/.test(e2e.content)) {
+    r.warnings.push(`这个 PR 豁免了 E2E，理由由独立审查核实、在合并卡片上由用户批准：${e2e.content.replace(/\s+/g, ' ')}`)
     return r
   }
   r.errors.push('「端到端验证」一节既没有 docs/e2e/ 下的证据路径，也没有写「不需要，理由是……」')
@@ -123,8 +134,9 @@ export function check(input: { body: string; changed: string[]; rules: Rule[] })
 
 function main(): void {
   const body = process.env.PR_BODY ?? ''
-  const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', 'HEAD^1', 'HEAD'], { encoding: 'utf8' })
+  const changed: Change[] = execFileSync('git', ['diff', '--name-status', '--no-renames', 'HEAD^1', 'HEAD'], { encoding: 'utf8' })
     .split('\n').filter((l) => l !== '')
+    .map((l) => { const [status, ...rest] = l.split('\t'); return { path: rest.join('\t'), deleted: status === 'D' } })
   const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
   const r = check({ body, changed, rules })
   for (const n of r.notes) console.log(n)

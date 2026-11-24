@@ -1,9 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, needsE2E, parseRules, sections } from './pr-checklist.ts'
+import { check, needsE2E, parseRules, sections, type Change } from './pr-checklist.ts'
 
 const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
+
+/** 新增或修改的文件 */
+const ch = (...paths: string[]): Change[] => paths.map((path) => ({ path, deleted: false }))
 
 const proof = '## 能用证据证明的\n\n- 测试通过\n\n## 证明不了的和原因\n\n- 没有在别的内核上测\n'
 
@@ -33,50 +36,81 @@ test('切分描述：低一级的标题算在外层节里，代码块里的 # �
 })
 
 test('缺少或空着「能用证据证明的」「证明不了的」时报错，不管改了什么', () => {
-  assert.deepEqual(check({ body: proof, changed: ['docs/a.md'], rules }).errors, [])
-  assert.equal(check({ body: '## 改动\n\n- x\n', changed: ['docs/a.md'], rules }).errors.length, 2)
-  const empty = check({ body: '## 能证明的\n\n## 证明不了的\n- x\n', changed: ['docs/a.md'], rules })
+  assert.deepEqual(check({ body: proof, changed: ch('docs/a.md'), rules }).errors, [])
+  assert.equal(check({ body: '## 改动\n\n- x\n', changed: ch('docs/a.md'), rules }).errors.length, 2)
+  const empty = check({ body: '## 能证明的\n\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
   assert.deepEqual(empty.errors, ['「能证明的」一节是空的'])
 })
 
 test('没碰需要 E2E 的路径：不要求「端到端验证」一节', () => {
-  const r = check({ body: proof, changed: ['docs/roadmap.md', 'tests/x.test.ts', 'poc/run-all.sh'], rules })
+  const r = check({ body: proof, changed: ch('docs/roadmap.md', 'tests/x.test.ts', 'poc/run-all.sh'), rules })
   assert.deepEqual(r.errors, [])
   assert.deepEqual(r.warnings, [])
 })
 
 test('碰了需要 E2E 的路径：缺「端到端验证」一节或一节是空的就失败', () => {
-  assert.match(check({ body: proof, changed: ['src/a.ts'], rules }).errors.join(), /端到端验证/)
-  assert.match(check({ body: `${proof}\n## 端到端验证\n\n`, changed: ['src/a.ts'], rules }).errors.join(), /端到端验证/)
-  assert.match(check({ body: `${proof}\n## 端到端验证\n\n跑过了\n`, changed: ['src/a.ts'], rules }).errors.join(), /既没有/)
+  assert.match(check({ body: proof, changed: ch('src/a.ts'), rules }).errors.join(), /端到端验证/)
+  assert.match(check({ body: `${proof}\n## 端到端验证\n\n`, changed: ch('src/a.ts'), rules }).errors.join(), /端到端验证/)
+  assert.match(check({ body: `${proof}\n## 端到端验证\n\n跑过了\n`, changed: ch('src/a.ts'), rules }).errors.join(), /既没有/)
 })
 
 test('写了证据路径：文件或目录必须在这个 PR 里新增或修改过', () => {
   const body = `${proof}\n## 端到端验证\n\n见 \`docs/e2e/ci-3/run.log\`，截图在 docs/e2e/ci-3/shots/。\n`
-  const ok = check({ body, changed: ['src/a.ts', 'docs/e2e/ci-3/run.log', 'docs/e2e/ci-3/shots/1.png'], rules })
+  const ok = check({ body, changed: ch('src/a.ts', 'docs/e2e/ci-3/run.log', 'docs/e2e/ci-3/shots/1.png'), rules })
   assert.deepEqual(ok.errors, [])
-  const missing = check({ body, changed: ['src/a.ts', 'docs/e2e/ci-3/run.log'], rules })
+  const missing = check({ body, changed: ch('src/a.ts', 'docs/e2e/ci-3/run.log'), rules })
   assert.deepEqual(missing.errors, ['「端到端验证」写的证据 docs/e2e/ci-3/shots/ 不在这个 PR 新增或修改的文件里'])
   // 前缀相同的另一个目录不算
-  const prefix = check({ body: `${proof}\n## 端到端验证\n\ndocs/e2e/ci-3（日志）\n`, changed: ['src/a.ts', 'docs/e2e/ci-30/run.log'], rules })
+  const prefix = check({ body: `${proof}\n## 端到端验证\n\ndocs/e2e/ci-3（日志）\n`, changed: ch('src/a.ts', 'docs/e2e/ci-30/run.log'), rules })
   assert.equal(prefix.errors.length, 1)
 })
 
 test('写了「不需要」和理由：通过，但给出豁免提示；只写「不需要」没有理由不算', () => {
-  const r = check({ body: `${proof}\n## 端到端验证\n\n不需要，理由是只改了注释。\n`, changed: ['src/a.ts'], rules })
+  const r = check({ body: `${proof}\n## 端到端验证\n\n不需要，理由是只改了注释。\n`, changed: ch('src/a.ts'), rules })
   assert.deepEqual(r.errors, [])
   assert.equal(r.warnings.length, 1)
   assert.match(r.warnings[0]!, /只改了注释/)
-  assert.equal(check({ body: `${proof}\n## 端到端验证\n\n不需要\n`, changed: ['src/a.ts'], rules }).errors.length, 1)
+  assert.equal(check({ body: `${proof}\n## 端到端验证\n\n不需要\n`, changed: ch('src/a.ts'), rules }).errors.length, 1)
 })
 
 test('改了检查规则或允许清单：给出提示，提示里列出是哪些文件；只改别的不提示', () => {
-  const r = check({ body: proof, changed: ['.gitleaksignore', '.github/workflows/ci.yml', 'docs/a.md'], rules })
+  const r = check({ body: proof, changed: ch('.gitleaksignore', '.github/workflows/ci.yml', 'docs/a.md'), rules })
   assert.deepEqual(r.errors, [])
   assert.equal(r.warnings.length, 1)
   assert.match(r.warnings[0]!, /\.gitleaksignore、\.github\/workflows\/ci\.yml/)
   for (const p of ['.gitleaks.toml', '.github/e2e-paths.txt', '.github/scripts/pr-checklist.ts']) {
-    assert.equal(check({ body: proof, changed: [p], rules }).warnings.length, 1, p)
+    assert.equal(check({ body: proof, changed: ch(p), rules }).warnings.length, 1, p)
   }
-  assert.deepEqual(check({ body: proof, changed: ['docs/a.md', '.github/README.md'], rules }).warnings, [])
+  assert.deepEqual(check({ body: proof, changed: ch('docs/a.md', '.github/README.md'), rules }).warnings, [])
+})
+
+test('删掉的文件算改动（要不要 E2E），但不能当证据', () => {
+  const body = `${proof}\n## 端到端验证\n\n见 docs/e2e/b1/run.log\n`
+  const r = check({ body, changed: [...ch('src/a.ts'), { path: 'docs/e2e/b1/run.log', deleted: true }], rules })
+  assert.deepEqual(r.errors, ['「端到端验证」写的证据 docs/e2e/b1/run.log 不在这个 PR 新增或修改的文件里'])
+  const onlyDeleted = check({ body: proof, changed: [{ path: 'src/old.ts', deleted: true }], rules })
+  assert.match(onlyDeleted.errors.join(), /端到端验证/)
+})
+
+test('豁免要以「不需要」开头；理由可以换行写，提示里带上完整理由', () => {
+  const casual = check({ body: `${proof}\n## 端到端验证\n\n本地跑过了，截图不需要附上\n`, changed: ch('src/a.ts'), rules })
+  assert.match(casual.errors.join(), /既没有/)
+  const multi = check({ body: `${proof}\n## 端到端验证\n\n不需要\n理由是只改了类型标注\n`, changed: ch('src/a.ts'), rules })
+  assert.deepEqual(multi.errors, [])
+  assert.match(multi.warnings.join(), /只改了类型标注/)
+})
+
+test('证据路径里的 * 不当通配，按它前面的目录匹配', () => {
+  const r = check({ body: `${proof}\n## 端到端验证\n\n截图在 docs/e2e/ci-3/shots/*.png\n`, changed: ch('src/a.ts', 'docs/e2e/ci-3/shots/1.png'), rules })
+  assert.deepEqual(r.errors, [])
+})
+
+test('「不能证明的」不算「能证明的」；标题要以这几个词开头', () => {
+  const r = check({ body: '## 不能证明的\n- x\n## 证明不了的\n- y\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(r.errors, ['描述里缺少「能用证据证明的」一节（CLAUDE.md 自检第 7 条）'])
+})
+
+test('代码块只由开始时的那种标记结束：``` 块里的 ~~~ 不结束它', () => {
+  const s = sections('## A\n```\n~~~\n# 还在代码块里\n```\n## B\nx\n')
+  assert.deepEqual(s.map((x) => x.title), ['A', 'B'])
 })
