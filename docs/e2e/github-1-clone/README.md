@@ -8,14 +8,14 @@ EOS_MASTER_KEY=<随机> EOS_E2E_REPO=https://github.com/Izelzzz/eos-e2e-sandbox 
 
 `scripts/e2e.ts` 先把 `EOS_E2E_GIT_TOKEN` 存进凭据存储，凭据名是 `github.com`。随后通过命令行在私有仓库 `Izelzzz/eos-e2e-sandbox` 上发起任务：feature 模板，真实模型。agent 提问时，由另一个进程回答。开发第一次完成后杀掉进程，再续跑。
 
-跑的是提交 7573c82 的代码，结果 11/11，见 `e2e-report.json`，完整输出见 `e2e-run.log`。
+跑的是处理独立审查之后的代码（提交 9af476c；7573c82 上也跑过一次，同样 11/11），结果 11/11，见 `e2e-report.json`，完整输出见 `e2e-run.log`。
 
 | 检查 | 依据 |
 |---|---|
 | 原有的 8 项（任务完成、评审打回、会话续接、权限档位、提问、杀进程续跑、计量、`npm test`） | 和本地仓库的 E2E 相同 |
 | 任务记下了远程仓库 | `meta.remote` 与地址解析的结果一致 |
 | worktree 建在平台数据目录里的镜像上 | `meta.repo` 在 `data/repos/` 下 |
-| 数据目录里找不到令牌（数据库、镜像、worktree、dsh 会话、日志） | 逐个文件按字节查找 |
+| 数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志） | 逐个文件按字节查找令牌本身和认证头里的 base64 形式 |
 
 `mirror.txt` 是镜像的现状：
 - 配置文件里没有远程地址，也没有凭据。

@@ -5,8 +5,8 @@
 	bare = true
 
 # 镜像里的引用
-refs/heads/eos/t261124135307f67 8db9560
+refs/heads/eos/t2611241403504gj d1a80e3
 refs/remotes/origin/main 86149f8
 
 # worktree 的 .git 文件
-gitdir: /home/user/Eos-workbench/.eos/e2e/data/repos/github.com/izelzzz/eos-e2e-sandbox.git/worktrees/t261124135307f67
+gitdir: /home/user/Eos-workbench/.eos/e2e/data/repos/github.com/izelzzz/eos-e2e-sandbox.git/worktrees/t2611241403504gj
