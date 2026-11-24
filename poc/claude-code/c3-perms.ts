@@ -25,8 +25,12 @@ const gate = () => {
 }
 const summary = (t: Turn) => {
   const res = new Map(toolResults(t).map(r => [r.id, r]))
-  return toolUses(t).map(u => ({ tool: u.name, input: u.input.file_path ?? u.input.command ?? u.input.url ?? u.input.pattern ?? '', isError: res.get(u.id)?.isError, out: res.get(u.id)?.text.slice(0, 160) }))
+  return toolUses(t).map(u => ({ tool: u.name, input: u.input.file_path ?? u.input.command ?? u.input.url ?? u.input.pattern ?? '', ...(u.input.dangerouslyDisableSandbox ? { unsandboxed: true } : {}), isError: res.get(u.id)?.isError, out: res.get(u.id)?.text.slice(0, 160) }))
 }
+/** "强行调用全部报错"：一次调用都没有时不算通过（真实模型不会调用工具表里没有的工具），只记一条 NOTE。 */
+const forcedCheck = (name: string, pre: boolean, calls: { isError?: boolean }[]) =>
+  calls.length ? check(name, pre && calls.every(c => c.isError === true), calls)
+    : (pre ? note(name + '（没有发起调用，这一条只有 mock 能证明）', calls) : check(name, false, calls))
 const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name).sort()
 
 // ---- A 只读：不给 Write/Edit/Bash ----
@@ -113,10 +117,10 @@ const requestTools = () => (requests.at(-1)?.tools ?? []).map((x: any) => x.name
   note('C 白名单 强行调用', summary(allow))
   const banned = ['WebFetch', 'WebSearch', 'Agent', 'Task', 'Bash', 'ListAgents', 'SendMessage', 'Workflow', 'Monitor', 'CronCreate', 'ScheduleWakeup']
   check('C 白名单：发给模型的工具表里没有联网、子 agent、命令、跨会话消息', !requestTools().some((n: string) => banned.includes(n)), requestTools())
-  check('C 白名单：强行调用被去掉的工具全部报错', summary(allow).every(s => s.isError === true), summary(allow))
+  forcedCheck('C 白名单：强行调用被去掉的工具全部报错', true, summary(allow))
   const deny = await run(plan('c3-c2', forced), { ...baseOptions(d.home, d.ws), disallowedTools: banned, canUseTool: g.fn(() => true) })
   note('C 黑名单 发给模型的工具表', requestTools())
-  check('C 黑名单：同样去掉了这些工具，强行调用报错', !requestTools().some((n: string) => banned.includes(n)) && summary(deny).every(s => s.isError === true), summary(deny))
+  forcedCheck('C 黑名单：同样去掉了这些工具，强行调用报错', !requestTools().some((n: string) => banned.includes(n)), summary(deny))
 }
 
 // ---- D canUseTool 和 PreToolUse hook 的触发次数 ----

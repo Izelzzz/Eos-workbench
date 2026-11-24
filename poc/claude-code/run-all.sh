@@ -3,10 +3,10 @@
 # - 真实模式（默认）：需要环境变量 EOS_ANTHROPIC_API_KEY。另外设了 EOS_CLAUDE_OAUTH_TOKEN（`claude setup-token` 生成）时，
 #   再用订阅令牌跑一次第 1 项。凭据只在本机的上游代理里使用，不进 agent 进程（见 upstream.ts、c8-env.ts）。
 # - mock 模式：EOS_MOCK=1，不需要凭据，用 upstream.ts 里的剧本模型强制 agent 发起指定的工具调用。
-# 需要 Node >= 22、npm、bubblewrap（沙箱，第 3 项用）。
+# 需要 Node >= 22、npm、bubblewrap 和 socat（沙箱，第 3 项用）。
 set -u
 cd "$(dirname "$0")"
-command -v bwrap >/dev/null || { echo "需要 bubblewrap：apt-get install -y bubblewrap"; exit 1; }
+command -v bwrap >/dev/null && command -v socat >/dev/null || { echo "需要 bubblewrap 和 socat（Claude Code 的沙箱两个都要）：apt-get install -y bubblewrap socat"; exit 1; }
 export POC="${POC:-$PWD/.run}" NODE_USE_ENV_PROXY=1 NODE_NO_WARNINGS=1
 [ -f /root/.ccr/ca-bundle.crt ] && export NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt
 [ -d node_modules ] || npm install --silent
@@ -19,6 +19,8 @@ run c2-ask c2-ask.ts
 run c3-perms c3-perms.ts
 run c4-recover-a c4-recover.ts a; run c4-recover-b c4-recover.ts b
 run c5-events c5-events.ts
+# 真实模型默认不给思考的文字（只有签名），再用 display: 'summarized' 跑一次对照
+[ $mode = real ] && EOS_THINKING_DISPLAY=summarized run c5-events-summarized c5-events.ts
 run c6-context c6-context.ts
 run c7-abort c7-abort.ts
 run c8-env c8-env.ts

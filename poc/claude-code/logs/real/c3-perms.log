@@ -1,0 +1,31 @@
+NOTE A 工具调用 :: []
+NOTE A init 工具表 :: ["Glob","Grep","Read"]
+PASS A 只读：工具表里没有 Write/Edit/Bash :: ["DeferredToolPlaceholder","Glob","Grep","Read"]
+PASS A 只读：文件没有被写出来 :: {"a":false,"b":false}
+NOTE A2 工具调用 :: [{"tool":"Bash","input":"cat /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/readme.txt","isError":false,"out":"hello"},{"tool":"Bash","input":"echo x > /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/b.txt","isError":true,"out":"Exit code 1\n/bin/bash: line 1: /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/b.txt: Read-only file system"},{"tool":"Bash","input":"echo x > /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/c.txt","unsandboxed":true,"isError":true,"out":"Exit code 1\n/bin/bash: line 1: /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/c.txt: Read-only file system"}]
+NOTE A2 canUseTool 收到 :: []
+PASS A2 只读+沙箱：能执行只读命令 :: {"tool":"Bash","input":"cat /home/user/Eos-workbench/poc/claude-code/.run/c3a2/ws/readme.txt","isError":false,"out":"hello"}
+PASS A2 只读+沙箱：bash 写不了 worktree（含绕过沙箱参数） :: {"b":false,"c":false}
+NOTE B 工具调用 :: [{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/ws/in.txt","isError":false,"out":"File created successfully at: /home/user/Eos-workbench/poc/claude-code/.run/c3b/ws/in.txt (file state is current in your context — no need to Read it back)"},{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/outside/abs.txt","isError":true,"out":"平台拒绝 Write"},{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/ws/../outside/rel.txt","isError":true,"out":"平台拒绝 Write"},{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/ws/link/via-link.txt","isError":true,"out":"平台拒绝 Write"},{"tool":"Bash","input":"echo x > in-bash.txt","isError":false,"out":"(Bash completed with no output)"},{"tool":"Bash","input":"echo x > ../outside/bash.txt","isError":true,"out":"Exit code 1\n/bin/bash: line 1: ../outside/bash.txt: Read-only file system"},{"tool":"Bash","input":"echo x > link/bash-link.txt","isError":true,"out":"Exit code 1\n/bin/bash: line 1: link/bash-link.txt: Read-only file system"},{"tool":"Bash","input":"echo x > ../outside/unsandboxed.txt","unsandboxed":true,"isError":true,"out":"Exit code 1\n/bin/bash: line 1: ../outside/unsandboxed.txt: Read-only file system"},{"tool":"Bash","input":"echo x > /tmp/eos-c3-3354.txt","isError":true,"out":"Exit code 1\n/bin/bash: line 1: /tmp/eos-c3-3354.txt: Read-only file system"}]
+NOTE B canUseTool 收到（全部拒绝） :: [{"name":"Write","path":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/outside/abs.txt"},{"name":"Write","path":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/outside/rel.txt"},{"name":"Write","path":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/ws/link/via-link.txt","blockedPath":"/home/user/Eos-workbench/poc/claude-code/.run/c3b/outside/via-link.txt"}]
+PASS B 可写：worktree 内 Write 和 bash 写入成功 :: {"write":true,"bash":true}
+PASS B 可写：worktree 外一个都没写成（绝对路径、../、软链接、bash、绕过沙箱参数） :: {"escaped":[]}
+NOTE B /tmp 写入 :: {"file":"/tmp/eos-c3-3354.txt","writtenToRealTmp":false}
+NOTE C 不限制时 init 工具表 :: ["Task","AskUserQuestion","Bash","CronCreate","CronDelete","CronList","Edit","EnterPlanMode","EnterWorktree","ExitPlanMode","ExitWorktree","ListAgents","Monitor","NotebookEdit","Read","ReportFindings","ScheduleWakeup","SendMessage","Skill","TaskStop","ToolSearch","WebFetch","WebSearch","Workflow","Write"]
+NOTE C 不限制时发给模型的工具表 :: ["Agent","AskUserQuestion","Bash","DeferredToolPlaceholder","Edit","ListAgents","Read","ReportFindings","ScheduleWakeup","Skill","ToolSearch","Workflow","Write"]
+NOTE C 不限制时 messaging_socket_path :: /tmp/cc-socks/3645.sock
+NOTE C 白名单 init 工具表 :: ["Edit","Glob","Grep","Read","Write"]
+NOTE C 白名单 发给模型的工具表 :: ["DeferredToolPlaceholder","Edit","Glob","Grep","Read","Write"]
+NOTE C 白名单 强行调用 :: []
+PASS C 白名单：发给模型的工具表里没有联网、子 agent、命令、跨会话消息 :: ["DeferredToolPlaceholder","Edit","Glob","Grep","Read","Write"]
+NOTE C 白名单：强行调用被去掉的工具全部报错（没有发起调用，这一条只有 mock 能证明） :: []
+NOTE C 黑名单 发给模型的工具表 :: ["AskUserQuestion","DeferredToolPlaceholder","Edit","Glob","Grep","Read","ReportFindings","Skill","ToolSearch","Write"]
+NOTE C 黑名单：同样去掉了这些工具，强行调用报错（没有发起调用，这一条只有 mock 能证明） :: []
+NOTE D 工具调用 :: [{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt","isError":false,"out":"1\thello"},{"tool":"Glob","input":"*.txt","isError":false,"out":"f.txt"},{"tool":"Bash","input":"ls","isError":false,"out":"f.txt"},{"tool":"Bash","input":"echo x > by-bash.txt","isError":false,"out":"(Bash completed with no output)"},{"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/denied.txt","isError":true,"out":"平台拒绝 Write"},{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/f.txt","isError":false,"out":"1\thello"}]
+NOTE D canUseTool 收到 :: ["Bash","Write"]
+NOTE D PreToolUse hook 收到 :: ["Read","Glob","Bash","Bash","Write","Read"]
+NOTE D canUseTool 是否每次都触发 :: {"toolUses":6,"canUseTool":2,"notAsked":["Read","Glob","Read"]}
+PASS D PreToolUse hook 每次工具调用都触发 :: {"uses":["Read","Glob","Bash","Bash","Write","Read"],"hooked":["Read","Glob","Bash","Bash","Write","Read"]}
+PASS D 平台拒绝的 Write 没有执行 :: {"tool":"Write","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d/ws/denied.txt","isError":true,"out":"平台拒绝 Write"}
+PASS D PreToolUse hook 能拒绝本来自动允许的 Read :: [{"tool":"Read","input":"/home/user/Eos-workbench/poc/claude-code/.run/c3d2/ws/.git/HEAD","isError":true,"out":"PreToolUse:Read hook error: 平台拒绝"}]
+mode=real model=claude-sonnet-5-5 failed=0

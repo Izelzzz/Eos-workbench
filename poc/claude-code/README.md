@@ -3,8 +3,9 @@
 **这是一次性的验证代码，不是正式实现。** 它要回答的问题是：Eos 平台能不能用 Claude Agent SDK（TypeScript）驱动 Claude Code，并满足 `src/executor/types.ts` 里 `Executor` 接口需要的能力。路线图第 4 项。
 
 - 验证对象：`@anthropic-ai/claude-agent-sdk@0.3.331`，它自带 Claude Code `2.1.331`（init 事件里的 `claude_code_version`）
-- 运行环境：Node 22.23.5，Linux 容器，装了 bubblewrap（`apt-get install -y bubblewrap`）
-- 重跑方法：`./run-all.sh`（真实模型，需要 `EOS_ANTHROPIC_API_KEY`），或者 `EOS_MOCK=1 ./run-all.sh`（剧本模型，不需要凭据）。日志写到 `logs/real/`、`logs/mock/`
+- 运行环境：Node 22.23.5，Linux 容器，装了 bubblewrap 0.9.0 和 socat（`apt-get install -y bubblewrap socat`）。**两个都要**：只装 bubblewrap 时 Claude Code 的沙箱不可用，见第 3 项
+- 真实模型：`claude-sonnet-5-5`（`common.ts` 的默认值），API key 认证
+- 重跑方法：`./run-all.sh`（真实模型，需要 `EOS_ANTHROPIC_API_KEY`），或者 `EOS_MOCK=1 ./run-all.sh`（剧本模型，不需要凭据）。日志写到 `logs/real/`、`logs/mock/`。`logs/real-no-socat/` 是没装 socat 时第 3 项的那一次日志
 
 ## 怎么验证的
 
@@ -17,18 +18,31 @@
 
 ## 结论
 
-真实模型一列：**待跑**。凭据要以环境变量的形式加进环境，而且要开新会话才生效（见文末「还没证明的」）。
+真实模型一列是 `claude-sonnet-5-5` 的结果：8 项全部通过，没有 FAIL（45 条 PASS）。mock 是 42 条 PASS，多出的 3 条来自真实模式多跑的一次 `c5-events-summarized`（+5），减去第 3 项里两条在真实模式下只记 NOTE 的判定（−2）。
 
 | # | 验证项 | mock | 真实模型 | 证据 |
 |---|---|---|---|---|
-| 1 | 会话续接 | 通过 | 待跑 | `logs/mock/c1-resume-*.log` |
-| 2 | 主动提问 | 通过 | 待跑 | `logs/mock/c2-ask.log` |
-| 3 | 权限限制 | 通过，`canUseTool` **不是每次都触发** | 待跑 | `logs/mock/c3-perms.log` |
-| 4 | 崩溃后找回 | 通过；宿主崩溃会留下孤儿进程 | 待跑 | `logs/mock/c4-recover-*.log` |
-| 5 | 事件流和用量 | 通过 | 待跑 | `logs/mock/c5-events.log` |
-| 6 | 技能、MCP、指令文件 | 通过 | 待跑 | `logs/mock/c6-context.log` |
-| 7 | 中止 | 通过 | 待跑 | `logs/mock/c7-abort.log` |
-| 8 | 环境隔离 | 通过：默认继承全部环境；key 不能交给 agent | 待跑 | `logs/mock/c8-env.log` |
+| 1 | 会话续接 | 通过 | 通过，和 mock 一致 | `logs/{mock,real}/c1-resume-*.log` |
+| 2 | 主动提问 | 通过 | 通过，和 mock 一致（提示词要求它提问） | `logs/{mock,real}/c2-ask.log` |
+| 3 | 权限限制 | 通过，`canUseTool` **不是每次都触发** | 通过；模型不调用工具表里没有的工具，"强行调用报错"只有 mock 能证明 | `logs/{mock,real}/c3-perms.log` |
+| 4 | 崩溃后找回 | 通过；宿主崩溃会留下孤儿进程 | 通过，和 mock 一致 | `logs/{mock,real}/c4-recover-*.log` |
+| 5 | 事件流和用量 | 通过 | 通过；**思考默认只有签名、没有文字**，简单任务不思考 | `logs/{mock,real}/c5-events.log`、`logs/real/c5-events-summarized.log` |
+| 6 | 技能、MCP、指令文件 | 通过 | 通过，和 mock 一致 | `logs/{mock,real}/c6-context.log` |
+| 7 | 中止 | 通过 | 通过，和 mock 一致 | `logs/{mock,real}/c7-abort.log` |
+| 8 | 环境隔离 | 通过：默认继承全部环境；key 不能交给 agent | 通过；不传 `env` 时**真实 key 也在 Claude Code 进程的环境里** | `logs/{mock,real}/c8-env.log` |
+
+### 真实模型和 mock 不一样的地方
+
+| # | 哪里不一样 | 为什么 | 影响 |
+|---|---|---|---|
+| 3 A、C | 真实模型一次被去掉的工具都没有调用（`A 工具调用: []`、`强行调用: []`）；mock 里这些调用返回 `No such tool available` | 这些工具不在发给模型的工具表里，模型只是用文字说做不了。mock 的剧本不看工具表，硬发调用 | "强行调用会报错"这一条只有 mock 证明。脚本在真实模式下把这两条记成 NOTE，不记 PASS（空列表不算通过）。"工具表里没有这些工具""文件没写出来"两种模式都证明了 |
+| 3 A2、B | 没有不一样：模型按提示词把越界操作全部试了一遍（B 的 9 次调用和剧本逐条相同，两次带 `dangerouslyDisableSandbox: true`），结果和 mock 相同 | 提示词写明是权限测试 | 只说明这个模型在被明确要求时会去试。没有验证它不被要求时会不会自己越界 |
+| 5 | 提示词"先想一想，然后 echo hi"下真实模型没有思考（`thinking_tokens: 0`，没有 thinking 块），第一次真实运行这条判定 FAIL | 用的是自适应思考（`thinking: { type: 'adaptive' }`），模型自己决定要不要想 | 真实模式的提示词加了一道小推理题，之后每次都有思考。mock 的提示词没变 |
+| 5 | 有思考时，默认拿到的 thinking 块 **文字是空的**（0 个字符），只有签名（约 1400 字符）；`thinking_delta` 只有 2 条。加上 `display: 'summarized'` 才有文字（401 个字符，36 条 `thinking_delta`） | SDK 的 `ThinkingAdaptive.display` 可选 `'summarized' \| 'omitted'`，这个模型默认不给文字 | 平台要在 trace 里展示思考，就得显式设 `display: 'summarized'`，拿到的是摘要。两种情况下 `thinking_tokens` 都有数（156、159），照常计费 |
+| 5 | `assistant` 事件里每条消息自带的 `usage.output_tokens` 是流开始时的数（1、3 这样），不是最终值；一轮的最终用量只在 `result.usage` 里（例如 412） | 事件里的 `usage` 取自 `message_start`。mock 的上游发的是固定数字，看不出来 | 实时事件里的用量不能拿来累加。`send` 用 `result.usage`；崩溃后从会话记录里算（第 4 项，记录里是最终值：nonce2 的 `output: 76`） |
+| 7 | 中止后 SDK 调用结束的总耗时 9.0 秒，mock 是 5.6 秒 | 差的是真实模型发起两次工具调用之前的耗时（前台命令在第 3.9 秒才起来，mock 是 0.5 秒）。脚本固定在前台命令起来 5 秒后 abort，两种模式都在 abort 后 1 秒内返回 | 没有影响 |
+
+其余各项（1、2、4、6、8）的判定和证据形状都和 mock 相同，只有 id、端口、耗时这类每次都变的值不同。
 
 ### 1. 会话续接（`c1-resume.ts`）
 
@@ -49,6 +63,7 @@
 
 证明不了的：
 
+- 模型会不会在没人要求时自己调用 `AskUserQuestion`：提示词里明确要求了它先提问。真实模型照做了，问题、`header`、选项都是它自己写的（`请选择颜色：red 还是 blue？`）。
 - 等几个小时再回答。SDK 文档写明权限回调"没有等待期限"，但等待期间 Claude Code 进程一直挂着这一轮。dsh 有 `continued` 状态，答案可以作为新的一轮到达；Claude Code 没有对应的东西。没有验证"先拒绝、中止，之后把答案当成下一轮发进去"这条路。
 
 ### 3. 权限限制（`c3-perms.ts`）
@@ -69,9 +84,12 @@
 - `tools` 白名单**不会**隐藏 MCP 工具：在 `c6` 里，`tools: ['Read','Skill']` 时 `mcp__eos__get_codeword` 仍然在工具表里。MCP 工具要靠"不挂这个服务"，或者 hook 来限制。
 - 逐次许可要用 `PreToolUse` hook，不要用 `canUseTool`。`canUseTool` 只负责"需要问人"的那部分调用，用来接主动提问正合适。
 
+- **沙箱需要 bubblewrap 和 socat 两个**。只装 bubblewrap 时，开了沙箱（`failIfUnavailable: true`）的会话整轮直接报错，一次工具调用都不执行：`Sandbox required but unavailable: sandbox is enabled but dependencies are missing: socat not installed`（`logs/real-no-socat/c3-perms.log`，A2 和 B 两个用例 FAIL）。这是安全的失败方式；部署文档和启动检查要把 socat 列进去，`run-all.sh` 已经加了检查。
+
 证明不了的：
 
-- 没有装 bubblewrap 时会怎样：这次用 `failIfUnavailable: true` 让它直接失败，没有测"降级"的情况。
+- 沙箱不可用时的"降级"（`failIfUnavailable: false`）：没有测，正式实现也不该用。
+- 真实模型不被要求时会不会自己尝试越界：见上面「不一样的地方」。
 
 ### 4. 崩溃后找回（`c4-recover.ts`）
 
@@ -97,7 +115,14 @@
 - `result.usage` 里缓存读（`cache_read_input_tokens`）和缓存写（`cache_creation_input_tokens`，还拆成 5 分钟和 1 小时两种）是分开的，另外有 `output_tokens_details.thinking_tokens`。
 - `result.modelUsage` 按模型给出用量和 `costUSD`，另外有 `total_cost_usd`、`duration_ms`、`duration_api_ms`、`num_turns`。成本按官方价目表算（`costBasis: "list"`）。
 
-证明不了的（mock 模式下）：真实的 token 数、真实的成本、真实的思考内容（新模型默认可能只给摘要）。这些等真实模型跑完补上。
+真实模型下（`logs/real/c5-events.log`，一轮两次 API 调用）：
+
+- 用量：`input_tokens: 4`、`cache_read_input_tokens: 4976`、`cache_creation_input_tokens: 400`（全是 5 分钟档）、`output_tokens: 412`，其中 `thinking_tokens: 156`。输入几乎全走缓存。
+- 成本 `total_cost_usd: 0.0056`，`modelUsage` 的键是 `claude-sonnet-5-5`，`costBasis: "list"`；`duration_ms: 4432`，`duration_api_ms: 4320`。
+- 多出一种消息 `system/thinking_tokens`（思考进行中的 token 计数）。
+- 思考默认没有文字，实时事件里的 `usage` 不是最终值：见「真实模型和 mock 不一样的地方」。
+
+证明不了的：成本数字对不对（没有和账单核对）；完整的思考原文（`display` 只有 `summarized` 和 `omitted` 两个值）。
 
 ### 6. 技能、MCP、指令文件（`c6-context.ts`）
 
@@ -119,9 +144,9 @@
 
 能证明的：
 
-- **不传 `env` 时，SDK 让 Claude Code 继承宿主进程的全部环境**：本容器里有 205 个变量，其中有 `AWS_SECRET_ACCESS_KEY` 这样的名字。宿主里的假凭据 `EOS_FAKE_SECRET` 被 agent 的 Bash 读到了。
-- 显式传 `env` 时，Claude Code 进程只有平台给的 10 个变量（宿主直接读 `/proc/<pid>/environ` 核对），宿主的假凭据不在里面。agent 的 Bash 里还会多出 Claude Code 自己加的变量（`CLAUDE_CODE_SESSION_ID`、`CLAUDE_CODE_MESSAGING_SOCKET`、`CLAUDE_CODE_MESSAGING_TOKEN` 等），以及登录 shell 读取的 profile。
-- **交给 Claude Code 的模型 key，agent 能读到**：把 key 直接放进 `env`，agent 的 Bash 能从自己的环境和 `/proc/$PPID/environ`（Claude Code 进程）里读出来。所以凭据不能这样给。平台要像 `upstream.ts` 这样做：在本机起一个上游，Claude Code 只拿到上游地址和一个假 key，转发时才换上真凭据。用错误的 key 走这条路，收到了 Anthropic 返回的 `Invalid API key`，说明请求确实转发出去了。
+- **不传 `env` 时，SDK 让 Claude Code 继承宿主进程的全部环境**：本容器里 Claude Code 进程有 133 个变量，其中有 `AWS_SECRET_ACCESS_KEY` 这样的名字。宿主里的假凭据 `EOS_FAKE_SECRET` 被 agent 的 Bash 读到了。真实模式下，宿主直接读 `/proc/<pid>/environ` 确认**平台的真实 key（`EOS_ANTHROPIC_API_KEY`）也在里面**（`hasRealKey: true`；日志只记布尔值）。
+- 显式传 `env` 时，Claude Code 进程只有平台给的 10 个变量（宿主直接读 `/proc/<pid>/environ` 核对），宿主的假凭据和真实 key 都不在里面（`hasRealKey: false`），agent 能读到的 key 只有占位的 `sk-ant-eos-placeholder`。真实模式的 8 项都是这样跑通的：真实 key 只在宿主的上游里使用。agent 的 Bash 里还会多出 Claude Code 自己加的变量（`CLAUDE_CODE_SESSION_ID`、`CLAUDE_CODE_MESSAGING_SOCKET`、`CLAUDE_CODE_MESSAGING_TOKEN` 等），以及登录 shell 读取的 profile。
+- **交给 Claude Code 的模型 key，agent 能读到**：把 key 直接放进 `env`，agent 的 Bash 能从自己的环境和 `/proc/$PPID/environ`（Claude Code 进程）里读出来。所以凭据不能这样给。平台要像 `upstream.ts` 这样做：在本机起一个上游，Claude Code 只拿到上游地址和一个假 key，转发时才换上真凭据。
 
 证明不了的：
 
@@ -136,7 +161,7 @@
 | 能力面 `AgentProfile` | `denyTools` 换算成 `tools` 白名单（下表）；`skills` 写进平台数据目录里的一个插件，再用 `skills` 列出名字；`mcp` 换成 `mcpServers`；`background: false` 时由 `PreToolUse` hook 拒绝带 `run_in_background` 的 Bash（推断：hook 能拒绝已经验证过，按参数拒绝没有单独测） |
 | `WriteScope` | `none`：不给 Write/Edit/NotebookEdit；要给 Bash 的话开沙箱，并且 `denyWrite: [worktree]`。`worktree`：`acceptEdits`，开沙箱，`allowUnsandboxedCommands: false`，worktree 外的写入交给 `canUseTool` 拒绝。`writePaths` 照旧由平台在事后撤销越界改动 |
 | `ask` | `canUseTool` 里只处理 `AskUserQuestion`：转成 `AgentQuestion`，等 `AskHandler` 返回后写进 `updatedInput.answers`；其他需要许可的调用按策略拒绝 |
-| `onEvent` | `assistant` 的内容块和 `user` 的 `tool_result` 转成 `TraceEvent`。逐次的平台检查放在 `PreToolUse` / `PostToolUse` hook 里 |
+| `onEvent` | `assistant` 的内容块和 `user` 的 `tool_result` 转成 `TraceEvent`。要展示思考就设 `thinking.display: 'summarized'`；事件里的 `usage` 不是最终值，不要累加。逐次的平台检查放在 `PreToolUse` / `PostToolUse` hook 里 |
 | `findReply` / `traceOf` | 读 `CLAUDE_CONFIG_DIR/projects/<cwd>/<id>.jsonl`（或者 `getSessionMessages`），按 nonce 切出范围，最后一条 assistant 是 `end_turn` 才算完成；用量按 `message.id` 去重。会话记录是普通 jsonl，不用像 dsh 那样逐帧解 zstd |
 | `release` / `close` | 每次调用结束后，`query()` 的进程就退出了。平台启动时还要清理崩溃留下的 Claude Code 进程（按 `--session-id=`） |
 | 凭据 | 平台起一个本机上游，转发到 Anthropic 时加上凭据；agent 进程里只有假 key |
@@ -178,8 +203,12 @@
 
 | 内容 | 原因 |
 |---|---|
-| 8 项在真实模型下的结果（模型会不会主动调用 AskUserQuestion，会不会按要求尝试越界操作，真实的用量和成本） | 代理不支持给 `api.anthropic.com` 注入凭据，key 只能以环境变量的形式加进环境，而且要开新会话才生效。这个会话里还没有 key |
-| 订阅令牌（`EOS_AUTH=oauth`）能不能经平台的上游使用 | 同上；`run-all.sh` 在设了 `EOS_CLAUDE_OAUTH_TOKEN` 时会跑第 1 项 |
-| 没有 bubblewrap 时沙箱会怎样 | 这次用 `failIfUnavailable: true` |
+| 订阅令牌（`EOS_AUTH=oauth`）能不能经平台的上游使用 | 这次运行的环境里没有 `EOS_CLAUDE_OAUTH_TOKEN`（只有 `EOS_ANTHROPIC_API_KEY`），`run-all.sh` 跳过了 `c1-oauth-*`。设上令牌重跑即可 |
+| 其他模型（Opus、Haiku 等）下的结果 | 只跑了 `claude-sonnet-5-5`。可以用 `EOS_MODEL` 换 |
+| 真实模型不被要求时的行为：会不会自己调用 AskUserQuestion，会不会自己尝试越界 | 提示词都明确要求了这些操作 |
+| "强行调用被去掉的工具会报错"在真实模型下 | 真实模型不调用工具表里没有的工具，只有 mock 能发起这种调用 |
+| 结果稳不稳定 | 真实模式完整跑了 3 遍（最后一遍 0 FAIL；前两遍的 FAIL 是缺 socat 和提示词没让模型思考，都已说明），仓库里只留最后一遍的日志。没有做更多次重复 |
+| 成本数字和账单是否一致 | 没有核对账单 |
+| 沙箱不可用时的降级（`failIfUnavailable: false`） | 没有测 |
 | agent 能不能借本机上游调用模型 | 见第 8 项 |
 | 并发多个会话时的资源占用、冷启动耗时 | 本次只跑了单个会话 |
