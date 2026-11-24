@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
+import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import { agentEnv, ALWAYS_DISABLED, DshExecutor, dshSandbox, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 import type { AgentProfile } from '../src/executor/types.ts'
 
@@ -55,10 +56,20 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
   })
 })
 
-test('the sandbox probe leaves macOS and Windows to dsh, and on Linux reports one of the backends dsh can pick', () => {
+test('the sandbox probe leaves macOS and Windows to dsh, and reports none on platforms dsh has no sandbox for', () => {
   assert.deepEqual(dshSandbox('darwin'), { backend: 'platform', platform: 'darwin' })
   assert.deepEqual(dshSandbox('win32'), { backend: 'platform', platform: 'win32' })
-  if (process.platform === 'linux') assert.ok(['bwrap', 'landlock', 'none'].includes(dshSandbox().backend))
+  assert.deepEqual(dshSandbox('freebsd'), { backend: 'none' })
+})
+
+test('on this host the sandbox probe agrees with the backend dsh itself selects (its chainVerdict), so a dsh upgrade that changes the choice fails here', { skip: process.platform !== 'linux' }, () => {
+  // dsh 的 LocalSandboxProvider 选后端的那一步；不经过构造函数，只要它读的两个字段。
+  const provider = Object.create(LocalSandboxProvider.prototype) as { internals: object; probeTimeoutMs: number; chainVerdict(): 'unavailable' | { runner: string; enforcement: string } }
+  provider.internals = {}
+  provider.probeTimeoutMs = 5000
+  const verdict = provider.chainVerdict()
+  const dsh = verdict === 'unavailable' ? { backend: 'none' } : verdict.runner === 'landlock' ? { backend: 'landlock', enforcement: verdict.enforcement } : { backend: verdict.runner }
+  assert.deepEqual(dshSandbox(), dsh)
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {

@@ -1,0 +1,17 @@
+# 一致性测试（tests/executor.test.ts「agrees with the backend dsh itself selects」）在三种容器配置下运行；镜像构建自 52551eb 加上本分支未提交的改动
+## 默认权限
+ℹ pass 1
+ℹ fail 0
+## bwrap 可用
+ℹ pass 1
+ℹ fail 0
+## 没有 Landlock
+ℹ pass 1
+ℹ fail 0
+## 变异：dshSandbox 跳过 bwrap、直接探测 Landlock（改过的 dsh.ts 只读挂载到 /app/src/executor/dsh.ts），在 bwrap 可用的容器里以平台用户跑同一条测试，应失败
+ℹ pass 0
+ℹ fail 1
+  +   backend: 'landlock',
+  -   backend: 'bwrap'
+    actual: { backend: 'landlock', enforcement: 'full' },
+    expected: { backend: 'bwrap' },

@@ -43,7 +43,7 @@ export const dshInstall = (root: string): { bin: string; version: string } | und
  * 这台机器上 dsh 实际会用的沙箱。dsh 在 Linux 上按 bwrap → Landlock 的顺序选第一个能用的，都不能用时拒绝执行命令。
  * 这里按同样的顺序、用同样的方式探测：bwrap 用 dsh 的只读档位参数真正起一次（装了 bwrap 不等于能用，
  * 例如 Docker 默认的 seccomp 不让建 user namespace）；Landlock 用 dsh 自带的探测（真正施加一次规则）。
- * 非 Linux 平台（macOS Seatbelt、Windows 受限令牌）由 dsh 自己选，这里不探测。
+ * macOS（Seatbelt）、Windows（受限令牌）由 dsh 自己选，这里不探测。tests/executor.test.ts 对照 dsh 自己的选择（chainVerdict），dsh 升级后两边不一致时测试会失败。
  */
 export type DshSandbox =
   | { backend: 'bwrap' }
@@ -52,7 +52,9 @@ export type DshSandbox =
   | { backend: 'platform'; platform: string }
 
 export const dshSandbox = (platform: string = process.platform): DshSandbox => {
-  if (platform !== 'linux') return { backend: 'platform', platform }
+  // macOS、Windows：dsh 只有一个候选（Seatbelt、受限令牌），不探测就选它。别的平台 dsh 没有可用的沙箱，会拒绝执行命令。
+  if (platform === 'darwin' || platform === 'win32') return { backend: 'platform', platform }
+  if (platform !== 'linux') return { backend: 'none' }
   const bwrap = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'true'], { stdio: 'ignore', timeout: 5000 })
   if (bwrap.status === 0) return { backend: 'bwrap' }
   const landlock = probeLandlock(undefined, { timeoutMs: 5000 }) // 和 dsh 自己探测的超时一致（probeTimeoutMs 默认 5000），机器忙时不会误判成不可用

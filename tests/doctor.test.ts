@@ -61,7 +61,7 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
   assert.equal(sandbox({ backend: 'bwrap' }).status, 'ok')
   assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间里；能写的 agent 有私有的 \/tmp，只读的 agent 看到的是共用的 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'full' }).status, 'ok')
-  assert.match(sandbox({ backend: 'landlock', enforcement: 'full' }).detail, /^Landlock（bwrap 用不了）.*读不到别的进程的环境.*各任务共用 \/tmp/)
+  assert.match(sandbox({ backend: 'landlock', enforcement: 'full' }).detail, /^Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 \/tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境.*各任务共用 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'partial' }).status, 'warn')
   assert.equal(sandbox({ backend: 'none' }).status, 'fail', 'dsh refuses to run commands without a sandbox, so tasks cannot run')
   assert.equal(sandbox({ backend: 'platform', platform: 'darwin' }).status, 'ok', 'macOS and Windows are not probed and must not block startup')

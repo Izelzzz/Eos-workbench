@@ -2,7 +2,7 @@
 
 ## 怎么跑的
 
-镜像用仓库里的 `Dockerfile` 构建，在三种权限配置下运行 `eos doctor`，命令和输出在 `container-doctor.txt`（提交 9bfdb7b 的镜像）。每次都带 compose 的 `--cap-drop ALL --security-opt no-new-privileges`。
+镜像用仓库里的 `Dockerfile` 构建，在三种权限配置下运行 `eos doctor`，命令和输出在 `container-doctor.txt`（处理独立审查之后的代码）。每次都带 compose 的 `--cap-drop ALL --security-opt no-new-privileges`。
 
 | 配置 | doctor「沙箱」 | 退出码 |
 |---|---|---|
@@ -21,9 +21,17 @@
 
 第一种配置（Landlock）的对照在 `docs/e2e/deploy-2-image/sandbox/compose-final.json`：agent 写进了真实 `/tmp`，写不了别的 worktree。
 
+## doctor 和 dsh 自己的选择一致（单元测试）
+
+`tests/executor.test.ts`「agrees with the backend dsh itself selects」直接调用 dsh 选后端的那一步（`LocalSandboxProvider` 的 `chainVerdict()`），要求和 `dshSandbox()` 的结果相同。dsh 升级后两边不一致时，这条测试会在那台机器上失败。
+
+`consistency-test.txt`：这条测试在三种容器配置下都通过。变异测试：让 `dshSandbox` 跳过 bwrap、在 bwrap 可用的容器里跑，测试失败，报 `landlock` 和 `bwrap` 不一致。注意：这条测试只能发现在运行它的那台机器上看得出来的不一致。宿主机和 CI 上没有 bwrap，所以 bwrap 那一支只在 bwrap 可用的容器里才测得到。
+
+上面 `dsh-backend-*.json` 两份是处理独立审查之前的镜像（提交 75c9ba2 之后、9bfdb7b 之前），探测逻辑和最终代码相同。`dsh-backend-none.json` 没有记下 dsh 的拒绝报错，只能看出命令没有执行；一致性测试在同一配置下确认了 dsh 自己的选择是不可用。
+
 ## 部署 E2E
 
-`scripts/deploy-e2e.ts`（真实模型，compose），在合入 main（#62、#63）后的提交 511a889 上跑：6 项核对全部为 true，任务 `t2611241841395wz` 完成，agent 提了 2 个问题、经接口回答。合入前在 9bfdb7b 上也跑通过一次。`container-doctor.txt` 是 9bfdb7b 的镜像，之后 doctor 和 dsh 的探测代码没有变。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
+`scripts/deploy-e2e.ts`（真实模型，compose），在合入 main（#62、#63）后的提交 511a889 上跑：6 项核对全部为 true，任务 `t2611241841395wz` 完成，agent 提了 2 个问题、经接口回答。合入前在 9bfdb7b 上也跑通过一次。之后处理独立审查时改了说明文字、非 Linux 平台的分支，并加了一致性测试，探测逻辑没有变，没有重跑部署 E2E。容器里的 doctor 输出（报告的 `doctor` 字段）里「沙箱」一项是 Landlock。见 `deploy-e2e-report.json`、`deploy-e2e-run.log`。
 
 ## 局限
 
