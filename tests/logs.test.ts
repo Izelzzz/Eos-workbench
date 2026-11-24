@@ -12,6 +12,7 @@ import { createWebServer, tail } from '../src/web/server.ts'
 import { FakeExecutor } from './fake-executor.ts'
 import { PASS } from './helpers.ts'
 import { Store } from '../src/store/store.ts'
+import { redacting, redactText } from '../src/credentials/redact.ts'
 
 /** 临时目录里的真实 git 仓库，加一个数据目录。 */
 const sandbox = () => {
@@ -103,6 +104,50 @@ test('任务的进度行和完整错误写进 logs/<任务>.log；任务详情�
   } finally {
     await new Promise(r => server.close(r))
   }
+})
+
+test('已知凭据值在任务日志、终端输出和失败原因里都换成 ***', async () => {
+  const s = sandbox()
+  const SECRET = 'sk-live-0123456789abcdef'
+  const redact = (t: string) => redactText(t, [SECRET])
+  const executor = redacting(new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/build')) throw new Error(`401 Unauthorized: invalid key ${SECRET}`)
+    return key.endsWith('/review') ? PASS : `方案里提到了 ${SECRET}`
+  }), redact)
+  const terminal: string[] = []
+  const sup = new Supervisor({ store: s.store, executor, dataDir: s.data, pollMs: 2, log: (_id, l) => terminal.push(l), redact })
+  const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
+  assert.ok(created.ok)
+  const started = sup.start(created.id)
+  assert.ok(started.ok)
+  const task = await started.done
+  await sup.idle()
+  assert.equal(task.status, 'failed')
+  const everything = [readFileSync(sup.logPath(created.id), 'utf8'), terminal.join('\n'), task.failure ?? '', JSON.stringify(s.store.get(created.id))].join('\n')
+  assert.ok(!everything.includes(SECRET), everything)
+  assert.match(readFileSync(sup.logPath(created.id), 'utf8'), /invalid key \*\*\*/)
+})
+
+test('不经过执行器的报错（例如提交、检查失败）也由 Supervisor 和 runTask 遮蔽：执行器不包 redacting 时日志和失败原因里也只有 ***', async () => {
+  const s = sandbox()
+  const SECRET = 'sk-live-fedcba9876543210'
+  const executor = new FakeExecutor(async ({ key }) => {
+    if (key.endsWith('/build')) throw Object.assign(new Error(`git push failed: https://x:${SECRET}@example.com`), { stack: `Error: token ${SECRET}\n    at push` })
+    return key.endsWith('/review') ? PASS : '方案'
+  })
+  const terminal: string[] = []
+  const sup = new Supervisor({ store: s.store, executor, dataDir: s.data, pollMs: 2, log: (_id, l) => terminal.push(l), redact: t => redactText(t, [SECRET]) })
+  const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
+  assert.ok(created.ok)
+  const started = sup.start(created.id)
+  assert.ok(started.ok)
+  const task = await started.done
+  await sup.idle()
+  assert.equal(task.status, 'failed')
+  const log = readFileSync(sup.logPath(created.id), 'utf8')
+  for (const [where, text] of [['日志', log], ['终端', terminal.join('\n')], ['失败原因', task.failure ?? '']] as const) assert.ok(!text.includes(SECRET), `${where}：${text}`)
+  assert.match(task.failure ?? '', /x:\*\*\*@example\.com/)
+  assert.match(log, /token \*\*\*/)
 })
 
 test('failureFacts 只留哪一步和原因；不是三段格式时原样返回', () => {
