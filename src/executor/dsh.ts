@@ -7,10 +7,12 @@
 // - 续接会话前核对会话头里记录的工作区：不是这个任务的 worktree（例如修复写入范围之前创建的会话）就拒绝续接。
 // - 会话 id 由 key 确定性地算出，进程崩溃后总能找回同一个会话。
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
+import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
 import { stringify as stringifyYaml } from 'yaml'
 import type { Usage } from '../engine/types.ts'
 import { zeroUsage } from '../engine/types.ts'
@@ -37,6 +39,26 @@ export const dshInstall = (root: string): { bin: string; version: string } | und
     return undefined
   }
 }
+/**
+ * 这台机器上 dsh 实际会用的沙箱。dsh 在 Linux 上按 bwrap → Landlock 的顺序选第一个能用的，都不能用时拒绝执行命令。
+ * 这里按同样的顺序、用同样的方式探测：bwrap 用 dsh 的只读档位参数真正起一次（装了 bwrap 不等于能用，
+ * 例如 Docker 默认的 seccomp 不让建 user namespace）；Landlock 用 dsh 自带的探测（真正施加一次规则）。
+ * 非 Linux 平台（macOS Seatbelt、Windows 受限令牌）由 dsh 自己选，这里不探测。
+ */
+export type DshSandbox =
+  | { backend: 'bwrap' }
+  | { backend: 'landlock'; enforcement: 'full' | 'partial' }
+  | { backend: 'none' }
+  | { backend: 'platform'; platform: string }
+
+export const dshSandbox = (platform: string = process.platform): DshSandbox => {
+  if (platform !== 'linux') return { backend: 'platform', platform }
+  const bwrap = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'true'], { stdio: 'ignore', timeout: 5000 })
+  if (bwrap.status === 0) return { backend: 'bwrap' }
+  const landlock = probeLandlock()
+  return landlock === 'unusable' ? { backend: 'none' } : { backend: 'landlock', enforcement: landlock }
+}
+
 const PRESET: Record<AgentSpec['write'], string> = { none: 'read-only', worktree: 'workspace-write' }
 
 /**

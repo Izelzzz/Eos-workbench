@@ -1,0 +1,25 @@
+# 镜像构建自 ea16817 加上本分支未提交的改动（src/executor/dsh.ts、src/runner/doctor.ts）；EOS_MASTER_KEY 为随机值，没有记录
+# 每次运行都带 --cap-drop ALL --security-opt no-new-privileges；下面每条命令只列出额外的选项
+
+## Docker 默认权限（compose 的配置：cap_drop ALL、no-new-privileges、默认 seccomp）
+$ docker run --rm  eos-workbench:local node --import tsx src/cli.ts doctor
+✓ 沙箱：Landlock（bwrap 用不了）：agent 只能写自己的 worktree 和 /tmp，读不到别的进程的环境；看得到进程列表，各任务共用 /tmp
+⚠ 凭据隔离：agent 在沙箱里读不到它们；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key
+  怎么修：用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）；在那之前只在可信的仓库和需求上使用
+doctor 退出码=0
+
+## 放开 seccomp 和 /proc 屏蔽：bwrap 可用
+$ docker run --rm --security-opt seccomp=unconfined --security-opt systempaths=unconfined eos-workbench:local node --import tsx src/cli.ts doctor
+✓ 沙箱：bwrap：agent 只能写自己的 worktree，在单独的进程号空间和私有 /tmp 里
+⚠ 凭据隔离：agent 在沙箱里读不到它们；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key
+  怎么修：用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）；在那之前只在可信的仓库和需求上使用
+doctor 退出码=0
+
+## Docker 默认 seccomp 再禁掉 Landlock 的三个系统调用（返回 ENOSYS，模拟内核没有 Landlock）
+$ docker run --rm --security-opt seccomp=/tmp/claude-0/bw/no-landlock.json eos-workbench:local node --import tsx src/cli.ts doctor
+✗ 沙箱：bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来
+  怎么修：安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）
+⚠ 凭据隔离：没有可用的沙箱：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key
+  怎么修：用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）；在那之前只在可信的仓库和需求上使用
+doctor 退出码=1
+

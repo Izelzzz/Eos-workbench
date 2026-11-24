@@ -36,7 +36,8 @@ docker compose exec eos node --import tsx src/cli.ts doctor
 
 - 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos node --import tsx src/cli.ts doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
 - `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
-- 「凭据隔离」一项现在是 ⚠：agent 和检查命令还和平台是同一个用户，这是路线图第 3 项下一个 PR 要做的事。**这一项的说明目前不准确**：它只看 `bwrap --version` 能不能运行，而镜像里装了 bwrap 却用不了，dsh 实际用的是 Landlock。实际情况以本文「沙箱」一节和顶部的警告为准：agent 读不到平台和 dsh 进程的环境，检查命令读得到。下一个 PR 会让 doctor 按实际生效的沙箱后端给说明。
+- 「沙箱」一项报告 dsh 实际会用的沙箱：在这份 compose 下是 Landlock（镜像里装了 bwrap，但 Docker 默认权限下用不了）。两个都用不了时是 ✗，平台不启动。
+- 「凭据隔离」一项现在是 ⚠：agent 在沙箱里读不到平台和 dsh 进程的环境，检查命令读得到（见顶部的警告）。用独立用户运行检查命令和 agent 是路线图第 3 项接下来的 PR。
 
 ## 访问
 
@@ -129,7 +130,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 - **模型 key 在 dsh 进程的环境里**（这一版 dsh 只能这样拿到 key）。在实测过的配置下（本镜像、这份 compose、内核 6.18），Landlock 挡住了 agent 读 dsh 和平台进程的 `/proc/<pid>/environ`（`docs/e2e/deploy-2-image/sandbox/modelkey-probe.json`）。**Landlock 没有生效时**，例如内核不支持、或者用别的方式运行没有走沙箱，同一用户的 agent 就能读到模型 key。换了宿主机内核时，请用这个探针重新确认。
 - **Landlock 只限制写，不限制读。** agent 能读整个 `/data`：别的任务和别的成员的 worktree、`/data/repos` 下所有仓库、`eos.db`（所有任务的 trace）、`/data/dsh` 的会话日志。放进这台服务器的仓库和任务，对所有任务的 agent 都是可见的。
 - 镜像里装了 bubblewrap，但在 Docker 默认权限下用不了。要用它就得放宽容器的 seccomp 和 `/proc` 屏蔽，所以没有这样做（见 ADR-006）。
-- 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 现在还不检查这一项，也不检查 dsh 能不能真正启动：doctor 全是 ✓ 时，任务仍可能在第一步失败（部署 E2E 第一次运行就遇到过，见 `docs/e2e/deploy-2-image/README.md`）。
+- 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 的「沙箱」一项会真正探测一次（bwrap 按 dsh 的参数起一次，Landlock 真正施加一次规则），都用不了时报 ✗。它不检查 dsh 本身能不能启动：doctor 全是 ✓ 时，任务仍可能在第一步失败（部署 E2E 第一次运行就遇到过，见 `docs/e2e/deploy-2-image/README.md`）。
 - 和 bwrap 相比的差别：
   - 同一个容器里的任务共用 `/tmp`（tmpfs），而且都能写：能读到别的任务的临时文件和 dsh 的输出暂存文件（`/tmp/dsh-spill-*`）；也能改共享的依赖缓存，一个任务的 agent 往缓存里放的东西，会被下一个任务用到。npm 按 lockfile 里的 hash 校验包，pip 的缓存和 corepack 下载的 pnpm、yarn 没有这种校验。
 - **MCP 服务不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类「现下载现运行」的命令启动。** MCP 服务跑在沙箱外，并继承 dsh 的环境，包括上面这几个缓存目录；用这类命令启动时，它可能运行 agent 放进缓存里的代码。把 MCP 服务装进派生镜像（见「执行器环境」），在模板里写它的绝对路径。

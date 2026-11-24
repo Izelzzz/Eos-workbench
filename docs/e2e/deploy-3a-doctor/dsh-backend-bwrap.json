@@ -1,0 +1,11 @@
+{
+  "whoami": "uid=10001(eos) gid=10001(eos) groups=10001(eos)",
+  "writes": {
+    "ownWorktree": true,
+    "otherWorktree": false,
+    "dataDirRoot": false,
+    "realTmp": false
+  },
+  "unsandboxedMarkerHits": "5",
+  "proc": "visible_pids=6\nmarker_hits=0\nself_environ_marker=0"
+}

@@ -13,7 +13,7 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, bwrap: true, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
+const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, sandbox: { backend: 'bwrap' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -25,13 +25,13 @@ test('版本比较按主、次、修订号', () => {
 
 test('环境都满足时每项都通过', () => {
   const items = evaluate(good)
-  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['凭据主密钥', 'ok'], ['凭据隔离', 'warn'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
+  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['凭据主密钥', 'ok'], ['沙箱', 'ok'], ['凭据隔离', 'warn'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, bwrap: false, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
+  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, sandbox: { backend: 'none' }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
   const items = evaluate(bad)
-  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail'])
+  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail'])
   assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
@@ -40,6 +40,7 @@ test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项�
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
   assert.match(text, /✗ dsh：没有安装，或安装不完整\n  怎么修：在仓库目录运行 npm install/)
+  assert.match(text, /✗ 沙箱：bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令\S*\n  怎么修：安装 bubblewrap/)
 })
 
 test('engines 读不出或写法认不出时给出提示；git 运行失败和找不到分开说', () => {
@@ -55,9 +56,24 @@ test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显�
   assert.match(formatItems(evaluate(good)), /✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 0123456789abcdef）/)
 })
 
-test('设置了主密钥时提示还没隔离的地方：有没有 bwrap 说法不同；没设置主密钥时不提示', () => {
-  assert.match(formatItems(evaluate(good)), /⚠ 凭据隔离：检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：团队共用的服务器上，用独立的用户运行/)
-  assert.match(formatItems(evaluate({ ...good, bwrap: false })), /⚠ 凭据隔离：没有 bwrap：agent 和检查命令都能读到.*\n  怎么修：安装 bubblewrap（bwrap）；/)
+test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分）、都不可用、非 Linux', () => {
+  const sandbox = (s: Facts['sandbox']) => evaluate({ ...good, sandbox: s }).find(i => i.name === '沙箱')!
+  assert.equal(sandbox({ backend: 'bwrap' }).status, 'ok')
+  assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间和私有 \/tmp/)
+  assert.equal(sandbox({ backend: 'landlock', enforcement: 'full' }).status, 'ok')
+  assert.match(sandbox({ backend: 'landlock', enforcement: 'full' }).detail, /^Landlock（bwrap 用不了）.*读不到别的进程的环境.*各任务共用 \/tmp/)
+  assert.equal(sandbox({ backend: 'landlock', enforcement: 'partial' }).status, 'warn')
+  assert.equal(sandbox({ backend: 'none' }).status, 'fail', 'dsh refuses to run commands without a sandbox, so tasks cannot run')
+  assert.equal(sandbox({ backend: 'platform', platform: 'darwin' }).status, 'ok', 'macOS and Windows are not probed and must not block startup')
+})
+
+test('设置了主密钥时如实说明谁能读到：有沙箱时 agent 读不到、检查命令读得到；没有沙箱时两者都读得到；没设置主密钥时不提示', () => {
+  const isolation = (s: Facts['sandbox']) => formatItems(evaluate({ ...good, sandbox: s }).filter(i => i.name === '凭据隔离'))
+  for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
+    assert.match(isolation(s), /^⚠ 凭据隔离：agent 在沙箱里读不到它们；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）/)
+  }
+  assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱：agent 和检查命令都能读到/)
+  assert.doesNotMatch(isolation({ backend: 'landlock', enforcement: 'full' }), /Docker 部署会这样做/, 'the fix must not claim the deployment already isolates users')
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
 })
 

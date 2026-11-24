@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
-import { agentEnv, ALWAYS_DISABLED, DshExecutor, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { agentEnv, ALWAYS_DISABLED, DshExecutor, dshSandbox, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 import type { AgentProfile } from '../src/executor/types.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
@@ -53,6 +53,12 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
     DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-store',
     NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
   })
+})
+
+test('the sandbox probe leaves macOS and Windows to dsh, and on Linux reports one of the backends dsh can pick', () => {
+  assert.deepEqual(dshSandbox('darwin'), { backend: 'platform', platform: 'darwin' })
+  assert.deepEqual(dshSandbox('win32'), { backend: 'platform', platform: 'win32' })
+  if (process.platform === 'linux') assert.ok(['bwrap', 'landlock', 'none'].includes(dshSandbox().backend))
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {
