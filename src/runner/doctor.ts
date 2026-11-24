@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { dshInstall } from '../executor/dsh.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
@@ -17,11 +18,15 @@ export type Facts = {
   /** Eos 的 package.json 里 engines.node，例如 ">=24.9.0"；读不出来时是 undefined。 */
   nodeRequired?: string
   apiKey: boolean
+  /** 凭据主密钥：只有状态和指纹，没有密钥本身。 */
+  masterKey: { kind: 'ok'; id: string } | { kind: 'missing' } | { kind: 'invalid'; error: string }
   /** git 的版本号，或者 git 找不到、运行失败的原因。 */
   git: { version: string } | { missing: true } | { error: string }
   dataDir: string
   /** 数据目录建不出来或不可写时的错误。 */
   dataDirError?: string
+  /** 有没有 bwrap：dsh 用它把 agent 放进单独的进程空间（看不到平台进程）。 */
+  bwrap: boolean
   /** dsh 的版本；没装时是 undefined。 */
   dsh?: string
 }
@@ -44,11 +49,35 @@ const nodeItem = (f: Facts): Item => {
     : { name: 'Node', status: 'warn', detail: `${f.node}，低于 Eos 要求的 ${f.nodeRequired}（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题`, fix: `安装 Node ${min} 或更新的版本，再用它启动平台` }
 }
 
+/** 没设置只提示：现在还没有功能离不开凭据。设置了但格式不对一定是配错了，拦下。 */
+const masterKeyItem = (f: Facts): Item =>
+  f.masterKey.kind === 'ok'
+    ? { name: '凭据主密钥', status: 'ok', detail: `已设置 ${MASTER_KEY_ENV}（指纹 ${f.masterKey.id}）` }
+    : f.masterKey.kind === 'missing'
+      ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT }
+      : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
+
+/**
+ * 设置了主密钥时提示还没隔离的地方：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉。
+ * 有 bwrap 时 agent 看不到平台进程；检查命令（npm test 等）不在沙箱里，和平台是同一个用户，总能读到。
+ * 要用独立的用户运行 agent 和检查命令才能隔离（路线图第 3 项 Docker 部署）。
+ */
+const isolationItem = (f: Facts): Item[] =>
+  f.masterKey.kind !== 'ok' ? [] : [{
+    name: '凭据隔离', status: 'warn',
+    detail: f.bwrap
+      ? '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥'
+      : '没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥',
+    fix: `${f.bwrap ? '' : '安装 bubblewrap（bwrap）；'}团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）`,
+  }]
+
 export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
   f.apiKey
     ? { name: 'DeepSeek API key', status: 'ok', detail: '已设置环境变量 DEEPSEEK_API_KEY（只检查是否设置，不检查是否有效）' }
     : { name: 'DeepSeek API key', status: 'fail', detail: '没有设置环境变量 DEEPSEEK_API_KEY', fix: '在启动平台的环境里设置 DEEPSEEK_API_KEY=<你的 key>（命令行里 export，或写进服务的环境配置）' },
+  masterKeyItem(f),
+  ...isolationItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
     : 'missing' in f.git
@@ -88,6 +117,15 @@ const gitState = (): Facts['git'] => {
   }
 }
 
+const hasBwrap = (): boolean => {
+  try {
+    execFileSync('bwrap', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const pkgSchema = z.object({ engines: z.object({ node: z.string() }).partial().optional() })
 
 /** Eos 的 package.json 里 engines.node。文件坏了或没有这一项时是 undefined，由检查项报出来。 */
@@ -100,13 +138,14 @@ const nodeRequired = (root: string): string | undefined => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; env: NodeJS.ProcessEnv }): Facts => {
+export const gather = (o: { root: string; dataDir: string; env: NodeJS.ProcessEnv; masterKey: MasterKeyState }): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
   return {
     node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), apiKey: (o.env.DEEPSEEK_API_KEY ?? '').trim() !== '',
-    git: gitState(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
+    masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
+    git: gitState(), bwrap: hasBwrap(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
   }
 }
 
