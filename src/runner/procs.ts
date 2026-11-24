@@ -40,11 +40,12 @@ const linux: Procfs = {
   kill: pid => process.kill(pid, 'SIGKILL'),
 }
 
-/** stat 里进程名（可能带空格和括号）后面的字段：[0] 是状态，[19] 是启动时间。 */
+/** stat 里进程名（可能带空格和括号）后面的字段：[0] 是状态，[17] 是线程数，[19] 是启动时间。 */
 const fieldsAfterName = (stat: string): string[] => stat.slice(stat.lastIndexOf(')') + 2).split(' ')
 
 /**
- * 被杀的进程是否已经退出：/proc 里没有了，变成僵尸（Z），或者进程号已经被别的进程（启动时间不同）重新用了。
+ * 被杀的进程是否已经退出：/proc 里没有了，变成僵尸（Z）而且别的线程都已退出，或者进程号已经被别的进程（启动时间不同）重新用了。
+ * 多线程的进程（node 等）主线程可能先变成 Z，别的线程还在退出，所以还要看线程数。
  * 不能看工作目录：内核在进程退出途中先释放工作目录（exit_fs），之后才变成僵尸（exit_notify），
  * 中间这段时间里读不到工作目录、进程却还在。
  */
@@ -52,7 +53,7 @@ const exited = (proc: Procfs, pid: number, started: string): boolean => {
   const stat = proc.stat(pid)
   if (stat === undefined) return true
   const f = fieldsAfterName(stat)
-  return f[0] === 'Z' || f[0] === 'X' || f[19] !== started
+  return f[19] !== started || ((f[0] === 'Z' || f[0] === 'X') && Number(f[17]) <= 1)
 }
 
 /**
@@ -60,7 +61,10 @@ const exited = (proc: Procfs, pid: number, started: string): boolean => {
  * 不是 Linux 时什么都不做。
  * 注意：用户自己的终端、编辑器只要工作目录在任务的 worktree 里也会被杀——不要在平台数据目录里的 worktree 里工作。
  */
-export const killProcessesIn = async (dir: string, waitMs = 2000, proc: Procfs = linux): Promise<{ pid: number; name: string; exited: boolean }[]> => {
+/** 默认最多等多久（毫秒）。 */
+export const KILL_WAIT_MS = 2000
+
+export const killProcessesIn = async (dir: string, waitMs = KILL_WAIT_MS, proc: Procfs = linux): Promise<{ pid: number; name: string; exited: boolean }[]> => {
   if (proc === linux && process.platform !== 'linux') return []
   const root = realpathSync(dir)
   const isInside = (pid: number): boolean => {
@@ -70,11 +74,12 @@ export const killProcessesIn = async (dir: string, waitMs = 2000, proc: Procfs =
   const killed: { pid: number; name: string; started: string }[] = []
   for (const pid of proc.pids().filter(isInside)) {
     const name = proc.comm(pid)
-    const stat = proc.stat(pid)
-    if (stat === undefined) continue
+    const started = (s => (s === undefined ? undefined : fieldsAfterName(s)[19]))(proc.stat(pid))
+    // 已经不在了，或者读不出启动时间（没法判断之后看到的是不是它）：跳过。
+    if (started === undefined) continue
     try {
       proc.kill(pid)
-      killed.push({ pid, name, started: fieldsAfterName(stat)[19] ?? '' })
+      killed.push({ pid, name, started })
     } catch {
       // 已经退出，或者不是平台用户的进程
     }

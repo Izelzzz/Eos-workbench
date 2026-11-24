@@ -47,20 +47,21 @@ test('processes whose working directory is inside the worktree are killed, detac
 
 /**
  * 假的 /proc：一个工作目录在 /wt 里的进程。被杀后依次经过：工作目录还在（R）→ 工作目录已释放但还没变成僵尸（R）→ 僵尸（Z）。
- * 第二段就是内核 exit_fs 之后、exit_notify 之前；CI 上 tests/procs.test.ts:41 偶发失败时，等待循环正是在这一段提前返回的。
+ * 第二段就是内核 exit_fs 之后、exit_notify 之前；CI 上「processes whose working directory is inside the worktree are killed…」偶发失败时，等待循环正是在这一段提前返回的。
  */
-const fakeProc = (stages: ('inside' | 'cwd-gone' | 'zombie' | 'gone')[], started = '4242') => {
+const fakeProc = (stages: ('inside' | 'cwd-gone' | 'zombie' | 'zombie-leader' | 'gone')[], started = '4242') => {
   let polls = 0
   let killedAt: number | undefined
   const stage = () => (killedAt === undefined ? 'inside' : stages[Math.min(polls - killedAt, stages.length - 1)]!)
-  const stat = (state: string, start = started) => `77 (sl eep) ${state} ${Array.from({ length: 18 }, () => '0').join(' ')} ${start} 0`
+  // 进程名后面依次是状态、16 个别的字段、线程数、1 个字段、启动时间。
+  const stat = (state: string, threads: number) => `77 (sl eep) ${state} ${Array.from({ length: 16 }, () => '0').join(' ')} ${threads} 0 ${started} 0`
   const proc: Procfs = {
     pids: () => (stage() === 'gone' ? [] : [77]),
     cwdOf: () => (stage() === 'inside' ? '/wt' : undefined),
     stat: () => {
       polls++
       const s = stage()
-      return s === 'gone' ? undefined : stat(s === 'zombie' ? 'Z' : 'R')
+      return s === 'gone' ? undefined : stat(s === 'zombie' || s === 'zombie-leader' ? 'Z' : 'R', s === 'zombie-leader' ? 4 : 1)
     },
     comm: () => 'sleep',
     kill: () => { killedAt = polls },
@@ -91,4 +92,11 @@ test('a process number reused by a new process (different start time) counts as 
     stat: pid => { const s = proc.stat(pid); return reused && s !== undefined ? s.replace(' 4242 ', ' 9999 ') : s },
   })
   assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: true }])
+})
+
+test('a multi-threaded process whose main thread is a zombie but other threads are still exiting has not exited yet', async () => {
+  const { proc, polls } = fakeProc(['inside', 'zombie-leader', 'zombie-leader', 'zombie-leader', 'zombie'])
+  const killed = await killProcessesIn('/', 2000, { ...proc, cwdOf: pid => (proc.cwdOf(pid) === '/wt' ? '/' : undefined) })
+  assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: true }])
+  assert.ok(polls() >= 5, `等到别的线程也退出才返回（查了 ${polls()} 次）`)
 })

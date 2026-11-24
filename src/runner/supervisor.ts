@@ -9,7 +9,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
-import { killProcessesIn } from './procs.ts'
+import { KILL_WAIT_MS, killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
 import { defaultForges, looksRemote, parseRemote } from '../forge/forges.ts'
@@ -265,7 +265,7 @@ export class Supervisor {
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
         const stuck = killed.filter(k => !k.exited)
-        if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 2 秒还没退出，照常撤销越界改动）`)
+        if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
       },
       checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)), redact),
       afterWrite: (t, call) => {

@@ -9,7 +9,9 @@ import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { killProcessesIn } from '../src/runner/procs.ts'
 
-const [rounds = 200, perRound = 8, load = availableParallelism()] = process.argv.slice(2, 5).map(Number)
+const nums = process.argv.slice(2, 5).map(Number)
+if (nums.some(n => !Number.isInteger(n) || n < 0)) throw new Error('轮数、每轮进程数、负载数都要是非负整数')
+const [rounds = 200, perRound = 8, load = availableParallelism()] = nums
 /** 被杀的进程：sleep（退出很快），或者 node（多线程、占几百 MB 内存，退出时要做的事多）。 */
 const kind = process.argv[5] ?? 'sleep'
 const cmd = kind === 'node' ? [process.execPath, '-e', 'const b = Buffer.alloc(300e6, 1); setInterval(() => b[0]++, 1000)'] : ['sleep', '60']
@@ -25,6 +27,7 @@ const state = (pid: number): string | undefined => {
 
 const workers = Array.from({ length: load }, () => new Worker('for (;;) {}', { eval: true }))
 const base = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-procs-race-'))
+const spawned: number[] = []
 let stillAlive = 0
 let total = 0
 const states = new Map<string, number>()
@@ -32,7 +35,11 @@ try {
   for (let i = 0; i < rounds; i++) {
     const dir = join(base, `r${i}`)
     mkdirSync(dir)
-    for (let j = 0; j < perRound; j++) spawn(cmd[0]!, cmd.slice(1), { cwd: dir, detached: true, stdio: 'ignore' }).unref()
+    for (let j = 0; j < perRound; j++) {
+      const p = spawn(cmd[0]!, cmd.slice(1), { cwd: dir, detached: true, stdio: 'ignore' })
+      p.unref()
+      if (p.pid !== undefined) spawned.push(p.pid)
+    }
     await new Promise(r => setTimeout(r, kind === 'node' ? 400 : 30))
     const killed = await killProcessesIn(dir)
     for (const { pid } of killed) {
@@ -46,6 +53,8 @@ try {
   }
 } finally {
   for (const w of workers) void w.terminate()
+  // 中途出错时不留下进程（已经被杀掉的再发一次信号也没关系）。
+  for (const pid of spawned) try { process.kill(pid, 'SIGKILL') } catch { /* 已经退出 */ }
   rmSync(base, { recursive: true, force: true })
 }
 process.stdout.write(`${JSON.stringify({ rounds, perRound, load, kind, killed: total, notExitedWhenReturned: stillAlive, states: Object.fromEntries(states) })}\n`)
