@@ -1,6 +1,6 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
 import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
-import { explain } from './failure.ts'
+import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeFailures } from './checks.ts'
 import {
@@ -249,7 +249,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 
     case 'call_failed':
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
-      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${event.error}` }))
+      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${failureFacts(event.error)}` }))
 
     case 'asked': {
       if (task.pending === undefined || isCheck(task.pending) || task.pending.id !== event.call) return ignore(task, '不是当前这次调用')

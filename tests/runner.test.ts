@@ -271,3 +271,19 @@ test('before reverting a writer’s changes the runner first ends the agent’s 
   for (let i = 0; i < order.length; i += 2) assert.deepEqual(order.slice(i, i + 2), ['end processes dev', 'revert dev'])
   assert.ok(!order.some(o => / (planner|rev)$/.test(o)), 'read-only roles neither end processes nor revert')
 })
+
+test('检查起不来：原因只取关键的一行并保留前缀，修法对应检查命令；worktree 不在时认成 worktree 损坏', async () => {
+  for (const [message, reason, fix] of [
+    ['spawn failed\nerror: npm not found', '检查无法执行：error: npm not found', /检查命令起不来/],
+    ['worktree 不存在：/w', '检查无法执行：worktree 不存在：/w', /worktree 被删除或损坏/],
+  ] as const) {
+    const path = dbPath()
+    const store = new Store(path)
+    store.create({ id: 't', request: '需求', workflow: workflow({ maxRounds: 2, escalate: true, checks: 'only' }), workflowSource: 'yaml', meta }, 0)
+    const task = await runTask('t', { store, executor: new FakeExecutor(async () => '回复'), pollMs: 1, afterWrite: () => [], checker: async () => { throw new Error(message) } })
+    assert.equal(task.status, 'failed')
+    const lines = (task.failure ?? '').split('\n')
+    assert.equal(lines[1], `原因：${reason}`)
+    assert.match(lines[2] ?? '', fix)
+  }
+})

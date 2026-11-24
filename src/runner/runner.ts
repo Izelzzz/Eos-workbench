@@ -52,7 +52,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const dispatch = (event: Parameters<Store['dispatch']>[1], actor: 'runner' | 'executor' = 'executor') => o.store.dispatch(id, event, now(), actor)
   /** 这一步失败：终端打一行，日志文件记完整信息，任务的失败原因写清哪一步、什么原因、怎么修。 */
   const fail = (where: string, callId: Call['id'] | CheckRun['id'], reason: string, e?: unknown) => {
-    const first = keyLine(reason)
+    const first = reason.trim().split('\n')[0]!
     log(`✗ ${where}：${first}`)
     if (e !== undefined) o.detail?.(`✗ ${where} 的完整错误：\n${fullError(e)}`)
     dispatch({ kind: 'call_failed', call: callId, error: explain({ where, error: first, task: id }) })
@@ -121,7 +121,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
           },
         })
       } catch (e) {
-        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, (e as Error).message, e)
+        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, keyLine((e as Error).message), e)
         return
       }
     }
@@ -161,7 +161,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       results = await o.checker(task, run, aborter.signal)
     } catch (e) {
       clearInterval(watch)
-      fail(where, run.id, `检查无法执行：${(e as Error).message}`, e)
+      fail(where, run.id, `检查无法执行：${keyLine((e as Error).message)}`, e)
       return
     }
     clearInterval(watch)

@@ -81,15 +81,18 @@ const sameOrigin = (req: IncomingMessage): boolean => {
 /** 日志接口最多返回的字节数（从文件末尾算）。 */
 export const LOG_TAIL = 2 * 1024 * 1024
 
-const tail = (path: string, max: number): string => {
+export const tail = (path: string, max: number): string => {
   const size = statSync(path).size
   if (size <= max) return readFileSync(path, 'utf8')
   const fd = openSync(path, 'r')
   try {
     const buf = Buffer.alloc(max)
-    readSync(fd, buf, 0, max, size - max)
-    const text = buf.toString('utf8')
-    return `（日志共 ${size} 字节，只显示最后 ${max} 字节；完整日志：${path}）\n${text.slice(text.indexOf('\n') + 1)}`
+    const n = readSync(fd, buf, 0, max, size - max)
+    const text = buf.subarray(0, n).toString('utf8')
+    // 从中间截断：丢掉第一个换行之前的半行；没有换行时去掉开头被截断的半个字符（解码成的替换字符）。
+    const nl = text.indexOf('\n')
+    const body = nl < 0 ? text.replace(/^\uFFFD+/, '') : text.slice(nl + 1)
+    return `（日志共 ${size} 字节，只显示最后 ${max} 字节；完整日志：${path}）\n${body}`
   } finally {
     closeSync(fd)
   }

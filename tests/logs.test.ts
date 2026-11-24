@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { explain, fixFor, RULES } from '../src/engine/failure.ts'
+import { explain, failureFacts, fixFor, RULES } from '../src/engine/failure.ts'
 import { appendLog } from '../src/runner/logs.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
-import { createWebServer } from '../src/web/server.ts'
+import { createWebServer, tail } from '../src/web/server.ts'
 import { FakeExecutor } from './fake-executor.ts'
 import { PASS } from './helpers.ts'
 import { Store } from '../src/store/store.ts'
@@ -37,6 +37,8 @@ test('常见错误都有对应的修法，认不出的让人看日志', () => {
     // E2E 里的真实报错：dsh 进程被结掉、worktree 被删。
     ['dsh profile "sdk": DeepSeek Harness runtime exited', /agent 进程意外退出/],
     ['working-directory: directory does not exist: "/data/worktrees/t1"', /worktree 被删除或损坏/],
+    ['检查无法执行：worktree 不存在：/data/worktrees/t1', /worktree 被删除或损坏/],
+    ['agent 进程在打开会话时被关闭，请重试', /agent 进程意外退出/],
     ['任务正在被进程 123 运行', /看日志/],
     ['奇怪的错误', /看日志/],
   ]
@@ -100,4 +102,21 @@ test('任务的进度行和完整错误写进 logs/<任务>.log；任务详情�
   } finally {
     await new Promise(r => server.close(r))
   }
+})
+
+test('failureFacts 只留哪一步和原因；不是三段格式时原样返回', () => {
+  assert.equal(failureFacts(explain({ where: 'x', error: 'y', task: 't' })), '哪一步：x；原因：y')
+  assert.equal(failureFacts('网络断了'), '网络断了')
+})
+
+test('日志超过上限时只返回末尾，丢掉被截断的半行；没有换行时也不留半个字符', () => {
+  const s = sandbox()
+  const path = join(s.dir, 'big.log')
+  writeFileSync(path, `${'第一行很长'.repeat(10)}\n最后一行\n`)
+  const t = tail(path, 20)
+  assert.match(t, /^（日志共 \d+ 字节，只显示最后 20 字节；完整日志：.+）\n最后一行\n$/)
+  writeFileSync(path, '汉字'.repeat(20))
+  const noNl = tail(path, 10)
+  assert.doesNotMatch(noNl, /\uFFFD/)
+  assert.match(noNl, /）\n(字|汉)/)
 })
