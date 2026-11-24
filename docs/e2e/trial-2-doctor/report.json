@@ -1,0 +1,17 @@
+{
+  "commit": "982693d",
+  "node": {
+    "old": "v22.23.5",
+    "required": "v24.22.3"
+  },
+  "checks": {
+    "Node 低于要求：doctor 报 ⚠ Node、给出修法、退出码 0": true,
+    "Node 低于要求：run 先提示，再照常用真实模型把任务跑完": true,
+    "没有 key：run 不启动，说明怎么设置": true,
+    "没有 key：web 不启动": true,
+    "没有 key 时不建数据库": true,
+    "数据目录不可用：doctor 报 ✗ 数据目录（中文原因）": true,
+    "环境都满足：doctor 全部 ✓、退出码 0": true,
+    "环境都满足：run 通过检查，用真实模型把任务跑完": true
+  }
+}
