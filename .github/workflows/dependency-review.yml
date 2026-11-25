@@ -1,0 +1,32 @@
+# 依赖扫描：只看这个 PR 新引入或改动的依赖（对比 base 和 head 的锁文件），有已知漏洞时报出来。
+# 运行时、开发和 scope 未知的依赖都算：高危及以上让检查变红。
+# 中、低危不报也不拦：设了 fail-on-severity 后，action 在过滤阶段就把低于这个级别的漏洞丢掉，摘要里也看不到。
+# 扫描范围：锁文件（根目录、.github/lint/、poc/claude-code/）、只有清单的 package.json（poc/，只能看到版本范围），
+# 以及工作流里引用的 action。PoC 的依赖引入高危漏洞也会变红。
+# 现有依赖里的漏洞（来自 dsh 的依赖树）不在这里拦，见 docs/roadmap.md 的 CI 一项。
+# job 名字（dependency-review）会设成必需检查，改名前先改分支保护。
+name: Dependency review
+
+on:
+  pull_request:
+
+# 只读；不在 PR 上发评论（那需要 pull-requests: write），结果看 job 摘要。不使用任何仓库密钥。
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: dependency-review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # 默认只算运行时依赖；lint 工具（.github/lint/）和 vite、tsx 等都是开发依赖，也要拦。
+          # 明确标成 unknown 的改动默认被排除，也加上
+          fail-on-scopes: runtime, development, unknown
