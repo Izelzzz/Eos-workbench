@@ -1,0 +1,7 @@
+# CodeQL 的配置。查询用默认的安全查询（security 类），见 .github/workflows/codeql.yml。
+name: Eos CodeQL
+paths-ignore:
+  # 证据目录里有 E2E 用的探针脚本（.mts），是一次性的验证代码，不是产品代码
+  - docs/**
+  # PoC 阶段的验证记录，不再运行
+  - poc/**
