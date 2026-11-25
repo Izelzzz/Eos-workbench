@@ -31,7 +31,12 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 type Detail = { status: string; failure?: string; logPath: string; position: string; worktree: string }
 const detail = async (id: string) => (await (await fetch(`${base}/api/tasks/${id}`)).json()) as Detail
@@ -46,13 +51,16 @@ const until = async (what: string, ok: () => Promise<boolean>, ms = 15 * 60_000)
 }
 
 /** 这个数据目录的 dsh 进程：工作目录是 <数据目录>/dsh/eos-process-cwd（见 executor/dsh.ts 的 processCwd）。 */
-const dshPids = (): number[] => readdirSync('/proc').filter(p => /^\d+$/.test(p)).flatMap(p => {
-  try {
-    return readlinkSync(`/proc/${p}/cwd`) === join(DATA, 'dsh', 'eos-process-cwd') ? [Number(p)] : []
-  } catch {
-    return []
-  }
-})
+const dshPids = (): number[] =>
+  readdirSync('/proc')
+    .filter(p => /^\d+$/.test(p))
+    .flatMap(p => {
+      try {
+        return readlinkSync(`/proc/${p}/cwd`) === join(DATA, 'dsh', 'eos-process-cwd') ? [Number(p)] : []
+      } catch {
+        return []
+      }
+    })
 
 /** 当前调用的 trace 里已经有了模型的步骤：调用确实在进行中。 */
 const callRunning = async (id: string, node: string) => {
@@ -62,8 +70,23 @@ const callRunning = async (id: string, node: string) => {
 
 const startServer = async (): Promise<ChildProcess> => {
   const out = openSync(join(OUT, 'server.log'), 'a')
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], { cwd: ROOT, detached: true, stdio: ['ignore', out, out], env })
-  await until('eos web 启动', async () => { try { return (await fetch(`${base}/api/tasks`)).ok } catch { return false } }, 30_000)
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env,
+  })
+  await until(
+    'eos web 启动',
+    async () => {
+      try {
+        return (await fetch(`${base}/api/tasks`)).ok
+      } catch {
+        return false
+      }
+    },
+    30_000,
+  )
   return child
 }
 
@@ -74,7 +97,10 @@ note(`eos web 已启动（提交 ${commit}，Node ${process.version}）`)
 const browser = await chromium.launch()
 const shots: string[] = []
 const snap = async (id: string, name: string) => {
-  for (const [w, h, tag] of [[1440, 900, 'desktop'], [390, 844, '390']] as const) {
+  for (const [w, h, tag] of [
+    [1440, 900, 'desktop'],
+    [390, 844, '390'],
+  ] as const) {
     const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2 })
     await page.goto(`${base}/#/tasks/${id}`)
     await page.locator('.failure').waitFor({ timeout: 20_000 })
@@ -92,7 +118,8 @@ const checkFailure = async (id: string, label: string) => {
   const cli = spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'status', id, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
   note(`${label} 失败原因：\n${d.failure}`)
   return {
-    failure: d.failure, logPath: d.logPath,
+    failure: d.failure,
+    logPath: d.logPath,
     checks: {
       [`${label}：失败原因分三段（哪一步、原因、怎么修）`]: /^哪一步：.+\n原因：.+\n怎么修：.+/.test(d.failure ?? ''),
       [`${label}：认出了这个错误，给出具体修法`]: !(d.failure ?? '').includes('没有认出这个错误'),

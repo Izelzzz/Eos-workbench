@@ -80,8 +80,14 @@ export const signalsOf = (task: Task): Signal[] => {
   const out: Signal[] = []
   const add = (entry: number, e: Entry, s: { kind: SignalKind; node?: NodeId | string; role?: RoleId | string; text: string }, sub?: number | 'r') => {
     out.push({
-      id: sub === undefined ? `${task.id}:${entry}` : `${task.id}:${entry}:${sub}`, task: task.id, entry, at: e.at, kind: s.kind,
-      ...(s.node === undefined ? {} : { node: s.node }), ...(s.role === undefined ? {} : { role: s.role }), text: clipText(s.text),
+      id: sub === undefined ? `${task.id}:${entry}` : `${task.id}:${entry}:${sub}`,
+      task: task.id,
+      entry,
+      at: e.at,
+      kind: s.kind,
+      ...(s.node === undefined ? {} : { node: s.node }),
+      ...(s.role === undefined ? {} : { role: s.role }),
+      text: clipText(s.text),
     })
   }
   task.log.forEach((e, i) => {
@@ -135,10 +141,15 @@ const key = (r: { kind: TargetKind; name: string }) => `${r.kind}\u0000${r.name}
 const refsOf = (s: EvidenceSample): { all: Ref[]; byRole: Map<string, Ref[]> } => {
   const t = s.task
   const skillVersion = new Map((s.used?.skills ?? []).map(k => [k.name, k.version]))
-  const byRole = new Map(Object.entries(t.workflow.roles).map(([id, r]) => [id, [
-    ...(r.template === undefined ? [] : [{ kind: 'template' as const, name: r.template.name, version: r.template.version }]),
-    ...r.skills.map(name => ({ kind: 'skill' as const, name, ...(skillVersion.has(name) ? { version: skillVersion.get(name)! } : {}) })),
-  ]]))
+  const byRole = new Map(
+    Object.entries(t.workflow.roles).map(([id, r]) => [
+      id,
+      [
+        ...(r.template === undefined ? [] : [{ kind: 'template' as const, name: r.template.name, version: r.template.version }]),
+        ...r.skills.map(name => ({ kind: 'skill' as const, name, ...(skillVersion.has(name) ? { version: skillVersion.get(name)! } : {}) })),
+      ],
+    ]),
+  )
   const shared: Ref[] = [
     { kind: 'workflow', name: t.workflow.name, ...(s.used?.workflow?.version === undefined ? {} : { version: s.used.workflow.version }) },
     ...t.docs.map(d => ({ kind: 'doc' as const, name: d.name, version: d.version })),
@@ -159,7 +170,7 @@ export const evidence = (samples: EvidenceSample[]): Evidence => {
   const target = (r: Ref) => {
     const k = key(r)
     let t = targets.get(k)
-    if (t === undefined) targets.set(k, t = { kind: r.kind, name: r.name, versions: new Set(), tasks: new Set(), affected: new Set(), signals: [] })
+    if (t === undefined) targets.set(k, (t = { kind: r.kind, name: r.name, versions: new Set(), tasks: new Set(), affected: new Set(), signals: [] }))
     return t
   }
   for (const s of samples) {
@@ -174,7 +185,7 @@ export const evidence = (samples: EvidenceSample[]): Evidence => {
       signals.push(sig)
       // 同一个约定被一个角色以多种方式用到（例如技能重复）时只记一次。
       const seen = new Set<string>()
-      for (const r of sig.role === undefined ? shared : refs.byRole.get(sig.role) ?? shared) {
+      for (const r of sig.role === undefined ? shared : (refs.byRole.get(sig.role) ?? shared)) {
         if (seen.has(key(r))) continue
         seen.add(key(r))
         const t = target(r)
@@ -186,13 +197,21 @@ export const evidence = (samples: EvidenceSample[]): Evidence => {
   const order = (k: TargetKind) => TARGET_KINDS.indexOf(k)
   return {
     signals,
-    targets: [...targets.values()].map(t => ({
-      kind: t.kind, name: t.name, versions: [...t.versions].sort((a, b) => a - b), tasks: t.tasks.size, affected: t.affected.size,
-      counts: Object.fromEntries(SIGNAL_KINDS.flatMap(k => {
-        const n = t.signals.filter(x => x.kind === k).length
-        return n === 0 ? [] : [[k, n]]
-      })),
-      signals: t.signals.map(x => x.id),
-    })).sort((a, b) => b.signals.length - a.signals.length || order(a.kind) - order(b.kind) || byCodePoint(a.name, b.name)),
+    targets: [...targets.values()]
+      .map(t => ({
+        kind: t.kind,
+        name: t.name,
+        versions: [...t.versions].sort((a, b) => a - b),
+        tasks: t.tasks.size,
+        affected: t.affected.size,
+        counts: Object.fromEntries(
+          SIGNAL_KINDS.flatMap(k => {
+            const n = t.signals.filter(x => x.kind === k).length
+            return n === 0 ? [] : [[k, n]]
+          }),
+        ),
+        signals: t.signals.map(x => x.id),
+      }))
+      .sort((a, b) => b.signals.length - a.signals.length || order(a.kind) - order(b.kind) || byCodePoint(a.name, b.name)),
   }
 }

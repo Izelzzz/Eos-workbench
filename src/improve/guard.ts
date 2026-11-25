@@ -7,7 +7,11 @@ import type { TargetKind } from '../engine/evidence.ts'
 
 /** 权限相关的字段，键是 YAML 里的写法。 */
 const permissionFields = (a: AgentConfig): Record<string, string> => ({
-  model: a.model, write: a.write, writePaths: JSON.stringify(a.writePaths), tools: JSON.stringify([...a.denyTools].sort()), mcp: JSON.stringify(a.mcp),
+  model: a.model,
+  write: a.write,
+  writePaths: JSON.stringify(a.writePaths),
+  tools: JSON.stringify([...a.denyTools].sort()),
+  mcp: JSON.stringify(a.mcp),
 })
 const permissionOf = (a: AgentConfig) => JSON.stringify(permissionFields(a))
 
@@ -16,12 +20,20 @@ const permissionOf = (a: AgentConfig) => JSON.stringify(permissionFields(a))
  * 提案不能删掉推送前的评审、也不能把交付节点挪到评审前面。
  */
 const commandsOf = (w: Workflow): string[] =>
-  w.nodes.flatMap((n, i) => n.checks.flatMap(c => {
-    if (c.kind === 'run') return [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`]
-    if (c.kind !== 'platform') return []
-    const reviews = w.nodes.slice(0, i).filter(p => p.kind === 'dialog' && p.role !== undefined).map(p => p.id).sort()
-    return [`${n.id}：平台动作 ${c.action}（之前的评审：${reviews.join('、')}）`]
-  })).sort()
+  w.nodes
+    .flatMap((n, i) =>
+      n.checks.flatMap(c => {
+        if (c.kind === 'run') return [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`]
+        if (c.kind !== 'platform') return []
+        const reviews = w.nodes
+          .slice(0, i)
+          .filter(p => p.kind === 'dialog' && p.role !== undefined)
+          .map(p => p.id)
+          .sort()
+        return [`${n.id}：平台动作 ${c.action}（之前的评审：${reviews.join('、')}）`]
+      }),
+    )
+    .sort()
 
 const UNPARSABLE = '当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'
 
@@ -41,7 +53,9 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
     if (!b.ok) return []
     const x = permissionFields(a.template)
     const y = permissionFields(b.template)
-    return Object.keys(x).filter(k => x[k] !== y[k]).map(k => `不能改模板的 ${k}`)
+    return Object.keys(x)
+      .filter(k => x[k] !== y[k])
+      .map(k => `不能改模板的 ${k}`)
   }
   if (kind === 'workflow') {
     const a = parseWorkflow(before, lookup)

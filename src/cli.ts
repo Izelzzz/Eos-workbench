@@ -48,7 +48,16 @@ const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_u
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { repo: { type: 'string' }, workflow: { type: 'string', default: 'standard' }, data: { type: 'string' }, 'no-wait': { type: 'boolean', default: false }, port: { type: 'string', default: '4317' }, host: { type: 'string', default: '127.0.0.1' }, help: { type: 'boolean', short: 'h' }, tasks: { type: 'string' } },
+  options: {
+    repo: { type: 'string' },
+    workflow: { type: 'string', default: 'standard' },
+    data: { type: 'string' },
+    'no-wait': { type: 'boolean', default: false },
+    port: { type: 'string', default: '4317' },
+    host: { type: 'string', default: '127.0.0.1' },
+    help: { type: 'boolean', short: 'h' },
+    tasks: { type: 'string' },
+  },
 })
 
 // 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（dsh、git、检查命令）都继承不到它。
@@ -155,7 +164,9 @@ const currentModelKey = (): string => {
 const executor = () =>
   redacting(
     new DshExecutor({
-      dshHome: join(dataDir, 'dsh'), dshBin: dshBin(), modelKey: currentModelKey,
+      dshHome: join(dataDir, 'dsh'),
+      dshBin: dshBin(),
+      modelKey: currentModelKey,
       // dsh 以 agent 的用户运行时，会话目录只有它能读。
       ...(agentUser.kind === 'ok' ? { readSessionLog: readSessionLogAs(agentUser.user, SESSION_LOG_FILE) } : {}),
     }),
@@ -171,7 +182,17 @@ const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'cli', log: (_id, line) => say(line), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}), ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}) })
+    const sup = new Supervisor({
+      store,
+      executor: ex,
+      dataDir,
+      credentials,
+      actor: 'cli',
+      log: (_id, line) => say(line),
+      redact,
+      ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}),
+      ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
+    })
     const started = sup.start(typeof id === 'string' ? id : await id(sup), { wait: !values['no-wait'] })
     if (!started.ok) return fail(started.error)
     summary(await started.done)
@@ -223,7 +244,10 @@ const commands: Record<string, () => Promise<void> | void> = {
         say(`>>> 提示词\n${e.prompt}\n<<< 回复\n${e.reply}`)
       } else if (e.type === 'question') say(`\n── ${time} 提问（${e.question.source}）：${e.question.text}`)
       else if (e.type === 'answer') say(`\n── ${time} 回答 ${e.questionId}：${e.text}`)
-      else if (e.type === 'check') say(`\n── ${time} [${e.node}${e.round === undefined ? '' : ` 第 ${e.round} 轮`}] 检查 · ${(e.ms / 1000).toFixed(1)}s\n${e.results.map(r => `${r.passed ? '✓' : '✗'} ${describeCheck(r.check)}${r.passed || r.detail === '' ? '' : `\n${r.detail}`}`).join('\n')}`)
+      else if (e.type === 'check')
+        say(
+          `\n── ${time} [${e.node}${e.round === undefined ? '' : ` 第 ${e.round} 轮`}] 检查 · ${(e.ms / 1000).toFixed(1)}s\n${e.results.map(r => `${r.passed ? '✓' : '✗'} ${describeCheck(r.check)}${r.passed || r.detail === '' ? '' : `\n${r.detail}`}`).join('\n')}`,
+        )
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)
@@ -239,7 +263,10 @@ const commands: Record<string, () => Promise<void> | void> = {
     const ex = executor()
     const conventions = new Conventions(store)
     conventions.seed(Date.now())
-    const tasks = values.tasks?.split(',').map(x => x.trim()).filter(x => x !== '')
+    const tasks = values.tasks
+      ?.split(',')
+      .map(x => x.trim())
+      .filter(x => x !== '')
     let r
     try {
       r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow!, ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
@@ -280,8 +307,26 @@ const commands: Record<string, () => Promise<void> | void> = {
       appendLog(processLog, line)
       say(line)
     }
-    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}), ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}) })
-    const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), credentials, improve: { executor: ex, dataDir }, ...(publicUrl === undefined ? {} : { publicUrl }) })
+    const sup = new Supervisor({
+      store,
+      executor: ex,
+      dataDir,
+      credentials,
+      actor: 'web',
+      log: (id, line) => note(`[${id}] ${line}`),
+      redact,
+      ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}),
+      ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
+    })
+    const server = createWebServer({
+      store,
+      supervisor: sup,
+      replay: ex,
+      staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
+      credentials,
+      improve: { executor: ex, dataDir },
+      ...(publicUrl === undefined ? {} : { publicUrl }),
+    })
     const plan = listenPlan(values.host, port, publicUrl)
     if (typeof plan === 'string') return fail(plan)
     await new Promise<void>(r => {
@@ -295,7 +340,10 @@ const commands: Record<string, () => Promise<void> | void> = {
         r()
       })
     })
-    if (plan.exposed) note(`注意：监听 ${values.host}，能连到这台机器 ${port} 端口的人都能用 Eos（没有登录）。浏览器只能通过 ${publicUrl === undefined ? `localhost:${port} 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL` : `localhost:${port} 或 ${publicUrl.origin} 访问`}`)
+    if (plan.exposed)
+      note(
+        `注意：监听 ${values.host}，能连到这台机器 ${port} 端口的人都能用 Eos（没有登录）。浏览器只能通过 ${publicUrl === undefined ? `localhost:${port} 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL` : `localhost:${port} 或 ${publicUrl.origin} 访问`}`,
+      )
     note(`Eos Web：${plan.url}（监听 ${values.host}:${port}，数据目录 ${dataDir}，日志 ${processLog}，Ctrl+C 退出）`)
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)

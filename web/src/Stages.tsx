@@ -18,9 +18,7 @@ export const PARTS = [
 /** 时长构成横条：宽度按 max 等比例。 */
 export const Bar = (props: { stage: Pick<Stage, (typeof PARTS)[number]['key'] | 'wallMs'>; max: number }) => (
   <div className="stage-bar" style={{ width: `${props.max === 0 ? 0 : (props.stage.wallMs / props.max) * 100}%` }}>
-    {PARTS.map(p => props.stage[p.key] > 0 && (
-      <span key={p.key} className={p.cls} style={{ flexGrow: props.stage[p.key] }} title={`${p.label} ${duration(props.stage[p.key])}`} />
-    ))}
+    {PARTS.map(p => props.stage[p.key] > 0 && <span key={p.key} className={p.cls} style={{ flexGrow: props.stage[p.key] }} title={`${p.label} ${duration(props.stage[p.key])}`} />)}
   </div>
 )
 
@@ -34,13 +32,27 @@ export const Stages = (props: { metrics: Metrics; runnerAlive: boolean }) => {
     <section className="stages">
       <div className="stages-head">
         <h2>各阶段耗时</h2>
-        <div className="legend">{PARTS.map(p => <span key={p.key}><i className={p.cls} />{p.label}</span>)}</div>
+        <div className="legend">
+          {PARTS.map(p => (
+            <span key={p.key}>
+              <i className={p.cls} />
+              {p.label}
+            </span>
+          ))}
+        </div>
       </div>
       <table>
         <thead>
           <tr>
-            <th>阶段</th><th className="num">调用</th><th className="num">输入 / 输出 / 缓存读</th><th className="bar-col">时长构成</th>
-            {PARTS.map(p => <th key={p.key} className="num">{p.label}</th>)}
+            <th>阶段</th>
+            <th className="num">调用</th>
+            <th className="num">输入 / 输出 / 缓存读</th>
+            <th className="bar-col">时长构成</th>
+            {PARTS.map(p => (
+              <th key={p.key} className="num">
+                {p.label}
+              </th>
+            ))}
             <th className="num">总时长</th>
           </tr>
         </thead>
@@ -52,11 +64,24 @@ export const Stages = (props: { metrics: Metrics; runnerAlive: boolean }) => {
                 {s.open && <span className="tag running">进行中</span>}
                 {s.node === slowest && <span className="tag">最慢</span>}
               </td>
-              <td className="num">{s.calls}{s.checks > 0 && <span className="muted"> · 检查 {s.checks}</span>}</td>
-              <td className="num">{tokens(s.usage.input)} / {tokens(s.usage.output)} / {tokens(s.usage.cacheRead)}</td>
-              <td className="bar-col"><Bar stage={s} max={max} /></td>
-              {PARTS.map(p => <td key={p.key} className={`num${s[p.key] === 0 ? ' muted' : ''}`}>{duration(s[p.key])}</td>)}
-              <td className="num"><b>{duration(s.wallMs)}</b></td>
+              <td className="num">
+                {s.calls}
+                {s.checks > 0 && <span className="muted"> · 检查 {s.checks}</span>}
+              </td>
+              <td className="num">
+                {tokens(s.usage.input)} / {tokens(s.usage.output)} / {tokens(s.usage.cacheRead)}
+              </td>
+              <td className="bar-col">
+                <Bar stage={s} max={max} />
+              </td>
+              {PARTS.map(p => (
+                <td key={p.key} className={`num${s[p.key] === 0 ? ' muted' : ''}`}>
+                  {duration(s[p.key])}
+                </td>
+              ))}
+              <td className="num">
+                <b>{duration(s.wallMs)}</b>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -64,16 +89,22 @@ export const Stages = (props: { metrics: Metrics; runnerAlive: boolean }) => {
           <tr>
             <td>合计</td>
             <td className="num">{total.calls}</td>
-            <td className="num">{tokens(total.usage.input)} / {tokens(total.usage.output)} / {tokens(total.usage.cacheRead)}</td>
+            <td className="num">
+              {tokens(total.usage.input)} / {tokens(total.usage.output)} / {tokens(total.usage.cacheRead)}
+            </td>
             <td />
-            {PARTS.map(p => <td key={p.key} className="num">{duration(total[p.key])}</td>)}
-            <td className="num"><b>{duration(total.wallMs)}</b></td>
+            {PARTS.map(p => (
+              <td key={p.key} className="num">
+                {duration(total[p.key])}
+              </td>
+            ))}
+            <td className="num">
+              <b>{duration(total.wallMs)}</b>
+            </td>
           </tr>
         </tfoot>
       </table>
-      {!props.runnerAlive && total.runningMs > 0 && (
-        <p className="notice warn">没有程序在运行这个任务：「运行中」的 {duration(total.runningMs)} 里，有一部分其实是在等人点「继续」。</p>
-      )}
+      {!props.runnerAlive && total.runningMs > 0 && <p className="notice warn">没有程序在运行这个任务：「运行中」的 {duration(total.runningMs)} 里，有一部分其实是在等人点「继续」。</p>}
       <p className="muted stages-note">
         任务总时长 {duration(props.metrics.elapsedMs)}
         {props.metrics.betweenMs > 0 && <>，其中 {duration(props.metrics.betweenMs)} 不在任何阶段里（阶段之间的间隔，例如平台停着或重启续跑）</>}

@@ -83,17 +83,29 @@ type KindSpec = {
 
 const SPEC: Record<ConventionKind, KindSpec> = {
   workflow: {
-    label: '工作流', group: '工作流', starter: NEW_WORKFLOW, rows: 28, nameOf: yamlName,
+    label: '工作流',
+    group: '工作流',
+    starter: NEW_WORKFLOW,
+    rows: 28,
+    nameOf: yamlName,
     hint: '工作流的名字取 YAML 里的 name（小写字母、数字和连字符）。',
   },
   doc: { label: '约定文档', group: '约定文档', starter: NEW_DOC, rows: 22, nameLabel: '文档名', namePlaceholder: '例如：评审约定' },
   template: {
-    label: 'Agent 模板', group: 'Agent 模板', starter: NEW_TEMPLATE, rows: 28, nameOf: yamlName,
+    label: 'Agent 模板',
+    group: 'Agent 模板',
+    starter: NEW_TEMPLATE,
+    rows: 28,
+    nameOf: yamlName,
     hint: '模板的名字取 YAML 里的 name（小写字母、数字和连字符）。工作流里写 role: { template: 名字 } 就能用上。',
     warning: '注意：模板里的 MCP 服务在 agent 沙箱之外运行，拥有平台进程的权限（能读写平台用户能访问的所有文件）。只添加团队信任的服务；env 里不要放密钥。',
   },
   skill: {
-    label: '技能', group: '技能', starter: NEW_SKILL, rows: 24, nameOf: frontmatterName,
+    label: '技能',
+    group: '技能',
+    starter: NEW_SKILL,
+    rows: 24,
+    nameOf: frontmatterName,
     hint: '技能的名字取开头 --- 之间的 name（小写字母、数字和连字符）。Agent 模板的 skills 里写上名字就会带给这个 agent。',
   },
 }
@@ -132,13 +144,18 @@ function Sidebar(props: { list: ConventionsResponse | undefined; kind?: Conventi
     <nav className="conv-side" aria-label="团队约定列表">
       {KINDS.map(kind => (
         <div className="conv-group" key={kind}>
-          <div className="conv-group-head"><b>{SPEC[kind].group}</b><a href={`#/conventions/new/${kind}`}>新建</a></div>
+          <div className="conv-group-head">
+            <b>{SPEC[kind].group}</b>
+            <a href={`#/conventions/new/${kind}`}>新建</a>
+          </div>
           <ul>
             {entries?.[kind].map(e => (
               <li key={e.name}>
                 <a href={conventionHref(kind, e.name)} className={props.kind === kind && props.name === e.name ? 'active' : ''}>
                   <span>{e.name}</span>
-                  <small className="muted">第 {e.version} 版{e.extra === undefined || e.extra === '' ? '' : ` · ${e.extra}`}</small>
+                  <small className="muted">
+                    第 {e.version} 版{e.extra === undefined || e.extra === '' ? '' : ` · ${e.extra}`}
+                  </small>
                 </a>
               </li>
             ))}
@@ -155,11 +172,22 @@ export function Diff(props: { before: string; after: string }) {
   if (stat.add === 0 && stat.del === 0) return <p className="muted">没有改动</p>
   return (
     <>
-      <p className="muted"><span className="diff-add">+{stat.add}</span> <span className="diff-del">-{stat.del}</span></p>
+      <p className="muted">
+        <span className="diff-add">+{stat.add}</span> <span className="diff-del">-{stat.del}</span>
+      </p>
       <pre className="diff" aria-label="改动">
-        {fold(lines).map((l, i) => l.kind === 'skip'
-          ? <div key={i} className="diff-skip">⋯ 省略 {l.count} 行未改动</div>
-          : <div key={i} className={`diff-${l.kind}`}>{l.kind === 'add' ? '+ ' : l.kind === 'del' ? '- ' : '  '}{l.text}</div>)}
+        {fold(lines).map((l, i) =>
+          l.kind === 'skip' ? (
+            <div key={i} className="diff-skip">
+              ⋯ 省略 {l.count} 行未改动
+            </div>
+          ) : (
+            <div key={i} className={`diff-${l.kind}`}>
+              {l.kind === 'add' ? '+ ' : l.kind === 'del' ? '- ' : '  '}
+              {l.text}
+            </div>
+          ),
+        )}
       </pre>
     </>
   )
@@ -179,14 +207,20 @@ function History(props: { detail: ConventionDetail; onRestore: (content: string)
             <button className={v.version === shown ? 'link active' : 'link'} onClick={() => setShown(v.version)}>
               第 {v.version} 版
             </button>
-            <span className="muted"> · {ago(v.createdAt)} · {v.actor === 'platform' ? '平台' : v.actor}{v.note === '' ? '' : ` · ${v.note}`}</span>
+            <span className="muted">
+              {' '}
+              · {ago(v.createdAt)} · {v.actor === 'platform' ? '平台' : v.actor}
+              {v.note === '' ? '' : ` · ${v.note}`}
+            </span>
           </li>
         ))}
       </ol>
       {version && (
         <div className="conv-version">
           <div className="conv-version-head">
-            <b>第 {version.version} 版{previous ? `相对第 ${previous.version} 版的改动` : '（第一版）'}</b>
+            <b>
+              第 {version.version} 版{previous ? `相对第 ${previous.version} 版的改动` : '（第一版）'}
+            </b>
             {index > 0 && <button onClick={() => props.onRestore(version.content)}>把这一版放回编辑器</button>}
           </div>
           <Diff before={previous?.content ?? ''} after={version.content} />
@@ -212,15 +246,18 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; sa
 
   useEffect(() => {
     if (props.isNew || props.name === undefined) return
-    getConvention(props.kind, props.name).then(d => {
-      setDetail(d)
-      setContent(d.versions[0]!.content)
-      setLoadError(undefined)
-    }, e => setLoadError((e as Error).message))
+    getConvention(props.kind, props.name).then(
+      d => {
+        setDetail(d)
+        setContent(d.versions[0]!.content)
+        setLoadError(undefined)
+      },
+      e => setLoadError((e as Error).message),
+    )
   }, [props.kind, props.name, props.isNew, reload])
 
   // 新建工作流、模板、技能时名字取自内容（YAML 或开头的 ---）；文档的名字单独填写。
-  const target = props.isNew ? (spec.nameOf === undefined ? name.trim() : spec.nameOf(content)) : props.name ?? ''
+  const target = props.isNew ? (spec.nameOf === undefined ? name.trim() : spec.nameOf(content)) : (props.name ?? '')
   const current: ConventionRow | undefined = detail?.versions[0]
   const dirty = props.isNew || current === undefined || content !== current.content
 
@@ -269,7 +306,11 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; sa
     <div className="conv-main">
       <div className="conv-title">
         <h1>{props.isNew ? `新建${/^[A-Za-z]/.test(spec.label) ? ' ' : ''}${spec.label}` : props.name}</h1>
-        {current && <span className="muted">{spec.label} · 当前第 {current.version} 版 · {ago(current.createdAt)}更新</span>}
+        {current && (
+          <span className="muted">
+            {spec.label} · 当前第 {current.version} 版 · {ago(current.createdAt)}更新
+          </span>
+        )}
       </div>
       {props.isNew && spec.nameOf === undefined && (
         <label className="conv-field">
@@ -278,21 +319,22 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; sa
         </label>
       )}
       {props.isNew && spec.hint !== undefined && <p className="muted">{spec.hint}</p>}
-      {spec.warning !== undefined && <p className="notice warn" role="note">{spec.warning}</p>}
-      <textarea
-        className="conv-editor mono"
-        aria-label={`${spec.label}内容`}
-        value={content}
-        onChange={e => setContent(e.target.value)}
-        spellCheck={false}
-        rows={spec.rows}
-      />
+      {spec.warning !== undefined && (
+        <p className="notice warn" role="note">
+          {spec.warning}
+        </p>
+      )}
+      <textarea className="conv-editor mono" aria-label={`${spec.label}内容`} value={content} onChange={e => setContent(e.target.value)} spellCheck={false} rows={spec.rows} />
       <div className="conv-check" aria-live="polite">
         {checked === 'checking' && <span className="muted">检查中…</span>}
         {checked === 'ok' && <span className="ok-text">格式正确，可以保存</span>}
         {errors.length > 0 && (
           <ul className="conv-errors" role="alert" aria-label="错误">
-            {errors.map((e, i) => <li key={i}><code>{e.path}</code>：{e.message}</li>)}
+            {errors.map((e, i) => (
+              <li key={i}>
+                <code>{e.path}</code>：{e.message}
+              </li>
+            ))}
           </ul>
         )}
       </div>
@@ -302,7 +344,11 @@ function Editor(props: { kind: ConventionKind; name?: string; isNew: boolean; sa
           {busy ? '保存中…' : '保存为新版本'}
         </button>
       </div>
-      {message && <p className="notice" role="status">{message}</p>}
+      {message && (
+        <p className="notice" role="status">
+          {message}
+        </p>
+      )}
       {!props.isNew && current && dirty && (
         <details className="conv-pending" open>
           <summary>未保存的改动（相对第 {current.version} 版）</summary>
@@ -326,7 +372,13 @@ export function Conventions(props: { route: { kind?: ConventionKind; name?: stri
     return () => clearTimeout(t)
   }, [flash])
   useEffect(() => {
-    listConventions().then(l => { setList(l); setError(undefined) }, e => setError((e as Error).message))
+    listConventions().then(
+      l => {
+        setList(l)
+        setError(undefined)
+      },
+      e => setError((e as Error).message),
+    )
   }, [reload])
   const { kind, name, isNew } = props.route
   return (
@@ -338,10 +390,18 @@ export function Conventions(props: { route: { kind?: ConventionKind; name?: stri
           <h1>团队约定</h1>
           <p>团队的工作流、约定文档、Agent 模板和技能放在这里，所有成员发起的任务都按同一份约定执行。</p>
           <ul className="muted">
-            <li><b>工作流</b>：从规格到交付的阶段、每个阶段由哪个 agent 做、交付物和验收检查。</li>
-            <li><b>约定文档</b>：注入到任务里每个 agent 会话开头的团队规则。工作流用 <code>docs</code> 列出要注入哪些。</li>
-            <li><b>Agent 模板</b>：一个 agent 的模型、思考档位、提示词、可写范围、禁用的工具组、技能和 MCP 服务。工作流里写 <code>role: {'{ template: 名字 }'}</code> 复用它。</li>
-            <li><b>技能</b>：按需读取的做法说明（dsh 的 <code>SKILL.md</code> 格式）。Agent 模板用 <code>skills</code> 列出带哪些。</li>
+            <li>
+              <b>工作流</b>：从规格到交付的阶段、每个阶段由哪个 agent 做、交付物和验收检查。
+            </li>
+            <li>
+              <b>约定文档</b>：注入到任务里每个 agent 会话开头的团队规则。工作流用 <code>docs</code> 列出要注入哪些。
+            </li>
+            <li>
+              <b>Agent 模板</b>：一个 agent 的模型、思考档位、提示词、可写范围、禁用的工具组、技能和 MCP 服务。工作流里写 <code>role: {'{ template: 名字 }'}</code> 复用它。
+            </li>
+            <li>
+              <b>技能</b>：按需读取的做法说明（dsh 的 <code>SKILL.md</code> 格式）。Agent 模板用 <code>skills</code> 列出带哪些。
+            </li>
             <li>每次保存都是一个新版本。新任务用最新版本，并记录用了哪一版；进行中的任务不受影响。</li>
           </ul>
         </div>

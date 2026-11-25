@@ -9,7 +9,11 @@ const DIR = join(import.meta.dirname, 'templates')
 const AGENTS_DIR = join(import.meta.dirname, 'agents')
 const SKILLS_DIR = join(import.meta.dirname, 'skills')
 
-const namesIn = (dir: string, ext: string) => readdirSync(dir).filter(f => extname(f) === ext).map(f => basename(f, ext)).sort()
+const namesIn = (dir: string, ext: string) =>
+  readdirSync(dir)
+    .filter(f => extname(f) === ext)
+    .map(f => basename(f, ext))
+    .sort()
 
 export const builtinAgentTemplates = (): string[] => namesIn(AGENTS_DIR, '.yaml')
 export const builtinSkills = (): string[] => namesIn(SKILLS_DIR, '.md')
@@ -41,7 +45,10 @@ export const checkBuiltinSkills = (): void => {
 }
 
 export const builtinTemplates = (): string[] =>
-  readdirSync(DIR).filter(f => extname(f) === '.yaml').map(f => basename(f, '.yaml')).sort()
+  readdirSync(DIR)
+    .filter(f => extname(f) === '.yaml')
+    .map(f => basename(f, '.yaml'))
+    .sort()
 
 /** 内置模板名，或一个 YAML 文件路径。校验失败时抛出带位置的中文错误。 */
 export const loadWorkflow = (nameOrPath: string, lookup: TemplateLookup = builtinLookup()): { workflow: Workflow; source: string } => {

@@ -77,13 +77,18 @@ const api = (req: import('node:http').IncomingMessage, res: import('node:http').
       control.hideNextList = false
       return reply(200, [])
     }
-    return reply(200, pulls.filter(p => (head === null || `${owner}:${p.head}` === head) && (base === null || p.base === base) && (state === 'all' || p.state === state))
-      .map(p => ({ number: p.number, html_url: html(p.number), merged_at: p.merged_at, head: { sha: p.sha } })))
+    return reply(
+      200,
+      pulls
+        .filter(p => (head === null || `${owner}:${p.head}` === head) && (base === null || p.base === base) && (state === 'all' || p.state === state))
+        .map(p => ({ number: p.number, html_url: html(p.number), merged_at: p.merged_at, head: { sha: p.sha } })),
+    )
   }
   if (control.failPost !== 0) return reply(control.failPost, { message: 'Resource not accessible by integration' })
   const p = JSON.parse(body) as { title: string; head: string; base: string; body: string }
   // 真实 GitHub：同一个分支已经有打开的 PR 时返回 422 "already exists"。
-  if (pulls.some(x => x.head === p.head && x.state === 'open')) return reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: `A pull request already exists for ${owner}:${p.head}.` }] })
+  if (pulls.some(x => x.head === p.head && x.state === 'open'))
+    return reply(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: `A pull request already exists for ${owner}:${p.head}.` }] })
   let ahead = 0
   try {
     ahead = Number(execFileSync('git', ['--git-dir', gitDir, 'rev-list', '--count', `refs/heads/${p.base}..refs/heads/${p.head}`], { encoding: 'utf8' }).trim())
@@ -140,7 +145,22 @@ const server = createServer((req, res) => {
     conversions.delete(decodeURIComponent(conv[1]!))
     res.writeHead(c === undefined ? 404 : 201, { 'content-type': 'application/json' })
     // 真实 GitHub 还返回 client_secret、webhook_secret：平台不该存它们。
-    return void res.end(JSON.stringify(c === undefined ? { message: 'Not Found' } : { id: c.id, slug: c.slug, name: c.name, pem: c.pem, html_url: `http://127.0.0.1:${port}/apps/${c.slug}`, client_id: 'Iv1.test', client_secret: 'client-secret-should-not-be-stored', webhook_secret: null }))
+    return void res.end(
+      JSON.stringify(
+        c === undefined
+          ? { message: 'Not Found' }
+          : {
+              id: c.id,
+              slug: c.slug,
+              name: c.name,
+              pem: c.pem,
+              html_url: `http://127.0.0.1:${port}/apps/${c.slug}`,
+              client_id: 'Iv1.test',
+              client_secret: 'client-secret-should-not-be-stored',
+              webhook_secret: null,
+            },
+      ),
+    )
   }
   // GitHub App：查安装、换安装令牌。
   const inst = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(req.url ?? '')
@@ -150,7 +170,10 @@ const server = createServer((req, res) => {
     req.on('data', (c: Buffer) => chunks.push(c))
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8')
-      appendFileSync(record, `${JSON.stringify({ path: req.url, method: req.method, auth: req.headers.authorization === undefined ? null : 'jwt', ...(body === '' ? {} : { body: JSON.parse(body) }) })}\n`)
+      appendFileSync(
+        record,
+        `${JSON.stringify({ path: req.url, method: req.method, auth: req.headers.authorization === undefined ? null : 'jwt', ...(body === '' ? {} : { body: JSON.parse(body) }) })}\n`,
+      )
       const reply = (status: number, value: unknown) => {
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(JSON.stringify(value))
@@ -195,9 +218,17 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const child = spawn('git', ['http-backend'], {
     env: {
-      PATH: process.env.PATH, GIT_PROJECT_ROOT: root, GIT_HTTP_EXPORT_ALL: '1', PATH_INFO: decodeURIComponent(url.pathname), QUERY_STRING: url.search.slice(1),
-      REQUEST_METHOD: req.method ?? 'GET', CONTENT_TYPE: req.headers['content-type'] ?? '', HTTP_CONTENT_ENCODING: req.headers['content-encoding'] ?? '',
-      REMOTE_USER: 'eos-test', REMOTE_ADDR: '127.0.0.1', GIT_HTTP_RECEIVE_PACK: 'true',
+      PATH: process.env.PATH,
+      GIT_PROJECT_ROOT: root,
+      GIT_HTTP_EXPORT_ALL: '1',
+      PATH_INFO: decodeURIComponent(url.pathname),
+      QUERY_STRING: url.search.slice(1),
+      REQUEST_METHOD: req.method ?? 'GET',
+      CONTENT_TYPE: req.headers['content-type'] ?? '',
+      HTTP_CONTENT_ENCODING: req.headers['content-encoding'] ?? '',
+      REMOTE_USER: 'eos-test',
+      REMOTE_ADDR: '127.0.0.1',
+      GIT_HTTP_RECEIVE_PACK: 'true',
     },
   })
   req.pipe(child.stdin)

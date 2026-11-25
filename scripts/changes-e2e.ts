@@ -17,7 +17,8 @@ const REPO = join(OUT, 'repo')
 const DATA = join(OUT, 'data')
 const port = Number(process.argv[2] ?? 4331)
 const base = `http://127.0.0.1:${port}`
-const REQUEST = '在 src/clamp.js 实现并导出 clamp(value, min, max)：把数字限制在 [min, max] 之间；min 大于 max 时抛 RangeError。用 node:test 写测试放在 test/ 目录，npm test 必须通过。README.md 不用改。'
+const REQUEST =
+  '在 src/clamp.js 实现并导出 clamp(value, min, max)：把数字限制在 [min, max] 之间；min 大于 max 时抛 RangeError。用 node:test 写测试放在 test/ 目录，npm test 必须通过。README.md 不用改。'
 
 const note = (s: string) => {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
@@ -30,12 +31,21 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
 writeFileSync(join(REPO, 'README.md'), '# demo\n')
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const startServer = async (): Promise<ChildProcess> => {
   const out = openSync(join(OUT, 'server.log'), 'a')
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)],
-    { cwd: ROOT, detached: true, stdio: ['ignore', out, out], env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' } })
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  })
   for (let i = 0; i < 60; i++) {
     try {
       if ((await fetch(`${base}/api/tasks`)).ok) return child
@@ -55,7 +65,9 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
 const errors: string[] = []
 page.on('pageerror', (e: Error) => errors.push(e.message))
-page.on('console', (m: any) => { if (m.type() === 'error') errors.push(m.text()) })
+page.on('console', (m: any) => {
+  if (m.type() === 'error') errors.push(m.text())
+})
 
 try {
   await page.goto(`${base}/#/new`)
@@ -73,10 +85,10 @@ try {
   const until = Date.now() + 40 * 60_000
   while (Date.now() < until) {
     const form = page.getByRole('form', { name: '回答提问' })
-    if (await form.count() > 0) {
+    if ((await form.count()) > 0) {
       const q = await form.locator('.question-text').innerText()
       const option = form.locator('.options button').first()
-      if (await option.count() > 0) {
+      if ((await option.count()) > 0) {
         answers.push(`${q} → ${await option.innerText()}`)
         await option.click()
       } else {
@@ -99,8 +111,11 @@ try {
   const changes = page.getByRole('region', { name: '改动' })
   await changes.locator('.change-file').first().waitFor({ timeout: 30_000 })
   const where = Object.fromEntries(await page.locator('.where dt').evaluateAll((dts: Element[]) => dts.map(dt => [dt.textContent, dt.nextElementSibling?.textContent])))
-  const rows: { status: string; path: string; count: string }[] = await changes.locator('.change-file').evaluateAll((bs: Element[]) =>
-    bs.map(b => ({ status: b.querySelector('.change-status')!.textContent!, path: b.querySelector('.change-path')!.textContent!, count: b.querySelector('.change-count')!.textContent! })))
+  const rows: { status: string; path: string; count: string }[] = await changes
+    .locator('.change-file')
+    .evaluateAll((bs: Element[]) =>
+      bs.map(b => ({ status: b.querySelector('.change-status')!.textContent!, path: b.querySelector('.change-path')!.textContent!, count: b.querySelector('.change-count')!.textContent! })),
+    )
   // 展开第一个源码文件的 diff（没有就展开第一个）。
   const target = rows.findIndex(r => r.path.startsWith('src/'))
   await changes.locator('.change-file').nth(Math.max(0, target)).click()
@@ -118,21 +133,43 @@ try {
 
   // 和 git 逐个比对：基线到任务分支的 numstat。
   const detail = (await (await fetch(`${base}/api/tasks/${id}`)).json()) as { repo: string; branch: string; worktree: string; baseSha: string }
-  const numstat = execFileSync('git', ['diff', '--numstat', detail.baseSha, detail.branch], { cwd: REPO, encoding: 'utf8' }).trim().split('\n').filter(l => l !== '')
-    .map(l => { const [a, d, p] = l.split('\t'); return { path: p!, count: `+${a} -${d}` } })
+  const numstat = execFileSync('git', ['diff', '--numstat', detail.baseSha, detail.branch], { cwd: REPO, encoding: 'utf8' })
+    .trim()
+    .split('\n')
+    .filter(l => l !== '')
+    .map(l => {
+      const [a, d, p] = l.split('\t')
+      return { path: p!, count: `+${a} -${d}` }
+    })
   const shown = rows.map(r => ({ path: r.path, count: r.count.replace(/\s+/g, ' ').trim() }))
   const gitFile = execFileSync('git', ['diff', detail.baseSha, detail.branch, '--', rows[Math.max(0, target)]!.path], { cwd: REPO, encoding: 'utf8' })
   const report = {
-    commit, task: id, status, answers,
+    commit,
+    task: id,
+    status,
+    answers,
     checks: {
-      '任务完成': status === 'done',
-      '页面显示仓库、分支、worktree、基线': where['仓库'] === detail.repo && where['分支'] === detail.branch && where['工作目录（worktree）'] === detail.worktree && where['基线提交'] === detail.baseSha.slice(0, 12),
-      '改动区的文件和增删行数与 git numstat 一致': JSON.stringify([...shown].sort((a, b) => a.path.localeCompare(b.path))) === JSON.stringify([...numstat].sort((a, b) => a.path.localeCompare(b.path))),
-      '展开的 diff 和 git diff 的 @@ 段逐行、按顺序一致': JSON.stringify(diffText.split('\n').map((l: string) => l.trimEnd())) === JSON.stringify(gitFile.slice(gitFile.search(/^@@/m)).replace(/\n+$/, '').split('\n').map(l => l.trimEnd())),
+      任务完成: status === 'done',
+      '页面显示仓库、分支、worktree、基线':
+        where['仓库'] === detail.repo && where['分支'] === detail.branch && where['工作目录（worktree）'] === detail.worktree && where['基线提交'] === detail.baseSha.slice(0, 12),
+      '改动区的文件和增删行数与 git numstat 一致':
+        JSON.stringify([...shown].sort((a, b) => a.path.localeCompare(b.path))) === JSON.stringify([...numstat].sort((a, b) => a.path.localeCompare(b.path))),
+      '展开的 diff 和 git diff 的 @@ 段逐行、按顺序一致':
+        JSON.stringify(diffText.split('\n').map((l: string) => l.trimEnd())) ===
+        JSON.stringify(
+          gitFile
+            .slice(gitFile.search(/^@@/m))
+            .replace(/\n+$/, '')
+            .split('\n')
+            .map(l => l.trimEnd()),
+        ),
       '390 宽没有横向滚动': overflow <= 0,
-      '页面没有报错': errors.length === 0,
+      页面没有报错: errors.length === 0,
     },
-    where, rows, numstat, errors,
+    where,
+    rows,
+    numstat,
+    errors,
   }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   const passed = Object.values(report.checks).filter(Boolean).length

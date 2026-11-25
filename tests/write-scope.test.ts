@@ -30,7 +30,12 @@ const write = (dir: string, path: string, content: string) => {
 const read = (dir: string, path: string) => readFileSync(join(dir, path), 'utf8')
 /** 最后一次提交里有改动的路径。 */
 const committed = (git: (...a: string[]) => string) =>
-  git('show', '--name-status', '--format=', 'HEAD').trim().split('\n').filter(l => l !== '').map(l => l.split('\t').slice(1).join(' → ')).sort()
+  git('show', '--name-status', '--format=', 'HEAD')
+    .trim()
+    .split('\n')
+    .filter(l => l !== '')
+    .map(l => l.split('\t').slice(1).join(' → '))
+    .sort()
 
 test('changes 解析出改过、删掉、改名和新加（未跟踪）的路径，包括带空格的和嵌套目录里的', () => {
   const { dir, git } = repo()
@@ -42,9 +47,12 @@ test('changes 解析出改过、删掉、改名和新加（未跟踪）的路径
   write(dir, 'out/new space.txt', 'y\n')
   writeFileSync(join(dir, 'a dir/with space.txt'), 's\nmod\n')
   git('add', 'src/new.ts')
-  assert.deepEqual(changes(dir).map(c => (c.from === undefined ? c.path : `${c.from} → ${c.path}`)).sort(), [
-    'README.md → LISEZMOI.md', 'a dir/with space.txt', 'docs/design.md', 'out/deep/u.txt', 'out/new space.txt', 'src/a.ts', 'src/new.ts',
-  ])
+  assert.deepEqual(
+    changes(dir)
+      .map(c => (c.from === undefined ? c.path : `${c.from} → ${c.path}`))
+      .sort(),
+    ['README.md → LISEZMOI.md', 'a dir/with space.txt', 'docs/design.md', 'out/deep/u.txt', 'out/new space.txt', 'src/a.ts', 'src/new.ts'],
+  )
 })
 
 test('撤销越界改动：改过的还原、删掉的恢复、新加的删除、改名的两边都复原', () => {
@@ -318,7 +326,10 @@ test('自己忽略自己的 .gitignore 藏不住越界文件：.gitignore 和它
   const r = commitInScope(wt, ['src/**'], 'm', main)
   // 整个新目录被藏起来时按目录撤销（docs/），其余按文件。
   for (const p of ['.gitignore', '.npmrc', 'evil.cjs', 'docs/x/.gitignore', 'docs/x/payload.sh']) {
-    assert.ok(r.reverted.some(x => x === p || (x.endsWith('/') && p.startsWith(x))), `${p} reverted (got ${r.reverted.join(', ')})`)
+    assert.ok(
+      r.reverted.some(x => x === p || (x.endsWith('/') && p.startsWith(x))),
+      `${p} reverted (got ${r.reverted.join(', ')})`,
+    )
     assert.equal(existsSync(join(wt, p)), false, `${p} removed`)
   }
   assert.equal(g(wt, 'show', 'HEAD:src/a.ts'), 'mine\n')

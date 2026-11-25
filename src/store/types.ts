@@ -63,6 +63,4 @@ export type ProposalInput = {
 export type ProposalRow = ProposalInput & { id: number; createdAt: number; status: ProposalStatus; events: ProposalEvent[] }
 
 export type Decision =
-  | { ok: true; row: ProposalRow }
-  | { ok: false; reason: 'missing' | 'not_pending' | 'stale'; row?: ProposalRow }
-  | { ok: false; reason: 'invalid'; errors: string[]; row: ProposalRow }
+  { ok: true; row: ProposalRow } | { ok: false; reason: 'missing' | 'not_pending' | 'stale'; row?: ProposalRow } | { ok: false; reason: 'invalid'; errors: string[]; row: ProposalRow }

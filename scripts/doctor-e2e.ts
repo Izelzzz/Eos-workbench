@@ -19,17 +19,30 @@ if (node24 === undefined) throw new Error('用法：node --import tsx scripts/do
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 writeFileSync(join(OUT, 'a-file'), '')
 
 /** 用指定的 node 跑 eos 命令。env 只给 PATH、代理和显式传入的变量，不继承别的。 */
 const eos = (nodeBin: string, args: string[], env: Record<string, string>) => {
   const r = spawnSync(nodeBin, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], {
-    cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 30,
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 1 << 30,
     env: { PATH: process.env.PATH!, HTTPS_PROXY: process.env.HTTPS_PROXY ?? '', NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS ?? '', NODE_USE_ENV_PROXY: '1', ...env },
   })
-  const out = `${r.stdout}${r.stderr}`.split('\n').filter(l => !/ExperimentalWarning|trace-warnings/.test(l)).join('\n')
-  appendFileSync(LOG, `\n$ [node ${spawnSync(nodeBin, ['-v'], { encoding: 'utf8' }).stdout.trim()}] eos ${args.join(' ')}${env.DEEPSEEK_API_KEY ? '（设置了 DEEPSEEK_API_KEY）' : ''}\n退出码 ${r.status}\n${out}\n`)
+  const out = `${r.stdout}${r.stderr}`
+    .split('\n')
+    .filter(l => !/ExperimentalWarning|trace-warnings/.test(l))
+    .join('\n')
+  appendFileSync(
+    LOG,
+    `\n$ [node ${spawnSync(nodeBin, ['-v'], { encoding: 'utf8' }).stdout.trim()}] eos ${args.join(' ')}${env.DEEPSEEK_API_KEY ? '（设置了 DEEPSEEK_API_KEY）' : ''}\n退出码 ${r.status}\n${out}\n`,
+  )
   return { status: r.status, out }
 }
 
@@ -44,13 +57,14 @@ const noKeyRun = eos(node24, ['run', '--repo', REPO, '--data', data('nokey'), '�
 const noKeyWeb = eos(node24, ['web', '--port', '4339', '--data', data('nokey')], {})
 const badDir = eos(node24, ['doctor', '--data', join(OUT, 'a-file', 'data')], KEY)
 const okDoctor = eos(node24, ['doctor', '--data', data('ok')], KEY)
-const okRun = eos(node24, ['run', '--repo', REPO, '--no-wait', '--data', data('ok'),
-  TASK], KEY)
+const okRun = eos(node24, ['run', '--repo', REPO, '--no-wait', '--data', data('ok'), TASK], KEY)
 
 const report = {
-  commit, node: { old: process.version, required: spawnSync(node24, ['-v'], { encoding: 'utf8' }).stdout.trim() },
+  commit,
+  node: { old: process.version, required: spawnSync(node24, ['-v'], { encoding: 'utf8' }).stdout.trim() },
   checks: {
-    'Node 低于要求：doctor 报 ⚠ Node、给出修法、退出码 0': oldDoctor.status === 0 && /⚠ Node：.*低于 Eos 要求的 >=24\.9\.0[\s\S]*怎么修：安装 Node 24\.9\.0/.test(oldDoctor.out) && !oldDoctor.out.includes('✗'),
+    'Node 低于要求：doctor 报 ⚠ Node、给出修法、退出码 0':
+      oldDoctor.status === 0 && /⚠ Node：.*低于 Eos 要求的 >=24\.9\.0[\s\S]*怎么修：安装 Node 24\.9\.0/.test(oldDoctor.out) && !oldDoctor.out.includes('✗'),
     'Node 低于要求：run 先提示，再照常用真实模型把任务跑完': oldRun.status === 0 && /启动前检查有提示（照常启动）：\n⚠ Node/.test(oldRun.out) && /任务 t\w+：已完成/.test(oldRun.out),
     '没有 key：run 不启动，说明怎么设置': noKeyRun.status === 1 && /✗ DeepSeek API key：没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/.test(noKeyRun.out),
     '没有 key：web 不启动': noKeyWeb.status === 1 && /启动前检查没有通过/.test(noKeyWeb.out),

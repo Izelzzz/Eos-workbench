@@ -24,13 +24,22 @@ const DATA = join(OUT, 'data')
 const port = Number(process.argv[2] ?? 4335)
 const base = `http://127.0.0.1:${port}`
 const RULE = '\n  - 团队规则（必须执行）：每个导出的函数都要有 JSDoc 注释，并且包含 @example 用法示例；缺少的一律给出 changes（severity: major），在 issues 里写明哪个函数缺。\n'
-const REQUESTS = [['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'], ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'], ['avg', 'avg(numbers)', '返回平均值，空数组返回 0']]
+const REQUESTS = [
+  ['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'],
+  ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'],
+  ['avg', 'avg(numbers)', '返回平均值，空数组返回 0'],
+]
 const env = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
 
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -39,7 +48,11 @@ const post = async (path: string, body: unknown) => (await fetch(base + path, { 
 const round = async (): Promise<string[]> => {
   const ids: string[] = []
   for (const [file, fn, spec] of REQUESTS) {
-    const r = await post('/api/tasks', { repo: REPO, workflow: 'standard', request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。` }) as { ok: boolean; id?: string; error?: string }
+    const r = (await post('/api/tasks', {
+      repo: REPO,
+      workflow: 'standard',
+      request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。`,
+    })) as { ok: boolean; id?: string; error?: string }
     if (!r.ok) throw new Error(`发起任务失败：${r.error}`)
     ids.push(r.id!)
   }
@@ -58,22 +71,33 @@ const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.t
 const checks: Record<string, boolean> = {}
 const facts: Record<string, unknown> = {}
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+  for (let i = 0; i < 60; i++) {
+    try {
+      await fetch(base + '/api/tasks')
+      break
+    } catch {
+      await sleep(500)
+    }
+  }
   const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
-  const saved = await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' }) as { ok: boolean; version?: number }
+  const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' })) as {
+    ok: boolean
+    version?: number
+  }
   if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
 
   const before = await round()
   facts.before = before
-  const gen = await post('/api/improve/generate', { workflow: 'standard', tasks: before }) as GenerateResponse
+  const gen = (await post('/api/improve/generate', { workflow: 'standard', tasks: before })) as GenerateResponse
   if (!gen.ok) throw new Error(`生成提案失败：${gen.error}`)
   facts.generated = gen.created.map(p => ({ id: p.id, target: p.target, rationale: p.rationale, evidence: p.evidence }))
   facts.refused = gen.refused
-  const chosen = gen.created.find(p => p.target.kind === 'template' && p.target.name === 'developer' && p.content.includes('@example'))
-    ?? gen.created.find(p => p.target.kind === 'doc' && p.content.includes('@example'))
+  const chosen =
+    gen.created.find(p => p.target.kind === 'template' && p.target.name === 'developer' && p.content.includes('@example')) ??
+    gen.created.find(p => p.target.kind === 'doc' && p.content.includes('@example'))
   checks['生成了把 @example 规则写进 developer 模板或约定文档的提案'] = chosen !== undefined
   if (chosen === undefined) throw new Error('没有可批准的提案')
-  const approved = await post(`/api/improve/proposals/${chosen.id}/approve`, { note: 'E2E：完整流程' }) as { ok: boolean; proposal?: { events: { version?: number }[] }; error?: string }
+  const approved = (await post(`/api/improve/proposals/${chosen.id}/approve`, { note: 'E2E：完整流程' })) as { ok: boolean; proposal?: { events: { version?: number }[] }; error?: string }
   const version = approved.proposal?.events.at(-1)?.version
   checks['批准成功，生成了新版本'] = approved.ok && version === chosen.baseVersion + 1
   facts.approved = { id: chosen.id, target: chosen.target, version }
@@ -83,7 +107,10 @@ try {
 
   // 第二轮任务用的是新版本（直接读数据库里的任务元数据）
   const db = new DatabaseSync(join(DATA, 'eos.db'), { readOnly: true })
-  const meta = (id: string) => JSON.parse(String((db.prepare('SELECT meta FROM tasks WHERE id = ?').get(id) as { meta: string }).meta)) as { conventions?: { templates?: { name: string; version: number }[]; docs?: { name: string; version: number }[] } }
+  const meta = (id: string) =>
+    JSON.parse(String((db.prepare('SELECT meta FROM tasks WHERE id = ?').get(id) as { meta: string }).meta)) as {
+      conventions?: { templates?: { name: string; version: number }[]; docs?: { name: string; version: number }[] }
+    }
   const usedVersion = (id: string) => (chosen.target.kind === 'template' ? meta(id).conventions?.templates : meta(id).conventions?.docs)?.find(x => x.name === chosen.target.name)?.version
   checks['改进前的任务用旧版本，改进后的任务用新版本'] = before.every(id => usedVersion(id) === chosen.baseVersion) && after.every(id => usedVersion(id) === version)
   checks['6 个任务都完成'] = [...before, ...after].every(id => (db.prepare('SELECT status FROM tasks WHERE id = ?').get(id) as { status: string }).status === 'done')
@@ -95,36 +122,53 @@ try {
   // 评审轮次按「回复里有 verdict 字段」数，不用 parseVerdict，作为独立的口径。
   const raw = (ids: string[]) => {
     const per = ids.map(id => {
-      const log = (JSON.parse(String((db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string }).state)) as { log: { type: string; purpose?: string; results?: { passed: boolean }[] }[] }).log
-      return { reviews: log.filter(e => e.type === 'call' && e.purpose === 'critique' && /"verdict"\s*:\s*"(pass|changes)"/.test(String((e as { reply?: string }).reply))).length, checkFailures: log.reduce((n, e) => n + (e.type === 'check' ? e.results!.filter(r => !r.passed).length : 0), 0) }
+      const log = (
+        JSON.parse(String((db.prepare('SELECT state FROM tasks WHERE id = ?').get(id) as { state: string }).state)) as { log: { type: string; purpose?: string; results?: { passed: boolean }[] }[] }
+      ).log
+      return {
+        reviews: log.filter(e => e.type === 'call' && e.purpose === 'critique' && /"verdict"\s*:\s*"(pass|changes)"/.test(String((e as { reply?: string }).reply))).length,
+        checkFailures: log.reduce((n, e) => n + (e.type === 'check' ? e.results!.filter(r => !r.passed).length : 0), 0),
+      }
     })
     return { reviews: per.reduce((s, x) => s + x.reviews, 0) / ids.length, checkFailures: per.reduce((s, x) => s + x.checkFailures, 0) / ids.length, per }
   }
   const rb = raw(before)
   const ra = raw(after)
   db.close()
-  checks['两组的评审轮次和检查失败等于从数据库独立复算的值'] = c !== undefined && Math.abs(c.before.mean.reviews - rb.reviews) < 1e-9 && Math.abs(c.after.mean.reviews - ra.reviews) < 1e-9
-    && Math.abs(c.before.mean.checkFailures - rb.checkFailures) < 1e-9 && Math.abs(c.after.mean.checkFailures - ra.checkFailures) < 1e-9
+  checks['两组的评审轮次和检查失败等于从数据库独立复算的值'] =
+    c !== undefined &&
+    Math.abs(c.before.mean.reviews - rb.reviews) < 1e-9 &&
+    Math.abs(c.after.mean.reviews - ra.reviews) < 1e-9 &&
+    Math.abs(c.before.mean.checkFailures - rb.checkFailures) < 1e-9 &&
+    Math.abs(c.after.mean.checkFailures - ra.checkFailures) < 1e-9
   facts.raw = { before: rb, after: ra }
-  facts.comparison = c === undefined ? undefined : { version: c.version, enough: c.enough, before: { tasks: c.before.tasks, done: c.before.done, mean: c.before.mean }, after: { tasks: c.after.tasks, done: c.after.done, mean: c.after.mean } }
+  facts.comparison =
+    c === undefined
+      ? undefined
+      : { version: c.version, enough: c.enough, before: { tasks: c.before.tasks, done: c.before.done, mean: c.before.mean }, after: { tasks: c.after.tasks, done: c.after.done, mean: c.after.mean } }
 
   // 页面
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
   const errors: string[] = []
-  page.on('console', (m: any) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()) })
+  page.on('console', (m: any) => {
+    if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text())
+  })
   page.on('pageerror', (e: Error) => errors.push(e.message))
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   await page.goto(`${base}/#/insights`)
   await page.waitForSelector('.compare-item table')
   const insightsRows = await page.locator('.compare-item table tbody tr').count()
   facts.insightsText = await page.locator('.compare-item').first().innerText()
-  await page.locator('.compare-item').first().screenshot({ path: join(OUT, 'insights-compare.png') })
+  await page
+    .locator('.compare-item')
+    .first()
+    .screenshot({ path: join(OUT, 'insights-compare.png') })
   await page.goto(`${base}/#/improve/${chosen.id}`)
   await page.waitForSelector('.compare table')
   await page.screenshot({ path: join(OUT, 'proposal-compare.png'), fullPage: true })
-  checks['统计页和提案页都显示对比区（8 行：任务数、完成率、6 项指标），样本足够时有变化列、没有样本不足的提示'] = insightsRows === 8 && (await page.locator('.compare tbody tr').count()) === 8
-    && (await page.locator('.compare .notice.warn').count()) === 0 && !/样本不足/.test(String(facts.insightsText))
+  checks['统计页和提案页都显示对比区（8 行：任务数、完成率、6 项指标），样本足够时有变化列、没有样本不足的提示'] =
+    insightsRows === 8 && (await page.locator('.compare tbody tr').count()) === 8 && (await page.locator('.compare .notice.warn').count()) === 0 && !/样本不足/.test(String(facts.insightsText))
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload()
   await page.waitForSelector('.compare table')
@@ -147,5 +191,8 @@ const dirty = execFileSync('git', ['status', '--porcelain', '--', 'src', 'web/sr
 writeFileSync(join(OUT, 'report.json'), JSON.stringify({ commit, dirty, checks, facts }, null, 2))
 for (const [k, v] of Object.entries(checks)) console.log(`${v ? '✓' : '✗'} ${k}`)
 const cmp = facts.comparison as { before: { mean: Record<string, number> }; after: { mean: Record<string, number> } } | undefined
-if (cmp !== undefined) console.log(`评审轮次 ${cmp.before.mean.reviews!.toFixed(2)} → ${cmp.after.mean.reviews!.toFixed(2)}，证据条数 ${cmp.before.mean.signals!.toFixed(2)} → ${cmp.after.mean.signals!.toFixed(2)}，token ${Math.round(cmp.before.mean.tokens!)} → ${Math.round(cmp.after.mean.tokens!)}`)
+if (cmp !== undefined)
+  console.log(
+    `评审轮次 ${cmp.before.mean.reviews!.toFixed(2)} → ${cmp.after.mean.reviews!.toFixed(2)}，证据条数 ${cmp.before.mean.signals!.toFixed(2)} → ${cmp.after.mean.signals!.toFixed(2)}，token ${Math.round(cmp.before.mean.tokens!)} → ${Math.round(cmp.after.mean.tokens!)}`,
+  )
 process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1

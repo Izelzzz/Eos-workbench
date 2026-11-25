@@ -81,9 +81,22 @@ export type Question = {
 export type TaskStatus = 'running' | 'waiting_user' | 'done' | 'failed' | 'aborted'
 
 export type Entry =
-  | { type: 'call'; at: number; call: CallId; node: NodeId; role: RoleId; purpose: Purpose; round?: number; prompt: string; reply: string; usage: Usage; ms: number; model?: string;
+  | {
+      type: 'call'
+      at: number
+      call: CallId
+      node: NodeId
+      role: RoleId
+      purpose: Purpose
+      round?: number
+      prompt: string
+      reply: string
+      usage: Usage
+      ms: number
+      model?: string
       /** 这次调用之后被平台撤销的越界改动（超出角色 writePaths 的路径），没有就不写。 */
-      reverted?: string[] }
+      reverted?: string[]
+    }
   | { type: 'check'; at: number; call: CallId; node: NodeId; round?: number; results: CheckResult[]; ms: number }
   | { type: 'question'; at: number; question: Question }
   | { type: 'answer'; at: number; questionId: string; text: string }
@@ -133,6 +146,9 @@ export type Step = { task: Task; accepted: boolean; reason?: string }
 
 export const zeroUsage = (): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
 export const addUsage = (a: Usage, b: Usage): Usage => ({
-  input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite,
+  input: a.input + b.input,
+  output: a.output + b.output,
+  cacheRead: a.cacheRead + b.cacheRead,
+  cacheWrite: a.cacheWrite + b.cacheWrite,
 })
 export const isTerminal = (t: Task): boolean => t.status === 'done' || t.status === 'aborted'

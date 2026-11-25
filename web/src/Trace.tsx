@@ -80,9 +80,7 @@ export function TraceTree(props: {
             <span className="num">{s.start > 0 && s.kind !== 'question' && s.kind !== 'answer' && s.kind !== 'note' ? duration(until - s.start) : ''}</span>
             <span className="num">{tokens(totalTokens(s))}</span>
             <span className="lane">
-              {s.start > 0 && (
-                <span className={`bar kind-${s.kind} ${statusClass(s.status)}${s.end === undefined ? ' live' : ''}`} style={{ left: `${left}%`, width: `${width}%` }} />
-              )}
+              {s.start > 0 && <span className={`bar kind-${s.kind} ${statusClass(s.status)}${s.end === undefined ? ' live' : ''}`} style={{ left: `${left}%`, width: `${width}%` }} />}
             </span>
           </div>
         )

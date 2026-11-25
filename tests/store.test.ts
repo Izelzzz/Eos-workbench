@@ -25,9 +25,21 @@ test('dispatch persists the reduced state and an append-only event log, includin
   assert.equal(task.status, 'done')
   assert.equal(task.outputs.plan, '方案')
   const events = store.events('t1')
-  assert.deepEqual(events.map(e => [e.seq, e.event.kind, e.accepted]), [[1, 'created', true], [2, 'replied', true], [3, 'replied', false], [4, 'replied', true], [5, 'replied', true]])
+  assert.deepEqual(
+    events.map(e => [e.seq, e.event.kind, e.accepted]),
+    [
+      [1, 'created', true],
+      [2, 'replied', true],
+      [3, 'replied', false],
+      [4, 'replied', true],
+      [5, 'replied', true],
+    ],
+  )
   assert.equal(events[2]?.reason, '不是当前这次调用的结果')
-  assert.deepEqual(store.list().map(s => [s.id, s.status, s.workflow]), [['t1', 'done', 't']])
+  assert.deepEqual(
+    store.list().map(s => [s.id, s.status, s.workflow]),
+    [['t1', 'done', 't']],
+  )
   assert.deepEqual(store.meta('t1'), meta)
 })
 
@@ -41,7 +53,10 @@ test('the stored state equals a replay of the accepted events', () => {
   store.dispatch('t2', { kind: 'answered', questionId: 'q1', text: '回答' }, 4, 'cli')
   store.close()
   const reopened = new Store(path)
-  const replayed = reopened.events('t2').slice(1).filter(e => e.accepted)
+  const replayed = reopened
+    .events('t2')
+    .slice(1)
+    .filter(e => e.accepted)
     .reduce((t, e) => reduce(t, e.event as Event, e.at).task, created)
   assert.deepEqual(reopened.get('t2'), JSON.parse(JSON.stringify(replayed)), 'state is stored as JSON')
 })
@@ -75,8 +90,22 @@ test('待通知的越界撤销存得下、读得回，重启后仍然发给同�
 
 test('a task saved before conventions and checks existed loads with defaults', () => {
   const store = new Store(':memory:')
-  const old = { id: 'old', request: 'r', workflow: { name: 'w', roles: { dev: { id: 'dev', model: 'm', prompt: 'p', write: 'worktree' }, rev: { id: 'rev', model: 'm', prompt: 'p', write: 'none' } }, nodes: [{ kind: 'agent', id: 'build', role: 'dev', task: 't', inputs: [] }] }, status: 'running', cursor: 0, outputs: {}, sessions: {},
-    dialog: { node: 'review', round: 2, escalated: false, phase: 'critique', formatRetries: 0 }, log: [], nextCall: 3 }
+  const old = {
+    id: 'old',
+    request: 'r',
+    workflow: {
+      name: 'w',
+      roles: { dev: { id: 'dev', model: 'm', prompt: 'p', write: 'worktree' }, rev: { id: 'rev', model: 'm', prompt: 'p', write: 'none' } },
+      nodes: [{ kind: 'agent', id: 'build', role: 'dev', task: 't', inputs: [] }],
+    },
+    status: 'running',
+    cursor: 0,
+    outputs: {},
+    sessions: {},
+    dialog: { node: 'review', round: 2, escalated: false, phase: 'critique', formatRetries: 0 },
+    log: [],
+    nextCall: 3,
+  }
   store.db.prepare("INSERT INTO tasks VALUES ('old', 1, 1, 'running', 'r', 'w', '', '{}', ?)").run(JSON.stringify(old))
   const t = store.get('old')!
   assert.deepEqual([t.docs, t.fixes, t.dialog?.review, t.workflow.docs, t.scopeNotices], [[], 0, 'reply', [], {}])

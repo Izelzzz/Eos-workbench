@@ -36,10 +36,17 @@ async function runTasks() {
   rmSync(OUT, { recursive: true, force: true })
   mkdirSync(REPO, { recursive: true })
   writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-  for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+  for (const a of [
+    ['init', '-q', '-b', 'main'],
+    ['add', '-A'],
+    ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+  ])
+    execFileSync('git', a, { cwd: REPO })
 
   const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
-    cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }, stdio: ['ignore', 'inherit', 'inherit'],
+    cwd: ROOT,
+    env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+    stdio: ['ignore', 'inherit', 'inherit'],
   })
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
   const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -51,14 +58,24 @@ async function runTasks() {
   ]
 
   try {
-    for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+    for (let i = 0; i < 60; i++) {
+      try {
+        await fetch(base + '/api/tasks')
+        break
+      } catch {
+        await sleep(500)
+      }
+    }
     // 团队规则只写进 reviewer 模板：在内置第 1 版的提示词末尾加上，存成第 2 版。
     const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
-    const saved = await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' }) as { ok: boolean; version?: number }
+    const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' })) as {
+      ok: boolean
+      version?: number
+    }
     if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
     const ids: string[] = []
     for (const request of REQUESTS) {
-      const r = await post('/api/tasks', { repo: REPO, workflow: 'standard', request }) as { ok: boolean; id?: string; error?: string }
+      const r = (await post('/api/tasks', { repo: REPO, workflow: 'standard', request })) as { ok: boolean; id?: string; error?: string }
       if (!r.ok) throw new Error(`发起任务失败：${r.error}`)
       ids.push(r.id!)
     }
@@ -82,30 +99,46 @@ const samples = store.list().map(s => ({ task: store.get(s.id)!, used: store.met
 const ev = evidence(samples)
 const checks: Record<string, boolean> = {}
 checks['所有任务都完成'] = samples.every(s => s.task.status === 'done')
-checks['每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻、类型对得上的条目'] = new Set(ev.signals.map(s => s.id)).size === ev.signals.length && ev.signals.every(sig => {
-  const task = samples.find(s => s.task.id === sig.task)!.task
-  const type = { review_changes: 'call', format_retry: 'call', scope_reverted: 'call', check_failed: 'check', escalated: 'note', call_failed: 'note', stuck: 'question' }[sig.kind]
-  return new RegExp(`^${sig.task}:${sig.entry}(:(\\d+|r))?$`).test(sig.id) && task.log[sig.entry]?.at === sig.at && task.log[sig.entry]?.type === type
-})
+checks['每条证据的 id 唯一，格式是 任务:日志下标[:子项]，指向日志里同一时刻、类型对得上的条目'] =
+  new Set(ev.signals.map(s => s.id)).size === ev.signals.length &&
+  ev.signals.every(sig => {
+    const task = samples.find(s => s.task.id === sig.task)!.task
+    const type = { review_changes: 'call', format_retry: 'call', scope_reverted: 'call', check_failed: 'check', escalated: 'note', call_failed: 'note', stuck: 'question' }[sig.kind]
+    return new RegExp(`^${sig.task}:${sig.entry}(:(\\d+|r))?$`).test(sig.id) && task.log[sig.entry]?.at === sig.at && task.log[sig.entry]?.type === type
+  })
 // 独立核对：从原始 events 表数没通过的检查结果。
-const rawFailed = samples.reduce((n, s) => n + store.events(s.task.id).filter(r => r.accepted && r.event.kind === 'checked')
-  .reduce((m, r) => m + ((r.event as { results: CheckResult[] }).results.filter(x => !x.passed).length), 0), 0)
+const rawFailed = samples.reduce(
+  (n, s) =>
+    n +
+    store
+      .events(s.task.id)
+      .filter(r => r.accepted && r.event.kind === 'checked')
+      .reduce((m, r) => m + (r.event as { results: CheckResult[] }).results.filter(x => !x.passed).length, 0),
+  0,
+)
 const failed = ev.signals.filter(s => s.kind === 'check_failed').length
 checks[`检查失败的证据 ${failed} 条 = 原始事件里没通过的结果 ${rawFailed} 条`] = failed === rawFailed
 // 独立核对：评审调用之后（跳过越界撤销的说明）紧跟的不是「第 N 轮通过」、又一次评审（格式重试）或格式失败的说明，就是要求修改。
-const rawChanges = samples.reduce((n, s) => n + s.task.log.filter((e, i) => {
-  if (e.type !== 'call' || e.purpose !== 'critique') return false
-  const next = s.task.log.slice(i + 1).find(x => !(x.type === 'note' && x.text.startsWith('撤销了 ')))
-  if (next?.type === 'note' && (/^第 \d+ 轮通过$/.test(next.text) || next.text.startsWith('回复格式无法解析'))) return false
-  return !(next?.type === 'call' && next.purpose === 'critique')
-}).length, 0)
+const rawChanges = samples.reduce(
+  (n, s) =>
+    n +
+    s.task.log.filter((e, i) => {
+      if (e.type !== 'call' || e.purpose !== 'critique') return false
+      const next = s.task.log.slice(i + 1).find(x => !(x.type === 'note' && x.text.startsWith('撤销了 ')))
+      if (next?.type === 'note' && (/^第 \d+ 轮通过$/.test(next.text) || next.text.startsWith('回复格式无法解析'))) return false
+      return !(next?.type === 'call' && next.purpose === 'critique')
+    }).length,
+  0,
+)
 const changes = ev.signals.filter(s => s.kind === 'review_changes').length
 checks[`评审要求修改的证据 ${changes} 条 = 日志里评审没通过的次数 ${rawChanges} 次`] = changes === rawChanges
 const dev = ev.targets.find(t => t.kind === 'template' && t.name === 'developer')
-const devSignals = ev.signals.filter(sig => {
-  const task = samples.find(s => s.task.id === sig.task)!.task
-  return sig.role !== undefined && task.workflow.roles[sig.role]?.template?.name === 'developer'
-}).map(s => s.id)
+const devSignals = ev.signals
+  .filter(sig => {
+    const task = samples.find(s => s.task.id === sig.task)!.task
+    return sig.role !== undefined && task.workflow.roles[sig.role]?.template?.name === 'developer'
+  })
+  .map(s => s.id)
 checks['归到 developer 模板的证据 = 被评判角色用 developer 模板的证据'] = JSON.stringify(dev?.signals ?? []) === JSON.stringify(devSignals)
 checks['任务用的是 reviewer 第 2 版'] = samples.every(s => s.task.workflow.roles.reviewer?.template?.version === 2)
 checks['至少一条评审要求修改的证据提到团队规则，并归到 developer 模板'] = ev.signals.some(s => s.kind === 'review_changes' && s.text.includes('@example') && (dev?.signals ?? []).includes(s.id))

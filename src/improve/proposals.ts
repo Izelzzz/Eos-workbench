@@ -17,7 +17,10 @@ const oneLine = (s: string, max: number): string => {
 }
 
 export class Proposals {
-  constructor(private readonly store: Store, private readonly conventions: Conventions) {}
+  constructor(
+    private readonly store: Store,
+    private readonly conventions: Conventions,
+  ) {}
 
   /** 校验并入库。不合格的不入库，返回全部原因。 */
   add(p: ProposalInput, at: number): AddResult {
@@ -45,16 +48,21 @@ export class Proposals {
    */
   approve(id: number, at: number, actor: string, note = ''): DecideResult {
     const extra = note.trim()
-    const d = this.store.decideProposal(id, {
-      status: 'approved',
-      reason: extra,
-      note: row => `改进提案 #${row.id}：${oneLine(row.rationale, NOTE_MAX)}${extra === '' ? '' : `；${extra}`}`,
-      // 批准时再核对一次权限（失败就关）：生成之后，工作流引用的模板可能被人改过，同一份内容展开出来的权限会变。
-      validate: row => [
-        ...this.conventions.validate(row.target.kind, row.target.name, row.content).map(e => `${e.path}：${e.message}`),
-        ...permissionChanges(row.target.kind, this.store.convention(row.target.kind, row.target.name, row.baseVersion)!.content, row.content, this.conventions.lookup()),
-      ],
-    }, at, actor)
+    const d = this.store.decideProposal(
+      id,
+      {
+        status: 'approved',
+        reason: extra,
+        note: row => `改进提案 #${row.id}：${oneLine(row.rationale, NOTE_MAX)}${extra === '' ? '' : `；${extra}`}`,
+        // 批准时再核对一次权限（失败就关）：生成之后，工作流引用的模板可能被人改过，同一份内容展开出来的权限会变。
+        validate: row => [
+          ...this.conventions.validate(row.target.kind, row.target.name, row.content).map(e => `${e.path}：${e.message}`),
+          ...permissionChanges(row.target.kind, this.store.convention(row.target.kind, row.target.name, row.baseVersion)!.content, row.content, this.conventions.lookup()),
+        ],
+      },
+      at,
+      actor,
+    )
     return d.ok ? d : { ok: false, error: describe(id, d), ...(d.row === undefined ? {} : { row: d.row }) }
   }
 
@@ -70,9 +78,13 @@ export { KIND_NAMES, STATUS_NAMES } from './labels.ts'
 
 const describe = (id: number, d: Exclude<Decision, { ok: true }>): string => {
   switch (d.reason) {
-    case 'missing': return `没有提案 #${id}`
-    case 'not_pending': return `提案 #${id} ${STATUS_NAMES[d.row!.status]}，不能再审批`
-    case 'stale': return `提案 #${id} 已过期：${d.row!.events.at(-1)!.reason}。请重新生成提案`
-    case 'invalid': return `新内容现在不能批准：${d.errors.join('；')}`
+    case 'missing':
+      return `没有提案 #${id}`
+    case 'not_pending':
+      return `提案 #${id} ${STATUS_NAMES[d.row!.status]}，不能再审批`
+    case 'stale':
+      return `提案 #${id} 已过期：${d.row!.events.at(-1)!.reason}。请重新生成提案`
+    case 'invalid':
+      return `新内容现在不能批准：${d.errors.join('；')}`
   }
 }

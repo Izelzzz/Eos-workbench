@@ -10,16 +10,43 @@ import { join } from 'node:path'
 const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
 
 /** 新增或修改的文件 */
-const ch = (...paths: string[]): Change[] => paths.map((path) => ({ path, deleted: false }))
+const ch = (...paths: string[]): Change[] => paths.map(path => ({ path, deleted: false }))
 
 const proof = '## 能用证据证明的\n\n- 测试通过\n\n## 证明不了的和原因\n\n- 没有在别的内核上测\n'
 
 test('仓库的规则文件：平台代码和构建、依赖、部署需要 E2E，文档、测试、验证脚本、CI 配置不需要，没列出的默认需要', () => {
-  const need = ['src/engine/reduce.ts', 'src/workflow/skills/write-changes.md', 'src/workflow/templates/standard.yaml',
-    'web/src/App.tsx', 'web/vite.config.ts', 'tsconfig.json', 'package.json', 'package-lock.json',
-    'vendor/dsh-sdk-client/client.ts', 'Dockerfile', 'compose.yaml', 'compose.override.yaml', '.dockerignore', 'newdir/x.ts', 'Makefile']
-  const skip = ['docs/roadmap.md', 'docs/e2e/b1/run.log', 'tests/engine.test.ts', 'poc/run-all.sh', 'scripts/e2e.ts',
-    '.github/workflows/ci.yml', '.gitleaksignore', '.gitleaks.toml', '.claude/settings.json', 'README.md', 'CLAUDE.md', 'LICENSE', '.gitignore']
+  const need = [
+    'src/engine/reduce.ts',
+    'src/workflow/skills/write-changes.md',
+    'src/workflow/templates/standard.yaml',
+    'web/src/App.tsx',
+    'web/vite.config.ts',
+    'tsconfig.json',
+    'package.json',
+    'package-lock.json',
+    'vendor/dsh-sdk-client/client.ts',
+    'Dockerfile',
+    'compose.yaml',
+    'compose.override.yaml',
+    '.dockerignore',
+    'newdir/x.ts',
+    'Makefile',
+  ]
+  const skip = [
+    'docs/roadmap.md',
+    'docs/e2e/b1/run.log',
+    'tests/engine.test.ts',
+    'poc/run-all.sh',
+    'scripts/e2e.ts',
+    '.github/workflows/ci.yml',
+    '.gitleaksignore',
+    '.gitleaks.toml',
+    '.claude/settings.json',
+    'README.md',
+    'CLAUDE.md',
+    'LICENSE',
+    '.gitignore',
+  ]
   for (const p of need) assert.equal(needsE2E(p, rules), true, p)
   for (const p of skip) assert.equal(needsE2E(p, rules), false, p)
 })
@@ -33,7 +60,10 @@ test('规则按顺序匹配，第一条算数；看不懂的行报出行号', ()
 
 test('切分描述：低一级的标题算在外层节里，代码块里的 # 不是标题，HTML 注释不算内容', () => {
   const s = sections('## A\n<!-- 待填 -->\n## B\n### B1\n内容\n```\n# 不是标题\n```\n## C\n')
-  assert.deepEqual(s.map((x) => x.title), ['A', 'B', 'B1', 'C'])
+  assert.deepEqual(
+    s.map(x => x.title),
+    ['A', 'B', 'B1', 'C'],
+  )
   assert.equal(s[0]!.content, '')
   assert.match(s[1]!.content, /### B1\n内容\n```\n# 不是标题\n```/)
   assert.equal(s[3]!.content, '')
@@ -116,7 +146,10 @@ test('「不能证明的」不算「能证明的」；标题要以这几个词�
 
 test('代码块只由开始时的那种标记结束：``` 块里的 ~~~ 不结束它', () => {
   const s = sections('## A\n```\n~~~\n# 还在代码块里\n```\n## B\nx\n')
-  assert.deepEqual(s.map((x) => x.title), ['A', 'B'])
+  assert.deepEqual(
+    s.map(x => x.title),
+    ['A', 'B'],
+  )
 })
 
 test('真实 git 输出：中文文件名不被转义，删除记成 deleted；中文证据路径能对上', () => {
@@ -126,12 +159,17 @@ test('真实 git 输出：中文文件名不被转义，删除记成 deleted；�
     git('init', '-q')
     mkdirSync(join(dir, 'docs/e2e/b1'), { recursive: true })
     writeFileSync(join(dir, 'docs/e2e/b1/旧.log'), 'x')
-    git('add', '.'); git('commit', '-qm', 'a')
+    git('add', '.')
+    git('commit', '-qm', 'a')
     writeFileSync(join(dir, 'docs/e2e/b1/截图.png'), 'x')
     rmSync(join(dir, 'docs/e2e/b1/旧.log'))
-    git('add', '-A'); git('commit', '-qm', 'b')
+    git('add', '-A')
+    git('commit', '-qm', 'b')
     const changed = parseNameStatusZ(git('diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD'))
-    assert.deepEqual(changed, [{ path: 'docs/e2e/b1/截图.png', deleted: false }, { path: 'docs/e2e/b1/旧.log', deleted: true }])
+    assert.deepEqual(changed, [
+      { path: 'docs/e2e/b1/截图.png', deleted: false },
+      { path: 'docs/e2e/b1/旧.log', deleted: true },
+    ])
     const r = check({ body: `${proof}\n## 端到端验证\n\n见 docs/e2e/b1/截图.png 。\n`, changed: [...ch('src/a.ts'), ...changed], rules })
     assert.deepEqual(r.errors, [])
   } finally {
@@ -171,7 +209,10 @@ test('HTML 注释和 GitHub 渲染一致：嵌套、没闭合、空注释、代�
 
 test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响后面的节', () => {
   const hidden = check({ body: '## 能用证据证明的\n\n<!-- 待填\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
-  assert.ok(hidden.errors.some((e) => e.includes('能用证据证明的')), hidden.errors.join())
+  assert.ok(
+    hidden.errors.some(e => e.includes('能用证据证明的')),
+    hidden.errors.join(),
+  )
   const fenced = check({ body: '## 能用证据证明的\n\n```html\n<!-- 示例\n```\n- ok\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
   assert.deepEqual(fenced.errors, [])
   const tick = check({ body: '## 能用证据证明的\n\n<!-- ` --> <!-- 待填 -->\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })

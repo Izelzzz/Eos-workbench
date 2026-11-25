@@ -125,7 +125,11 @@ test('an unparseable verdict is asked again, then the task fails with a ready ca
   }
   d.reply(GARBAGE)
   assert.equal(d.task.status, 'failed')
-  assert.match(d.task.failure ?? '', new RegExp(`^哪一步：「review」的回复\\n原因：连续 ${MAX_FORMAT_RETRIES + 1} 次无法解析成要求的 JSON 格式\\n怎么修：模型偶尔会这样：直接重试；.+npm run eos -- retry `), '和 runner 的失败用同一种三段格式')
+  assert.match(
+    d.task.failure ?? '',
+    new RegExp(`^哪一步：「review」的回复\\n原因：连续 ${MAX_FORMAT_RETRIES + 1} 次无法解析成要求的 JSON 格式\\n怎么修：模型偶尔会这样：直接重试；.+npm run eos -- retry `),
+    '和 runner 的失败用同一种三段格式',
+  )
   const ready = d.pending
   d.send({ kind: 'retry' })
   assert.equal(d.task.status, 'running')

@@ -139,7 +139,18 @@ nodes:
 
   const worktree = s.store.meta(created.id).worktree
   const log = execFileSync('git', ['log', '--name-only', '--format=', `${s.store.meta(created.id).baseSha}..HEAD`], { cwd: worktree, encoding: 'utf8' })
-  assert.deepEqual([...new Set(log.trim().split('\n').filter(l => l !== ''))], ['src/sum.ts'], '提交里只有范围内的改动')
+  assert.deepEqual(
+    [
+      ...new Set(
+        log
+          .trim()
+          .split('\n')
+          .filter(l => l !== ''),
+      ),
+    ],
+    ['src/sum.ts'],
+    '提交里只有范围内的改动',
+  )
   assert.equal(readFileSync(join(worktree, 'README.md'), 'utf8'), '# demo\n', '范围外被改过的文件恢复了')
   assert.equal(existsSync(join(worktree, 'secrets.txt')), false, '范围外新建的文件删掉了')
   assert.equal(existsSync(join(worktree, 'src/sum.ts')), true)

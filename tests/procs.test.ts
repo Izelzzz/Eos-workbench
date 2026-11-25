@@ -71,7 +71,9 @@ const fakeProc = (stages: ('inside' | 'cwd-gone' | 'zombie' | 'zombie-leader' | 
       return s === 'gone' ? undefined : stat(s === 'zombie' || s === 'zombie-leader' ? 'Z' : 'R', s === 'zombie-leader' ? 4 : 1)
     },
     comm: () => 'sleep',
-    kill: () => { killedAt = polls },
+    kill: () => {
+      killedAt = polls
+    },
   }
   return { proc, polls: () => polls }
 }
@@ -95,8 +97,14 @@ test('a process number reused by a new process (different start time) counts as 
   const killed = await killProcessesIn('/', 2000, {
     ...proc,
     cwdOf: pid => (proc.cwdOf(pid) === '/wt' ? '/' : undefined),
-    kill: pid => { proc.kill(pid); reused = true },
-    stat: pid => { const s = proc.stat(pid); return reused && s !== undefined ? s.replace(' 4242 ', ' 9999 ') : s },
+    kill: pid => {
+      proc.kill(pid)
+      reused = true
+    },
+    stat: pid => {
+      const s = proc.stat(pid)
+      return reused && s !== undefined ? s.replace(' 4242 ', ' 9999 ') : s
+    },
   })
   assert.deepEqual(killed, [{ pid: 77, name: 'sleep', exited: true }])
 })

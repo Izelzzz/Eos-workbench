@@ -49,6 +49,4 @@ export const parseDecision = (text: string): Decision | undefined => {
 }
 
 export const describeVerdict = (v: Verdict): string =>
-  [v.summary, ...v.issues.map((i, n) => `${n + 1}. [${i.severity}]${i.file === undefined ? '' : ` ${i.file}`}：${i.message}`)]
-    .filter(s => s !== '')
-    .join('\n')
+  [v.summary, ...v.issues.map((i, n) => `${n + 1}. [${i.severity}]${i.file === undefined ? '' : ` ${i.file}`}：${i.message}`)].filter(s => s !== '').join('\n')

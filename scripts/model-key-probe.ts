@@ -28,14 +28,18 @@ const scan = () => {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
       const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1])
       const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ').trim().slice(0, 200)
-      const vars = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').filter(v => v !== '')
+      const vars = readFileSync(`/proc/${pid}/environ`, 'utf8')
+        .split('\0')
+        .filter(v => v !== '')
       const names = new Set(vars.map(v => v.slice(0, v.indexOf('='))))
       const dshKey = vars.find(v => v.startsWith('DEEPSEEK_API_KEY='))?.slice('DEEPSEEK_API_KEY='.length)
       const hasKey = vars.some(v => v.includes(storeKey))
       const prev = procs.get(pid)
       if (prev === undefined || prev.cmd !== cmd) procs.set(pid, { pid, ppid, cmd, names, ...(dshKey === undefined ? {} : { dshKey }), hasKey })
       else prev.hasKey ||= hasKey
-    } catch { /* 进程已经退出或读不了 */ }
+    } catch {
+      /* 进程已经退出或读不了 */
+    }
   }
 }
 
@@ -74,9 +78,13 @@ const finish = (code: number | null, error?: string) => {
     }
   })()
   const plaintextFiles = (readdirSync(DATA, { recursive: true, withFileTypes: true }) as import('node:fs').Dirent[])
-    .filter(d => d.isFile()).map(d => join(d.parentPath, d.name)).filter(f => readFileSync(f).includes(storeKey)).map(f => f.slice(DATA.length + 1))
+    .filter(d => d.isFile())
+    .map(d => join(d.parentPath, d.name))
+    .filter(f => readFileSync(f).includes(storeKey))
+    .map(f => f.slice(DATA.length + 1))
   const report = {
-    e2eExit: code, ...(error === undefined ? {} : { error }),
+    e2eExit: code,
+    ...(error === undefined ? {} : { error }),
     platformProcesses: platform.length,
     platformEnvHasModelKey: platform.some(p => p.names.has('DEEPSEEK_API_KEY')),
     platformWithModelKey: platform.filter(p => p.names.has('DEEPSEEK_API_KEY')).map(p => p.cmd),

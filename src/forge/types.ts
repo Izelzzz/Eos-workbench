@@ -32,7 +32,11 @@ export interface Forge {
    * 这个分支打开的 PR 被关掉（没合并）后再调用，会开一个新的。sha 是刚推上去的提交：它已经通过某个 PR 合并过时返回 { merged }。
    * head 和 base 没有差别时返回 { empty: true }。出错时抛 ForgeError（消息是给用户看的中文）。
    */
-  openPullRequest(repo: RemoteRepo, token: string | undefined, p: { head: string; base: string; sha: string; title: string; body: string; credential?: string }): Promise<PullRequest | { empty: true } | { merged: { number: number; url: string } }>
+  openPullRequest(
+    repo: RemoteRepo,
+    token: string | undefined,
+    p: { head: string; base: string; sha: string; title: string; body: string; credential?: string },
+  ): Promise<PullRequest | { empty: true } | { merged: { number: number; url: string } }>
 }
 
 /**

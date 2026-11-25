@@ -108,4 +108,3 @@ export class Clock {
     return this.task.pending!.id
   }
 }
-

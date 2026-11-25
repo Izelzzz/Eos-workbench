@@ -39,7 +39,11 @@ const scenario = async (kind: 'delete' | 'restore') => {
   if (kind === 'restore') rmSync(join(wt, 'd'), { recursive: true })
   // 竞态进程：备用的真目录和链接放在 worktree 外面（同一个文件系统，rename 仍是原子的），worktree 里只出现 d 本身。
   // 进程先 cd /：平台撤销前的进程清理（按工作目录找）找不到它，只能靠删除和写回本身不被引走。
-  const racer = spawn(process.execPath, ['-e', `
+  const racer = spawn(
+    process.execPath,
+    [
+      '-e',
+      `
 process.chdir('/')
 const fs = require('fs'), path = require('path')
 const [wt, outside, stage, name] = process.argv.slice(1)
@@ -66,7 +70,14 @@ for (;;) {
   try { ok = fs.readFileSync(path.join(real, name), 'utf8') === 'agent\\n' } catch {}
   if (!ok) fill()
   relink()
-}`, wt, outside, stage, name], { stdio: 'ignore' })
+}`,
+      wt,
+      outside,
+      stage,
+      name,
+    ],
+    { stdio: 'ignore' },
+  )
   let touchedOutside = 0
   let refused = 0
   const samples = new Map<string, number>()
@@ -77,7 +88,10 @@ for (;;) {
         commitInScope(wt, ['src/**'], `round ${i}`, main)
       } catch (e) {
         refused++
-        const first = (e as Error).message.split('\n')[0]!.replace(/round \d+/, 'round N').slice(0, 140)
+        const first = (e as Error).message
+          .split('\n')[0]!
+          .replace(/round \d+/, 'round N')
+          .slice(0, 140)
         samples.set(first, (samples.get(first) ?? 0) + 1)
       }
       if (!existsSync(victim) || readFileSync(victim, 'utf8') !== 'outside\n') touchedOutside++

@@ -81,7 +81,14 @@ test('a command that exits 0 but leaves a background child holding the pipes pas
   const { readFileSync } = await import('node:fs')
   const pid = Number(readFileSync(join(w, 'child.pid'), 'utf8'))
   // SIGKILL 异步生效：最多等 2 秒看它消失（被 init 回收）。
-  const alive = () => { try { process.kill(pid, 0); return true } catch { return false } }
+  const alive = () => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
   for (let i = 0; i < 40 && alive(); i++) await new Promise(r => setTimeout(r, 50))
   assert.equal(alive(), false, 'the background child was killed with the process group')
 })

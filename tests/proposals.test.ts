@@ -19,9 +19,15 @@ const setup = (path = ':memory:') => {
 const DEV = (line: string) => `${builtinAgentSource('developer').trimEnd()}\n  - ${line}\n`
 
 const input = (over: Partial<ProposalInput> = {}): ProposalInput => ({
-  target: { kind: 'template', name: 'developer' }, baseVersion: 1, content: DEV('导出函数都写带 @example 的 JSDoc'),
-  rationale: '评审两次要求补 @example\n第二行不进备注', evidence: ['t1:9', 't2:9'], scope: { workflow: 'standard', tasks: ['t1', 't2'] },
-  generator: { model: 'deepseek-flash', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }, ms: 1200 }, actor: 'cli', ...over,
+  target: { kind: 'template', name: 'developer' },
+  baseVersion: 1,
+  content: DEV('导出函数都写带 @example 的 JSDoc'),
+  rationale: '评审两次要求补 @example\n第二行不进备注',
+  evidence: ['t1:9', 't2:9'],
+  scope: { workflow: 'standard', tasks: ['t1', 't2'] },
+  generator: { model: 'deepseek-flash', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }, ms: 1200 },
+  actor: 'cli',
+  ...over,
 })
 
 /** 每类约定所有版本的快照：用来断言"没有批准就没有任何约定被改"。 */
@@ -47,8 +53,17 @@ test('approving writes the new content as the next version, noting the proposal,
   // 批准之前创建的任务：存进库里，批准后从库里读它的快照。
   const resolved = c.resolve('standard')
   assert.ok(resolved.ok)
-  store.create({ id: 'running', request: '需求', workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-    meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x', conventions: resolved.used } }, 11)
+  store.create(
+    {
+      id: 'running',
+      request: '需求',
+      workflow: resolved.workflow,
+      workflowSource: resolved.source,
+      docs: resolved.docs,
+      meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x', conventions: resolved.used },
+    },
+    11,
+  )
   const r = p.approve(1, 20, 'web', '先在 standard 上试')
   assert.ok(r.ok, !r.ok ? r.error : '')
   assert.deepEqual(r.row.events.at(-1), { seq: 2, at: 20, status: 'approved', actor: 'web', version: 2, reason: '先在 standard 上试' }, 'the approval note is kept on the event too')
@@ -125,7 +140,13 @@ test('rejecting needs a reason; unknown proposals are reported; the list is newe
   assert.deepEqual(p.reject(9, 12, 'web', '无'), { ok: false, error: '没有提案 #9' })
   store.close()
   const reopened = new Store(join(dir, 'eos.db'))
-  assert.deepEqual(reopened.proposals().map(r => [r.id, r.rationale, r.status]), [[2, '第二条', 'pending'], [1, input().rationale, 'pending']])
+  assert.deepEqual(
+    reopened.proposals().map(r => [r.id, r.rationale, r.status]),
+    [
+      [2, '第二条', 'pending'],
+      [1, input().rationale, 'pending'],
+    ],
+  )
   assert.deepEqual(reopened.proposal(1)!.generator, input().generator)
   reopened.close()
   rmSync(dir, { recursive: true, force: true })

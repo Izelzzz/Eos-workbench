@@ -36,10 +36,14 @@ export function ForgeApps({ query }: { query: string }) {
   const [org, setOrg] = useState('')
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => { listForgeApps().then(setData, e => setError(`加载失败：${(e as Error).message}`)) }, [query])
+  useEffect(() => {
+    listForgeApps().then(setData, e => setError(`加载失败：${(e as Error).message}`))
+  }, [query])
   // 在托管平台的页面上点了后退：浏览器可能原样恢复这个页面，按钮要能再点。
   useEffect(() => {
-    const on = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false) }
+    const on = (e: PageTransitionEvent) => {
+      if (e.persisted) setBusy(false)
+    }
     addEventListener('pageshow', on)
     return () => removeEventListener('pageshow', on)
   }, [])
@@ -61,43 +65,96 @@ export function ForgeApps({ query }: { query: string }) {
   return (
     <div className="credentials">
       <h1>代码托管</h1>
-      <p className="muted">平台用 App 访问仓库：按仓库授权，令牌一小时有效、到期前自动换新，不依赖某个人的令牌。App 的私钥加密存在凭据存储里，只由平台使用。没有 App、或 App 没装到某个仓库时，平台改用凭据页里的 Git 令牌。</p>
-      {result.get('error') !== null && <p className="error" role="alert">注册没有完成：{result.get('error')}</p>}
+      <p className="muted">
+        平台用 App 访问仓库：按仓库授权，令牌一小时有效、到期前自动换新，不依赖某个人的令牌。App 的私钥加密存在凭据存储里，只由平台使用。没有 App、或 App 没装到某个仓库时，平台改用凭据页里的 Git
+        令牌。
+      </p>
+      {result.get('error') !== null && (
+        <p className="error" role="alert">
+          注册没有完成：{result.get('error')}
+        </p>
+      )}
       {registered !== null && (
         <p className="notice" role="status">
           已注册 App「{result.get('app')}」，凭据存为 <span className="mono">{registered}</span>。下一步：把它安装到要用的仓库
-          {justDone?.registered?.installUrl !== undefined && <>（<a href={justDone.registered.installUrl} target="_blank" rel="noreferrer">去安装</a>）</>}。
+          {justDone?.registered?.installUrl !== undefined && (
+            <>
+              （
+              <a href={justDone.registered.installUrl} target="_blank" rel="noreferrer">
+                去安装
+              </a>
+              ）
+            </>
+          )}
+          。
         </p>
       )}
-      {error && <p className="error" role="alert">{error}</p>}
-      {data === undefined ? (error ? null : <p className="muted">加载中…</p>) : (
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {data === undefined ? (
+        error ? null : (
+          <p className="muted">加载中…</p>
+        )
+      ) : (
         <>
-          {!data.usable && <p className="error" role="alert">平台没有主密钥，注册后存不了 App 的凭据。{data.hint}</p>}
+          {!data.usable && (
+            <p className="error" role="alert">
+              平台没有主密钥，注册后存不了 App 的凭据。{data.hint}
+            </p>
+          )}
           {data.apps.map(a => (
             <section key={a.name} className="forge-app" aria-label={`${a.host} 的 App`}>
               <h2>GitHub App · {a.host}</h2>
               {a.registered !== undefined ? (
                 <>
-                  <p>已注册，凭据 <span className="mono">{a.name}</span>，更新于 {ago(a.registered.updatedAt)}。</p>
-                  {a.registered.installUrl !== undefined && <p><a href={a.registered.installUrl} target="_blank" rel="noreferrer">把 App 安装到仓库</a>：只勾选要让平台访问的仓库。</p>}
-                  <p className="muted">要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。</p>
+                  <p>
+                    已注册，凭据 <span className="mono">{a.name}</span>，更新于 {ago(a.registered.updatedAt)}。
+                  </p>
+                  {a.registered.installUrl !== undefined && (
+                    <p>
+                      <a href={a.registered.installUrl} target="_blank" rel="noreferrer">
+                        把 App 安装到仓库
+                      </a>
+                      ：只勾选要让平台访问的仓库。
+                    </p>
+                  )}
+                  <p className="muted">
+                    要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。
+                  </p>
                 </>
               ) : (
-                <form className="new-task" aria-label="注册 App" autoComplete="off" onSubmit={e => { e.preventDefault(); void register(a.name) }}>
+                <form
+                  className="new-task"
+                  aria-label="注册 App"
+                  autoComplete="off"
+                  onSubmit={e => {
+                    e.preventDefault()
+                    void register(a.name)
+                  }}
+                >
                   <label>
                     <span>App 名字</span>
                     <input value={appName} onChange={e => setAppName(e.target.value)} required spellCheck={false} />
-                    <small className="muted">最多 {a.appNameMax} 个字符，在 {a.host} 上全局唯一，到那边还能再改。</small>
+                    <small className="muted">
+                      最多 {a.appNameMax} 个字符，在 {a.host} 上全局唯一，到那边还能再改。
+                    </small>
                   </label>
                   <label>
                     <span>组织（可选）</span>
                     <input value={org} onChange={e => setOrg(e.target.value)} placeholder="留空时注册在你的个人账号下" spellCheck={false} />
                   </label>
                   <p className="muted">
-                    权限：Contents 读写（推任务分支）、Pull requests 读写（开 PR）、Metadata 只读。不用 webhook。
-                    注册完 {a.host} 会跳回 <span className="mono">{data.callbackUrl}</span>：要用团队成员都能打开的地址访问本页面（部署时设 EOS_PUBLIC_URL）。
+                    权限：Contents 读写（推任务分支）、Pull requests 读写（开 PR）、Metadata 只读。不用 webhook。 注册完 {a.host} 会跳回 <span className="mono">{data.callbackUrl}</span>
+                    ：要用团队成员都能打开的地址访问本页面（部署时设 EOS_PUBLIC_URL）。
                   </p>
-                  <div><button type="submit" className="primary" disabled={busy || !data.usable}>{busy ? '正在跳转…' : `到 ${a.host} 注册`}</button></div>
+                  <div>
+                    <button type="submit" className="primary" disabled={busy || !data.usable}>
+                      {busy ? '正在跳转…' : `到 ${a.host} 注册`}
+                    </button>
+                  </div>
                 </form>
               )}
             </section>

@@ -90,9 +90,9 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
 
   // 提问的等待区间：到下一条日志为止。等回答时只有这些事会写日志，而且都结束这次等待：回答、调用回复（问题作废）、
   // 调用失败、换成新问题（续跑后 agent 重新提问）、中止。还没有下一条日志的算到 until。
-  const waits = task.log.flatMap((e, i) => (e.type === 'question'
-    ? [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end: task.log[i + 1]?.at ?? until } }]
-    : []))
+  const waits = task.log.flatMap((e, i) =>
+    e.type === 'question' ? [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end: task.log[i + 1]?.at ?? until } }] : [],
+  )
 
   // 失败到重试的阻塞区间：失败说明带着节点，重试说明不带，按顺序配对。
   const blocks: { node: string | undefined; span: Span }[] = []
@@ -148,9 +148,20 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
       runningMs = Math.max(0, len(span) - union(nodeWaits.filter(w => w.call === p.id).map(w => clip(w.span, span))))
     }
     stages.push({
-      node: n.id, calls: calls.length, checks: checks.length, usage: calls.reduce<Usage>((u, c) => addUsage(u, c.usage), zeroUsage()),
-      agentMs, runningMs, checkMs, waitUserMs, blockedMs, overheadMs: Math.max(0, wallMs - agentMs - runningMs - checkMs - waitUserMs - blockedMs), wallMs,
-      ...(start === undefined ? {} : { start }), ...(end === undefined ? {} : { end }), open,
+      node: n.id,
+      calls: calls.length,
+      checks: checks.length,
+      usage: calls.reduce<Usage>((u, c) => addUsage(u, c.usage), zeroUsage()),
+      agentMs,
+      runningMs,
+      checkMs,
+      waitUserMs,
+      blockedMs,
+      overheadMs: Math.max(0, wallMs - agentMs - runningMs - checkMs - waitUserMs - blockedMs),
+      wallMs,
+      ...(start === undefined ? {} : { start }),
+      ...(end === undefined ? {} : { end }),
+      open,
     })
   }
   const starts = stages.flatMap(s => (s.start === undefined ? [] : [s.start]))
@@ -169,8 +180,16 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
     elapsedMs,
     betweenMs: Math.max(0, elapsedMs - wallMs),
     total: {
-      calls: sum('calls'), checks: sum('checks'), usage: stages.reduce<Usage>((u, s) => addUsage(u, s.usage), zeroUsage()),
-      agentMs: sum('agentMs'), runningMs: sum('runningMs'), checkMs: sum('checkMs'), waitUserMs: sum('waitUserMs'), blockedMs: sum('blockedMs'), overheadMs: sum('overheadMs'), wallMs,
+      calls: sum('calls'),
+      checks: sum('checks'),
+      usage: stages.reduce<Usage>((u, s) => addUsage(u, s.usage), zeroUsage()),
+      agentMs: sum('agentMs'),
+      runningMs: sum('runningMs'),
+      checkMs: sum('checkMs'),
+      waitUserMs: sum('waitUserMs'),
+      blockedMs: sum('blockedMs'),
+      overheadMs: sum('overheadMs'),
+      wallMs,
     },
   }
 }
@@ -187,12 +206,30 @@ const k = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 export const formatMetrics = (m: TaskMetrics): string => {
   const head = ['阶段', '调用', '检查', '输入', '输出', '缓存读', 'agent', '运行中', '检查耗时', '等用户', '阻塞', '平台开销', '总时长']
   const row = (name: string, x: TaskMetrics['total'], open = false) => [
-    open ? `${name}（进行中）` : name, String(x.calls), String(x.checks), k(x.usage.input), k(x.usage.output), k(x.usage.cacheRead),
-    secs(x.agentMs), secs(x.runningMs), secs(x.checkMs), secs(x.waitUserMs), secs(x.blockedMs), secs(x.overheadMs), secs(x.wallMs),
+    open ? `${name}（进行中）` : name,
+    String(x.calls),
+    String(x.checks),
+    k(x.usage.input),
+    k(x.usage.output),
+    k(x.usage.cacheRead),
+    secs(x.agentMs),
+    secs(x.runningMs),
+    secs(x.checkMs),
+    secs(x.waitUserMs),
+    secs(x.blockedMs),
+    secs(x.overheadMs),
+    secs(x.wallMs),
   ]
   const rows = [head, ...m.stages.map(s => row(s.node, s, s.open)), row('合计', m.total)]
   const widths = head.map((_, i) => Math.max(...rows.map(r => [...r[i]!].reduce((w, ch) => w + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0))))
   const pad = (s: string, w: number) => s + ' '.repeat(Math.max(0, w - [...s].reduce((x, ch) => x + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0)))
-  const table = rows.map(r => r.map((c, i) => pad(c, widths[i]!)).join('  ').trimEnd()).join('\n')
+  const table = rows
+    .map(r =>
+      r
+        .map((c, i) => pad(c, widths[i]!))
+        .join('  ')
+        .trimEnd(),
+    )
+    .join('\n')
   return `${table}\n任务总时长 ${secs(m.elapsedMs)}，其中不在任何阶段的 ${secs(m.betweenMs)}（阶段之间的间隔，例如平台停着或重启续跑）`
 }

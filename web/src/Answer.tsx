@@ -27,7 +27,14 @@ export function Answer(props: { task: TaskDetail; onAnswered: (resumeNeeded: boo
   }
 
   return (
-    <form className="question" aria-label="回答提问" onSubmit={e => { e.preventDefault(); void send(text) }}>
+    <form
+      className="question"
+      aria-label="回答提问"
+      onSubmit={e => {
+        e.preventDefault()
+        void send(text)
+      }}
+    >
       <div className="question-head">
         <b>{q.source === 'agent' ? 'agent 在等你回答' : '对话循环需要你的指示'}</b>
         <span className="muted">（{q.id}）</span>
@@ -36,7 +43,9 @@ export function Answer(props: { task: TaskDetail; onAnswered: (resumeNeeded: boo
       {q.options && q.options.length > 0 && (
         <div className="options">
           {q.options.map(o => (
-            <button key={o} type="button" disabled={busy} onClick={() => void send(o)}>{o}</button>
+            <button key={o} type="button" disabled={busy} onClick={() => void send(o)}>
+              {o}
+            </button>
           ))}
         </div>
       )}
@@ -47,11 +56,19 @@ export function Answer(props: { task: TaskDetail; onAnswered: (resumeNeeded: boo
           rows={2}
           placeholder={q.options ? '或者输入你自己的回答…' : '输入你的回答…'}
           onChange={e => setText(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void send(text) }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void send(text)
+          }}
         />
-        <button type="submit" className="primary" disabled={busy}>{busy ? '提交中…' : '回答'}</button>
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? '提交中…' : '回答'}
+        </button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </form>
   )
 }

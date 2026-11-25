@@ -68,11 +68,11 @@ export const versionUsed = (s: Pick<CompareSample, 'task' | 'used'>, kind: Targe
     case 'template': {
       const role = Object.values(t.workflow.roles).find(r => r.template?.name === name)
       // 快照里的角色没有模板信息（第 2 块之前的任务）时，退回任务元数据里记的模板版本。
-      return role !== undefined ? role.template!.version : recorded(s.used?.templates) ?? null
+      return role !== undefined ? role.template!.version : (recorded(s.used?.templates) ?? null)
     }
     case 'doc': {
       const d = t.docs.find(x => x.name === name)
-      return d !== undefined ? d.version : recorded(s.used?.docs) ?? null
+      return d !== undefined ? d.version : (recorded(s.used?.docs) ?? null)
     }
     case 'skill':
       if (!Object.values(t.workflow.roles).some(r => r.skills.includes(name))) return null
@@ -85,7 +85,9 @@ export const versionUsed = (s: Pick<CompareSample, 'task' | 'used'>, kind: Targe
 export const outcomeOf = (s: CompareSample, version: number): TaskOutcome => {
   const log = s.task.log
   return {
-    task: s.task.id, version, status: s.task.status,
+    task: s.task.id,
+    version,
+    status: s.task.status,
     tokens: s.metrics.total.usage.input + s.metrics.total.usage.output,
     agentMs: s.metrics.total.agentMs,
     reviews: log.filter(e => e.type === 'call' && e.purpose === 'critique' && parseVerdict(e.reply) !== undefined).length,

@@ -15,15 +15,17 @@ const DOCS_DIR = join(import.meta.dirname, '..', 'workflow', 'docs')
 const DOC_NAME = /^[^/\\\n]{1,64}$/
 
 export type SaveResult = { ok: true; row: ConventionRow } | { ok: false; errors: WorkflowError[] }
-export type Resolved =
-  | { ok: true; workflow: Workflow; source: string; docs: ConventionDoc[]; skills: SkillSnapshot[]; used: ConventionsUsed }
-  | { ok: false; error: string }
+export type Resolved = { ok: true; workflow: Workflow; source: string; docs: ConventionDoc[]; skills: SkillSnapshot[]; used: ConventionsUsed } | { ok: false; error: string }
 
 export type WorkflowSummary = ConventionSummary & { description?: string; nodes: string[] }
 export type TemplateSummary = ConventionSummary & { description?: string; write?: 'none' | 'worktree' }
 export type SkillSummary = ConventionSummary & { description?: string }
 
-export const builtinDocs = (): string[] => readdirSync(DOCS_DIR).filter(f => extname(f) === '.md').map(f => basename(f, '.md')).sort()
+export const builtinDocs = (): string[] =>
+  readdirSync(DOCS_DIR)
+    .filter(f => extname(f) === '.md')
+    .map(f => basename(f, '.md'))
+    .sort()
 
 export class Conventions {
   constructor(private readonly store: Store) {}
@@ -93,10 +95,14 @@ export class Conventions {
   /** 只校验不保存：页面上边写边检查用。 */
   validate(kind: ConventionKind, name: string, content: string): WorkflowError[] {
     switch (kind) {
-      case 'workflow': return this.validateWorkflow(name, content)
-      case 'doc': return this.validateDoc(name, content)
-      case 'template': return this.validateTemplate(name, content)
-      case 'skill': return this.validateSkill(name, content)
+      case 'workflow':
+        return this.validateWorkflow(name, content)
+      case 'doc':
+        return this.validateDoc(name, content)
+      case 'template':
+        return this.validateTemplate(name, content)
+      case 'skill':
+        return this.validateSkill(name, content)
     }
   }
 
@@ -171,13 +177,20 @@ export class Conventions {
       skills.push({ name, version: k.version, content: k.content })
     }
     // 按名字排序（和技能一样）：记录不随工作流里角色的书写顺序变化。
-    const templates = [...new Map(Object.values(workflow.roles).flatMap(r => (r.template === undefined ? [] : [[r.template.name, r.template] as const]))).values()]
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const templates = [...new Map(Object.values(workflow.roles).flatMap(r => (r.template === undefined ? [] : [[r.template.name, r.template] as const]))).values()].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
     return {
-      ok: true, workflow, source, docs, skills,
+      ok: true,
+      workflow,
+      source,
+      docs,
+      skills,
       used: {
-        workflow: { name: workflow.name, ...(row === undefined ? {} : { version: row.version }) }, docs: docs.map(d => ({ name: d.name, version: d.version })),
-        templates, skills: skills.map(k => ({ name: k.name, version: k.version })),
+        workflow: { name: workflow.name, ...(row === undefined ? {} : { version: row.version }) },
+        docs: docs.map(d => ({ name: d.name, version: d.version })),
+        templates,
+        skills: skills.map(k => ({ name: k.name, version: k.version })),
       },
     }
   }

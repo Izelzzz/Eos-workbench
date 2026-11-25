@@ -12,7 +12,13 @@ export const appendLog = (path: string, text: string, at: number = Date.now()): 
   const stamp = new Date(at).toISOString()
   try {
     mkdirSync(join(path, '..'), { recursive: true })
-    appendFileSync(path, text.split('\n').map(l => `${stamp} ${l}\n`).join(''))
+    appendFileSync(
+      path,
+      text
+        .split('\n')
+        .map(l => `${stamp} ${l}\n`)
+        .join(''),
+    )
   } catch {
     // 磁盘满、没有权限：不打断任务。
   }

@@ -36,29 +36,71 @@ const serve = async (improve?: Executor, publicUrl?: URL, masterKey?: MasterKey)
   // 和平台一样用真实的 git worktree：平台提交前会核对 worktree 的 .git 还是 git 建的那个文件。
   const mainRepo = join(dir, 'main-repo')
   mkdirSync(mainRepo)
-  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: mainRepo })
+  for (const a of [
+    ['init', '-q', '-b', 'main'],
+    ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'],
+  ])
+    execFileSync('git', a, { cwd: mainRepo })
   const worktree = join(dir, 'wt')
   execFileSync('git', ['worktree', 'add', '-q', '-b', 'eos/t1', worktree], { cwd: mainRepo })
   store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: mainRepo, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
   const replayed: string[] = []
   // c1 跑在事件流之前（只能回放），c2 运行时记录了事件流。
   store.dispatch('t1', { kind: 'replied', call: 'c1' as never, sessionId: 's', text: '方案', usage: zero, ms: 100 }, 1100, 'executor')
-  store.appendTrace('t1', 'c2', [{ kind: 'call_start', t: 1200 }, { kind: 'step_start', t: 1201, step: 1 }])
-  const replay = { traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => { replayed.push(`${key} ${nonce}`); return [{ kind: 'call_start', t: 1000 }, { kind: 'step_start', t: 1001, step: 1 }, { kind: 'step_end', t: 1090, step: 1 }] } }
+  store.appendTrace('t1', 'c2', [
+    { kind: 'call_start', t: 1200 },
+    { kind: 'step_start', t: 1201, step: 1 },
+  ])
+  const replay = {
+    traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => {
+      replayed.push(`${key} ${nonce}`)
+      return [
+        { kind: 'call_start', t: 1000 },
+        { kind: 'step_start', t: 1001, step: 1 },
+        { kind: 'step_end', t: 1090, step: 1 },
+      ]
+    },
+  }
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: dir, pollMs: 5 })
   const locksDir = supervisor.locksDir
   const credentials = new Credentials(join(dir, 'eos.db'), masterKey)
-  const server = createWebServer({ store, supervisor, replay, staticDir: join(dir, 'static'), credentials, ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }), ...(publicUrl === undefined ? {} : { publicUrl }) })
+  const server = createWebServer({
+    store,
+    supervisor,
+    replay,
+    staticDir: join(dir, 'static'),
+    credentials,
+    ...(improve === undefined ? {} : { improve: { executor: improve, dataDir: dir } }),
+    ...(publicUrl === undefined ? {} : { publicUrl }),
+  })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { base, dir, store, credentials, supervisor, replayed, locksDir, close: () => new Promise(r => server.close(() => { credentials.close(); r(undefined) })) }
+  return {
+    base,
+    dir,
+    store,
+    credentials,
+    supervisor,
+    replayed,
+    locksDir,
+    close: () =>
+      new Promise(r =>
+        server.close(() => {
+          credentials.close()
+          r(undefined)
+        }),
+      ),
+  }
 }
 
 test('lists tasks and returns a detail with the trace tree, replaying calls recorded before the trace existed', async () => {
   const s = await serve()
   try {
     const list = await (await fetch(`${s.base}/api/tasks`)).json()
-    assert.deepEqual(list.map((t: { id: string }) => t.id), ['t1'])
+    assert.deepEqual(
+      list.map((t: { id: string }) => t.id),
+      ['t1'],
+    )
     const d = (await (await fetch(`${s.base}/api/tasks/t1`)).json()) as TaskDetail
     assert.equal(d.status, 'running')
     assert.equal(d.branch, 'eos/t1')
@@ -183,13 +225,16 @@ test('with a public URL, its host is accepted and only its exact origin may writ
     s.store.dispatch('t1', { kind: 'asked', call: 'c2' as never, question: { id: 'q1', text: '?' } }, 1250, 'executor')
     const port = new URL(s.base).port
     const host = 'eos.example.com'
-    const answer = (headers: Record<string, string>) => raw(s.base, 'POST', '/api/tasks/t1/answer', { 'content-type': 'application/json', ...headers }, JSON.stringify({ questionId: 'q1', text: '用方案 A' }))
+    const answer = (headers: Record<string, string>) =>
+      raw(s.base, 'POST', '/api/tasks/t1/answer', { 'content-type': 'application/json', ...headers }, JSON.stringify({ questionId: 'q1', text: '用方案 A' }))
     assert.equal((await raw(s.base, 'GET', '/api/tasks', { host })).status, 200)
     assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: `localhost:${port}` })).status, 200, 'local access keeps working')
     assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: `evil.example:${port}` })).status, 421)
     assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: 'eos.example.com:8443' })).status, 421, 'a different port is a different origin')
-    for (const same of ['EOS.Example.com', 'eos.example.com:443']) assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: same })).status, 200, `${same} is the same host as forwarded by some proxies`)
-    for (const odd of ['eos.example.com/x', 'evil.example@eos.example.com', 'eos.example.com#x', 'eos%2eexample.com', 'eos.exa\tmple.com', 'eos.example.com:0443']) assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: odd })).status, 421, odd)
+    for (const same of ['EOS.Example.com', 'eos.example.com:443'])
+      assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: same })).status, 200, `${same} is the same host as forwarded by some proxies`)
+    for (const odd of ['eos.example.com/x', 'evil.example@eos.example.com', 'eos.example.com#x', 'eos%2eexample.com', 'eos.exa\tmple.com', 'eos.example.com:0443'])
+      assert.equal((await raw(s.base, 'GET', '/api/tasks', { host: odd })).status, 421, odd)
     // 外部地址是 https：同名的 http Origin、没有 Origin、本机 Origin 配外部 Host 都不算同源。
     assert.equal((await answer({ host, origin: 'http://eos.example.com' })).status, 403)
     assert.equal((await answer({ host })).status, 403)
@@ -220,7 +265,8 @@ test('the public URL must be a bare http(s) origin', () => {
   assert.equal((parsePublicUrl('https://eos.example.com/') as URL).origin, 'https://eos.example.com')
   assert.equal((parsePublicUrl('http://localhost:8080') as URL).host, 'localhost:8080')
   assert.equal((parsePublicUrl('HTTPS://EOS.Example.com:443') as URL).host, 'eos.example.com', 'default port and case are normalized like the browser does')
-  for (const bad of ['eos.example.com', 'ftp://eos.example.com', 'https://eos.example.com/eos', 'https://eos.example.com/?a=1', 'https://u:p@eos.example.com']) assert.equal(typeof parsePublicUrl(bad), 'string', bad)
+  for (const bad of ['eos.example.com', 'ftp://eos.example.com', 'https://eos.example.com/eos', 'https://eos.example.com/?a=1', 'https://u:p@eos.example.com'])
+    assert.equal(typeof parsePublicUrl(bad), 'string', bad)
 })
 
 /** fetch 不允许改 Host，用 node:http 模拟 DNS 重绑定：请求打到 127.0.0.1，Host 和 Origin 却是攻击者的域名。 */
@@ -254,8 +300,7 @@ test('requests whose Host is not a local address are refused, which stops DNS re
   }
 })
 
-const postTo = (base: string, path: string, body: unknown) =>
-  fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(body) })
+const postTo = (base: string, path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(body) })
 
 test('the page can list workflows, create a task that starts running, and gets Chinese errors for bad input', async () => {
   const s = await serve()
@@ -265,7 +310,11 @@ test('the page can list workflows, create a task that starts running, and gets C
     assert.deepEqual(wfs[0].nodes, ['plan', 'build', 'review'])
     const repo = join(s.dir, 'repo')
     mkdirSync(repo)
-    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'],
+    ])
+      execFileSync('git', a, { cwd: repo })
     const bad = await postTo(s.base, '/api/tasks', { repo: join(s.dir, 'static'), workflow: 'feature', request: 'x' })
     assert.equal(bad.status, 400)
     assert.match((await bad.json()).error, /不是 git 仓库/)
@@ -309,7 +358,13 @@ test('a failed task is retried from the page and a running one can be aborted', 
     assert.equal(retry.status, 200)
     await s.supervisor.idle()
     assert.equal(s.store.get('t1')!.status, 'done')
-    assert.equal(s.store.events('t1').filter(e => e.event.kind === 'retry').at(-1)?.actor, 'web')
+    assert.equal(
+      s.store
+        .events('t1')
+        .filter(e => e.event.kind === 'retry')
+        .at(-1)?.actor,
+      'web',
+    )
   } finally {
     await s.close()
   }
@@ -351,14 +406,24 @@ test('team conventions: list, validate without saving, save new versions, read h
 
     await postTo(s.base, docUrl, { content: '# 评审约定\n只报告真实问题\n给出修改建议' })
     const history = await (await fetch(`${s.base}${docUrl}`)).json()
-    assert.deepEqual(history.versions.map((r: { version: number; note: string; actor: string }) => [r.version, r.note, r.actor]), [[2, '', 'web'], [1, '初版', 'web']])
+    assert.deepEqual(
+      history.versions.map((r: { version: number; note: string; actor: string }) => [r.version, r.note, r.actor]),
+      [
+        [2, '', 'web'],
+        [1, '初版', 'web'],
+      ],
+    )
 
     const cross = await fetch(`${s.base}${docUrl}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: JSON.stringify({ content: 'x' }) })
     assert.equal(cross.status, 403, 'conventions are written only from the page itself')
 
     const repo = join(s.dir, 'repo')
     mkdirSync(repo)
-    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'],
+    ])
+      execFileSync('git', a, { cwd: repo })
     const task = await postTo(s.base, '/api/tasks', { repo, workflow: 'team', request: '加一个函数' })
     const { id } = await task.json()
     await s.supervisor.idle()
@@ -369,7 +434,11 @@ test('team conventions: list, validate without saving, save new versions, read h
     assert.equal(d.metrics.total.wallMs + d.metrics.betweenMs, d.metrics.elapsedMs)
     const ins = (await (await fetch(`${s.base}/api/insights`)).json()) as Insights
     const team = ins.byWorkflow.find(w => w.workflow === 'team')!
-    assert.deepEqual([team.tasks, team.calls, team.usage, team.agentMs, team.wallMs], [1, d.report.total.calls, d.metrics.total.usage, d.metrics.total.agentMs, d.metrics.total.wallMs], 'the stats page sums the same task')
+    assert.deepEqual(
+      [team.tasks, team.calls, team.usage, team.agentMs, team.wallMs],
+      [1, d.report.total.calls, d.metrics.total.usage, d.metrics.total.agentMs, d.metrics.total.wallMs],
+      'the stats page sums the same task',
+    )
     assert.equal(ins.tasks.total, (await (await fetch(`${s.base}/api/tasks`)).json()).length)
   } finally {
     await s.close()
@@ -401,10 +470,18 @@ test('agent templates and skills are listed, validated without saving, saved as 
     const list = await (await fetch(`${s.base}/api/conventions`)).json()
     assert.deepEqual(
       list.templates.map((t: { name: string; version: number; write?: string; description?: string }) => [t.name, t.version, t.write, t.description]),
-      [['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'], ['improver', 1, 'none', '改进：从任务里程序归纳的证据出发，提出团队约定（模板、技能、约定文档、工作流）的修改提案，只读、不用工具。'], ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'], ['spec-writer', 1, 'worktree', '规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。']],
+      [
+        ['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'],
+        ['improver', 1, 'none', '改进：从任务里程序归纳的证据出发，提出团队约定（模板、技能、约定文档、工作流）的修改提案，只读、不用工具。'],
+        ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'],
+        ['spec-writer', 1, 'worktree', '规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。'],
+      ],
       'the seeded templates come with their description and write scope',
     )
-    assert.deepEqual(list.skills.map((k: { name: string; version: number; description?: string }) => [k.name, k.version]), [['write-changes', 1]])
+    assert.deepEqual(
+      list.skills.map((k: { name: string; version: number; description?: string }) => [k.name, k.version]),
+      [['write-changes', 1]],
+    )
     assert.match(list.skills[0].description, /改动说明/)
 
     // 技能名必须和 frontmatter 里的 name 一致，正文不能空；错误带位置。
@@ -445,7 +522,13 @@ test('agent templates and skills are listed, validated without saving, saved as 
     assert.equal((await postTo(s.base, '/api/conventions/template/auditor', { content: TEMPLATE.replace('deny: [subagent]', 'deny: [subagent, web]'), note: '也禁联网' })).status, 201)
     const history = await (await fetch(`${s.base}/api/conventions/template/auditor`)).json()
     assert.equal(history.kind, 'template')
-    assert.deepEqual(history.versions.map((r: { version: number; note: string }) => [r.version, r.note]), [[2, '也禁联网'], [1, '初版']])
+    assert.deepEqual(
+      history.versions.map((r: { version: number; note: string }) => [r.version, r.note]),
+      [
+        [2, '也禁联网'],
+        [1, '初版'],
+      ],
+    )
     assert.match(history.versions[1].content, /deny: \[subagent\]/, 'the first version is kept so the page can diff it')
 
     // 工作流用模板当角色：任务记下模板和技能各自用了哪一版。
@@ -453,7 +536,11 @@ test('agent templates and skills are listed, validated without saving, saved as 
     assert.equal((await postTo(s.base, '/api/conventions/workflow/audit', { content: wf })).status, 201)
     const repo = join(s.dir, 'repo')
     mkdirSync(repo)
-    for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: repo })
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'],
+    ])
+      execFileSync('git', a, { cwd: repo })
     const task = await postTo(s.base, '/api/tasks', { repo, workflow: 'audit', request: '核对改动' })
     const { id } = await task.json()
     await s.supervisor.idle()
@@ -469,14 +556,29 @@ test('proposals: list and detail with the base version for diffing; approve and 
   const s = await serve()
   try {
     const dev = s.store.convention('template', 'developer')!
-    const add = (rationale: string) => new Proposals(s.store, s.supervisor.conventions).add({
-      target: { kind: 'template', name: 'developer' }, baseVersion: dev.version, content: dev.content.replace(/prompt: \|/, 'prompt: |\n  导出函数要写 @example。'),
-      rationale, evidence: ['t1:9'], scope: { workflow: 'standard', tasks: ['t1'] }, actor: 'cli',
-    }, 2000)
+    const add = (rationale: string) =>
+      new Proposals(s.store, s.supervisor.conventions).add(
+        {
+          target: { kind: 'template', name: 'developer' },
+          baseVersion: dev.version,
+          content: dev.content.replace(/prompt: \|/, 'prompt: |\n  导出函数要写 @example。'),
+          rationale,
+          evidence: ['t1:9'],
+          scope: { workflow: 'standard', tasks: ['t1'] },
+          actor: 'cli',
+        },
+        2000,
+      )
     assert.ok(add('第一条').ok)
     assert.ok(add('第二条').ok)
     const list = (await (await fetch(`${s.base}/api/improve/proposals`)).json()) as ProposalInfo[]
-    assert.deepEqual(list.map(p => [p.id, p.status, p.latestVersion]), [[2, 'pending', 1], [1, 'pending', 1]])
+    assert.deepEqual(
+      list.map(p => [p.id, p.status, p.latestVersion]),
+      [
+        [2, 'pending', 1],
+        [1, 'pending', 1],
+      ],
+    )
     const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
     assert.deepEqual([d.base?.version, d.base?.content === dev.content, d.rationale], [1, true, '第一条'])
     assert.equal((await fetch(`${s.base}/api/improve/proposals/9`)).status, 404)
@@ -500,11 +602,27 @@ test('proposals: list and detail with the base version for diffing; approve and 
     assert.deepEqual([stale.status, ((await stale.json()) as { error: string }).error], [409, '提案 #2 已过期：目标已是第 2 版，提案基于第 1 版。请重新生成提案'])
     assert.equal((await decide(9, 'reject', { reason: '无' })).status, 404)
     const after = (await (await fetch(`${s.base}/api/improve/proposals`)).json()) as ProposalInfo[]
-    assert.deepEqual(after.map(p => [p.id, p.status, p.latestVersion]), [[2, 'stale', 2], [1, 'approved', 2]])
+    assert.deepEqual(
+      after.map(p => [p.id, p.status, p.latestVersion]),
+      [
+        [2, 'stale', 2],
+        [1, 'approved', 2],
+      ],
+    )
     // 内容在批准时已无法保存（工作流引用的模板被换成解析不了的版本）：409，保持待审批。
     const wf = s.store.convention('workflow', 'standard')!
-    const r3 = new Proposals(s.store, s.supervisor.conventions).add({ target: { kind: 'workflow', name: 'standard' }, baseVersion: wf.version, content: wf.content + '\n',
-      rationale: '第三条', evidence: ['t1:9'], scope: { workflow: 'standard', tasks: ['t1'] }, actor: 'cli' }, 3000)
+    const r3 = new Proposals(s.store, s.supervisor.conventions).add(
+      {
+        target: { kind: 'workflow', name: 'standard' },
+        baseVersion: wf.version,
+        content: wf.content + '\n',
+        rationale: '第三条',
+        evidence: ['t1:9'],
+        scope: { workflow: 'standard', tasks: ['t1'] },
+        actor: 'cli',
+      },
+      3000,
+    )
     assert.ok(r3.ok)
     s.store.saveConvention({ kind: 'template', name: 'developer', content: 'name: developer\nprompt: x\nwrite: everywhere\n', note: '', actor: 'test' }, 3001)
     const invalid = await decide(r3.row.id, 'approve', {})
@@ -518,9 +636,19 @@ test('proposals: list and detail with the base version for diffing; approve and 
 
 test('generating proposals from the page: one run at a time, the detail carries the cited evidence, and errors are reported', async () => {
   let release: () => void = () => {}
-  const gate = new Promise<void>(r => { release = r })
-  const reply = () => '```json\n' + JSON.stringify({ proposals: [{ target: { kind: 'template', name: 'developer' }, rationale: '评审要求补测试', evidence: ['t2:2'], content: `${builtinAgentSource('developer').trimEnd()}\n  - 先写测试。\n` }] }) + '\n```'
-  const improver = new FakeExecutor(async () => { await gate; return reply() })
+  const gate = new Promise<void>(r => {
+    release = r
+  })
+  const reply = () =>
+    '```json\n' +
+    JSON.stringify({
+      proposals: [{ target: { kind: 'template', name: 'developer' }, rationale: '评审要求补测试', evidence: ['t2:2'], content: `${builtinAgentSource('developer').trimEnd()}\n  - 先写测试。\n` }],
+    }) +
+    '\n```'
+  const improver = new FakeExecutor(async () => {
+    await gate
+    return reply()
+  })
   const s = await serve(improver)
   try {
     // 一个用 developer 模板、评审要求过一次修改的已完成任务。
@@ -542,10 +670,16 @@ test('generating proposals from the page: one run at a time, the detail carries 
     release()
     const done = (await (await first).json()) as GenerateResponse
     assert.ok(done.ok)
-    assert.deepEqual(done.created.map(p => [p.id, p.target.name, p.evidence, p.actor]), [[1, 'developer', ['t2:2'], 'web']])
+    assert.deepEqual(
+      done.created.map(p => [p.id, p.target.name, p.evidence, p.actor]),
+      [[1, 'developer', ['t2:2'], 'web']],
+    )
     assert.equal(done.call?.usage.output, 10)
     const d = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
-    assert.deepEqual(d.signals.map(x => [x.id, x.kind, x.role, x.text]), [['t2:2', 'review_changes', 'dev', '缺少测试\n1. [major]：补测试']])
+    assert.deepEqual(
+      d.signals.map(x => [x.id, x.kind, x.role, x.text]),
+      [['t2:2', 'review_changes', 'dev', '缺少测试\n1. [major]：补测试']],
+    )
     const missing = await gen({ workflow: 't', tasks: ['nope'] })
     assert.deepEqual([missing.status, ((await missing.json()) as { error: string }).error], [400, '这些任务不存在或不是工作流「t」的：nope'])
   } finally {
@@ -572,13 +706,30 @@ test('generate: a cross-site request is refused; a failed model call is 502 with
       p.onEvent?.({ kind: 'tool_start', t: 1, step: 1, id: 'x', name: 'read', args: '{}' })
       return { sessionId: 's', text: '我先读一下文件……', usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 }, ms: 9 }
     },
-    async findReply() { return undefined }, async traceOf() { return [] }, async release() {}, async close() {},
+    async findReply() {
+      return undefined
+    },
+    async traceOf() {
+      return []
+    },
+    async release() {},
+    async close() {},
   }
   const s = await serve(ex)
   try {
     const w = workflow({ maxRounds: 2, escalate: false })
-    s.store.create({ id: 't2', request: '需求', workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } }, workflowSource: 'y', meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 2000)
-    for (const text of ['方案', '实现', CHANGES, '改了', PASS]) s.store.dispatch('t2', { kind: 'replied', call: s.store.get('t2')!.pending!.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
+    s.store.create(
+      {
+        id: 't2',
+        request: '需求',
+        workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version: 1 } } } },
+        workflowSource: 'y',
+        meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' },
+      },
+      2000,
+    )
+    for (const text of ['方案', '实现', CHANGES, '改了', PASS])
+      s.store.dispatch('t2', { kind: 'replied', call: s.store.get('t2')!.pending!.id, sessionId: 's', text, usage: zero, ms: 5 }, 2001, 'executor')
     const gen = (origin: string) => fetch(`${s.base}/api/improve/generate`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ workflow: 't' }) })
     assert.equal((await gen('http://evil.example')).status, 403)
     const thrown = await gen(s.base)
@@ -598,16 +749,34 @@ test('comparisons: each approved proposal compares the tasks before and after it
   try {
     const dev = s.store.convention('template', 'developer')!
     const p = new Proposals(s.store, s.supervisor.conventions)
-    const added = p.add({ target: { kind: 'template', name: 'developer' }, baseVersion: dev.version, content: `${dev.content.trimEnd()}\n  - 写 @example。\n`,
-      rationale: '补规则', evidence: ['x:1'], scope: { workflow: 't', tasks: [] }, actor: 'cli' }, 2000)
+    const added = p.add(
+      {
+        target: { kind: 'template', name: 'developer' },
+        baseVersion: dev.version,
+        content: `${dev.content.trimEnd()}\n  - 写 @example。\n`,
+        rationale: '补规则',
+        evidence: ['x:1'],
+        scope: { workflow: 't', tasks: [] },
+        actor: 'cli',
+      },
+      2000,
+    )
     assert.ok(added.ok)
     const pending = (await (await fetch(`${s.base}/api/improve/proposals/1`)).json()) as ProposalDetail
     assert.equal(pending.comparison, undefined, 'no comparison before approval')
     assert.ok(p.approve(1, 2001, 'web').ok)
     const run = (id: string, version: number, replies: string[]) => {
       const w = workflow({ maxRounds: 2, escalate: false })
-      s.store.create({ id, request: '需求', workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version } } } }, workflowSource: 'y',
-        meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' } }, 3000)
+      s.store.create(
+        {
+          id,
+          request: '需求',
+          workflow: { ...w, roles: { ...w.roles, dev: { ...w.roles.dev!, template: { name: 'developer', version } } } },
+          workflowSource: 'y',
+          meta: { repo: 'r', worktree: 'w', branch: 'b', baseSha: 'x' },
+        },
+        3000,
+      )
       for (const text of replies) s.store.dispatch(id, { kind: 'replied', call: s.store.get(id)!.pending!.id, sessionId: 's', text, usage: { ...zero, input: 10, output: 5 }, ms: 5 }, 3001, 'executor')
     }
     for (const id of ['b1', 'b2', 'b3']) run(id, 1, ['方案', '实现', CHANGES, '改了', PASS])
@@ -642,7 +811,10 @@ test('凭据：保存、替换、删除；列表和所有响应里都没有值',
     assert.deepEqual(await call(postTo(s.base, '/api/credentials', { name: 'github.com', kind: 'token', value: VALUE })), { status: 200, body: { ok: true } })
     assert.deepEqual(s.credentials.get(LOCAL_OWNER, 'github.com'), { kind: 'ok', value: VALUE }, '存进了凭据存储')
     const list = (await call(fetch(`${s.base}/api/credentials`))).body as CredentialsResponse
-    assert.deepEqual(list.items.map(i => [i.name, i.kind, i.keyId]), [['github.com', 'token', KEY.id]])
+    assert.deepEqual(
+      list.items.map(i => [i.name, i.kind, i.keyId]),
+      [['github.com', 'token', KEY.id]],
+    )
     assert.deepEqual(await call(postTo(s.base, '/api/credentials', { name: 'github.com', kind: 'token', value: `${VALUE}-2` })), { status: 200, body: { ok: true } })
     assert.deepEqual(s.credentials.get(LOCAL_OWNER, 'github.com'), { kind: 'ok', value: `${VALUE}-2` }, '同名替换')
     // 不合规的输入：报原因，不回显值。
@@ -681,14 +853,29 @@ test('凭据：没有主密钥时保存返回 409 并写明怎么设置；列表
 test('凭据：跨站请求和非 JSON 请求被挡住，什么都不改', async () => {
   const s = await serve(undefined, undefined, KEY)
   try {
-    const evil = await fetch(`${s.base}/api/credentials`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }) })
+    const evil = await fetch(`${s.base}/api/credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }),
+    })
     assert.equal(evil.status, 403)
-    const form = await fetch(`${s.base}/api/credentials`, { method: 'POST', headers: { 'content-type': 'text/plain', origin: s.base }, body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }) })
+    const form = await fetch(`${s.base}/api/credentials`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', origin: s.base },
+      body: JSON.stringify({ name: 'github.com', kind: 'token', value: VALUE }),
+    })
     assert.equal(form.status, 415)
     s.credentials.put(LOCAL_OWNER, 'keep', 'token', VALUE)
-    const del = await fetch(`${s.base}/api/credentials/delete`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ name: 'keep' }) })
+    const del = await fetch(`${s.base}/api/credentials/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ name: 'keep' }),
+    })
     assert.equal(del.status, 403)
-    assert.deepEqual(s.credentials.list(LOCAL_OWNER).map(i => i.name), ['keep'])
+    assert.deepEqual(
+      s.credentials.list(LOCAL_OWNER).map(i => i.name),
+      ['keep'],
+    )
   } finally {
     await s.close()
   }
@@ -704,7 +891,10 @@ test('凭据：github-app. 开头的名字只能是 GitHub App 凭据；已有�
     s.credentials.put(LOCAL_OWNER, 'github-app.github.com', 'github-app', '{"appId":1,"privateKey":"x"}')
     const overwrite = await postTo(s.base, '/api/credentials', { name: 'github-app.github.com', kind: 'token', value: VALUE })
     assert.equal(overwrite.status, 400)
-    assert.deepEqual(s.credentials.list(LOCAL_OWNER).map(i => [i.name, i.kind]), [['github-app.github.com', 'github-app']])
+    assert.deepEqual(
+      s.credentials.list(LOCAL_OWNER).map(i => [i.name, i.kind]),
+      [['github-app.github.com', 'github-app']],
+    )
   } finally {
     await s.close()
   }

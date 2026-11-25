@@ -16,8 +16,17 @@ export function Credentials() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
 
-  const load = () => listCredentials().then(d => { setData(d); setError(undefined) }, e => setError(`加载凭据失败：${(e as Error).message}`))
-  useEffect(() => { void load() }, [])
+  const load = () =>
+    listCredentials().then(
+      d => {
+        setData(d)
+        setError(undefined)
+      },
+      e => setError(`加载凭据失败：${(e as Error).message}`),
+    )
+  useEffect(() => {
+    void load()
+  }, [])
 
   const existing = data?.items.find(i => i.name === name)?.kind
   // GitHub App 的凭据（id 和私钥）由 GitHub 接入的注册流程写入，这里只能删除，不能用表单覆盖。
@@ -53,25 +62,61 @@ export function Credentials() {
     <div className="credentials">
       <h1>凭据</h1>
       <p className="muted">平台加密保存的模型 API key 和 Git 令牌，只由平台使用，agent 看不到。保存后不再显示值，只能替换或删除。</p>
-      {data !== undefined && !data.usable && <p className="error" role="alert">平台没有主密钥，不能保存凭据。{data.hint}</p>}
-      {data?.keyId !== undefined && <p className="muted">主密钥指纹 <span className="mono">{data.keyId}</span></p>}
-      {data === undefined ? (error ? null : <p className="muted">加载中…</p>) : data.items.length === 0 ? <p className="muted">还没有凭据。</p> : (
+      {data !== undefined && !data.usable && (
+        <p className="error" role="alert">
+          平台没有主密钥，不能保存凭据。{data.hint}
+        </p>
+      )}
+      {data?.keyId !== undefined && (
+        <p className="muted">
+          主密钥指纹 <span className="mono">{data.keyId}</span>
+        </p>
+      )}
+      {data === undefined ? (
+        error ? null : (
+          <p className="muted">加载中…</p>
+        )
+      ) : data.items.length === 0 ? (
+        <p className="muted">还没有凭据。</p>
+      ) : (
         <table className="tasks credential-list">
-          <thead><tr><th>名字</th><th>类型</th><th className="fp">主密钥指纹</th><th>更新</th><th /></tr></thead>
+          <thead>
+            <tr>
+              <th>名字</th>
+              <th>类型</th>
+              <th className="fp">主密钥指纹</th>
+              <th>更新</th>
+              <th />
+            </tr>
+          </thead>
           <tbody>
             {data.items.map(i => (
               <tr key={i.name}>
                 <td className="mono">{i.name}</td>
                 <td>{KIND[i.kind]}</td>
-                <td className="mono fp">{data.keyId === undefined || i.keyId === data.keyId ? (i.keyId || '—') : <span title="和当前主密钥不同：换回原来的主密钥，或重新录入">{i.keyId || '—'} ⚠</span>}</td>
+                <td className="mono fp">
+                  {data.keyId === undefined || i.keyId === data.keyId ? i.keyId || '—' : <span title="和当前主密钥不同：换回原来的主密钥，或重新录入">{i.keyId || '—'} ⚠</span>}
+                </td>
                 <td>{i.updatedAt > 0 ? ago(i.updatedAt) : '—'}</td>
-                <td><button type="button" onClick={() => void remove(i.name)}>删除</button></td>
+                <td>
+                  <button type="button" onClick={() => void remove(i.name)}>
+                    删除
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <form className="new-task" aria-label="保存凭据" autoComplete="off" onSubmit={e => { e.preventDefault(); void save() }}>
+      <form
+        className="new-task"
+        aria-label="保存凭据"
+        autoComplete="off"
+        onSubmit={e => {
+          e.preventDefault()
+          void save()
+        }}
+      >
         <h2>添加或替换</h2>
         <label>
           <span>名字</span>
@@ -89,10 +134,22 @@ export function Credentials() {
           <span>值</span>
           <input type="password" value={value} onChange={e => setValue(e.target.value)} required autoComplete="new-password" spellCheck={false} />
         </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        {notice && <p className="notice" role="status">{notice}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="notice" role="status">
+            {notice}
+          </p>
+        )}
         {appLocked && <p className="muted">「{name}」是 GitHub App 的凭据，不能在这里替换；要换就删掉后重新注册。</p>}
-        <div><button type="submit" className="primary" disabled={busy || data?.usable === false || appLocked}>{busy ? '保存中…' : '保存'}</button></div>
+        <div>
+          <button type="submit" className="primary" disabled={busy || data?.usable === false || appLocked}>
+            {busy ? '保存中…' : '保存'}
+          </button>
+        </div>
       </form>
     </div>
   )

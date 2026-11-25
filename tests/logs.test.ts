@@ -20,7 +20,12 @@ const sandbox = () => {
   const repo = join(dir, 'repo')
   mkdirSync(repo)
   writeFileSync(join(repo, 'README.md'), '# demo\n')
-  for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: repo, stdio: 'ignore' })
+  for (const a of [
+    ['init', '-q', '-b', 'main'],
+    ['add', '-A'],
+    ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'init'],
+  ])
+    execFileSync('git', a, { cwd: repo, stdio: 'ignore' })
   return { dir, repo, data: join(dir, 'data'), store: new Store(join(dir, 'data', 'eos.db')) }
 }
 
@@ -49,8 +54,10 @@ test('常见错误都有对应的修法，认不出的让人看日志', () => {
 })
 
 test('失败原因写清哪一步、什么原因、怎么修；日志路径不存进失败原因', () => {
-  assert.equal(explain({ where: '[build] dev · produce（调用 c2）', error: '429 Too Many Requests', task: 't1' }),
-    '哪一步：[build] dev · produce（调用 c2）\n原因：429 Too Many Requests\n怎么修：请求太频繁被限流：等一会儿再重试。处理后在任务页点「重试」，或运行 npm run eos -- retry t1')
+  assert.equal(
+    explain({ where: '[build] dev · produce（调用 c2）', error: '429 Too Many Requests', task: 't1' }),
+    '哪一步：[build] dev · produce（调用 c2）\n原因：429 Too Many Requests\n怎么修：请求太频繁被限流：等一会儿再重试。处理后在任务页点「重试」，或运行 npm run eos -- retry t1',
+  )
   assert.match(explain({ where: 'x', error: 'y', task: 't1', fix: '自定义修法' }), /\n怎么修：自定义修法。/)
 })
 
@@ -110,10 +117,13 @@ test('已知凭据值在任务日志、终端输出和失败原因里都换成 *
   const s = sandbox()
   const SECRET = 'sk-live-0123456789abcdef'
   const redact = (t: string) => redactText(t, [SECRET])
-  const executor = redacting(new FakeExecutor(async ({ key }) => {
-    if (key.endsWith('/build')) throw new Error(`401 Unauthorized: invalid key ${SECRET}`)
-    return key.endsWith('/review') ? PASS : `方案里提到了 ${SECRET}`
-  }), redact)
+  const executor = redacting(
+    new FakeExecutor(async ({ key }) => {
+      if (key.endsWith('/build')) throw new Error(`401 Unauthorized: invalid key ${SECRET}`)
+      return key.endsWith('/review') ? PASS : `方案里提到了 ${SECRET}`
+    }),
+    redact,
+  )
   const terminal: string[] = []
   const sup = new Supervisor({ store: s.store, executor, dataDir: s.data, pollMs: 2, log: (_id, l) => terminal.push(l), redact })
   const created = await sup.create({ repo: s.repo, workflow: 'feature', request: '加一个函数' })
@@ -145,7 +155,12 @@ test('不经过执行器的报错（例如提交、检查失败）也由 Supervi
   await sup.idle()
   assert.equal(task.status, 'failed')
   const log = readFileSync(sup.logPath(created.id), 'utf8')
-  for (const [where, text] of [['日志', log], ['终端', terminal.join('\n')], ['失败原因', task.failure ?? '']] as const) assert.ok(!text.includes(SECRET), `${where}：${text}`)
+  for (const [where, text] of [
+    ['日志', log],
+    ['终端', terminal.join('\n')],
+    ['失败原因', task.failure ?? ''],
+  ] as const)
+    assert.ok(!text.includes(SECRET), `${where}：${text}`)
   assert.match(task.failure ?? '', /x:\*\*\*@example\.com/)
   assert.match(log, /token \*\*\*/)
 })

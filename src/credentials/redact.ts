@@ -37,7 +37,11 @@ const forms = (s: string): string[] => {
 
 /** 把 text 里的每个 secret 换成 ***。长的先换：一个值包含另一个值时，不会只换掉一部分。 */
 export const redactText = (text: string, secrets: readonly string[]): string =>
-  secrets.filter(s => s.length >= MIN_SECRET_LENGTH).flatMap(forms).sort((a, b) => b.length - a.length).reduce((t, s) => t.split(s).join(MASK), text)
+  secrets
+    .filter(s => s.length >= MIN_SECRET_LENGTH)
+    .flatMap(forms)
+    .sort((a, b) => b.length - a.length)
+    .reduce((t, s) => t.split(s).join(MASK), text)
 
 /** 遮蔽一个 JSON 形状的值里所有的字符串（trace 事件、检查结果），其余原样保留。 */
 export const redactDeep = <T>(value: T, redact: (s: string) => string): T => {
@@ -62,11 +66,15 @@ const redactError = (e: unknown, redact: (s: string) => string): unknown => {
  */
 export const redacting = (ex: Executor, redact: (s: string) => string): Executor => ({
   send: async p => {
-    const reply = await ex.send({
-      ...p,
-      ask: (q, signal) => p.ask(redactDeep(q, redact), signal),
-      ...(p.onEvent === undefined ? {} : { onEvent: e => p.onEvent!(redactDeep(e, redact)) }),
-    }).catch(e => { throw redactError(e, redact) })
+    const reply = await ex
+      .send({
+        ...p,
+        ask: (q, signal) => p.ask(redactDeep(q, redact), signal),
+        ...(p.onEvent === undefined ? {} : { onEvent: e => p.onEvent!(redactDeep(e, redact)) }),
+      })
+      .catch(e => {
+        throw redactError(e, redact)
+      })
     return { ...reply, text: redact(reply.text) }
   },
   findReply: async (key, nonce) => {
@@ -125,7 +133,14 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
       return [...(cache?.values ?? []), ...runtime, ...extra]
     }
     const sig = items.map(i => `${i.name}@${i.updatedAt}`).join('\n')
-    if (cache?.sig !== sig) cache = { sig, values: items.flatMap(i => { const r = credentials.get(LOCAL_OWNER, i.name); return r.kind === 'ok' ? valuesOf(r.value) : [] }) }
+    if (cache?.sig !== sig)
+      cache = {
+        sig,
+        values: items.flatMap(i => {
+          const r = credentials.get(LOCAL_OWNER, i.name)
+          return r.kind === 'ok' ? valuesOf(r.value) : []
+        }),
+      }
     return [...cache.values, ...runtime, ...extra]
   }
 }

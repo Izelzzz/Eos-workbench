@@ -5,7 +5,13 @@ import { describeCheck, describeRequirements } from '../engine/checks.ts'
 import type { Span, SpanStatus, TraceEvent } from './types.ts'
 
 export const PURPOSE: Record<Purpose, string> = {
-  produce: '完成工作', fix: '补齐交付物', critique: '评审', respond: '回应评审', reconfirm: '重新确认', reapply: '按新方案调整', instruct: '按用户指示调整',
+  produce: '完成工作',
+  fix: '补齐交付物',
+  critique: '评审',
+  respond: '回应评审',
+  reconfirm: '重新确认',
+  reapply: '按新方案调整',
+  instruct: '按用户指示调整',
 }
 
 const ended = (spans: Span[]) => spans.every(s => s.end !== undefined)
@@ -22,8 +28,7 @@ const pretty = (args: string): string => {
   }
 }
 
-const instant = (id: string, kind: Span['kind'], name: string, at: number, extra: Partial<Span> = {}): Span =>
-  ({ id, kind, name, start: at, end: at, status: 'ok', meta: {}, children: [], ...extra })
+const instant = (id: string, kind: Span['kind'], name: string, at: number, extra: Partial<Span> = {}): Span => ({ id, kind, name, start: at, end: at, status: 'ok', meta: {}, children: [], ...extra })
 
 /** 一次调用里的模型步骤与工具。open 为 true 表示调用还没结束，没收尾的步骤和工具显示为运行中。 */
 const steps = (callId: string, events: TraceEvent[], prompt: string, open: boolean): Span[] => {
@@ -34,8 +39,16 @@ const steps = (callId: string, events: TraceEvent[], prompt: string, open: boole
   for (const e of events) {
     switch (e.kind) {
       case 'step_start':
-        current = { id: `${callId}.s${out.length + 1}`, kind: 'model', name: `第 ${e.step} 步`, start: e.t, status: 'running', meta: {}, children: [],
-          input: out.length === 0 ? prompt : previousOutputs.join('\n\n────────\n\n') }
+        current = {
+          id: `${callId}.s${out.length + 1}`,
+          kind: 'model',
+          name: `第 ${e.step} 步`,
+          start: e.t,
+          status: 'running',
+          meta: {},
+          children: [],
+          input: out.length === 0 ? prompt : previousOutputs.join('\n\n────────\n\n'),
+        }
         previousOutputs = []
         out.push(current)
         break
@@ -93,14 +106,14 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const info = entry ?? pending ?? abandoned
     if (info === undefined) return undefined
     const started = events.find(e => e.kind === 'call_start')?.t ?? (entry === undefined ? events[0]?.t : entry.at - entry.ms)
-    const status: SpanStatus = entry !== undefined ? 'ok'
-      : abandoned !== undefined ? 'error'
-      : task.status === 'failed' ? 'error'
-      : task.question?.call === id ? 'waiting'
-      : task.status === 'running' ? 'running' : 'error'
+    const status: SpanStatus =
+      entry !== undefined ? 'ok' : abandoned !== undefined ? 'error' : task.status === 'failed' ? 'error' : task.question?.call === id ? 'waiting' : task.status === 'running' ? 'running' : 'error'
     const children = steps(id, events, info.prompt, entry === undefined && status !== 'error')
     for (const e of task.log) {
-      if (e.type === 'question' && e.question.call === id) children.push(instant(`${id}.${e.question.id}`, 'question', `提问 ${e.question.id}`, e.at, { output: e.question.text, meta: e.question.options ? { 选项: e.question.options.join(' / ') } : {} }))
+      if (e.type === 'question' && e.question.call === id)
+        children.push(
+          instant(`${id}.${e.question.id}`, 'question', `提问 ${e.question.id}`, e.at, { output: e.question.text, meta: e.question.options ? { 选项: e.question.options.join(' / ') } : {} }),
+        )
       if (e.type === 'answer' && task.log.some(q => q.type === 'question' && q.question.id === e.questionId && q.question.call === id)) {
         children.push(instant(`${id}.a.${e.questionId}`, 'answer', `回答 ${e.questionId}`, e.at, { output: e.text }))
       }
@@ -110,44 +123,77 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const usage = entry?.usage ?? sumUsage(children)
     const model = entry?.model ?? children.find(c => c.model !== undefined)?.model
     return {
-      id, kind: 'call', name: `${info.role} · ${purposeLabel(info)}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
-      start: started ?? entry?.at ?? 0, ...(entry === undefined ? {} : { end: entry.at }), status, usage,
+      id,
+      kind: 'call',
+      name: `${info.role} · ${purposeLabel(info)}${round === undefined ? '' : ` · 第 ${round} 轮`}${abandoned === undefined ? '' : '（已中止）'}`,
+      start: started ?? entry?.at ?? 0,
+      ...(entry === undefined ? {} : { end: entry.at }),
+      status,
+      usage,
       ...(model === undefined ? {} : { model }),
-      input: info.prompt, ...(entry === undefined ? {} : { output: entry.reply }),
-      meta: { 调用: id, 角色: info.role, 用途: purposeLabel(info), ...(round === undefined ? {} : { 轮次: String(round) }),
+      input: info.prompt,
+      ...(entry === undefined ? {} : { output: entry.reply }),
+      meta: {
+        调用: id,
+        角色: info.role,
+        用途: purposeLabel(info),
+        ...(round === undefined ? {} : { 轮次: String(round) }),
         // 这次调用写到了可写范围外，平台在提交前撤销了这些路径。
         ...(entry?.reverted === undefined || entry.reverted.length === 0 ? {} : { 撤销的越界改动: entry.reverted.join('、') }),
         ...(task.status === 'failed' && pending !== undefined && task.failure !== undefined ? { 失败原因: task.failure } : {}),
-        ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }) },
+        ...(abandoned === undefined ? {} : { 说明: '任务中止时这次调用还在进行；中止不会打断它，它之后的 trace 和用量仍记在这里' }),
+      },
       children,
     }
   }
 
-  const callIds = [...new Set([...done.keys(), ...(task.pending ? [task.pending.id as string] : []), ...eventsOf.keys()])]
-    .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+  const callIds = [...new Set([...done.keys(), ...(task.pending ? [task.pending.id as string] : []), ...eventsOf.keys()])].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
   const calls = callIds.map(callSpan).filter((s): s is Span => s !== undefined)
-  const nodeOfCall = new Map(callIds.map(id => [id, (done.get(id) ?? (task.pending?.id === id ? task.pending : undefined) ?? eventsOf.get(id)?.find(e => e.kind === 'call_start')?.call)?.node as string | undefined]))
+  const nodeOfCall = new Map(
+    callIds.map(id => [id, (done.get(id) ?? (task.pending?.id === id ? task.pending : undefined) ?? eventsOf.get(id)?.find(e => e.kind === 'call_start')?.call)?.node as string | undefined]),
+  )
 
   /** 平台检查：一次检查是一个 span，每一项检查是它的子 span，带没通过的原因。 */
   const checkSpans = (node: string): Span[] => {
-    const spans: Span[] = task.log.filter((e): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && e.node === node).map(e => {
-      const passed = e.results.filter(r => r.passed).length
-      return {
-        id: e.call, kind: 'check', name: `平台检查${e.round === undefined ? '' : ` · 第 ${e.round} 轮`} · ${passed === e.results.length ? '通过' : '没有通过'}`,
-        start: e.at - e.ms, end: e.at, status: passed === e.results.length ? 'ok' : 'error',
-        meta: { 检查: e.call, 结果: `${passed}/${e.results.length} 项通过`, 耗时: `${(e.ms / 1000).toFixed(1)}s`, ...(e.round === undefined ? {} : { 轮次: String(e.round) }) },
-        children: e.results.map((r, j) => ({
-          id: `${e.call}.r${j + 1}`, kind: 'check', name: describeCheck(r.check), start: e.at - e.ms, end: e.at, status: r.passed ? 'ok' : 'error',
-          output: r.passed ? '通过' : r.detail, meta: { 结果: r.passed ? '通过' : '没有通过' }, children: [],
-        }) satisfies Span),
-      } satisfies Span
-    })
+    const spans: Span[] = task.log
+      .filter((e): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && e.node === node)
+      .map(e => {
+        const passed = e.results.filter(r => r.passed).length
+        return {
+          id: e.call,
+          kind: 'check',
+          name: `平台检查${e.round === undefined ? '' : ` · 第 ${e.round} 轮`} · ${passed === e.results.length ? '通过' : '没有通过'}`,
+          start: e.at - e.ms,
+          end: e.at,
+          status: passed === e.results.length ? 'ok' : 'error',
+          meta: { 检查: e.call, 结果: `${passed}/${e.results.length} 项通过`, 耗时: `${(e.ms / 1000).toFixed(1)}s`, ...(e.round === undefined ? {} : { 轮次: String(e.round) }) },
+          children: e.results.map(
+            (r, j) =>
+              ({
+                id: `${e.call}.r${j + 1}`,
+                kind: 'check',
+                name: describeCheck(r.check),
+                start: e.at - e.ms,
+                end: e.at,
+                status: r.passed ? 'ok' : 'error',
+                output: r.passed ? '通过' : r.detail,
+                meta: { 结果: r.passed ? '通过' : '没有通过' },
+                children: [],
+              }) satisfies Span,
+          ),
+        } satisfies Span
+      })
     const p = task.pending
     if (p !== undefined && isCheck(p) && p.node === node) {
       spans.push({
-        id: p.id, kind: 'check', name: `平台检查${task.dialog === undefined ? '' : ` · 第 ${task.dialog.round} 轮`}`, start: task.log.at(-1)?.at ?? 0,
-        status: task.status === 'failed' ? 'error' : 'running', input: describeRequirements(p.checks),
-        meta: { 检查: p.id, ...(task.status === 'failed' && task.failure !== undefined ? { 失败原因: task.failure } : {}) }, children: [],
+        id: p.id,
+        kind: 'check',
+        name: `平台检查${task.dialog === undefined ? '' : ` · 第 ${task.dialog.round} 轮`}`,
+        start: task.log.at(-1)?.at ?? 0,
+        status: task.status === 'failed' ? 'error' : 'running',
+        input: describeRequirements(p.checks),
+        meta: { 检查: p.id, ...(task.status === 'failed' && task.failure !== undefined ? { 失败原因: task.failure } : {}) },
+        children: [],
       })
     }
     return spans
@@ -165,16 +211,25 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
       if (e.type === 'answer' && loopQuestions.has(e.questionId)) children.push(instant(`${n.id}.a.${e.questionId}`, 'answer', `回答 ${e.questionId}`, e.at, { output: e.text }))
     }
     children.sort(byStart)
-    const status: SpanStatus = i < task.cursor ? 'ok'
-      : i > task.cursor ? 'pending'
-      : task.status === 'waiting_user' ? 'waiting' : task.status === 'failed' ? 'error' : task.status === 'aborted' ? 'error' : 'running'
+    const status: SpanStatus =
+      i < task.cursor ? 'ok' : i > task.cursor ? 'pending' : task.status === 'waiting_user' ? 'waiting' : task.status === 'failed' ? 'error' : task.status === 'aborted' ? 'error' : 'running'
     const start = startOf(children)
     const end = status === 'ok' ? endOf(children) : undefined
     return {
-      id: n.id, kind: 'node', name: n.id, start: start ?? 0, ...(end === undefined ? {} : { end }), status,
+      id: n.id,
+      kind: 'node',
+      name: n.id,
+      start: start ?? 0,
+      ...(end === undefined ? {} : { end }),
+      status,
       usage: sumUsage(children.filter(c => c.kind === 'call')),
-      meta: { 类型: n.kind === 'agent' ? 'agent 节点' : '对话节点', ...(n.role === undefined ? {} : { 角色: n.role }), ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}),
-        ...(n.checks.length === 0 ? {} : { 验收检查: describeRequirements(n.checks) }), ...(n.kind === 'agent' && n.checks.length > 0 ? { 最多自动补齐: `${n.maxFixes} 次` } : {}) },
+      meta: {
+        类型: n.kind === 'agent' ? 'agent 节点' : '对话节点',
+        ...(n.role === undefined ? {} : { 角色: n.role }),
+        ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}),
+        ...(n.checks.length === 0 ? {} : { 验收检查: describeRequirements(n.checks) }),
+        ...(n.kind === 'agent' && n.checks.length > 0 ? { 最多自动补齐: `${n.maxFixes} 次` } : {}),
+      },
       children,
     }
   })
@@ -184,9 +239,14 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   const lastNote = task.log.filter(e => e.type === 'note').at(-1)
   const taskStatus: SpanStatus = task.status === 'done' ? 'ok' : task.status === 'waiting_user' ? 'waiting' : task.status === 'running' ? 'running' : 'error'
   return {
-    id: task.id, kind: 'task', name: task.request.split('\n')[0]!.slice(0, 80), start: startOf(reached) ?? 0,
+    id: task.id,
+    kind: 'task',
+    name: task.request.split('\n')[0]!.slice(0, 80),
+    start: startOf(reached) ?? 0,
     ...(finished && lastNote !== undefined ? { end: Math.max(lastNote.at, endOf(reached) ?? 0) } : {}),
-    status: taskStatus, usage: sumUsage(nodes), input: task.request,
+    status: taskStatus,
+    usage: sumUsage(nodes),
+    input: task.request,
     meta: { 任务: task.id, 工作流: task.workflow.name, ...(task.failure ? { 失败原因: task.failure } : {}) },
     children: nodes,
   }

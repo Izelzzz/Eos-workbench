@@ -116,27 +116,40 @@ test('平台动作 { platform: push } 解析成检查；位置不对、不认识
   const ship = (checks: string) => `${withChecks}  - { id: ship, kind: dialog, with: build, task: 交付, checks: ${checks} }\n`
   const r = parseWorkflow(ship('[{ run: [npm, test] }, { platform: push }]'))
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
-  assert.deepEqual(r.workflow.nodes[4]?.checks, [{ kind: 'run', run: ['npm', 'test'], timeoutSec: 600 }, { kind: 'platform', action: 'push' }])
+  assert.deepEqual(r.workflow.nodes[4]?.checks, [
+    { kind: 'run', run: ['npm', 'test'], timeoutSec: 600 },
+    { kind: 'platform', action: 'push' },
+  ])
   // 只能在评审之后、没有评审角色的对话节点里，排在命令检查后面。
   const misplaced = [
     [ship('[{ platform: push }, { run: [npm, test] }]'), 'nodes[4].checks', /要排在命令检查后面/],
     [withChecks.replace('checks: [{ run: [npm, run, lint] }]', 'checks: [{ platform: push }]'), 'nodes[1].checks', /只能放在没有评审角色的对话节点里/],
-    [withChecks.replace('{ id: review, kind: dialog, role: rev, with: build, task: 评审 }', '{ id: review, kind: dialog, role: rev, with: build, task: 评审, checks: [{ platform: push }] }'), 'nodes[3].checks', /只能放在没有评审角色的对话节点里/],
+    [
+      withChecks.replace('{ id: review, kind: dialog, role: rev, with: build, task: 评审 }', '{ id: review, kind: dialog, role: rev, with: build, task: 评审, checks: [{ platform: push }] }'),
+      'nodes[3].checks',
+      /只能放在没有评审角色的对话节点里/,
+    ],
     [withChecks.replace('checks: [{ run: [npm, test], timeoutSec: 120 }]', 'checks: [{ run: [npm, test], timeoutSec: 120 }, { platform: push }]'), 'nodes[2].checks', /前面要有带评审角色的对话节点/],
   ] as const
   for (const [text, path, message] of misplaced) {
     const errors = errorsOf(text)
-    assert.ok(errors.some(e => e.path === path && message.test(e.message)), JSON.stringify(errors))
+    assert.ok(
+      errors.some(e => e.path === path && message.test(e.message)),
+      JSON.stringify(errors),
+    )
   }
   for (const bad of ['{ platform: deploy }', '{ platform: push, run: [x] }', '{ push: true }']) {
     const errors = errorsOf(ship(`[${bad}]`))
-    assert.ok(errors.some(e => e.path === 'nodes[4].checks[0]' && /必须是命令检查 \{ run: \[npm, test\] \} 或平台动作 \{ platform: push \}/.test(e.message)), `${bad}：${JSON.stringify(errors)}`)
+    assert.ok(
+      errors.some(e => e.path === 'nodes[4].checks[0]' && /必须是命令检查 \{ run: \[npm, test\] \} 或平台动作 \{ platform: push \}/.test(e.message)),
+      `${bad}：${JSON.stringify(errors)}`,
+    )
   }
 })
 
 test('a dialog needs a reviewer or checks, and deliverable paths must stay inside the worktree', () => {
   const src = withChecks
-    .replace("{ id: test, kind: dialog, with: build, task: 跑测试, checks: [{ run: [npm, test], timeoutSec: 120 }] }", '{ id: test, kind: dialog, with: build, task: 跑测试 }')
+    .replace('{ id: test, kind: dialog, with: build, task: 跑测试, checks: [{ run: [npm, test], timeoutSec: 120 }] }', '{ id: test, kind: dialog, with: build, task: 跑测试 }')
     .replace('path: docs/spec.md', 'path: ../outside.md')
   const byPath = Object.fromEntries(errorsOf(src).map(e => [e.path, e.message]))
   assert.match(byPath['nodes[0].deliverables[0].path']!, /worktree 内的相对路径/)
@@ -160,16 +173,23 @@ test('交付物不在产出它的角色的可写范围内时报错：写了会�
   const errors = errorsOf(withChecks.replace('planner: { prompt: 写规格, write: worktree }', 'planner: { prompt: 写规格, write: worktree, writePaths: [specs/**] }'))
   assert.deepEqual(errors, [{ path: 'nodes[0].deliverables', message: '交付物「docs/spec.md」不在角色「planner」的可写范围（specs/**）内，写了会被撤销；把它加进 writePaths，或换一个范围内的路径' }])
   // 对话节点的交付物由被评审的节点产出。
-  const dialog = errorsOf(withChecks
-    .replace('dev: { prompt: 写代码, write: worktree }', 'dev: { prompt: 写代码, write: worktree, writePaths: [src/**] }')
-    .replace("checks: [{ run: [npm, test], timeoutSec: 120 }] }", "checks: [{ run: [npm, test], timeoutSec: 120 }], deliverables: [{ path: docs/changes.md }] }"))
-  assert.deepEqual(dialog.map(e => e.path), ['nodes[2].deliverables'])
+  const dialog = errorsOf(
+    withChecks
+      .replace('dev: { prompt: 写代码, write: worktree }', 'dev: { prompt: 写代码, write: worktree, writePaths: [src/**] }')
+      .replace('checks: [{ run: [npm, test], timeoutSec: 120 }] }', 'checks: [{ run: [npm, test], timeoutSec: 120 }], deliverables: [{ path: docs/changes.md }] }'),
+  )
+  assert.deepEqual(
+    dialog.map(e => e.path),
+    ['nodes[2].deliverables'],
+  )
   assert.equal(parseWorkflow(withChecks.replace('planner: { prompt: 写规格, write: worktree }', 'planner: { prompt: 写规格, write: worktree, writePaths: [docs/**] }')).ok, true)
 })
 
 test('对话节点的交付物由被评审的节点产出：那个角色只读时同样报错', () => {
-  const errors = errorsOf(withChecks
-    .replace('dev: { prompt: 写代码, write: worktree }', 'dev: { prompt: 写代码, write: none }')
-    .replace("checks: [{ run: [npm, test], timeoutSec: 120 }] }", "checks: [{ run: [npm, test], timeoutSec: 120 }], deliverables: [{ path: docs/changes.md }] }"))
+  const errors = errorsOf(
+    withChecks
+      .replace('dev: { prompt: 写代码, write: worktree }', 'dev: { prompt: 写代码, write: none }')
+      .replace('checks: [{ run: [npm, test], timeoutSec: 120 }] }', 'checks: [{ run: [npm, test], timeoutSec: 120 }], deliverables: [{ path: docs/changes.md }] }'),
+  )
   assert.deepEqual(errors, [{ path: 'nodes[2].deliverables', message: '角色「dev」只读（write: none），写不出交付物文件；把它的 write 改成 worktree' }])
 })

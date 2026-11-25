@@ -27,7 +27,12 @@ const env = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -37,13 +42,31 @@ const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.t
 const checks: Record<string, boolean> = {}
 const facts: Record<string, unknown> = {}
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+  for (let i = 0; i < 60; i++) {
+    try {
+      await fetch(base + '/api/tasks')
+      break
+    } catch {
+      await sleep(500)
+    }
+  }
   const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
-  const saved = await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' }) as { ok: boolean; version?: number }
+  const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' })) as {
+    ok: boolean
+    version?: number
+  }
   if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
   const ids: string[] = []
-  for (const [file, fn, spec] of [['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'], ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'], ['avg', 'avg(numbers)', '返回平均值，空数组返回 0']]) {
-    const r = await post('/api/tasks', { repo: REPO, workflow: 'standard', request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。` }) as { ok: boolean; id?: string; error?: string }
+  for (const [file, fn, spec] of [
+    ['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'],
+    ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'],
+    ['avg', 'avg(numbers)', '返回平均值，空数组返回 0'],
+  ]) {
+    const r = (await post('/api/tasks', {
+      repo: REPO,
+      workflow: 'standard',
+      request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。`,
+    })) as { ok: boolean; id?: string; error?: string }
     if (!r.ok) throw new Error(`发起任务失败：${r.error}`)
     ids.push(r.id!)
   }
@@ -61,7 +84,9 @@ try {
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
   const errors: string[] = []
-  page.on('console', (m: any) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()) })
+  page.on('console', (m: any) => {
+    if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text())
+  })
   page.on('pageerror', (e: Error) => errors.push(e.message))
   const shot = (name: string) => page.screenshot({ path: join(OUT, name), fullPage: true })
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
@@ -99,8 +124,8 @@ try {
   await page.waitForSelector('.improve [role=status]')
   facts.approveText = await page.locator('.improve [role=status]').innerText()
   const after = (await get<{ versions: { version: number; note: string }[] }>(`/api/conventions/${first.target.kind}/${encodeURIComponent(first.target.name)}`)).versions[0]!
-  checks['批准后页面提示新版本，平台上多了一个版本，备注写明提案号和审批备注'] = String(facts.approveText).includes(`现在是第 ${before + 1} 版`) && after.version === before + 1
-    && after.note.startsWith(`改进提案 #${first.id}：`) && after.note.endsWith('；E2E：网页上批准')
+  checks['批准后页面提示新版本，平台上多了一个版本，备注写明提案号和审批备注'] =
+    String(facts.approveText).includes(`现在是第 ${before + 1} 版`) && after.version === before + 1 && after.note.startsWith(`改进提案 #${first.id}：`) && after.note.endsWith('；E2E：网页上批准')
   checks['批准后状态显示已批准，审批按钮消失'] = (await page.locator('.summary-head .pill').innerText()) === '已批准' && (await page.getByRole('button', { name: '批准，写成新版本' }).count()) === 0
   await shot('improve-approved.png')
 
@@ -110,7 +135,8 @@ try {
     await page.goto(`${base}/#/improve/${second.id}`)
     await page.waitForSelector('.signals li')
     await page.getByRole('button', { name: '拒绝' }).click()
-    checks['空理由拒绝被页面挡住'] = (await page.locator('.improve [role=alert]').innerText()) === '拒绝需要写理由。' && (await get<ProposalDetail>(`/api/improve/proposals/${second.id}`)).status === 'pending'
+    checks['空理由拒绝被页面挡住'] =
+      (await page.locator('.improve [role=alert]').innerText()) === '拒绝需要写理由。' && (await get<ProposalDetail>(`/api/improve/proposals/${second.id}`)).status === 'pending'
     await page.locator('label.decide textarea').fill('E2E：先只改一处，看效果再说')
     await page.getByRole('button', { name: '拒绝' }).click()
     await page.waitForSelector('.improve [role=status]')
