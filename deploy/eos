@@ -56,7 +56,12 @@ own_dsh() {
   done
   # MCP 服务的工作目录：MCP 服务以 eos-agent 运行，要能在里面写缓存、日志。平台只把它当 cwd 传给 dsh，不往里写，
   # 所以交给 eos-agent（src/executor/dsh.ts 的 mcpCwd）。
-  [ -d "$1/mcp-cwd" ] && [ ! -L "$1/mcp-cwd" ] || as_agent mkdir -p "$1/mcp-cwd" || return 1
+  if [ -L "$1/mcp-cwd" ]; then
+    echo "eos：$1/mcp-cwd 是符号链接，MCP 服务会在链接指向的地方运行；删掉它后重启：docker compose run --rm -u eos-agent eos rm $1/mcp-cwd" >&2
+  else
+    # 迁移过来的可能还是旧的权限（例如 0777）：收紧到组内（只有 eos、eos-agent）。
+    as_agent mkdir -p "$1/mcp-cwd" && as_agent chmod 2770 "$1/mcp-cwd" || return 1
+  fi
 }
 prepare_dsh() {
   dsh="$data/dsh"
@@ -98,8 +103,9 @@ prepare_dsh() {
 # 数据目录有问题时不在这里退出：让 eos doctor、启动检查说明原因。
 prepare || echo "eos：没能把 $data/worktrees 设成共用组 eos-work，检查命令可能写不了 worktree" >&2
 if [ -n "${EOS_AGENT_USER:-}" ]; then
-  # 迁移停在中间（返回 2）时不启动平台：启动后平台会建一个空的 dsh 目录，下次再迁移就会删掉复制好的数据。
-  prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" = web ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
+  # 迁移停在中间（返回 2）时，除了 doctor 都不运行：会启动 dsh 的命令（web、run、resume……）会建出 dsh 目录，
+  # 下一次启动平台就会把它当成旧数据再迁移，删掉复制好的数据。
+  prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" != doctor ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
 fi
 
 cd /app
