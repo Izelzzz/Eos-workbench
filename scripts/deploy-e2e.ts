@@ -95,7 +95,7 @@ try {
   await until('任务结束', async () => {
     task = (await api(`/api/tasks/${id}`)).body
     // [d] 让 pgrep 不匹配到执行它的 bash 自己。
-    const found = scan === undefined ? inContainer("pgrep -u eos -f '@deepseek-ai/[d]sh/'") : undefined
+    const found = scan === undefined ? inContainer("pgrep -u eos-agent -f '@deepseek-ai/[d]sh/'") : undefined
     if (found?.code === 0) {
       dshPids = found.out.trim().split('\n').map(Number)
       scan = inContainer('cd /tmp && node /app/scripts/check-user-scan.mjs', 'eos-check')
@@ -137,7 +137,9 @@ try {
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
     '检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key': scanned !== undefined && scanned.uid !== 10001 && scanned.secretsFoundIn.length === 0
-      && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10001 && p.environ !== 'readable')),
+      && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.environ !== 'readable'))
+      && scanned.processes.some((p: any) => p.uid === 10001 && p.environ !== 'readable'),
+    'dsh 以 eos-agent 运行（读不到平台进程的环境）': scanned !== undefined && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10003)),
     'dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）': scanned !== undefined && dshPids.length > 0
       && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && /^0+$/.test(p.capEff ?? '') && /^0+$/.test(p.capAmb ?? ''))),
     '任务完成': task.status === 'done',
