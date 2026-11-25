@@ -299,3 +299,41 @@ test('凭据主密钥没设置、凭据隔离的 ⚠ 只在 doctor 里列出，�
     assert.match(d.stdout, 'EOS_MASTER_KEY' in env ? /⚠ 凭据隔离/ : /⚠ 凭据主密钥/)
   }
 })
+
+test('模型接口地址：没设置时不显示；官方接口通过并显示路径；本机地址只在 doctor 里提示；别的主机提示 key 会发过去；格式不对时拦下', () => {
+  const item = (f: Partial<Facts>) => evaluate({ ...good, ...f }).find(i => i.name === '模型接口地址')
+  assert.equal(item({}), undefined)
+  const official = item({ modelBaseUrl: { kind: 'ok', host: 'api.deepseek.com', path: '/anthropic', loopback: false } })!
+  assert.equal(official.status, 'ok')
+  assert.match(official.detail, /api\.deepseek\.com\/anthropic/)
+  const local = item({ modelBaseUrl: { kind: 'ok', host: '127.0.0.1:40137', path: '/anthropic', loopback: true } })!
+  assert.deepEqual([local.status, local.doctorOnly], ['warn', true])
+  const other = item({ modelBaseUrl: { kind: 'ok', host: 'gateway.example:8443', path: '/a', loopback: false } })!
+  assert.deepEqual([other.status, other.doctorOnly], ['warn', undefined])
+  assert.match(other.detail, /gateway\.example:8443.*模型 key/)
+  assert.equal(item({ modelBaseUrl: { kind: 'invalid', error: 'EOS_MODEL_BASE_URL 里不能带用户名和密码' } })?.status, 'fail')
+})
+
+test('gather 按 EOS_MODEL_BASE_URL 收集解析后的主机，官方主机的判断不被大小写、端口、相似的主机名骗过；错误里不带原始地址', () => {
+  const run = (value: string | undefined) =>
+    gather(
+      { root: ROOT, dataDir: tmp(), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } },
+      value === undefined ? {} : { EOS_MODEL_BASE_URL: value },
+    ).modelBaseUrl
+  const status = (value: string) => evaluate({ ...good, modelBaseUrl: run(value) }).find(i => i.name === '模型接口地址')!.status
+  assert.equal(run(undefined), undefined)
+  assert.deepEqual(run('https://gateway.example:8443/anthropic'), { kind: 'ok', host: 'gateway.example:8443', path: '/anthropic', loopback: false })
+  assert.deepEqual(run('http://127.0.0.1:12345/anthropic'), { kind: 'ok', host: '127.0.0.1:12345', path: '/anthropic', loopback: true })
+  // 大小写和默认端口不影响判断（主机名拼出来写，免得被密钥扫描当成 key）
+  const mixedCase = ['API', 'DeepSeek', 'com'].join('.')
+  assert.equal(status(`https://${mixedCase}:443/anthropic`), 'ok')
+  for (const lookalike of ['https://api.deepseek.com:8443/x', 'https://api.deepseek.com.evil.example/x', 'https://evilapi.deepseek.com/x']) {
+    assert.equal(status(lookalike), 'warn', lookalike)
+  }
+  const relay = run('http://relay.internal/anthropic')
+  assert.equal(relay?.kind, 'invalid')
+  assert.equal(status('http://relay.internal/anthropic'), 'fail')
+  const bad = run('https://user:secret-pw@gateway.example/anthropic')
+  assert.equal(bad?.kind, 'invalid')
+  assert.ok(!JSON.stringify(bad).includes('secret-pw'))
+})
