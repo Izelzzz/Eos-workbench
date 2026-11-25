@@ -8,10 +8,18 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 base="${1:-HEAD^1}"
+# base 解析不了（历史取得太浅、本地没 fetch）时必须失败，不能当成「没有新文件」放过去
+if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+  echo "::error title=格式::找不到 base 提交 $base，没法算出新增的文件"
+  exit 1
+fi
+# 先写进临时文件：git diff 失败时 set -e 能让脚本失败（进程替换里的失败不会）
+list="$(mktemp)"
+trap 'rm -f "$list"' EXIT
+# 三个点：和 base 的分叉点比，本地用 origin/main 时结果和 CI 一样
+git diff --name-only --diff-filter=A -z "$base"...HEAD -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs' >"$list"
 files=()
-while IFS= read -r -d '' f; do files+=("$f"); done < <(
-  git diff --name-only --diff-filter=A -z "$base" HEAD -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs'
-)
+while IFS= read -r -d '' f; do files+=("$f"); done <"$list"
 if [ "${#files[@]}" -eq 0 ]; then
   echo "没有新增的代码文件，不需要检查格式"
   exit 0

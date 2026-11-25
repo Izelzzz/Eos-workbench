@@ -92,6 +92,8 @@ jobs:
   # 格式化（Prettier）：只检查这个 PR 新增的代码文件，存量文件择机一次性格式化。见 .github/lint/check-format.sh
   format:
     name: format
+    # main 上的 push 没有「新增文件」的说法，只在 PR 上跑（跳过的 job 不会挡住必需检查）
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -107,6 +109,4 @@ jobs:
           cache-dependency-path: .github/lint/package-lock.json
       - run: npm ci --prefix .github/lint --ignore-scripts
       - name: 检查新增文件的格式
-        # main 上的 push 没有「新增文件」的说法，只在 PR 上查
-        if: github.event_name == 'pull_request'
         run: bash .github/lint/check-format.sh HEAD^1
