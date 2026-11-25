@@ -28,7 +28,7 @@ test('other refs and tags that are not valid image tags are refused', () => {
   assert.throws(() => imageTags(IMAGE, 'branch', 'main', 'not-a-sha'))
 })
 
-test('the command line prints GITHUB_OUTPUT lines', () => {
+test('the command line prints the tags, first and version lines', () => {
   const out = execFileSync(process.execPath, [new URL('./image-tags.ts', import.meta.url).pathname, IMAGE, 'tag', 'v2.0.0', SHA], { encoding: 'utf8' })
   assert.equal(out, `tags=${IMAGE}:2.0.0 ${IMAGE}:latest\nfirst=${IMAGE}:2.0.0\nversion=2.0.0\n`)
 })

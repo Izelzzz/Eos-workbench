@@ -49,7 +49,7 @@ docker compose exec eos eos doctor
 | 标签 | 什么时候更新 |
 |---|---|
 | `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时，例如 `v0.1.0` 发布 `0.1.0` |
-| `ghcr.io/izelzzz/eos-workbench:latest` | 最新的正式版（版本号里没有 `-` 的） |
+| `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-` 的）。给旧版本补发修订版时它也会指过去 |
 | `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main |
 | `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main，不会被覆盖 |
 
@@ -64,9 +64,9 @@ docker compose up -d --no-build
 - 推荐写具体的版本号或 `sha-` 标签，不写 `latest`、`main`：升级是你自己决定的，回退时也知道退到哪个。
 - `--no-build`：不要在本地构建。不加时，`docker compose up --build` 会用本地的代码构建，并打上 ghcr 的标签，盖掉拉下来的镜像。
 - 仓库的代码和镜像的版本尽量一致（`git checkout v0.1.0`）：`compose.yaml` 里的能力、tmpfs 等设置是和镜像一起改的。
-- 派生镜像（见「执行器环境」）的 `FROM` 改成同一个标签，例如 `FROM ghcr.io/izelzzz/eos-workbench:0.1.0`。
+- 用了派生镜像（见「执行器环境」）时，`compose.override.yaml` 里的 `image:` 会盖掉 `EOS_IMAGE`，`EOS_IMAGE` 不起作用。把 `Dockerfile.team` 的 `FROM` 改成发布的标签，例如 `FROM ghcr.io/izelzzz/eos-workbench:0.1.0`，然后 `docker compose build --pull && docker compose up -d`。
 
-**升级**：先备份（见「数据和升级」），改 `.env` 里的 `EOS_IMAGE`，再执行 `docker compose pull && docker compose up -d --no-build`。**回退**：把 `EOS_IMAGE` 改回原来的标签，执行同样的命令。数据卷不动；升级后如果数据已经被新版本改过（例如 dsh 目录的迁移），回退前先恢复升级前的备份。
+**升级**：先备份（见「数据和升级」），改 `.env` 里的 `EOS_IMAGE`，再执行 `docker compose pull && docker compose up -d --no-build`。**回退**：把 `EOS_IMAGE` 改回原来的标签，执行同样的命令。用派生镜像时改的是 `Dockerfile.team` 的 `FROM`，执行 `docker compose build --pull && docker compose up -d`。数据卷不动；升级后如果数据已经被新版本改过（例如 dsh 目录的迁移），回退前先恢复升级前的备份。
 
 ## 访问
 

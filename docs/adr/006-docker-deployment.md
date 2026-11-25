@@ -72,9 +72,9 @@
 - 目标：服务器直接拉镜像；能指定版本、能回退。
 - 决定（用户在卡片上确认）：
   - 镜像名 `ghcr.io/izelzzz/eos-workbench`，和仓库同名，公开，拉取不用登录。镜像里没有密钥，key 都在运行时从 `.env` 传入。
-  - `v*` 标签发布版本号，正式版同时发布 `latest`；合并到 main 发布 `main` 和 `sha-<短提交号>`；PR 改到镜像的输入（`Dockerfile`、`deploy/`、依赖、这个工作流）时只构建、不推送。
+  - `v*` 标签发布版本号，正式版同时发布 `latest`；合并到 main 发布 `main` 和 `sha-<短提交号>`；每个 PR 都按同样的步骤构建和冒烟、不推送（镜像里有 `src/`、`web/` 的构建，按路径触发会漏）。
   - `compose.yaml` 不改：默认仍在本地构建；用发布的镜像时在 `.env` 里设 `EOS_IMAGE`。
-  - 工作流只用 GitHub 自带的 `docker` 命令和 `GITHUB_TOKEN`，不引入第三方 action；有写包权限的只有发布那个 job，PR 的 job 只读。标签由 `.github/scripts/image-tags.ts` 算，有单元测试。
+  - 工作流只用 GitHub 自带的 `docker` 命令和 `GITHUB_TOKEN`，不引入第三方 action；有写包权限的只有发布那个 job，PR 的 job 只读。标签由 `.github/scripts/image-tags.ts` 算（有单元测试），构建和冒烟在 `.github/scripts/image-build.sh`，PR 和发布共用。main 上每个提交单独一组并发，不会因为连续合并跳过中间提交的 `sha-` 标签。
   - 推送前跑一次 `eos --help`：镜像能启动，平台的启动包装能降到 `eos` 用户。
 - 包第一次发布后要由仓库所有者在 GitHub 的包设置里改成公开一次，工作流做不了。
 
@@ -93,7 +93,7 @@
 - 新增：`Dockerfile`、`.dockerignore`、`compose.yaml`、`docs/deploy.md`、`scripts/deploy-e2e.ts`。
 - ③b：`Dockerfile`（建 `eos-check` 和共用组 `eos-work`，以 root 启动，`EOS_CHECK_USER`、`EOS_DSH_LAUNCHER`）、`compose.yaml`（`cap_add: SETUID, SETGID`）、`deploy/eos`（降权入口）、`deploy/dsh-launch.mjs` 和 `deploy/git`（清掉能力）、`src/cli.ts`（dsh 入口可换）、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`（「检查命令的用户」「检查命令的代理」两项）。不在容器里、没有设置 `EOS_CHECK_USER` 时，检查命令只多拿到证书和代理变量，其余不变。
 - ③c：`Dockerfile`（建 `eos-agent` 和组 `eos-dsh`，`EOS_AGENT_USER`）、`compose.yaml`（`cap_add` 加 `KILL`）、`deploy/eos`（带上 `KILL`，准备和迁移 `/data/dsh`）、`deploy/dsh-launch.mjs`（切换到 `eos-agent`）、`src/executor/dsh.ts`（会话日志的读法可替换；白名单加 `EOS_AGENT_USER`）、`src/runner/check-user.ts`（以别的用户读会话日志）、`src/runner/supervisor.ts`（结束 agent 留下的进程）、`src/runner/doctor.ts`（「agent 的用户」一项，「凭据隔离」都满足时是 ✓）、`src/cli.ts`。不在容器里、没有设置 `EOS_AGENT_USER` 时行为不变。
-- 镜像发布：`.github/workflows/image.yml`、`.github/scripts/image-tags.ts`（和测试）、`docs/deploy.md`「用发布的镜像」。
+- 镜像发布：`.github/workflows/image.yml`、`.github/scripts/image-tags.ts`（和测试）、`.github/scripts/image-build.sh`、`docs/deploy.md`「用发布的镜像」。
 
 ## 已知限制
 

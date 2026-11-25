@@ -1,5 +1,5 @@
 // 发布到 ghcr 的镜像打哪些标签（.github/workflows/image.yml 调用）。
-// 命令行：node image-tags.ts <镜像> <ref_type> <ref_name> <提交号>，按 $GITHUB_OUTPUT 的格式输出 tags、first、version。
+// 命令行：node image-tags.ts <镜像> <ref_type> <ref_name> <提交号>，输出 tags=、first=、version= 三行（image-build.sh 读）。
 
 export type ImageTags = { tags: string[]; version: string }
 
