@@ -96,7 +96,15 @@ test('跟在标点、关键字后面或在闭合符号前的指令注释也能�
 
 test('TypeScript 认的其他 @ts- 写法也算指令；JSDoc 正文里的 // 不算', () => {
   const moved = (f, c) => [f, `${c}\nexport const a: number = 'x'\n`, `export const a: number =\n  ${c}\n  'x'\n`]
-  const cases = [moved('t1.ts', '/// @ts-ignore'), moved('t2.ts', '/** @ts-ignore */'), moved('t3.ts', '/*\n * @ts-expect-error */')]
+  const cases = [
+    moved('t1.ts', '/// @ts-ignore'),
+    moved('t2.ts', '/** @ts-ignore */'),
+    moved('t3.ts', '/*\n * @ts-expect-error */'),
+    // /** 开头的打包和 JSX 指令
+    ['p1.js', 'export const a = /** @__PURE__ */ foo()\n', 'export const a =\n  /** @__PURE__ */ foo()\n'],
+    ['p2.ts', '/** @__NO_SIDE_EFFECTS__ */\nexport function f() {}\n', '/** @__NO_SIDE_EFFECTS__ */\nexport function f() {\n}\n'],
+    ['p3.tsx', '/** @jsx h */\nexport const C = () => <p/>\n', '/** @jsx h */\nexport const C = () => <p />\n'],
+  ]
   const r = run(cases)
   assert.equal(r.code, 1, r.out)
   for (const [f] of cases) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)

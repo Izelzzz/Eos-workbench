@@ -75,7 +75,8 @@ const MEANING_FLAGS =
 
 // 指令注释：注释一开头就是这些
 // 三斜线指令（/// <reference ...>）只在文件开头生效，也算
-const DIRECTIVE = /^(\/\/\/\s*<|\/[/*]\s*(@ts-|eslint-|eslint\s|prettier-ignore|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack[A-Z]|c8\s|istanbul\s|v8\s|@jsx))/
+// 偏宽：注释开头（// /// /* /** 之后）或块注释里任意一行的开头（去掉空白和 *）出现这些词都算，宁可多列人工核对
+const DIRECTIVE = /^\/\/\/\s*<|(^\/(\/\/?|\*+)|\n)[\s*]*(@ts-|eslint-|eslint\s|prettier-ignore|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack[A-Z]|c8\s|istanbul\s|v8\s|@jsx)/
 
 // React（Babel）的 cleanJSXElementLiteralChild，lastNonEmptyLine 初始为 0
 function jsxText(t) {
@@ -113,12 +114,14 @@ function directives(f, src) {
   const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, kindOf(f))
   // 已经报出的指令注释的位置（去重）
   const seen = new Set()
+  const reported = new Set()
   const found = []
   const take = ranges => {
     for (const r of ranges ?? []) {
       const t = src.slice(r.pos, r.end)
       if (seen.has(r.pos) || !DIRECTIVE.test(t)) continue
       seen.add(r.pos)
+      reported.add([r.pos, r.end])
       found.push(t)
     }
   }
@@ -135,8 +138,8 @@ function directives(f, src) {
   // TypeScript 自己认出的 @ts-ignore / @ts-expect-error（它的写法比上面的正则宽：/// @ts-ignore、/** @ts-ignore */、
   // 块注释最后一行的 @ts-expect-error 都算）
   for (const d of sf.commentDirectives ?? []) {
-    if (seen.has(d.range.pos)) continue
-    seen.add(d.range.pos)
+    // 多行块注释记的是最后一行的位置：落在已报出的注释里就不重复列
+    if ([...reported].some(([a, b]) => d.range.pos >= a && d.range.pos < b)) continue
     found.push(src.slice(d.range.pos, d.range.end))
   }
   return found
@@ -198,7 +201,12 @@ for (const f of files) {
   try {
     const d = [...directives(f, before), ...directives(f, after)]
     if (d.length) {
-      problems.push(`需要人工核对（含指令注释 ${d.slice(0, 3).join(' | ')}）：${f}`)
+      problems.push(
+        `需要人工核对（含指令注释 ${d
+          .slice(0, 3)
+          .map(x => x.replace(/\s*\n\s*/g, ' '))
+          .join(' | ')}）：${f}`,
+      )
       continue
     }
     const a = shape(f, before)
