@@ -43,8 +43,8 @@ export type Facts = {
   agentUser: UserFact
   /** 带账号密码、所以没有传给检查命令的代理变量。 */
   droppedProxies: string[]
-  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是地址的主机（不含路径），或者校验失败的原因（不含原始地址）。 */
-  modelBaseUrl?: { kind: 'ok'; host: string } | { kind: 'invalid'; error: string }
+  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
+  modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
 }
 
 const parts = (v: string): number[] =>
@@ -234,13 +234,24 @@ const modelBaseUrlItem = (f: Facts): Item[] => {
   if (f.modelBaseUrl.kind === 'invalid') {
     return [{ name, status: 'fail', detail: f.modelBaseUrl.error, fix: '改正环境变量 EOS_MODEL_BASE_URL（https 地址，或本机的 http 地址，不带用户名和密码）；用官方接口时删掉它' }]
   }
-  return f.modelBaseUrl.host === OFFICIAL_MODEL_HOST
-    ? [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${OFFICIAL_MODEL_HOST}` }]
+  const u = f.modelBaseUrl
+  if (u.host === OFFICIAL_MODEL_HOST) return [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${u.host}${u.path}` }]
+  // 本机地址（例如 CI 的假模型、本机的网关）：key 不出这台机器，只在 eos doctor 里提示，免得每次启动都打印、让人习惯忽略提示
+  return u.loopback
+    ? [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向本机的 ${u.host}${u.path}：模型请求和模型 key 会发给本机上的这个服务`,
+          fix: '确认它是你在本机运行的模型网关或测试服务',
+          doctorOnly: true,
+        },
+      ]
     : [
         {
           name,
           status: 'warn',
-          detail: `EOS_MODEL_BASE_URL 指向 ${f.modelBaseUrl.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
+          detail: `EOS_MODEL_BASE_URL 指向 ${u.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
           fix: '确认这是你信任的模型网关；不需要时删掉 EOS_MODEL_BASE_URL，改用官方接口',
         },
       ]
@@ -324,7 +335,10 @@ const hasCapKill = (): boolean => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState }): Facts => {
+export const gather = (
+  o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState },
+  env: NodeJS.ProcessEnv = process.env,
+): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
@@ -353,15 +367,19 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
     ...(dsh === undefined ? {} : { dsh }),
     checkUser: userFact(o.checkUser),
     agentUser: agentFact(o.agentUser),
-    droppedProxies: droppedProxies(process.env),
-    ...modelBaseUrlFact(process.env),
+    droppedProxies: droppedProxies(env),
+    ...modelBaseUrlFact(env),
   }
 }
+
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]']
 
 const modelBaseUrlFact = (env: NodeJS.ProcessEnv): Pick<Facts, 'modelBaseUrl'> => {
   try {
     const url = modelBaseUrl(env)
-    return url === undefined ? {} : { modelBaseUrl: { kind: 'ok', host: new URL(url).host } }
+    if (url === undefined) return {}
+    const u = new URL(url)
+    return { modelBaseUrl: { kind: 'ok', host: u.host, path: u.pathname, loopback: LOOPBACK.includes(u.hostname) } }
   } catch (e) {
     return { modelBaseUrl: { kind: 'invalid', error: (e as Error).message } }
   }
