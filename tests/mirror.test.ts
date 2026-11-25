@@ -1273,7 +1273,7 @@ test('撤销时令牌已经过期：先续期再撤销，GitHub 上真的撤销�
 test('续期等 GitHub 回复期间有人换人重新授权或撤销：以那边为准，不把旧授权人的令牌写回去', async () => {
   const r = await registeredApp({ userTtlS: 60 })
   await r.authorize()
-  await fetch(`http://${r.credential}/__control/slow-refresh?ms=800`)
+  await fetch(`http://${r.credential}/__control/slow-refresh`)
   // 换人重新授权：续期期间凭据被换成另一个人的（这里直接写入，模拟授权回调）。
   const other = JSON.stringify({
     login: 'someone-else',

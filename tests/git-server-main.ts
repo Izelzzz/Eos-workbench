@@ -11,7 +11,7 @@
 // POST /login/oauth/access_token 用 code 或刷新令牌换用户令牌（刷新令牌每次换新、旧的作废），GET /api/v3/user 返回授权人 octo，
 // DELETE /api/v3/applications/<client_id>/grant 撤销。用户令牌只能访问装了 App 的仓库，有效期是 EOS_TEST_USER_TTL_S 秒（默认 8 小时）。
 // 控制接口：/__control/expire-user 让现有的用户令牌立即过期；/__control/deny-next 让下一次授权被用户拒绝；
-// /__control/slow-refresh?ms=N 让续期晚 N 毫秒才回复；/__control/fail-refresh?times=N 让接下来 N 次续期暂时出错。撤销时令牌认不出来（过期、撤销过）返回 404，授权不撤销（和 GitHub 一样）。
+// /__control/slow-refresh 让之后的续期晚 800 毫秒才回复；/__control/fail-refresh?times=N 让接下来 N 次续期暂时出错。撤销时令牌认不出来（过期、撤销过）返回 404，授权不撤销（和 GitHub 一样）。
 import { execFileSync, spawn } from 'node:child_process'
 import { createPublicKey, createVerify, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -33,7 +33,9 @@ const userCodes = new Map<string, string>()
 const userTokens = new Map<string, number>()
 const refreshTokens = new Set<string>()
 const userTtl = Number(process.env.EOS_TEST_USER_TTL_S ?? 28800)
-const userControl = { denyNext: false, slowRefreshMs: 0, failRefresh: 0 }
+const userControl = { denyNext: false, slowRefresh: false, failRefresh: 0 }
+/** 打开 slow-refresh 后，续期晚这么久才回复（固定值，不由请求决定）。 */
+const SLOW_REFRESH_MS = 800
 const issueUser = () => {
   const access = `ghu_${randomBytes(12).toString('hex')}`
   const refresh = `ghr_${randomBytes(12).toString('hex')}`
@@ -140,8 +142,7 @@ const server = createServer((req, res) => {
     else if (ctl[1] === 'install') installed.push(q.get('repo')!)
     else if (ctl[1] === 'expire-user') for (const k of userTokens.keys()) userTokens.set(k, 0)
     else if (ctl[1] === 'deny-next') userControl.denyNext = true
-    // 延迟最多 5 秒：只给测试用，也不让一个请求把服务卡住太久。
-    else if (ctl[1] === 'slow-refresh') userControl.slowRefreshMs = Math.min(Math.max(Number(q.get('ms')) || 0, 0), 5000)
+    else if (ctl[1] === 'slow-refresh') userControl.slowRefresh = true
     else if (ctl[1] === 'fail-refresh') userControl.failRefresh = Number(q.get('times'))
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)
@@ -242,7 +243,7 @@ const server = createServer((req, res) => {
         }
         if (!refreshTokens.delete(b.refresh_token!)) return reply({ error: 'bad_refresh_token' })
         const issued = issueUser()
-        if (userControl.slowRefreshMs > 0) return void setTimeout(() => reply(issued), userControl.slowRefreshMs)
+        if (userControl.slowRefresh) return void setTimeout(() => reply(issued), SLOW_REFRESH_MS)
         return reply(issued)
       }
       const redirect = userCodes.get(b.code!)
