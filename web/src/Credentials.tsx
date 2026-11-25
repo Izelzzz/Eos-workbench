@@ -4,7 +4,13 @@ import type { CredentialKind, CredentialsResponse } from './api.ts'
 import { deleteCredential, listCredentials, saveCredential } from './api.ts'
 import { ago } from './format.ts'
 
-const KIND: Record<CredentialKind | 'unknown', string> = { 'api-key': '模型 API key', token: 'Git 令牌', 'github-app': 'GitHub App', 'github-user': 'GitHub 用户授权', unknown: '无法识别（请删掉重新录入）' }
+const KIND: Record<CredentialKind | 'unknown', string> = {
+  'api-key': '模型 API key',
+  token: 'Git 令牌',
+  'github-app': 'GitHub App',
+  'github-user': 'GitHub 用户授权',
+  unknown: '无法识别（请删掉重新录入）',
+}
 
 export function Credentials() {
   const [data, setData] = useState<CredentialsResponse>()
@@ -52,8 +58,12 @@ export function Credentials() {
   const remove = async (n: string) => {
     const kindOf = data?.items.find(i => i.name === n)?.kind
     // 这里只删平台存的值；GitHub 上的授权还在。授权要在代码托管页撤销（会一并在 GitHub 上撤销）。
-    const note = kindOf === 'github-user' ? '\n\n这只删掉平台存的令牌，GitHub 上的授权还在：要一并撤销，到代码托管页点「撤销授权」。'
-      : kindOf === 'github-app' ? '\n\n有人用这个 App 授权过时，那条授权也会用不了：先到代码托管页撤销授权。' : ''
+    const note =
+      kindOf === 'github-user'
+        ? '\n\n这只删掉平台存的令牌，GitHub 上的授权还在：要一并撤销，到代码托管页点「撤销授权」。'
+        : kindOf === 'github-app'
+          ? '\n\n有人用这个 App 授权过时，那条授权也会用不了：先到代码托管页撤销授权。'
+          : ''
     if (!confirm(`删除凭据 ${n}？用到它的任务会读不到它。${note}`)) return
     setNotice(undefined)
     const r = await deleteCredential(n)
@@ -139,10 +149,26 @@ export function Credentials() {
           <span>值</span>
           <input type="password" value={value} onChange={e => setValue(e.target.value)} required autoComplete="new-password" spellCheck={false} />
         </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        {notice && <p className="notice" role="status">{notice}</p>}
-        {appLocked && <p className="muted">「{name}」是{existing === 'github-user' ? ' GitHub 的用户授权，不能在这里替换；在代码托管页重新授权或撤销' : ' GitHub App 的凭据，不能在这里替换；要换就删掉后重新注册'}。</p>}
-        <div><button type="submit" className="primary" disabled={busy || data?.usable === false || appLocked}>{busy ? '保存中…' : '保存'}</button></div>
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="notice" role="status">
+            {notice}
+          </p>
+        )}
+        {appLocked && (
+          <p className="muted">
+            「{name}」是{existing === 'github-user' ? ' GitHub 的用户授权，不能在这里替换；在代码托管页重新授权或撤销' : ' GitHub App 的凭据，不能在这里替换；要换就删掉后重新注册'}。
+          </p>
+        )}
+        <div>
+          <button type="submit" className="primary" disabled={busy || data?.usable === false || appLocked}>
+            {busy ? '保存中…' : '保存'}
+          </button>
+        </div>
       </form>
     </div>
   )

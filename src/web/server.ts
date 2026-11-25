@@ -25,7 +25,29 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, ForgeAppsResponse, RegisterAppResponse, AuthorizeUserResponse, RevokeUserResponse, ForgeAppInfo, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  ActionResponse,
+  AnswerResponse,
+  ConventionDetail,
+  CredentialsResponse,
+  ForgeAppsResponse,
+  RegisterAppResponse,
+  AuthorizeUserResponse,
+  RevokeUserResponse,
+  ForgeAppInfo,
+  DeleteCredentialResponse,
+  SaveCredentialResponse,
+  ConventionsResponse,
+  CreateResponse,
+  DecideResponse,
+  GenerateResponse,
+  ImprovementComparison,
+  ProposalDetail,
+  ProposalInfo,
+  FileDiff,
+  SaveConventionResponse,
+  TaskChanges,
+  TaskDetail,
+  WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -408,10 +430,12 @@ export const createWebServer = (o: {
     if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
     if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
     // github-app. 开头的名字留给 GitHub App 的凭据：平台按这个名字找 App，放成别的类型会挡住 App 和令牌。
-    if (name.startsWith('github-app.') !== (body.kind === 'github-app')) return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
+    if (name.startsWith('github-app.') !== (body.kind === 'github-app'))
+      return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
     // github-user. 开头的名字留给 GitHub 的用户授权：只能在代码托管页授权得到，不能手填（手填的拿不到刷新令牌，也认不出是谁）。
     if (name.startsWith('github-user.') || body.kind === 'github-user') return [400, { ok: false, error: 'GitHub 的用户授权只能在代码托管页「用 GitHub 账号授权」得到，不能在这里填' }]
-    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app') return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app')
+      return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
     const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
     return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
   }
@@ -454,9 +478,12 @@ export const createWebServer = (o: {
     if (saved !== undefined) {
       const got = o.credentials.get(LOCAL_OWNER, u.ua.credentialName)
       try {
-        authorized = got.kind !== 'ok' ? { error: got.kind === 'error' ? got.error : '读不到' }
-          : appValue !== undefined && !u.ua.matches(appValue, got.value) ? { error: '这条授权是给之前注册的那个 App 的，用不了：撤销后重新授权' }
-          : { login: u.ua.read(got.value, Date.now()).login, updatedAt: saved.updatedAt }
+        authorized =
+          got.kind !== 'ok'
+            ? { error: got.kind === 'error' ? got.error : '读不到' }
+            : appValue !== undefined && !u.ua.matches(appValue, got.value)
+              ? { error: '这条授权是给之前注册的那个 App 的，用不了：撤销后重新授权' }
+              : { login: u.ua.read(got.value, Date.now()).login, updatedAt: saved.updatedAt }
       } catch (e) {
         authorized = { error: (e as Error).message }
       }
@@ -507,7 +534,10 @@ export const createWebServer = (o: {
     // 不挤掉进行中的注册：挤掉后，那个人在托管平台上建好的 App 回来时会被拒，成了没人用的 App。
     const state = begin('register', reg.credentialName, userCallbackUrl(req))
     if (state === undefined) return [429, { ok: false, error: '进行中的注册太多了，过半小时再试' }]
-    return [200, { ok: true, ...reg.form({ appName, origin: allowedOrigin(req)!, callbackUrl: callbackUrl(req), userCallbackUrl: userCallbackUrl(req), state, ...(org === undefined ? {} : { org }) }) }]
+    return [
+      200,
+      { ok: true, ...reg.form({ appName, origin: allowedOrigin(req)!, callbackUrl: callbackUrl(req), userCallbackUrl: userCallbackUrl(req), state, ...(org === undefined ? {} : { org }) }) },
+    ]
   }
 
   /** 托管平台跳回来：核对 state，用 code 换 App 的凭据存起来，再跳回页面，结果放在页面地址里。 */
@@ -563,7 +593,8 @@ export const createWebServer = (o: {
     if (p === undefined) return back({ error: `这次授权不是从本页面发起的，或者已经过期、已经用过（发起后 ${PENDING_MS / 60_000} 分钟内有效，平台重启后失效）：在本页面重新授权` })
     const said = url.searchParams.get('error')
     if (said === 'access_denied') return back({ error: '在 GitHub 上取消了授权，平台没有存任何东西' })
-    if (said !== null) return back({ error: `GitHub 没有完成授权：${said.slice(0, 100)}${url.searchParams.has('error_description') ? `（${(url.searchParams.get('error_description') ?? '').slice(0, 300)}）` : ''}` })
+    if (said !== null)
+      return back({ error: `GitHub 没有完成授权：${said.slice(0, 100)}${url.searchParams.has('error_description') ? `（${(url.searchParams.get('error_description') ?? '').slice(0, 300)}）` : ''}` })
     const code = url.searchParams.get('code') ?? ''
     if (!/^[\w-]{1,200}$/.test(code)) return back({ error: '托管平台没有带回 code：重新授权' })
     const u = userAuthOf(p.name)!
@@ -644,7 +675,8 @@ export const createWebServer = (o: {
         const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
         const reg = url.pathname === '/api/forge-apps/register'
         const userAction = url.pathname === '/api/forge-apps/authorize' ? 'authorize' : url.pathname === '/api/forge-apps/revoke' ? 'revoke' : undefined
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg && userAction === undefined) return json(res, 404, { error: '没有这个接口' })
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg && userAction === undefined)
+          return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
         if (reg) return json(res, ...registerApp(req, g.body))

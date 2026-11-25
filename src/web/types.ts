@@ -82,7 +82,10 @@ export type DeleteCredentialResponse = { ok: true } | { ok: false; error: string
 
 /** 托管平台 App（例如 GitHub App）的注册情况。name 是它在凭据存储里的名字；registered 是已经存了凭据。 */
 export type ForgeAppInfo = {
-  name: string; host: string; appNameMax: number; registered?: { updatedAt: number; installUrl?: string }
+  name: string
+  host: string
+  appNameMax: number
+  registered?: { updatedAt: number; installUrl?: string }
   /**
    * 用户授权（OAuth）：托管平台支持时才有。authorized 是已经授权的人（error 是授权读不出来时的原因）；
    * unavailable 是现在不能发起授权的原因（例如 App 是早先注册的、没有 client id）。

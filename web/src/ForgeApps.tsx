@@ -93,8 +93,15 @@ export function ForgeApps({ query }: { query: string }) {
   return (
     <div className="credentials">
       <h1>代码托管</h1>
-      <p className="muted">先注册一个 App 并装到要用的仓库，再用 GitHub 账号授权：平台以授权人的身份克隆、推送、开 PR。没人授权时用 App 自己的身份；App 没装到某个仓库时，改用凭据页里的 Git 令牌。App 的私钥和授权的令牌都加密存在凭据存储里，只由平台使用。</p>
-      {result.get('error') !== null && <p className="error" role="alert">注册没有完成：{result.get('error')}</p>}
+      <p className="muted">
+        先注册一个 App 并装到要用的仓库，再用 GitHub 账号授权：平台以授权人的身份克隆、推送、开 PR。没人授权时用 App 自己的身份；App 没装到某个仓库时，改用凭据页里的 Git 令牌。App
+        的私钥和授权的令牌都加密存在凭据存储里，只由平台使用。
+      </p>
+      {result.get('error') !== null && (
+        <p className="error" role="alert">
+          注册没有完成：{result.get('error')}
+        </p>
+      )}
       {registered !== null && (
         <p className="notice" role="status">
           已注册 App「{result.get('app')}」，凭据存为 <span className="mono">{registered}</span>。下一步：把它安装到要用的仓库
@@ -110,10 +117,26 @@ export function ForgeApps({ query }: { query: string }) {
           。
         </p>
       )}
-      {result.get('authorized') !== null && <p className="notice" role="status">已用 @{result.get('authorized')} 的 GitHub 账号授权：之后推送和开 PR 都以 @{result.get('authorized')} 的身份进行（仓库要装了 App）。</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-      {data === undefined ? (error ? null : <p className="muted">加载中…</p>) : (
+      {result.get('authorized') !== null && (
+        <p className="notice" role="status">
+          已用 @{result.get('authorized')} 的 GitHub 账号授权：之后推送和开 PR 都以 @{result.get('authorized')} 的身份进行（仓库要装了 App）。
+        </p>
+      )}
+      {notice && (
+        <p className="notice" role="status">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {data === undefined ? (
+        error ? null : (
+          <p className="muted">加载中…</p>
+        )
+      ) : (
         <>
           {!data.usable && (
             <p className="error" role="alert">
@@ -125,21 +148,53 @@ export function ForgeApps({ query }: { query: string }) {
               <h2>GitHub App · {a.host}</h2>
               {a.registered !== undefined ? (
                 <>
-                  <p>已注册，凭据 <span className="mono">{a.name}</span>，更新于 {ago(a.registered.updatedAt)}。</p>
-                  {a.registered.installUrl !== undefined && <p><a href={a.registered.installUrl} target="_blank" rel="noreferrer">把 App 安装到仓库</a>：只勾选要让平台访问的仓库。</p>}
+                  <p>
+                    已注册，凭据 <span className="mono">{a.name}</span>，更新于 {ago(a.registered.updatedAt)}。
+                  </p>
+                  {a.registered.installUrl !== undefined && (
+                    <p>
+                      <a href={a.registered.installUrl} target="_blank" rel="noreferrer">
+                        把 App 安装到仓库
+                      </a>
+                      ：只勾选要让平台访问的仓库。
+                    </p>
+                  )}
                   {a.user !== undefined && (
                     <div className="forge-user">
                       <h3>用 GitHub 账号授权</h3>
-                      <p className="muted">授权后，平台以授权人的身份推送、开 PR（PR 作者是这个人），只能访问装了 App、而且这个人有权限的仓库。令牌 8 小时过期，平台自动续期。没人授权时用 App 自己的身份。</p>
-                      {a.user.authorized !== undefined && ('login' in a.user.authorized
-                        ? <p>已授权：<b>@{a.user.authorized.login}</b>，更新于 {ago(a.user.authorized.updatedAt)}。 <button type="button" onClick={() => void revoke(a.name, (a.user!.authorized as { login: string }).login)}>撤销授权</button></p>
-                        : <p className="error">授权读不出来：{a.user.authorized.error} <button type="button" onClick={() => void revoke(a.name)}>撤销授权</button></p>)}
-                      {a.user.unavailable !== undefined
-                        ? <p className="muted">现在不能授权：{a.user.unavailable}</p>
-                        : <div><button type="button" className={a.user.authorized === undefined ? 'primary' : ''} disabled={busy || !data.usable} onClick={() => void authorize(a.name)}>{busy ? '正在跳转…' : a.user.authorized === undefined ? `用 ${a.host} 账号授权` : '换一个人重新授权'}</button></div>}
+                      <p className="muted">
+                        授权后，平台以授权人的身份推送、开 PR（PR 作者是这个人），只能访问装了 App、而且这个人有权限的仓库。令牌 8 小时过期，平台自动续期。没人授权时用 App 自己的身份。
+                      </p>
+                      {a.user.authorized !== undefined &&
+                        ('login' in a.user.authorized ? (
+                          <p>
+                            已授权：<b>@{a.user.authorized.login}</b>，更新于 {ago(a.user.authorized.updatedAt)}。{' '}
+                            <button type="button" onClick={() => void revoke(a.name, (a.user!.authorized as { login: string }).login)}>
+                              撤销授权
+                            </button>
+                          </p>
+                        ) : (
+                          <p className="error">
+                            授权读不出来：{a.user.authorized.error}{' '}
+                            <button type="button" onClick={() => void revoke(a.name)}>
+                              撤销授权
+                            </button>
+                          </p>
+                        ))}
+                      {a.user.unavailable !== undefined ? (
+                        <p className="muted">现在不能授权：{a.user.unavailable}</p>
+                      ) : (
+                        <div>
+                          <button type="button" className={a.user.authorized === undefined ? 'primary' : ''} disabled={busy || !data.usable} onClick={() => void authorize(a.name)}>
+                            {busy ? '正在跳转…' : a.user.authorized === undefined ? `用 ${a.host} 账号授权` : '换一个人重新授权'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
-                  <p className="muted">要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。</p>
+                  <p className="muted">
+                    要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。
+                  </p>
                 </>
               ) : (
                 <form

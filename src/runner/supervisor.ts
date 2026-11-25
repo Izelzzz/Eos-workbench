@@ -232,7 +232,9 @@ export class Supervisor {
       }
     })()
     this.refreshing.set(ua.credentialName, job)
-    const clear = () => { if (this.refreshing.get(ua.credentialName) === job) this.refreshing.delete(ua.credentialName) }
+    const clear = () => {
+      if (this.refreshing.get(ua.credentialName) === job) this.refreshing.delete(ua.credentialName)
+    }
     job.then(clear, clear)
     return job
   }

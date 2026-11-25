@@ -3,10 +3,32 @@ import type { Insights } from '../../src/engine/insights.ts'
 import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
-  FileChange, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
-  CredentialsResponse, DeleteCredentialResponse, SaveCredentialRequest, SaveCredentialResponse,
-  ForgeAppsResponse, RegisterAppRequest, RegisterAppResponse, AuthorizeUserResponse, RevokeUserResponse,
+  ActionResponse,
+  AnswerResponse,
+  ConventionDetail,
+  ConventionsResponse,
+  CreateResponse,
+  DecideResponse,
+  FieldError,
+  GenerateResponse,
+  ImprovementComparison,
+  ProposalDetail,
+  ProposalInfo,
+  FileChange,
+  FileDiff,
+  SaveConventionResponse,
+  TaskChanges,
+  TaskDetail,
+  WorkflowInfo,
+  CredentialsResponse,
+  DeleteCredentialResponse,
+  SaveCredentialRequest,
+  SaveCredentialResponse,
+  ForgeAppsResponse,
+  RegisterAppRequest,
+  RegisterAppResponse,
+  AuthorizeUserResponse,
+  RevokeUserResponse,
 } from '../../src/web/types.ts'
 import type { CredentialKind } from '../../src/credentials/types.ts'
 

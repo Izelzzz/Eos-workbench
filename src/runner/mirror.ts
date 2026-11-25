@@ -95,8 +95,10 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
   const raw = scrub(stderr, o.secrets ?? [])
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
   if (/Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]|HTTP 40[13]|403 Forbidden|401 Unauthorized/i.test(raw)) {
-    if (o.hasToken && o.credential.startsWith('github-user.')) return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」里的 GitHub 授权已失效，或者授权人对这个仓库没有写权限。在代码托管页重新授权，或者换一个有权限的人授权`
-    if (o.hasToken && o.credential.startsWith('github-app.')) return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」的 GitHub App 换来的令牌没有权限，检查 App 在这个仓库的安装和 Contents 权限（任务改了 .github/workflows 时还要 Workflows 权限）；改好后重试会重新换令牌`
+    if (o.hasToken && o.credential.startsWith('github-user.'))
+      return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」里的 GitHub 授权已失效，或者授权人对这个仓库没有写权限。在代码托管页重新授权，或者换一个有权限的人授权`
+    if (o.hasToken && o.credential.startsWith('github-app.'))
+      return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」的 GitHub App 换来的令牌没有权限，检查 App 在这个仓库的安装和 Contents 权限（任务改了 .github/workflows 时还要 Workflows 权限）；改好后重试会重新换令牌`
     return o.hasToken
       ? `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」里的令牌无效、已过期，或者没有授权这个仓库。在凭据页替换这条凭据`
       : `${repo.host} 拒绝了访问 ${where}：这是私有仓库或需要登录。在凭据页添加名字为「${o.credential}」、类型为 Git 令牌的凭据`

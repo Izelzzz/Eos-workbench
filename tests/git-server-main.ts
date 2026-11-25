@@ -157,7 +157,14 @@ const server = createServer((req, res) => {
       const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
       const id = 700 + appsCreated++
       const code = randomBytes(10).toString('hex')
-      conversions.set(code, { id, slug: manifest.name.toLowerCase(), pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(), name: manifest.name, clientId: `Iv1.app${id}`, clientSecret: `secret_${randomBytes(10).toString('hex')}` })
+      conversions.set(code, {
+        id,
+        slug: manifest.name.toLowerCase(),
+        pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(),
+        name: manifest.name,
+        clientId: `Iv1.app${id}`,
+        clientSecret: `secret_${randomBytes(10).toString('hex')}`,
+      })
       appId = String(id)
       appKey = publicKey
       const back = new URL(manifest.redirect_url)
@@ -175,7 +182,22 @@ const server = createServer((req, res) => {
     if (c !== undefined) client = { id: c.clientId, secret: c.clientSecret }
     res.writeHead(c === undefined ? 404 : 201, { 'content-type': 'application/json' })
     // 真实 GitHub 还返回 client_secret、webhook_secret：平台不该存它们。
-    return void res.end(JSON.stringify(c === undefined ? { message: 'Not Found' } : { id: c.id, slug: c.slug, name: c.name, pem: c.pem, html_url: `http://127.0.0.1:${port}/apps/${c.slug}`, client_id: c.clientId, client_secret: c.clientSecret, webhook_secret: 'webhook-secret-should-not-be-stored' }))
+    return void res.end(
+      JSON.stringify(
+        c === undefined
+          ? { message: 'Not Found' }
+          : {
+              id: c.id,
+              slug: c.slug,
+              name: c.name,
+              pem: c.pem,
+              html_url: `http://127.0.0.1:${port}/apps/${c.slug}`,
+              client_id: c.clientId,
+              client_secret: c.clientSecret,
+              webhook_secret: 'webhook-secret-should-not-be-stored',
+            },
+      ),
+    )
   }
   // 用户授权：授权页直接跳回。
   const authz = /^\/login\/oauth\/authorize\?(.*)$/.exec(req.url ?? '')
@@ -206,7 +228,10 @@ const server = createServer((req, res) => {
       const b = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, string>
       appendFileSync(record, `${JSON.stringify({ path: req.url, grant: b.grant_type ?? 'code' })}\n`)
       // 真实 GitHub：出错也回 200，带 error。
-      const reply = (v: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)) }
+      const reply = (v: unknown) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(v))
+      }
       if (client === undefined || b.client_id !== client.id || b.client_secret !== client.secret) return reply({ error: 'incorrect_client_credentials' })
       if (b.grant_type === 'refresh_token') {
         // 模拟 GitHub 暂时出错：刷新令牌不作废，下次还能用。
@@ -243,7 +268,10 @@ const server = createServer((req, res) => {
       const authed = client !== undefined && basic === `${client.id}:${client.secret}`
       const known = t !== undefined && (userTokens.get(t) ?? 0) > Date.now()
       const ok = authed && known
-      if (ok) { userTokens.clear(); refreshTokens.clear() }
+      if (ok) {
+        userTokens.clear()
+        refreshTokens.clear()
+      }
       appendFileSync(record, `${JSON.stringify({ path: req.url, method: 'DELETE', ok })}\n`)
       res.writeHead(!authed ? 401 : known ? 204 : 404)
       res.end()

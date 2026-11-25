@@ -960,7 +960,7 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   const r = await remote(TOKEN)
   const web = await webOn(r)
   const name = `github-app.${r.credential}`
-  const before = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const before = (await (await fetch(`${web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.deepEqual(before, { usable: true, callbackUrl: `${web.base}/api/forge-apps/callback`, apps: [{ name, host: r.credential, appNameMax: 34, user: { unavailable: '先注册 App' } }] })
 
   // 写接口照样只接受同源请求。
@@ -976,8 +976,13 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   assert.ok(state.length >= 40, 'state 是足够长的随机串')
   const manifest = JSON.parse(started.fields.manifest!)
   assert.deepEqual(manifest, {
-    name: 'Eos-Test', url: web.base, redirect_url: `${web.base}/api/forge-apps/callback`, callback_urls: [`${web.base}/api/forge-apps/user-callback`], public: false,
-    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' }, default_events: [],
+    name: 'Eos-Test',
+    url: web.base,
+    redirect_url: `${web.base}/api/forge-apps/callback`,
+    callback_urls: [`${web.base}/api/forge-apps/user-callback`],
+    public: false,
+    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+    default_events: [],
   })
 
   const done = await submitManifest(started.action, started.fields)
@@ -985,7 +990,11 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   const saved = r.credentials.get(LOCAL_OWNER, name)
   assert.equal(saved.kind, 'ok')
   const value = JSON.parse((saved as { value: string }).value)
-  assert.deepEqual(Object.keys(value).sort(), ['appId', 'clientId', 'clientSecret', 'htmlUrl', 'privateKey', 'slug', 'userCallbackUrl'], '只存 App id、私钥、短名、页面地址，以及用户授权用的 client id 和 secret（不存 webhook secret）')
+  assert.deepEqual(
+    Object.keys(value).sort(),
+    ['appId', 'clientId', 'clientSecret', 'htmlUrl', 'privateKey', 'slug', 'userCallbackUrl'],
+    '只存 App id、私钥、短名、页面地址，以及用户授权用的 client id 和 secret（不存 webhook secret）',
+  )
   assert.equal(value.slug, 'eos-test')
   assert.match(value.privateKey, /BEGIN RSA PRIVATE KEY/)
   assert.equal(r.credentials.list(LOCAL_OWNER).find(i => i.name === name)?.kind, 'github-app')
@@ -1057,13 +1066,13 @@ const registeredApp = async (o: { userTtlS?: number } = {}) => {
   delete process.env.EOS_TEST_USER_TTL_S
   const web = await webOn(r)
   const name = `github-app.${r.credential}`
-  const started = await (await web.post('/api/forge-apps/register', { name, appName: 'eos-oauth' })).json() as { action: string; fields: Record<string, string> }
+  const started = (await (await web.post('/api/forge-apps/register', { name, appName: 'eos-oauth' })).json()) as { action: string; fields: Record<string, string> }
   await submitManifest(started.action, started.fields)
   await fetch(`http://${r.credential}/__control/install?repo=acme/app`)
   /** 浏览器做的事：去 GitHub 授权页（模拟的直接跳回），跟着跳回平台的回调，返回平台最后跳到的页面地址。 */
   const authorize = async (): Promise<string> => {
     const res = await web.post('/api/forge-apps/authorize', { name })
-    const body = await res.json() as { ok: boolean; url?: string; error?: string }
+    const body = (await res.json()) as { ok: boolean; url?: string; error?: string }
     assert.equal(body.ok, true, JSON.stringify(body))
     const atGitHub = await fetch(body.url!, { redirect: 'manual' })
     assert.equal(atGitHub.status, 302)
@@ -1073,13 +1082,22 @@ const registeredApp = async (o: { userTtlS?: number } = {}) => {
   }
   const user = `github-user.${r.credential}`
   /** git 请求里用过的令牌（从 Basic 认证头里解出来）。 */
-  const gitTokens = () => r.requests().filter(q => q.path.includes('.git/') && q.auth !== null).map(q => Buffer.from(q.auth!.replace(/^Basic /, ''), 'base64').toString('utf8').split(':')[1]!)
+  const gitTokens = () =>
+    r
+      .requests()
+      .filter(q => q.path.includes('.git/') && q.auth !== null)
+      .map(
+        q =>
+          Buffer.from(q.auth!.replace(/^Basic /, ''), 'base64')
+            .toString('utf8')
+            .split(':')[1]!,
+      )
   return { ...r, web, name, user, authorize, gitTokens }
 }
 
 test('用户授权（OAuth）：授权后存下授权人和令牌；克隆用的是授权人的令牌，不是 App 的安装令牌', async () => {
   const r = await registeredApp()
-  const before = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const before = (await (await fetch(`${r.web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.deepEqual(before.apps[0]!.user, {}, '注册后可以授权，还没人授权')
   const page = await r.authorize()
   assert.equal(page, '/#/forges?authorized=octo')
@@ -1091,7 +1109,7 @@ test('用户授权（OAuth）：授权后存下授权人和令牌；克隆用的
   assert.deepEqual(Object.keys(value).sort(), ['accessToken', 'clientId', 'expiresAt', 'login', 'refreshExpiresAt', 'refreshToken'])
   assert.equal(value.login, 'octo')
   assert.equal(r.credentials.list(LOCAL_OWNER).find(i => i.name === r.user)?.kind, 'github-user')
-  const after = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const after = (await (await fetch(`${r.web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.equal((after.apps[0]!.user?.authorized as { login: string }).login, 'octo')
 
   // 克隆、推送、开 PR 走一遍：git 和 PR 接口都用授权人的令牌（PR 作者就是授权人）。
@@ -1099,7 +1117,10 @@ test('用户授权（OAuth）：授权后存下授权人和令牌；克隆用的
   assert.equal(task.status, 'done', task.failure)
   assert.match(result.detail, /已开 PR #1/)
   assert.ok(r.gitTokens().length > 0 && r.gitTokens().every(t => t === value.accessToken), `git 只用了授权人的令牌：${r.gitTokens().join(',')}`)
-  assert.ok(r.requests().some(q => q.path.includes('.git/git-receive-pack')), '推送过')
+  assert.ok(
+    r.requests().some(q => q.path.includes('.git/git-receive-pack')),
+    '推送过',
+  )
   const prCalls = apiCalls(r).filter(q => q.path.includes('/pulls'))
   assert.ok(prCalls.length > 0 && prCalls.every(q => q.auth === `Bearer ${value.accessToken}`), `PR 接口用的是授权人的令牌：${prCalls.map(q => q.auth).join(',')}`)
   // 令牌不落盘：数据目录里找不到用户令牌和刷新令牌。
@@ -1134,7 +1155,11 @@ test('用户令牌快过期时先续期：并发的只续一次，刷新令牌�
   // 在 GitHub 上撤销了授权（刷新令牌也作废）：续期失败，报中文原因；不悄悄改用 App 的安装令牌。
   const app = JSON.parse((r.credentials.get(LOCAL_OWNER, `github-app.${r.credential}`) as { value: string }).value)
   const live = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value).accessToken
-  const del = await fetch(`http://${r.credential}/api/v3/applications/${app.clientId}/grant`, { method: 'DELETE', headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString('base64')}` }, body: JSON.stringify({ access_token: live }) })
+  const del = await fetch(`http://${r.credential}/api/v3/applications/${app.clientId}/grant`, {
+    method: 'DELETE',
+    headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString('base64')}` },
+    body: JSON.stringify({ access_token: live }),
+  })
   assert.equal(del.status, 204)
   const gitBefore = r.gitTokens().length
   const failed = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'c' })
@@ -1171,9 +1196,12 @@ test('撤销授权：先在 GitHub 上撤销，再删掉平台存的令牌；之
   // 凭据页不能手填用户授权。
   assert.equal((await r.web.post('/api/credentials', { name: r.user, kind: 'github-user', value: '{}' })).status, 400)
   assert.equal((await r.web.post('/api/credentials', { name: 'x', kind: 'github-user', value: '{}' })).status, 400)
-  const revoked = await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json() as { ok: boolean; warning?: string }
+  const revoked = (await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json()) as { ok: boolean; warning?: string }
   assert.deepEqual(revoked, { ok: true })
-  assert.ok(r.requests().some(q => q.path.endsWith('/grant') && (q as unknown as { ok: boolean }).ok), '在 GitHub 上撤销了')
+  assert.ok(
+    r.requests().some(q => q.path.endsWith('/grant') && (q as unknown as { ok: boolean }).ok),
+    '在 GitHub 上撤销了',
+  )
   assert.equal(r.credentials.get(LOCAL_OWNER, r.user).kind, 'absent')
   const created = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'x' })
   assert.equal(created.ok, true, JSON.stringify(created))
@@ -1187,7 +1215,7 @@ test('早先注册的 App（凭据里没有 client id）：页面说明要重新
   const { generateKeyPairSync } = await import('node:crypto')
   const pem = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' }).toString()
   r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appId: '1', privateKey: pem, slug: 'old' }))
-  const list = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const list = (await (await fetch(`${web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.match(list.apps[0]!.user!.unavailable!, /没有记下 client id 和 secret.*重新注册/)
   const res = await web.post('/api/forge-apps/authorize', { name: `github-app.${r.credential}` })
   assert.equal(res.status, 409)
@@ -1223,15 +1251,18 @@ test('撤销时令牌已经过期：先续期再撤销，GitHub 上真的撤销�
   await fetch(`http://${r.credential}/__control/expire-user`)
   const value = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
   r.credentials.put(LOCAL_OWNER, r.user, 'github-user', JSON.stringify({ ...value, expiresAt: Date.now() - 1000 }))
-  const revoked = await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json() as { ok: boolean; warning?: string }
+  const revoked = (await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json()) as { ok: boolean; warning?: string }
   assert.deepEqual(revoked, { ok: true })
-  assert.ok(r.requests().some(q => q.path.endsWith('/grant') && (q as unknown as { ok: boolean }).ok), 'GitHub 上撤销了')
+  assert.ok(
+    r.requests().some(q => q.path.endsWith('/grant') && (q as unknown as { ok: boolean }).ok),
+    'GitHub 上撤销了',
+  )
 
   // 平台存的令牌 GitHub 不认（例如已经在 GitHub 上撤销过、存的到期时间不准）：照样删掉，但提醒去 GitHub 上确认。
   await r.authorize()
   const v2 = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
   await fetch(`http://${r.credential}/__control/expire-user`)
-  const again = await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json() as { ok: boolean; warning?: string }
+  const again = (await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json()) as { ok: boolean; warning?: string }
   assert.equal(again.ok, true)
   assert.match(again.warning!, /没能确认 @octo 的授权已撤销.*Authorized GitHub Apps/)
   assert.equal(r.credentials.get(LOCAL_OWNER, r.user).kind, 'absent')
@@ -1243,7 +1274,11 @@ test('续期等 GitHub 回复期间有人换人重新授权或撤销：以那边
   await r.authorize()
   await fetch(`http://${r.credential}/__control/slow-refresh?ms=800`)
   // 换人重新授权：续期期间凭据被换成另一个人的（这里直接写入，模拟授权回调）。
-  const other = JSON.stringify({ login: 'someone-else', accessToken: 'ghu_other_not_valid_for_git_0001', clientId: JSON.parse((r.credentials.get(LOCAL_OWNER, r.name) as { value: string }).value).clientId })
+  const other = JSON.stringify({
+    login: 'someone-else',
+    accessToken: 'ghu_other_not_valid_for_git_0001',
+    clientId: JSON.parse((r.credentials.get(LOCAL_OWNER, r.name) as { value: string }).value).clientId,
+  })
   const running = r.sup.create({ repo: r.url, workflow: 'feature', request: 'a' })
   await new Promise(ok => setTimeout(ok, 300))
   r.credentials.put(LOCAL_OWNER, r.user, 'github-user', other)
@@ -1267,14 +1302,14 @@ test('删掉 App 重新注册后，旧 App 的授权用不了：说清楚要重�
   const r = await registeredApp()
   await r.authorize()
   r.credentials.delete(LOCAL_OWNER, r.name)
-  const started = await (await r.web.post('/api/forge-apps/register', { name: r.name, appName: 'eos-new' })).json() as { action: string; fields: Record<string, string> }
+  const started = (await (await r.web.post('/api/forge-apps/register', { name: r.name, appName: 'eos-new' })).json()) as { action: string; fields: Record<string, string> }
   await submitManifest(started.action, started.fields)
   const gitBefore = r.gitTokens().length
   const failed = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'x' })
   assert.equal(failed.ok, false)
   assert.match((failed as { error: string }).error, /给之前注册的那个 App 的.*重新授权/)
   assert.equal(r.gitTokens().length, gitBefore)
-  const list = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const list = (await (await fetch(`${r.web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.match((list.apps[0]!.user!.authorized as { error: string }).error, /之前注册的那个 App/)
 })
 
@@ -1304,5 +1339,11 @@ test('只有认证被拒才在下次先续期：开 PR 因别的原因失败不�
   assert.equal(ok.ok, true, JSON.stringify(ok))
   assert.equal(refreshes(), 2, '续期出错后又续了一次')
   const value = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
-  assert.ok(r.gitTokens().slice(gitBefore).every(t => t === value.accessToken), '没有再用被拒过的令牌')
+  assert.ok(
+    r
+      .gitTokens()
+      .slice(gitBefore)
+      .every(t => t === value.accessToken),
+    '没有再用被拒过的令牌',
+  )
 })
