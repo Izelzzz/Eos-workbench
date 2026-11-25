@@ -67,6 +67,22 @@ test('含指令注释的文件不算证明了，列为需要人工核对', () =>
   assert.match(r.out, /需要人工核对.*d\.ts/)
 })
 
+test('模板字符串和 JSX 文本不打乱指令注释的识别；三斜线指令也算', () => {
+  const r = run([
+    ['m.ts', "const a = `${1}`\n// @ts-expect-error\nexport const z: number = 'a'\nconst t = `b`\n", "const a = `${1}`\nexport const z: number =\n  // @ts-expect-error\n  'a'\nconst t = `b`\n"],
+    ['x.tsx', "export const P = () => <p>a/*</p>\n// @ts-expect-error\nexport const z: number = 'a'\n", "export const P = () => <p>a/*</p>\nexport const z: number =\n  // @ts-expect-error\n  'a'\n"],
+    ['r.ts', '/// <reference types="node" />\nexport const i = 1\n', 'export const i = 1\n/// <reference types="node" />\n'],
+  ])
+  assert.equal(r.code, 1, r.out)
+  for (const f of ['m.ts', 'x.tsx', 'r.ts']) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)
+})
+
+test('JS 里 JSDoc 类型转换的括号不当成多余括号', () => {
+  const r = run([['c.js', 'const y = 1\nexport const v = /** @type {number} */ (y)\n', 'const y = 1\nexport const v = /** @type {number} */ y\n']])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /不一致：c\.js/)
+})
+
 test('普通注释里提到指令的词不算指令', () => {
   const r = run([['c.ts', '// 不许用 eslint-disable 关规则\nexport const c = 1;\n', '// 不许用 eslint-disable 关规则\nexport const c = 1\n']])
   assert.equal(r.code, 0, r.out)

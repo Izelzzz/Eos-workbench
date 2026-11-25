@@ -14,7 +14,7 @@
 // 证明不了、算失败（退出码 1）的：
 // - 含指令注释（// @ts-expect-error、eslint-disable、prettier-ignore、@__PURE__ 等）的文件：指令作用于它后面的行或节点，
 //   换行可能改变作用对象。列为「需要人工核对」；
-// - 新增、删除、改名的文件：只比较两边都有的文件。
+// - 新增、删除、改名、类型改变（例如变成符号链接）的文件：只比较两边都有的普通文件。
 //
 // 用法（仓库根目录，先 npm ci --prefix .github/lint --ignore-scripts）：node .github/lint/ast-equal.mjs [base]
 // base 默认 HEAD：比较 base 和工作区。全部一致时退出码 0，否则列出文件、退出码 1。
@@ -74,7 +74,8 @@ const MEANING_FLAGS =
   ts.NodeFlags.ExportContext
 
 // 指令注释：注释一开头就是这些
-const DIRECTIVE = /^\/[/*]\s*(@ts-|eslint-|eslint\s|prettier-ignore|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack[A-Z]|c8\s|istanbul\s|v8\s|@jsx)/
+// 三斜线指令（/// <reference ...>）只在文件开头生效，也算
+const DIRECTIVE = /^(\/\/\/\s*<|\/[/*]\s*(@ts-|eslint-|eslint\s|prettier-ignore|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack[A-Z]|c8\s|istanbul\s|v8\s|@jsx))/
 
 // React（Babel）的 cleanJSXElementLiteralChild，lastNonEmptyLine 初始为 0
 function jsxText(t) {
@@ -103,14 +104,30 @@ const parenMatters = n =>
   ts.isOptionalChain(n.expression) ||
   (ts.isExpressionStatement(n.parent) && ts.isStringLiteral(n.expression)) ||
   // (a?.b).c 里括号的 flags 也带 OptionalChain 信息，保守起见：里面是可选链的一律保留
-  (n.expression.flags & ts.NodeFlags.OptionalChain) !== 0
+  (n.expression.flags & ts.NodeFlags.OptionalChain) !== 0 ||
+  // JS 里 /** @type {T} */ (x) 是类型转换，括号不能去
+  (n.jsDoc?.length ?? 0) > 0
 
-function directives(src) {
+// 从语法树按 token 取注释（不自己扫描全文：模板字符串、JSX 文本里的 /* 和 // 会打乱扫描）
+function directives(f, src) {
+  const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, kindOf(f))
+  const seen = new Set()
   const found = []
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, src)
-  for (let t = scanner.scan(); t !== ts.SyntaxKind.EndOfFileToken; t = scanner.scan()) {
-    if ((t === ts.SyntaxKind.SingleLineCommentTrivia || t === ts.SyntaxKind.MultiLineCommentTrivia) && DIRECTIVE.test(scanner.getTokenText())) found.push(scanner.getTokenText())
+  const take = ranges => {
+    for (const r of ranges ?? []) {
+      if (seen.has(r.pos)) continue
+      seen.add(r.pos)
+      const t = src.slice(r.pos, r.end)
+      if (DIRECTIVE.test(t)) found.push(t)
+    }
   }
+  const walk = n => {
+    take(ts.getLeadingCommentRanges(src, n.pos))
+    take(ts.getTrailingCommentRanges(src, n.end))
+    n.forEachChild(walk)
+  }
+  walk(sf)
+  take(ts.getLeadingCommentRanges(src, sf.endOfFileToken.pos))
   return found
 }
 
@@ -162,13 +179,13 @@ function shape(f, src) {
 
 let same = 0
 const problems = []
-for (const f of listed('ADR')) problems.push(`新增、删除或改名（只比较两边都有的文件）：${f}`)
+for (const f of listed('ADRTUXB')) problems.push(`新增、删除、改名或类型改变（只比较两边都有的普通文件）：${f}`)
 const files = listed('M')
 for (const f of files) {
   const before = execFileSync('git', ['show', `${base}:${f}`], { encoding: 'utf8' })
   const after = readFileSync(f, 'utf8')
   try {
-    const d = [...directives(before), ...directives(after)]
+    const d = [...directives(f, before), ...directives(f, after)]
     if (d.length) {
       problems.push(`需要人工核对（含指令注释 ${d.slice(0, 3).join(' | ')}）：${f}`)
       continue
