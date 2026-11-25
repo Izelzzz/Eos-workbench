@@ -40,7 +40,7 @@
 - **③c**：dsh 的入口（`deploy/dsh-launch.mjs`）在清掉能力的同时切换到 `eos-agent`，agent 和 dsh 启动的 MCP 服务也是这个用户。实测（`docs/e2e/deploy-3c-agent-user/`）：eos-agent 读不到平台（eos）和 1 号进程的环境，平台的主密钥对 agent 不再只靠沙箱。
   - agent 是 dsh 启动的，和 dsh 总是同一个用户：dsh 进程环境里的模型 key 对 agent 仍然只靠 Landlock，dsh 在沙箱外启动的 MCP 服务读得到它。要隔开得让 dsh 不从环境拿 key，这一版 dsh 做不到。
   - 平台加回 `KILL`：平台要给 dsh 发信号（SDK 关掉 dsh、换 key 后重起，#65 的路径），dsh 现在是别的用户。另一个办法是像检查命令那样以 `eos-agent` 的身份去杀，但要改 vendor 里 SDK 关闭进程的写法，用户选了加能力。平台的子进程照样清掉它。
-  - dsh 的数据目录 `/data/dsh`：属于 `eos`、组 `eos-dsh`（只有 `eos` 和 `eos-agent`），2770。平台往里写能力面，dsh 写会话日志。dsh 建的会话目录是 0700、文件是 0600，平台以 `eos-agent` 的身份读（`readSessionLogAs`）。不给平台加 `DAC_READ_SEARCH`：那样平台什么文件都能读，范围比需要的大。
+  - dsh 的数据目录 `/data/dsh`：属于 `eos`、组 `eos-dsh`（只有 `eos` 和 `eos-agent`），3770。dsh 写会话日志。平台写的能力面和两个工作目录放在 `eos-profiles/`、`eos-process-cwd/`、`eos-mcp-cwd/`，启动时建好、2755，平台写之前核对它们是自己的真目录（`platformDir`）。独立审查发现：原来这些目录组内可写、`/data/dsh` 没有 sticky 位，eos-agent（例如 dsh 起的 MCP 服务）能把它们换成链接，让平台顺着链接覆盖 `eos.db`。dsh 建的会话目录是 0700、文件是 0600，平台以 `eos-agent` 的身份读（`readSessionLogAs`）。不给平台加 `DAC_READ_SEARCH`：那样平台什么文件都能读，范围比需要的大。
   - 平台读不到别的用户进程的工作目录（要 `SYS_PTRACE`），`procs.ts` 找不到 agent 留下的进程：撤销越界改动前以 `eos-agent` 的身份找、杀（和检查命令一样）。
   - 升级：旧的 `/data/dsh` 属于 `eos`，dsh 的文件多是 0700、0600，`eos-agent` 用不了，平台又没有 `CHOWN` 改不了属主。第一次启动平台时以 `eos-agent` 的身份复制一份，旧的改名留作备份。`.credentials.yaml` 不复制：dsh 要求它只有属主可读，新的 dsh 会重新生成（里面是 dsh 的浏览器会话授权，没有模型 key）。实测迁移后能续接升级前的会话。
   - dsh 的 native 模块缓存放到 `eos-agent` 的家目录：平台（eos）有自己的一份，不加载 `eos-agent` 能写的那份。

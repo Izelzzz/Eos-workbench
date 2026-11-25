@@ -83,7 +83,7 @@ try {
   inContainer([
     `rm -rf ${REPO} && mkdir -p ${REPO} && cd ${REPO}`,
     'git init -q -b main',
-    // pretest 记下跑过 npm test 的用户（每个用户一个文件，不用写别人的文件）：agent 在沙箱里跑的是 eos，平台的检查命令应该是 eos-check。
+    // pretest 记下跑过 npm test 的用户（每个用户一个文件，不用写别人的文件）：agent 在沙箱里跑的是 eos-agent，平台的检查命令应该是 eos-check。
     `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "pretest": "touch /tmp/eos-e2e-npm-test-by-$(id -un)", "test": "node --test" } }' > package.json`,
     'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
   ].join(' && '))

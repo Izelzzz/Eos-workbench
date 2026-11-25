@@ -97,6 +97,23 @@ const restart = {
   afterStatus: Object.fromEntries(second.map(p => [p, status(p)])),
 }
 
+// eos-agent（代表 dsh 在沙箱外起的 MCP 服务）想让平台顺着链接写到别处（独立审查发现的）：
+// 把平台的目录改名再换成链接、往平台的目录里放链接、删掉平台写的文件。都应该被拒绝。
+const attack = (script: string) => {
+  const [c, ...a] = asUser(agent.user, ['sh', '-c', script, 'sh', join(data, 'dsh')])
+  const r = spawnSync(c!, a, { encoding: 'utf8' })
+  return r.status === 0 ? 'ok' : r.stderr.trim().split('\n')[0]
+}
+const symlinkAttack = {
+  renameProfilesDir: attack('mv "$1/eos-profiles" "$1/moved"'),
+  plantLinkInProfiles: attack('ln -s /data "$1/eos-profiles/planted"'),
+  replacePatchFile: attack('f=$(ls "$1"/eos-profiles/*/cordis.patch.yml | head -1); rm -f "$f" && ln -s /data/eos.db "$f"'),
+  renameProcessCwd: attack('mv "$1/eos-process-cwd" "$1/moved2"'),
+  modes: execFileSync('sh', ['-c', 'stat -c "%A %U:%G %n" "$1" "$1"/eos-profiles "$1"/eos-profiles/* "$1"/eos-process-cwd "$1"/eos-mcp-cwd', 'sh', join(data, 'dsh')], { encoding: 'utf8' })
+    .trim()
+    .split('\n'),
+}
+
 // agent 留下的进程：以 eos-agent 在 worktree 里起一个脱离进程组的 sleep，平台撤销前以 eos-agent 的身份结束它。
 const [lc, ...la] = asUser(agent.user, ['setsid', 'sleep', '300'])
 const leftover = spawn(lc!, la, { cwd: worktree, detached: true, stdio: 'ignore' })
@@ -133,6 +150,7 @@ console.log(
     restartAfterKeyChange: restart,
     scanAsAgentOutsideSandbox: asAgent,
     scanAsCheckUser: asCheck,
+    symlinkAttack,
     leftover: { pid: leftover.pid, killed, gone: status(leftover.pid!) === 'gone' },
     upgrade,
     dshAfterClose: dshPids(),

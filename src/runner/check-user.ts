@@ -128,12 +128,14 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string, waitMs =
 const SHARE_WITH_GROUP = [
   // 用户不在 worktree 的组里（不在部署镜像里时可能这样）就改不了组，只开放权限。
   'if id -G | tr " " "\\n" | grep -qx "$3"; then',
-  '  find "$1" -user "$2" -type d \\( ! -gid "$3" -o ! -perm -2070 \\) -exec chgrp "$3" {} + -exec chmod g+rwxs {} + &&',
-  '  find "$1" -user "$2" -type f \\( ! -gid "$3" -o ! -perm -060 \\) -exec chgrp "$3" {} + -exec chmod g+rw {} +;',
+  '  find "$1" -user "$2" -type d \\( ! -gid "$3" -o ! -perm -2070 \\) -exec chgrp "$3" {} + -exec chmod g+rwxs {} +; d=$?;',
+  '  find "$1" -user "$2" -type f \\( ! -gid "$3" -o ! -perm -060 \\) -exec chgrp "$3" {} + -exec chmod g+rw {} +; f=$?;',
   'else',
-  '  find "$1" -user "$2" -type d ! -perm -070 -exec chmod g+rwx {} + &&',
-  '  find "$1" -user "$2" -type f ! -perm -060 -exec chmod g+rw {} +;',
+  '  find "$1" -user "$2" -type d ! -perm -070 -exec chmod g+rwx {} +; d=$?;',
+  '  find "$1" -user "$2" -type f ! -perm -060 -exec chmod g+rw {} +; f=$?;',
   'fi',
+  // 两条都跑完（一条失败不跳过另一条），有一条失败就报失败。
+  '[ "$d" = 0 ] && [ "$f" = 0 ]',
 ].join('\n')
 
 /**

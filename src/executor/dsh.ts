@@ -9,8 +9,8 @@
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
 import { stringify as stringifyYaml } from 'yaml'
@@ -83,6 +83,14 @@ export const dshSandbox = (platform: string = process.platform): DshSandbox => {
   if (bwrap.status === 0) return { backend: 'bwrap' }
   const landlock = probeLandlock(undefined, { timeoutMs: 5000 }) // 和 dsh 自己探测的超时一致（probeTimeoutMs 默认 5000），机器忙时不会误判成不可用
   return landlock === 'unusable' ? { backend: 'none' } : { backend: 'landlock', enforcement: landlock }
+}
+
+const isLink = (p: string): boolean => {
+  try {
+    return lstatSync(p).isSymbolicLink()
+  } catch {
+    return false
+  }
 }
 
 /** 会话日志放在 <sessions>/<按工作目录命名的目录>/<会话 id>/ 下。 */
@@ -455,7 +463,7 @@ export class DshExecutor implements Executor {
     if (h === undefined) {
       const patch = this.materialize(spec.profile)
       const create = this.opts.createHarness ?? (o => {
-        mkdirSync(o.processCwd!, { recursive: true })
+        this.platformDir(o.processCwd!)
         return new DeepSeekHarness(o)
       })
       h = create({
@@ -474,32 +482,49 @@ export class DshExecutor implements Executor {
 
   /** dsh 进程的工作目录：在 dsh home 里，agent 写不到，里面没有 .env。 */
   get processCwd(): string {
-    return join(this.opts.dshHome, 'process-cwd')
+    return join(this.opts.dshHome, 'eos-process-cwd')
   }
 
   /** MCP 服务子进程的工作目录：平台自己的目录，不是任务的 worktree（见 patchRows 里的说明）。 */
   get mcpCwd(): string {
-    return join(this.opts.dshHome, 'mcp-cwd')
+    return join(this.opts.dshHome, 'eos-mcp-cwd')
   }
 
   /** 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。 */
   profileDir(profile: AgentProfile): string {
-    return join(this.opts.dshHome, 'profiles', profileHash(profile))
+    return join(this.opts.dshHome, 'eos-profiles', profileHash(profile))
   }
 
-  /** 写出这个能力面的 profile 补丁和技能目录，返回补丁文件路径。 */
+  /**
+   * 平台自己在 dsh home 里的目录（eos-*）：建出来（组内不可写），并核对它是平台自己的真目录、不是符号链接。
+   * dsh home 对 dsh 的用户（部署镜像里是 eos-agent）组内可写：它能在里面建同名的链接，让平台顺着写到别处。
+   * 部署镜像里 deploy/eos 在启动时先建好这几个目录，dsh home 带 sticky 位，eos-agent 改不了名、删不掉它们。
+   */
+  private platformDir(dir: string): void {
+    const top = join(this.opts.dshHome, relative(this.opts.dshHome, dir).split(sep)[0]!)
+    // 先核对顶层目录，再往里建：顺着链接建出来就已经写到别处了。
+    mkdirSync(this.opts.dshHome, { recursive: true })
+    if (!existsSync(top) && !isLink(top)) mkdirSync(top, { mode: 0o755 })
+    const st = lstatSync(top)
+    if (st.isSymbolicLink() || !st.isDirectory() || (process.getuid !== undefined && st.uid !== process.getuid())) {
+      throw new Error(`${top} 不是平台自己的目录（可能被换成了链接，或者被别的用户先建了）：为了安全不往里写。删掉它后重试`)
+    }
+    mkdirSync(dir, { recursive: true, mode: 0o755 })
+  }
+
+  /** 写出这个能力面的 profile 补丁和技能目录，返回补丁文件路径。文件和目录组内不可写：dsh 只读它们。 */
   private materialize(profile: AgentProfile): string {
     const dir = this.profileDir(profile)
     const skillsDir = join(dir, 'skills')
-    mkdirSync(skillsDir, { recursive: true })
-    mkdirSync(this.mcpCwd, { recursive: true })
+    this.platformDir(skillsDir)
+    this.platformDir(this.mcpCwd)
     for (const s of profile.skills) {
       // 技能名在边界上已经校验过（只有小写字母、数字和连字符），可以直接当目录名。
-      mkdirSync(join(skillsDir, s.name), { recursive: true })
-      writeFileSync(join(skillsDir, s.name, 'SKILL.md'), s.content)
+      mkdirSync(join(skillsDir, s.name), { recursive: true, mode: 0o755 })
+      writeFileSync(join(skillsDir, s.name, 'SKILL.md'), s.content, { mode: 0o644 })
     }
     const file = join(dir, 'cordis.patch.yml')
-    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)))
+    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: 0o644 })
     return file
   }
 

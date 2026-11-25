@@ -139,12 +139,12 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 | `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
 - compose 去掉了全部能力，只加回 `SETUID`、`SETGID`、`KILL`。`eos` 命令以 root 启动，降到 `eos` 时把这三个能力带过去（ambient）：平台用前两个把检查命令切换到 `eos-check`、把 dsh 切换到 `eos-agent`，用 `KILL` 给它们的进程发信号（关掉 dsh、结束超时的命令）。切换时清掉全部能力，它们切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
-- dsh 的数据目录 `/data/dsh` 属于 `eos`、组 `eos-dsh`、2770：平台往里写能力面（`profiles/`），dsh 写会话日志。dsh 建的会话目录是 0700，只有 `eos-agent` 能读，平台以 `eos-agent` 的身份读（`src/cli.ts` 的 `readSessionLogAs`）。检查命令不在 `eos-dsh` 里，进不了这个目录。
+- dsh 的数据目录 `/data/dsh` 属于 `eos`、组 `eos-dsh`、3770（带 sticky 位）：dsh 在里面写会话日志等自己的目录。平台自己的三个目录 `eos-profiles/`（能力面）、`eos-process-cwd/`、`eos-mcp-cwd/` 在启动时建好，2755，`eos-agent` 只能读；sticky 位让它改不了名、删不掉这几个目录，平台写之前也核对它们不是符号链接。否则 dsh 起的 MCP 服务能把它们换成链接，让平台顺着链接覆盖 `eos.db` 等文件（独立审查实测过）。dsh 建的会话目录是 0700，只有 `eos-agent` 能读，平台以 `eos-agent` 的身份读（`src/cli.ts` 的 `readSessionLogAs`）。检查命令不在 `eos-dsh` 里，进不了这个目录。
 - worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。`/data/worktrees` 目录本身是 2755，组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接（独立审查发现的，`probe-report.json` 的 `renameWorktreeDir`）。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
 - 平台启动的、会运行仓库代码或第三方程序的进程不带这三个能力：dsh 经 `deploy/dsh-launch.mjs` 启动（清掉能力并切换到 `eos-agent`），git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。平台撤销越界改动时用的 `sh`、`rm`、`find` 也先清掉能力（`docs/e2e/deploy-3c-agent-user/without-caps.txt`）。还带着能力的只有 Landlock 探测（doctor 起一次 node-addon-system 自带的程序）和 tsx 的 esbuild 服务进程（编译平台自己的源码），它们都不碰 worktree，也不运行仓库里的代码。
 - 平台读不到别的用户进程的工作目录：撤销越界改动前，以 `eos-check`、`eos-agent` 的身份找出并结束它们留在 worktree 里的进程。
 - 平台提交、撤销越界改动之前（以及检查命令跑完之后），以 `eos-agent`、`eos-check` 的身份把它们在 worktree 里建的文件改回 worktree 的组、开放组读写。dsh 写文件时经过一个 `chmod 0700` 的临时目录，文件会落在 `eos-agent` 自己的组里、权限 0600，不这样做平台读不了（第一次部署 E2E 就失败在这里，`deploy-e2e-1-failed-report.json`）。
-- **升级**：之前的版本里 dsh 以 `eos` 运行，`/data/dsh` 里的文件属于 `eos`。新版本第一次启动平台时，以 `eos-agent` 的身份把它复制一份（不复制 `.credentials.yaml`，dsh 会重新生成，里面是 dsh 自己的浏览器会话授权），旧的改名为 `/data/dsh.before-agent`。进行中的任务能续接原来的 dsh 会话（`docs/e2e/deploy-3c-agent-user/`）。确认任务都正常后可以删掉 `dsh.before-agent`。`/data/.dsh-agent` 是做过的标记。
+- **升级**：之前的版本里 dsh 以 `eos` 运行，`/data/dsh` 里的文件属于 `eos`。新版本第一次启动平台时，以 `eos-agent` 的身份把它复制一份（不复制 `.credentials.yaml`，dsh 会重新生成，里面是 dsh 自己的浏览器会话授权），旧的改名为 `/data/dsh.before-agent`。进行中的任务能续接原来的 dsh 会话（`docs/e2e/deploy-3c-agent-user/`）。确认任务都正常后可以删掉 `dsh.before-agent`。`/data/.dsh-agent` 是做过的标记。迁移在最后两步之间被打断时（`/data/dsh` 不在、`/data/dsh.agent-new` 在），平台不启动并提示：手工运行 `docker compose run --rm -u eos eos mv /data/dsh.agent-new /data/dsh` 再 `docker compose up -d`。
 - **还没做到的**：agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 只靠 Landlock；dsh 在沙箱外启动的 MCP 服务读得到它。
 
 ## 沙箱

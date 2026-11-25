@@ -40,14 +40,31 @@ prepare() {
 # dsh 的数据目录：dsh 以 eos-agent 运行，平台要往里写能力面（profiles），并以 eos-agent 的身份读会话日志（见 src/cli.ts）。
 # 目录本身属于 eos、组 eos-dsh、2770：检查命令进不去。dsh 在里面建的目录是 0700，属于 eos-agent。
 as_agent() {
-  setpriv --reuid="$EOS_AGENT_USER" --regid="$EOS_AGENT_USER" --init-groups --inh-caps=-all --ambient-caps=-all -- "$@"
+  # 主组按 passwd 里的 gid（和 deploy/dsh-launch.mjs 一样），不假定有同名的组。
+  setpriv --reuid="$EOS_AGENT_USER" --regid="$(id -g "$EOS_AGENT_USER")" --init-groups --inh-caps=-all --ambient-caps=-all -- "$@"
+}
+# dsh home 的权限：组内可写（dsh 在里面建自己的目录）加 sticky 位（eos-agent 改不了名、删不掉平台的目录），
+# 平台自己的目录（eos-*）先建好、组内不可写：eos-agent 不能在里面放链接，让平台顺着链接写到别处（src/executor/dsh.ts 的 platformDir）。
+own_dsh() {
+  mkdir -p "$1" && chgrp eos-dsh "$1" && chmod 3770 "$1" || return 1
+  for d in eos-profiles eos-process-cwd eos-mcp-cwd; do
+    if [ -L "$1/$d" ] || { [ -e "$1/$d" ] && [ "$(stat -c %U "$1/$d")" != eos ]; }; then
+      echo "eos：$1/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写；删掉它后重启" >&2
+      continue
+    fi
+    mkdir -p "$1/$d" && chmod 2755 "$1/$d" || return 1
+  done
 }
 prepare_dsh() {
   dsh="$data/dsh"
   # 升级前的 dsh 以 eos 运行，留下的文件属于 eos、多是 0700、0600，eos-agent 用不了，也改不了属主（没有 CHOWN 能力）。
   # 以 eos-agent 复制一份（复制出来的属于它，权限照旧），旧的改名留着。只在启动平台时做：别的命令可能和正在运行的 dsh 同时跑。
   # .credentials.yaml 不复制：dsh 要求它只有属主能读，新的 dsh 会重新生成（里面是 dsh 自己的浏览器会话授权，没有模型 key）。
-  [ ! -e "$data/.dsh-agent" ] || { mkdir -p "$dsh" && chgrp eos-dsh "$dsh" && chmod 2770 "$dsh"; return; }
+  [ ! -e "$data/.dsh-agent" ] || { own_dsh "$dsh"; return; }
+  if [ ! -e "$dsh" ] && [ -d "$data/dsh.agent-new" ]; then
+    echo "eos：上次迁移 $dsh 停在了中间：复制好的在 $data/dsh.agent-new，旧的在 $data/dsh.before-agent*。确认后运行 mv $data/dsh.agent-new $dsh 再启动" >&2
+    return 1
+  fi
   if [ -d "$dsh" ] && [ -n "$(ls -A "$dsh")" ]; then
     # 有旧数据、还没迁移：只在启动平台时做，别的命令（eos doctor）不写标记，留给下一次启动平台。
     [ "${1:-}" = web ] || return 0
@@ -63,10 +80,11 @@ prepare_dsh() {
     backup="$data/dsh.before-agent"
     [ ! -e "$backup" ] || backup="$data/dsh.before-agent-$(date +%Y%m%d%H%M%S)"
     mv "$dsh" "$backup" || return 1
+    # 两次 mv 之间被打断时：/data/dsh 不在、$backup 是旧数据、$new 是复制好的。手工 mv "$new" "$dsh" 即可（见 docs/deploy.md）。
     mv "$new" "$dsh" || { mv "$backup" "$dsh"; return 1; }
     echo "eos：dsh 的数据目录已复制成 $EOS_AGENT_USER 的，旧的留在 $backup（确认任务都正常后可以删掉）" >&2
   fi
-  mkdir -p "$dsh" && chgrp eos-dsh "$dsh" && chmod 2770 "$dsh" && touch "$data/.dsh-agent"
+  own_dsh "$dsh" && touch "$data/.dsh-agent"
 }
 # 数据目录有问题时不在这里退出：让 eos doctor、启动检查说明原因。
 prepare || echo "eos：没能把 $data/worktrees 设成共用组 eos-work，检查命令可能写不了 worktree" >&2

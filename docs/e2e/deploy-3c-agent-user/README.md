@@ -14,7 +14,7 @@
 
 任务在第一步提交时失败：`open("docs/spec.md"): Permission denied`。dsh 写文件时，先在目标目录里建一个临时目录并 `chmod 0700`，这会清掉目录的 setgid，再在里面建 0600 的文件、改名过去。这样文件属于 `eos-agent` 的主组，平台（eos）读不了。修法（b0a38b8、c6bea86）：提交、撤销之前，以 `eos-agent` 的身份把它建的文件改回 worktree 的组，并开放组读写。容器里按 dsh 的写法复现过，修之后平台读得到。
 
-## deploy-e2e-2-report.json：12/12
+## deploy-e2e-2-report.json：11/11
 
 - doctor 没有 ✗，主密钥已设置（「凭据主密钥」✓）。
 - 任务运行期间以 `eos-check` 扫描（`checkUserScan`）：真实 dsh（pid 138，uid 10003）、平台（uid 10001）、1 号进程的 `environ` 都是 EACCES，`secretsFoundIn` 为空（主密钥、模型 key 都没找到）。
@@ -35,7 +35,8 @@
 | `doctor` | 「检查命令的用户」「agent 的用户」「凭据隔离」都是 ✓ |
 | `probe.platform` | 平台进程 uid 10001，能力 `e0`（SETUID、SETGID、KILL），NoNewPrivs 1 |
 | `probe.firstDsh` | dsh 的 uid 10003（eos-agent），能力 0 |
-| `probe.sessionsAsAgent`、`platformReadsLogAsAgent` | 新会话的目录 0700、文件 0600，属于 eos-agent；平台以 eos-agent 的身份读到了（打开会话后 5 毫秒） |
+| `probe.sessionsAsAgent`、`platformReadsLogAsAgent` | 新会话的目录 0700、文件 0600，属于 eos-agent；平台以 eos-agent 的身份读到了（打开会话后 5 毫秒）。`platformReadsLogDirectly` 是 `ok`，是因为迁移过来的旧会话目录组内可读、glob 只匹配到了它，不说明平台能直接读新会话 |
+| `probe.symlinkAttack` | 以 eos-agent 把平台的目录改名、往里面放链接、把平台写的文件换成链接，都被拒绝；`modes` 是这几个目录的权限（`/data/dsh` 带 sticky 位，`eos-*` 组内不可写） |
 | `probe.restartAfterKeyChange` | 换模型 key 后（#65 的路径），旧 dsh 结束了（平台用 KILL 给 eos-agent 的进程发信号），新 dsh 也是 eos-agent、能力 0 |
 | `probe.scanAsAgentOutsideSandbox` | 以 eos-agent 在沙箱外扫描（代表 dsh 起的 MCP 服务，或者沙箱失效时的 agent）：只读到 dsh 自己的环境（同一个用户）；平台和 1 号进程读不到主密钥 |
 | `probe.scanAsCheckUser` | 以 eos-check 扫描：什么都读不到 |
