@@ -38,8 +38,7 @@ const patternSegments = (pattern: string): string[] => {
 }
 
 /** 这个 glob 是否匹配这条（worktree 内的相对）路径。 */
-export const matchGlob = (pattern: string, path: string): boolean =>
-  matchSegments(patternSegments(pattern), segmentsOf(path))
+export const matchGlob = (pattern: string, path: string): boolean => matchSegments(patternSegments(pattern), segmentsOf(path))
 
 /** 这条路径是否被其中任意一个 glob 允许；patterns 为空表示什么都不允许。 */
 export const matchesAny = (patterns: string[], path: string): boolean => patterns.some(p => matchGlob(p, path))

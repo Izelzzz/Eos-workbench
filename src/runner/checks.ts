@@ -14,9 +14,21 @@ import { asUser, type CheckUser } from './check-user.ts'
 /** 命令输出只保留最后这么多字符，交给 agent 和页面。 */
 export const OUTPUT_TAIL = 4000
 
-const KEEP_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TZ',
+const KEEP_ENV = [
+  'PATH',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'TMPDIR',
+  'TZ',
   // 服务器在会解开 TLS 的代理后面时，联网的检查（npm install、pip install）要用到的证书和代理设置。
-  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NO_PROXY', 'no_proxy', 'NODE_USE_ENV_PROXY']
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NO_PROXY',
+  'no_proxy',
+  'NODE_USE_ENV_PROXY',
+]
 /** 代理地址。带账号密码（有 @）的不传：检查命令跑的是 agent 改过的代码。 */
 export const PROXY_ENV = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']
 

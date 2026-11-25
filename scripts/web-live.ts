@@ -21,7 +21,8 @@ const until = Date.now() + Number(maxMin) * 60_000
 for (let i = 1; Date.now() < until; i++) {
   await page.getByRole('button', { name: '全部展开' }).click()
   const sample = {
-    i, at: new Date().toISOString().slice(11, 19),
+    i,
+    at: new Date().toISOString().slice(11, 19),
     status: await page.locator('.summary .pill').first().innerText(),
     position: await page.locator('.stats div').nth(1).locator('b').innerText(),
     rows: await page.locator('.trace-row').count(),

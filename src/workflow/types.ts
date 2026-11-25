@@ -62,10 +62,7 @@ export type PlatformAction = (typeof PLATFORM_ACTIONS)[number]
  * file：交付物文件存在于 worktree 内，并且包含这些章节（Markdown 标题）；run：命令在 worktree 里执行，退出码为 0；
  * platform：平台替任务做一个动作（例如推送分支），做成了算通过。用到的凭据只在平台进程里，agent 碰不到。
  */
-export type Check =
-  | { kind: 'file'; path: string; sections: string[] }
-  | { kind: 'run'; run: string[]; timeoutSec: number }
-  | { kind: 'platform'; action: PlatformAction }
+export type Check = { kind: 'file'; path: string; sections: string[] } | { kind: 'run'; run: string[]; timeoutSec: number } | { kind: 'platform'; action: PlatformAction }
 
 /** 一个 agent 完成一段工作，产出文本（方案、开发说明等），并拥有一个跨整个任务的会话。 */
 export type AgentNode = {

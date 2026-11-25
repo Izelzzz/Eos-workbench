@@ -10,7 +10,9 @@ import { LOCAL_OWNER, type Owner } from '../src/credentials/types.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const dirs: string[] = []
-after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) })
+after(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true })
+})
 const tmp = () => {
   const d = mkdtempSync(join(ROOT, 'node_modules', '.eos-cred-'))
   dirs.push(d)
@@ -108,7 +110,10 @@ test('篡改：密文、标签被改，或把一行的密文挪到另一行（�
   c.put('user-2' as Owner, 'a', 'token', 'theirs')
   const db = new DatabaseSync(path)
   const copy = (from: string, fromOwner: string, to: string, toOwner: string) =>
-    db.prepare('UPDATE credentials SET iv = (SELECT iv FROM credentials WHERE owner = ? AND name = ?), tag = (SELECT tag FROM credentials WHERE owner = ? AND name = ?), ciphertext = (SELECT ciphertext FROM credentials WHERE owner = ? AND name = ?) WHERE owner = ? AND name = ?')
+    db
+      .prepare(
+        'UPDATE credentials SET iv = (SELECT iv FROM credentials WHERE owner = ? AND name = ?), tag = (SELECT tag FROM credentials WHERE owner = ? AND name = ?), ciphertext = (SELECT ciphertext FROM credentials WHERE owner = ? AND name = ?) WHERE owner = ? AND name = ?',
+      )
       .run(fromOwner, from, fromOwner, from, fromOwner, from, toOwner, to)
   copy('a', 'local', 'b', 'local')
   assert.match((c.get(LOCAL_OWNER, 'b') as { error: string }).error, /解密失败/, '换名字')
@@ -140,7 +145,14 @@ test('数据库行格式不对：列表照样列出（不认识的类型标成 u
   c.put(LOCAL_OWNER, 'c', 'token', SECRET)
   db.prepare("UPDATE credentials SET created_at = 'not-a-number' WHERE name = 'c'").run()
   db.close()
-  assert.deepEqual(c.list(LOCAL_OWNER).map(i => [i.name, i.kind]), [['a', 'unknown'], ['b', 'token'], ['c', 'unknown']])
+  assert.deepEqual(
+    c.list(LOCAL_OWNER).map(i => [i.name, i.kind]),
+    [
+      ['a', 'unknown'],
+      ['b', 'token'],
+      ['c', 'unknown'],
+    ],
+  )
   assert.equal(c.delete(LOCAL_OWNER, 'c'), true, '列出来的坏行能删掉')
   assert.match((c.get(LOCAL_OWNER, 'a') as { error: string }).error, /类型「ssh-key」不认识/)
   assert.match((c.get(LOCAL_OWNER, 'b') as { error: string }).error, /记录格式不对/)

@@ -73,8 +73,10 @@ test('a failing test in a review dialog goes back to the developer as a round, a
   assert.match(d.pending.prompt, /第 3 轮：build 的回复[\s\S]*补了测试/, 'later rounds are replies in the reviewer’s own session')
   d.reply(PASS)
   assert.equal(d.task.status, 'done')
-  assert.deepEqual(d.task.log.filter(e => e.type === 'check').map(e => `${e.node}:${e.type === 'check' && e.results.every(r => r.passed)}`),
-    ['build:true', 'review:false', 'review:true', 'review:true'])
+  assert.deepEqual(
+    d.task.log.filter(e => e.type === 'check').map(e => `${e.node}:${e.type === 'check' && e.results.every(r => r.passed)}`),
+    ['build:true', 'review:false', 'review:true', 'review:true'],
+  )
 })
 
 test('a dialog with only checks passes a round without any reviewer call', () => {

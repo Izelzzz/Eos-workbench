@@ -89,8 +89,7 @@ export const locate = (worktree: string, repo: string): Loc => {
 }
 
 /** 在 worktree 里执行 git：显式指定 git 目录和工作目录，不让 git 自己找（不看 worktree 里的 .git）。 */
-const wgit = (loc: Loc, args: string[], input?: Buffer): Buffer =>
-  gitRaw(loc.worktree, ['--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], input)
+const wgit = (loc: Loc, args: string[], input?: Buffer): Buffer => gitRaw(loc.worktree, ['--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], input)
 const wgitText = (loc: Loc, args: string[]): string => wgit(loc, args).toString('utf8').trim()
 
 /**
@@ -122,8 +121,7 @@ export type Change = { path: string; from?: string; untracked?: boolean; raw?: B
 export const pathsOf = (c: Change): string[] => (c.from === undefined ? [c.path] : [c.path, c.from])
 
 /** 这处改动是否在可写范围内。名字不是合法 UTF-8 的、嵌套的 git 仓库、指向目录的符号链接，一律不在。 */
-export const inScope = (c: Change, writePaths: string[]): boolean =>
-  c.raw === undefined && !c.linkDir && !c.gitlink && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
+export const inScope = (c: Change, writePaths: string[]): boolean => c.raw === undefined && !c.linkDir && !c.gitlink && !c.path.endsWith('/') && pathsOf(c).every(p => matchesAny(writePaths, p))
 
 const shown = (b: Buffer): string => [...b].map(x => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : `\\x${x.toString(16).padStart(2, '0')}`)).join('')
 
@@ -213,8 +211,12 @@ export const changes = (loc: Loc | string): Change[] => {
     const linkDir = abs !== undefined && isLink(abs) && (isDir(abs) || shape.dirs.has(bare!))
     const gitlink = bare !== undefined && shape.gitlinks.has(bare)
     out.push({
-      path: path ?? shown(rawPath), ...(from === undefined ? {} : { from }), ...(untracked ? { untracked } : {}),
-      ...(invalid ? { raw: rawPath } : {}), ...(linkDir ? { linkDir } : {}), ...(gitlink ? { gitlink } : {}),
+      path: path ?? shown(rawPath),
+      ...(from === undefined ? {} : { from }),
+      ...(untracked ? { untracked } : {}),
+      ...(invalid ? { raw: rawPath } : {}),
+      ...(linkDir ? { linkDir } : {}),
+      ...(gitlink ? { gitlink } : {}),
     })
   }
   // 被 agent 自己写的忽略规则藏起来的文件，当成未跟踪的新文件。
@@ -225,8 +227,7 @@ export const changes = (loc: Loc | string): Change[] => {
 /** 按字面量（而不是通配符）传给 git 的路径：文件名里的 *、? 和 [] 不能被当成 pathspec 的通配。 */
 const literal = (path: string): string => `:(literal)${path}`
 
-const inHead = (loc: Loc, path: string): boolean =>
-  wgitText(loc, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', literal(path)]) !== ''
+const inHead = (loc: Loc, path: string): boolean => wgitText(loc, ['ls-tree', '-r', '-z', '--name-only', 'HEAD', '--', literal(path)]) !== ''
 
 /**
  * 在核对过真实路径的目录里执行命令（Izelzzz/Eos-workbench#28）。shell 先进入目标的上级目录，用 pwd -P 确认它的
@@ -249,7 +250,13 @@ const inVerifiedDir = (worktree: string, parentRel: string, argv: string[]): voi
     // 目录在核对和执行之间消失了：要删的东西已经不在，不算错。目录还在时的 ENOENT 是程序（sh、setpriv）找不到，要报错。
     if (err.code === 'ENOENT' && !existsSync(cwd)) return
     if (err.status === 3) throw new OutsideWorktree(`worktree 里的目录 ${parentRel || '.'} 被换成了指向外面的链接，平台没有删除也没有提交`)
-    throw new Error(`撤销时 ${argv[0]} 失败（worktree 里的文件在撤销过程中被改动），没有提交：${String(err.stderr ?? '').trim().split('\n')[0] ?? ''}`)
+    throw new Error(
+      `撤销时 ${argv[0]} 失败（worktree 里的文件在撤销过程中被改动），没有提交：${
+        String(err.stderr ?? '')
+          .trim()
+          .split('\n')[0] ?? ''
+      }`,
+    )
   }
 }
 
@@ -453,7 +460,7 @@ export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
     const t1 = f.indexOf(9)
     const t2 = f.indexOf(9, t1 + 1)
     const [add, del, rest] = [f.subarray(0, t1).toString('utf8'), f.subarray(t1 + 1, t2).toString('utf8'), f.subarray(t2 + 1)]
-    const path = rest.length === 0 ? (i += 2, utf8(num[i]!)) : utf8(rest)
+    const path = rest.length === 0 ? ((i += 2), utf8(num[i]!)) : utf8(rest)
     if (path !== undefined) counts.set(path, { add: Number(add) || 0, del: Number(del) || 0, binary: add === '-' })
   }
   const files: FileChange[] = []
@@ -464,7 +471,7 @@ export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
     const path = utf8(names[++i]!)
     if (path === undefined) continue
     const renamed = code === 'R' && from !== undefined
-    const status = renamed ? 'renamed' : code === 'R' || code === 'C' ? 'added' : STATUS[code] ?? 'modified'
+    const status = renamed ? 'renamed' : code === 'R' || code === 'C' ? 'added' : (STATUS[code] ?? 'modified')
     files.push({ path, ...(renamed ? { from } : {}), status, ...(counts.get(path) ?? { add: 0, del: 0, binary: false }) })
   }
   return { base: w.baseSha, head: at, files: files.slice(0, MAX_FILES), omitted: Math.max(0, files.length - MAX_FILES) }
@@ -518,7 +525,10 @@ export const MAX_DIFF_BYTES = 8 * 1024 * 1024
 /** 带输出上限的 git 调用：超过上限时返回已经读到的部分，不报错。 */
 const wgitCapped = (loc: Loc, args: string[], max: number): { out: Buffer; capped: boolean } => {
   try {
-    return { out: execFileSync('git', [...SAFE, '--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], { cwd: loc.worktree, maxBuffer: max, stdio: ['ignore', 'pipe', 'pipe'] }), capped: false }
+    return {
+      out: execFileSync('git', [...SAFE, '--git-dir', loc.gitDir, '--work-tree', loc.worktree, ...args], { cwd: loc.worktree, maxBuffer: max, stdio: ['ignore', 'pipe', 'pipe'] }),
+      capped: false,
+    }
   } catch (e) {
     const stdout = (e as { stdout?: unknown }).stdout
     if ((e as NodeJS.ErrnoException).code === 'ENOBUFS' && Buffer.isBuffer(stdout)) return { out: stdout, capped: true }

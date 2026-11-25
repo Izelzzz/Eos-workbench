@@ -45,11 +45,7 @@ export const dshInstall = (root: string): { bin: string; version: string } | und
  * 例如 Docker 默认的 seccomp 不让建 user namespace）；Landlock 用 dsh 自带的探测（真正施加一次规则）。
  * macOS（Seatbelt）、Windows（受限令牌）由 dsh 自己选，这里不探测。tests/executor.test.ts 对照 dsh 自己的选择（chainVerdict），dsh 升级后两边不一致时测试会失败。
  */
-export type DshSandbox =
-  | { backend: 'bwrap' }
-  | { backend: 'landlock'; enforcement: 'full' | 'partial' }
-  | { backend: 'none' }
-  | { backend: 'platform'; platform: string }
+export type DshSandbox = { backend: 'bwrap' } | { backend: 'landlock'; enforcement: 'full' | 'partial' } | { backend: 'none' } | { backend: 'platform'; platform: string }
 
 /** 本进程带着 ambient 能力：部署镜像里平台进程带着切换用户用的 SETUID、SETGID（deploy/eos）。 */
 const hasAmbientCaps = (): boolean => {
@@ -146,8 +142,18 @@ export const GROUP_ROWS: Record<ToolGroup, string[]> = {
 export const GROUP_TOOLS: Record<ToolGroup, string[]> = {
   web: ['web_fetch', 'web_search'],
   subagent: [
-    'subagent', 'subagent_fork', 'list_subagent_models', 'list_agents', 'send_message', 'wait_agent', 'interrupt_agent',
-    'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update', 'workflow',
+    'subagent',
+    'subagent_fork',
+    'list_subagent_models',
+    'list_agents',
+    'send_message',
+    'wait_agent',
+    'interrupt_agent',
+    'team_task_create',
+    'team_task_get',
+    'team_task_list',
+    'team_task_update',
+    'workflow',
   ],
   bash: ['bash', 'pwsh', 'job_kill', 'job_list', 'job_output'],
   schedule: ['schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view'],
@@ -168,12 +174,17 @@ export const ALWAYS_DISABLED = ['tool-plugin-manager', 'skill-office']
  * 技能按名字排序（技能目录是个集合，先后无意义）；MCP 保持模板里的顺序。
  */
 export const profileHash = (p: AgentProfile): string =>
-  createHash('sha256').update(JSON.stringify([
-    [...p.denyTools].sort(),
-    [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
-    p.mcp.map(m => [m.name, m.command, m.args, Object.entries(m.env).sort()]),
-    p.background,
-  ])).digest('hex').slice(0, 16)
+  createHash('sha256')
+    .update(
+      JSON.stringify([
+        [...p.denyTools].sort(),
+        [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+        p.mcp.map(m => [m.name, m.command, m.args, Object.entries(m.env).sort()]),
+        p.background,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 16)
 
 /**
  * 这个能力面的 profile 补丁（cordis.patch.yml 的内容）。值都是数据，由 yaml 包序列化，不做字符串拼接。
@@ -188,23 +199,32 @@ export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): u
     ...disabled.map(id => ({ id, disabled: true })),
     ...(p.background || p.denyTools.includes('bash') ? [] : [{ id: 'tool-bash', config: { enableRunInBackground: false, promoteOnTimeout: false } }]),
     { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: [skillsDir] } },
-    ...(p.mcp.length === 0 ? [] : [{
-      insert: p.mcp.map((m, i) => ({
-        id: `eos-mcp-${i}`,
-        name: '@deepseek-ai/dsh-mcp-client',
-        config: {
-          transport: 'stdio', serverName: m.name, command: m.command, args: m.args, env: m.env,
-          // MCP 服务的子进程跑在平台自己的目录里，不是任务的 worktree：它不受 agent 沙箱约束，
-          // 用的是平台进程的权限（能读写 worktree 以外的文件、能联网）。模板里加 MCP 服务等于给平台级信任。
-          cwd: mcpCwd,
-          toolCallTimeoutMs: 60_000, closeTimeoutMs: 5_000,
-          // 配置里的值原样用，不做 ${...} 展开：模板里的值不能变成读环境变量的手段。
-          expandTemplates: false,
-          // 服务起不来就让会话失败，而不是让 agent 少一个工具照常干活。
-          failOnStartupError: true,
-        },
-      })),
-    }]),
+    ...(p.mcp.length === 0
+      ? []
+      : [
+          {
+            insert: p.mcp.map((m, i) => ({
+              id: `eos-mcp-${i}`,
+              name: '@deepseek-ai/dsh-mcp-client',
+              config: {
+                transport: 'stdio',
+                serverName: m.name,
+                command: m.command,
+                args: m.args,
+                env: m.env,
+                // MCP 服务的子进程跑在平台自己的目录里，不是任务的 worktree：它不受 agent 沙箱约束，
+                // 用的是平台进程的权限（能读写 worktree 以外的文件、能联网）。模板里加 MCP 服务等于给平台级信任。
+                cwd: mcpCwd,
+                toolCallTimeoutMs: 60_000,
+                closeTimeoutMs: 5_000,
+                // 配置里的值原样用，不做 ${...} 展开：模板里的值不能变成读环境变量的手段。
+                expandTemplates: false,
+                // 服务起不来就让会话失败，而不是让 agent 少一个工具照常干活。
+                failOnStartupError: true,
+              },
+            })),
+          },
+        ]),
   ]
 }
 
@@ -263,15 +283,18 @@ export const parseSessionLog = (buf: Buffer): LogEvent[] | undefined => {
     at = ok ? at + n! : buf.indexOf(magic, at + 1)
   }
   if (parts.length === 0) return undefined
-  return Buffer.concat(parts).toString('utf8').split('\n').flatMap(l => {
-    if (l.trim() === '') return []
-    try {
-      const e = JSON.parse(l) as unknown
-      return typeof e === 'object' && e !== null && typeof (e as LogEvent).type === 'string' ? [e as LogEvent] : []
-    } catch {
-      return []
-    }
-  })
+  return Buffer.concat(parts)
+    .toString('utf8')
+    .split('\n')
+    .flatMap(l => {
+      if (l.trim() === '') return []
+      try {
+        const e = JSON.parse(l) as unknown
+        return typeof e === 'object' && e !== null && typeof (e as LogEvent).type === 'string' ? [e as LogEvent] : []
+      } catch {
+        return []
+      }
+    })
 }
 
 const marker = (nonce: string) => `<!-- eos:${nonce} -->`
@@ -284,9 +307,28 @@ const marker = (nonce: string) => `<!-- eos:${nonce} -->`
  * DSH_SPEECH_TOKEN 是令牌。DSH_HOME 由 SDK 按平台的 dshHome 覆盖，不用放行。
  */
 export const AGENT_ENV_KEEP: readonly string[] = [
-  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LANGUAGE', 'TMPDIR', 'TZ',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
-  'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TERM',
+  'LANG',
+  'LANGUAGE',
+  'TMPDIR',
+  'TZ',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'all_proxy',
+  'NODE_USE_ENV_PROXY',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
   'DSH_TELEMETRY_DISABLED', // 部署方关掉 dsh 的遥测
   'EOS_AGENT_USER', // 部署镜像里 dsh 的入口（deploy/dsh-launch.mjs）按它切换到 agent 的用户
   // 缓存的位置和开关，部署镜像设定（见 Dockerfile、ADR-006）。agent 在沙箱里能写 /tmp、写不了家目录：
@@ -307,15 +349,25 @@ export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.Proce
 export const sessionIdFor = (key: string): string => `session-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`
 
 const usageOf = (events: LogEvent[]): Usage =>
-  events.filter(e => e.type === 'assistant/message').reduce((u, e) => {
-    const x = e.data?.usage ?? e.data?.message?.usage
-    if (x === undefined) return u
-    return { input: u.input + (x.inputTokens ?? 0), output: u.output + (x.outputTokens ?? 0), cacheRead: u.cacheRead + (x.cacheReadTokens ?? 0), cacheWrite: u.cacheWrite + (x.cacheWriteTokens ?? 0) }
-  }, zeroUsage())
+  events
+    .filter(e => e.type === 'assistant/message')
+    .reduce((u, e) => {
+      const x = e.data?.usage ?? e.data?.message?.usage
+      if (x === undefined) return u
+      return {
+        input: u.input + (x.inputTokens ?? 0),
+        output: u.output + (x.outputTokens ?? 0),
+        cacheRead: u.cacheRead + (x.cacheReadTokens ?? 0),
+        cacheWrite: u.cacheWrite + (x.cacheWriteTokens ?? 0),
+      }
+    }, zeroUsage())
 
 const textOf = (e: LogEvent): string => {
   const content = (e.data?.message?.content ?? e.data?.content ?? []) as { type: string; text?: string }[]
-  return content.filter(c => c.type === 'text').map(c => c.text ?? '').join('')
+  return content
+    .filter(c => c.type === 'text')
+    .map(c => c.text ?? '')
+    .join('')
 }
 
 const contentOf = (e: LogEvent) => (e.data?.message?.content ?? e.data?.content ?? []) as { type: string; text?: string; id?: string; name?: string; arguments?: string }[]
@@ -332,23 +384,45 @@ export const normalize = (e: LogEvent): TraceEvent | undefined => {
       const c = contentOf(e)
       const model = e.data?.message?.source?.model
       return {
-        kind: 'model', t: e.time, step, usage: usageOf([e]), ...(model === undefined ? {} : { model }),
-        reasoning: c.filter(x => x.type === 'reasoning').map(x => x.text ?? '').join(''),
-        text: c.filter(x => x.type === 'text').map(x => x.text ?? '').join(''),
+        kind: 'model',
+        t: e.time,
+        step,
+        usage: usageOf([e]),
+        ...(model === undefined ? {} : { model }),
+        reasoning: c
+          .filter(x => x.type === 'reasoning')
+          .map(x => x.text ?? '')
+          .join(''),
+        text: c
+          .filter(x => x.type === 'text')
+          .map(x => x.text ?? '')
+          .join(''),
         toolCalls: c.filter(x => x.type === 'tool-call').map(x => ({ id: String(x.id), name: String(x.name), args: String(x.arguments ?? '') })),
       }
     }
     case 'tool/call':
       return { kind: 'tool_start', t: e.time, step, id: String(e.data?.callId), name: String(e.data?.name), args: String(e.data?.arguments ?? '') }
     case 'tool/result':
-      return { kind: 'tool_end', t: e.time, id: String(e.data?.message?.toolCallId), output: contentOf(e).map(x => x.text ?? '').join(''), isError: e.data?.message?.isError === true }
+      return {
+        kind: 'tool_end',
+        t: e.time,
+        id: String(e.data?.message?.toolCallId),
+        output: contentOf(e)
+          .map(x => x.text ?? '')
+          .join(''),
+        isError: e.data?.message?.isError === true,
+      }
     default:
       return undefined
   }
 }
 
 const modelOf = (events: LogEvent[]): string | undefined =>
-  events.filter(e => e.type === 'assistant/message').map(e => e.data?.message?.source?.model).filter(Boolean).at(-1)
+  events
+    .filter(e => e.type === 'assistant/message')
+    .map(e => e.data?.message?.source?.model)
+    .filter(Boolean)
+    .at(-1)
 
 const MARKED = /<!-- eos:[^ ]+ -->/
 
@@ -385,7 +459,11 @@ export const traceAfter = (events: LogEvent[], nonce: string): TraceEvent[] => {
 const DONE = new Set(['completed'])
 
 const REASON: Record<string, string> = {
-  interrupted: '被打断', error: '出错', aborted: '被中止', blocked: '被拦下', 'max-tokens': '输出达到上限被截断，这一步的工具调用没有执行',
+  interrupted: '被打断',
+  error: '出错',
+  aborted: '被中止',
+  blocked: '被拦下',
+  'max-tokens': '输出达到上限被截断，这一步的工具调用没有执行',
 }
 
 export const describeEnd = (kind: string | null | undefined): string => REASON[kind ?? ''] ?? `结束原因为 ${kind ?? '未知'}`
@@ -408,7 +486,11 @@ export const replyAfter = (events: LogEvent[], nonce: string, sessionId: string)
   if (end < 0 || range.slice(end + 1).some(e => e.type === 'turn/start')) return undefined
   if (!turnOutcome(range[end]!.data?.reason?.kind).ok) return undefined
   const turn = range.slice(0, end + 1)
-  const final = turn.filter(e => e.type === 'assistant/message').map(textOf).filter(t => t.trim() !== '').at(-1)
+  const final = turn
+    .filter(e => e.type === 'assistant/message')
+    .map(textOf)
+    .filter(t => t.trim() !== '')
+    .at(-1)
   if (final === undefined) return undefined
   const model = modelOf(turn)
   return { sessionId, text: final, usage: usageOf(turn), ms: turn.at(-1)!.time - events[start]!.time, ...(model === undefined ? {} : { model }) }
@@ -441,35 +523,45 @@ export class DshExecutor implements Executor {
   /** key 的指纹用 HMAC 加本进程的随机盐：不在内存里留一个能拿来比对猜测的、稳定的 key 哈希。 */
   private readonly keySalt = randomBytes(32)
 
-  constructor(private readonly opts: {
-    dshHome: string
-    dshBin: string
-    /** 模型 API key：每次调用前取一次；和这个工作目录的 dsh 进程启动时用的不一样（在 Web 上换了或删了），就关掉旧进程用新 key 重起。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
-    modelKey: () => string
-    /** 从中按白名单挑出交给 dsh 的变量；默认是平台进程的环境。 */
-    env?: NodeJS.ProcessEnv
-    /** 测试用：替换真正启动 dsh 进程的构造。 */
-    createHarness?: (options: DeepSeekHarnessOptions) => Harness
-    /**
-     * 读一个会话的日志（压缩的原始字节）：没有这个会话时 undefined，有但读不出来时抛错。默认直接读文件。
-     * 部署镜像里 dsh 以别的用户运行，会话目录只有它能读（0700），由平台换成以那个用户读的实现（src/cli.ts）。
-     */
-    readSessionLog?: (sessionsRoot: string, sessionId: string) => Buffer | undefined
-  }) {}
+  constructor(
+    private readonly opts: {
+      dshHome: string
+      dshBin: string
+      /** 模型 API key：每次调用前取一次；和这个工作目录的 dsh 进程启动时用的不一样（在 Web 上换了或删了），就关掉旧进程用新 key 重起。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
+      modelKey: () => string
+      /** 从中按白名单挑出交给 dsh 的变量；默认是平台进程的环境。 */
+      env?: NodeJS.ProcessEnv
+      /** 测试用：替换真正启动 dsh 进程的构造。 */
+      createHarness?: (options: DeepSeekHarnessOptions) => Harness
+      /**
+       * 读一个会话的日志（压缩的原始字节）：没有这个会话时 undefined，有但读不出来时抛错。默认直接读文件。
+       * 部署镜像里 dsh 以别的用户运行，会话目录只有它能读（0700），由平台换成以那个用户读的实现（src/cli.ts）。
+       */
+      readSessionLog?: (sessionsRoot: string, sessionId: string) => Buffer | undefined
+    },
+  ) {}
 
   private harness(spec: AgentSpec, modelKey: string, keyId: string): Harness {
     const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
       const patch = this.materialize(spec.profile)
-      const create = this.opts.createHarness ?? (o => {
-        this.platformDir(o.processCwd!)
-        return new DeepSeekHarness(o)
-      })
+      const create =
+        this.opts.createHarness ??
+        (o => {
+          this.platformDir(o.processCwd!)
+          return new DeepSeekHarness(o)
+        })
       h = create({
         // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
-        cwd: spec.cwd, processCwd: this.processCwd, patches: [patch],
-        profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
+        cwd: spec.cwd,
+        processCwd: this.processCwd,
+        patches: [patch],
+        profile: 'sdk',
+        dshHome: this.opts.dshHome,
+        dshBin: this.opts.dshBin,
+        provider: PROVIDER,
+        model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
         env: agentEnv(this.opts.env ?? process.env, modelKey),
         initializeTimeoutMs: 60_000,

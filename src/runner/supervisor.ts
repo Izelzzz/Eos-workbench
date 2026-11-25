@@ -32,8 +32,7 @@ export const prTitle = (request: string): string => {
 }
 
 /** PR 的说明：需求原文，加上是哪个任务开的。 */
-export const prBody = (request: string, id: string, branch: string): string =>
-  `${request.trim()}\n\n---\n由 Eos 平台开的 PR：任务 ${id}，分支 ${branch}。代码由 agent 编写，平台推送；合并前请评审。`
+export const prBody = (request: string, id: string, branch: string): string => `${request.trim()}\n\n---\n由 Eos 平台开的 PR：任务 ${id}，分支 ${branch}。代码由 agent 编写，平台推送；合并前请评审。`
 
 export const newId = (): string => `t${new Date().toISOString().replace(/\D/g, '').slice(2, 14)}${Math.random().toString(36).slice(2, 5)}`
 
@@ -45,26 +44,28 @@ export class Supervisor {
   readonly conventions: Conventions
   readonly forges: Forge[]
 
-  constructor(private readonly o: {
-    store: Store
-    executor: Executor
-    dataDir: string
-    /** 记在事件里的发起方：命令行或 Web 页面。 */
-    actor?: 'cli' | 'web'
-    /** 每个任务的进度行。 */
-    log?: (id: string, line: string) => void
-    pollMs?: number
-    /** 遮蔽已知凭据值：日志行和检查输出写下来之前都经过它。agent 的输出由包了 redacting 的执行器遮蔽。 */
-    redact?: (text: string) => string
-    /** 访问远程仓库用的令牌从这里取；不给时只能访问公开仓库。 */
-    credentials?: Credentials
-    /** 认得的代码托管平台，默认只有 github.com。 */
-    forges?: Forge[]
-    /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
-    checkUser?: CheckUser
-    /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
-    agentUser?: CheckUser
-  }) {
+  constructor(
+    private readonly o: {
+      store: Store
+      executor: Executor
+      dataDir: string
+      /** 记在事件里的发起方：命令行或 Web 页面。 */
+      actor?: 'cli' | 'web'
+      /** 每个任务的进度行。 */
+      log?: (id: string, line: string) => void
+      pollMs?: number
+      /** 遮蔽已知凭据值：日志行和检查输出写下来之前都经过它。agent 的输出由包了 redacting 的执行器遮蔽。 */
+      redact?: (text: string) => string
+      /** 访问远程仓库用的令牌从这里取；不给时只能访问公开仓库。 */
+      credentials?: Credentials
+      /** 认得的代码托管平台，默认只有 github.com。 */
+      forges?: Forge[]
+      /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
+      checkUser?: CheckUser
+      /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
+      agentUser?: CheckUser
+    },
+  ) {
     this.locksDir = join(o.dataDir, 'locks')
     // 托管平台只建一次：GitHub App 的安装令牌缓存在它里面。
     this.forges = o.forges ?? defaultForges()
@@ -111,8 +112,19 @@ export class Supervisor {
       const msg = String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim()
       return { ok: false, error: `创建 worktree 失败：${msg.split('\n')[0]}` }
     }
-    this.o.store.create({ id, request, context: contextFor(w), workflow: resolved.workflow, workflowSource: resolved.source, docs: resolved.docs,
-      meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), ...(baseBranch === undefined ? {} : { baseBranch }), conventions: resolved.used, skills: resolved.skills } }, Date.now(), this.o.actor ?? 'cli')
+    this.o.store.create(
+      {
+        id,
+        request,
+        context: contextFor(w),
+        workflow: resolved.workflow,
+        workflowSource: resolved.source,
+        docs: resolved.docs,
+        meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), ...(baseBranch === undefined ? {} : { baseBranch }), conventions: resolved.used, skills: resolved.skills },
+      },
+      Date.now(),
+      this.o.actor ?? 'cli',
+    )
     return { ok: true, id }
   }
 
@@ -152,7 +164,6 @@ export class Supervisor {
     if (auth.credential === forge.appCredentialName?.(repo)) forge.forgetAppToken?.(repo)
   }
 
-
   /** 任务的远程仓库对应的托管平台：按记下的种类和地址找回来。 */
   private forgeOf(repo: RemoteRepo): Forge | undefined {
     return this.forges.find(f => f.kind === repo.forge && f.parse(repo.webUrl) !== undefined)
@@ -170,17 +181,27 @@ export class Supervisor {
     const fail = (detail: string): CheckResult => ({ check: c, passed: false, detail })
     // agent 能在 worktree 里自己提交：推送前按整个任务分支核对，改到的文件都要在可写角色的范围内。
     const task = this.o.store.get(id)!
-    const writable = Object.values(task.workflow.roles).filter(r => r.write === 'worktree').flatMap(r => r.writePaths)
+    const writable = Object.values(task.workflow.roles)
+      .filter(r => r.write === 'worktree')
+      .flatMap(r => r.writePaths)
     let scope: ReturnType<typeof scopeOfBranch>
     try {
       scope = scopeOfBranch(meta, writable)
     } catch (e) {
-      return fail(`核对任务分支失败，没有推送：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}`)
+      return fail(
+        `核对任务分支失败，没有推送：${
+          String((e as { stderr?: unknown }).stderr ?? (e as Error).message)
+            .trim()
+            .split('\n')[0]
+        }`,
+      )
     }
     if ('error' in scope) return fail(scope.error)
     const { outside } = scope
     if (outside.length > 0) {
-      return fail(`任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支`)
+      return fail(
+        `任务分支的提交里有改动不在可写范围（${writable.join('、') || '没有可写的角色'}）内：${outside.slice(0, 20).join('、')}${outside.length > 20 ? ` 等 ${outside.length} 个` : ''}。这些提交不是平台做的，没有推送；请人工检查这个任务的分支`,
+      )
     }
     const got = await this.authFor(meta.remote, forge)
     if ('fatal' in got) return fail(`没有推送：${got.fatal}`)
@@ -209,13 +230,27 @@ export class Supervisor {
       }
     }
     try {
-      const pr = await forge.openPullRequest(meta.remote, auth.secret, { credential: auth.credential, head: meta.branch, base, sha, title: prTitle(task.request), body: prBody(task.request, id, meta.branch) })
+      const pr = await forge.openPullRequest(meta.remote, auth.secret, {
+        credential: auth.credential,
+        head: meta.branch,
+        base,
+        sha,
+        title: prTitle(task.request),
+        body: prBody(task.request, id, meta.branch),
+      })
       if ('merged' in pr) {
-        return { check: c, passed: true, detail: `${pushed}。这个提交已经通过 PR #${pr.merged.number} 合并了：${pr.merged.url}`, links: [branchLink, { label: `PR #${pr.merged.number}（已合并）`, url: pr.merged.url, kind: 'pull-request' }] }
+        return {
+          check: c,
+          passed: true,
+          detail: `${pushed}。这个提交已经通过 PR #${pr.merged.number} 合并了：${pr.merged.url}`,
+          links: [branchLink, { label: `PR #${pr.merged.number}（已合并）`, url: pr.merged.url, kind: 'pull-request' }],
+        }
       }
       if ('empty' in pr) return { check: c, passed: true, detail: `${pushed}。任务分支和 ${base} 没有差别，没有开 PR`, links: [branchLink] }
       return {
-        check: c, passed: true, detail: `${pushed}。${pr.reused ? '复用已经打开的' : '已开'} PR #${pr.number}：${pr.url}`,
+        check: c,
+        passed: true,
+        detail: `${pushed}。${pr.reused ? '复用已经打开的' : '已开'} PR #${pr.number}：${pr.url}`,
         links: [branchLink, { label: `PR #${pr.number}`, url: pr.url, kind: 'pull-request' }],
       }
     } catch (e) {
@@ -266,7 +301,12 @@ export class Supervisor {
     }
     appendLog(logPath, `runner 开始（进程 ${process.pid}，${this.o.actor ?? 'cli'}）`)
     const done = runTask(id, {
-      store: this.o.store, executor: this.o.executor, wait: opts.wait ?? true, log, detail: text => appendLog(logPath, redact(text)), redact,
+      store: this.o.store,
+      executor: this.o.executor,
+      wait: opts.wait ?? true,
+      log,
+      detail: text => appendLog(logPath, redact(text)),
+      redact,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
       // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。
@@ -310,16 +350,20 @@ export class Supervisor {
       this.active.delete(id)
     })
     this.active.set(id, done)
-    done.then(t => appendLog(logPath, `runner 结束：${t.status}`), e => {
-      log(`✗ runner 出错：${(e as Error).message}`)
-      appendLog(logPath, redact((e as Error).stack ?? String(e)))
-    })
+    done.then(
+      t => appendLog(logPath, `runner 结束：${t.status}`),
+      e => {
+        log(`✗ runner 出错：${(e as Error).message}`)
+        appendLog(logPath, redact((e as Error).stack ?? String(e)))
+      },
+    )
     return { ok: true, done }
   }
 
   /** 进行中、又没有 runner 的任务全部接着跑（Web 服务启动时用）。失败和已中止的不动。 */
   resumeAll(): string[] {
-    return this.o.store.list()
+    return this.o.store
+      .list()
       .filter(t => (t.status === 'running' || t.status === 'waiting_user') && !this.running(t.id))
       .flatMap(t => (this.start(t.id).ok ? [t.id] : []))
   }

@@ -48,8 +48,7 @@ test('a lock that was just created and is still empty is not mistaken for a dead
   const code = `const { acquire } = await import(${JSON.stringify(lockModule)}); const { existsSync, writeFileSync } = await import('node:fs');
     writeFileSync(process.argv[1] + '/ready', ''); while (!existsSync(process.argv[1] + '/go')) {}
     console.log(JSON.stringify(acquire(process.argv[1], 'e', 4242)))`
-  const out = new Promise<string>((resolve, reject) =>
-    execFile(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code, d], (e, stdout) => (e ? reject(e) : resolve(stdout.trim()))))
+  const out = new Promise<string>((resolve, reject) => execFile(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code, d], (e, stdout) => (e ? reject(e) : resolve(stdout.trim()))))
   while (!existsSync(join(d, 'ready'))) await new Promise(r => setTimeout(r, 10))
   writeFileSync(join(d, 'e.pid'), '') // 另一个进程刚用 O_EXCL 建好锁，还没写入 pid
   writeFileSync(join(d, 'go'), '')

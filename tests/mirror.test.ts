@@ -20,16 +20,43 @@ import { PASS } from './helpers.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const cleanup: (() => void)[] = []
-after(() => { for (const f of cleanup) f() })
+after(() => {
+  for (const f of cleanup) f()
+})
 
 const KEY = (parseMasterKey(Buffer.alloc(32, 4).toString('base64')) as { key: MasterKey }).key
 const TOKEN = 'ghp_MirrorTestToken0123456789ABCDEF'
 
 test('GitHub 地址：认 https、带 .git 或末尾 /、git@ 写法；认不出的返回 undefined', () => {
   const gh = githubForge()
-  const want = { forge: 'github', host: 'github.com', owner: 'Izelzzz', name: 'eos-e2e-sandbox', cloneUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox.git', webUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox' }
-  for (const s of ['https://github.com/Izelzzz/eos-e2e-sandbox', 'github.com/Izelzzz/eos-e2e-sandbox', 'https://github.com/Izelzzz/eos-e2e-sandbox.git', 'https://github.com/Izelzzz/eos-e2e-sandbox/', ' git@github.com:Izelzzz/eos-e2e-sandbox.git ', 'https://GitHub.com/Izelzzz/eos-e2e-sandbox']) assert.deepEqual(gh.parse(s), want, s)
-  for (const s of ['https://github.com/Izelzzz', 'https://github.com/a/b/c', 'https://gitlab.com/a/b', 'http://github.com/a/b', 'https://github.com/a/..', 'https://github.com/-a/b', 'https://github.com/a/b?x=1', '/srv/repo']) assert.equal(gh.parse(s), undefined, s)
+  const want = {
+    forge: 'github',
+    host: 'github.com',
+    owner: 'Izelzzz',
+    name: 'eos-e2e-sandbox',
+    cloneUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox.git',
+    webUrl: 'https://github.com/Izelzzz/eos-e2e-sandbox',
+  }
+  for (const s of [
+    'https://github.com/Izelzzz/eos-e2e-sandbox',
+    'github.com/Izelzzz/eos-e2e-sandbox',
+    'https://github.com/Izelzzz/eos-e2e-sandbox.git',
+    'https://github.com/Izelzzz/eos-e2e-sandbox/',
+    ' git@github.com:Izelzzz/eos-e2e-sandbox.git ',
+    'https://GitHub.com/Izelzzz/eos-e2e-sandbox',
+  ])
+    assert.deepEqual(gh.parse(s), want, s)
+  for (const s of [
+    'https://github.com/Izelzzz',
+    'https://github.com/a/b/c',
+    'https://gitlab.com/a/b',
+    'http://github.com/a/b',
+    'https://github.com/a/..',
+    'https://github.com/-a/b',
+    'https://github.com/a/b?x=1',
+    '/srv/repo',
+  ])
+    assert.equal(gh.parse(s), undefined, s)
   assert.equal(gh.credentialName(want), 'github.com')
   assert.equal(gh.gitAuthHeader('t0k'), `Authorization: Basic ${Buffer.from('x-access-token:t0k').toString('base64')}`)
   assert.equal(parseRemote(defaultForges(), 'https://github.com/a/b')?.repo.name, 'b')
@@ -46,8 +73,14 @@ test('git 配置接在环境里已有的 GIT_CONFIG_* 后面', () => {
 test('git 的报错换成中文原因，报错里出现的令牌被抹掉', () => {
   const repo = githubForge().parse('https://github.com/o/r')!
   assert.match(explain(repo, 'fatal: Authentication failed', { credential: 'github.com', hasToken: true }), /github\.com 拒绝了访问 github\.com 上的 o\/r：凭据「github\.com」里的令牌无效/)
-  assert.match(explain(repo, "fatal: could not read Username for 'https://github.com': terminal prompts disabled", { credential: 'github.com', hasToken: false }), /这是私有仓库或需要登录。在凭据页添加名字为「github\.com」/)
-  assert.match(explain(repo, "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", { credential: 'github.com', hasToken: true }), /找不到仓库 github\.com 上的 o\/r/)
+  assert.match(
+    explain(repo, "fatal: could not read Username for 'https://github.com': terminal prompts disabled", { credential: 'github.com', hasToken: false }),
+    /这是私有仓库或需要登录。在凭据页添加名字为「github\.com」/,
+  )
+  assert.match(
+    explain(repo, "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", { credential: 'github.com', hasToken: true }),
+    /找不到仓库 github\.com 上的 o\/r/,
+  )
   assert.match(explain(repo, 'fatal: unable to access: Could not resolve host: github.com', { credential: 'github.com', hasToken: false }), /连不上 github\.com/)
   assert.equal(explain(repo, `fatal: weird ${TOKEN} thing`, { credential: 'github.com', hasToken: true, secrets: [TOKEN] }).includes(TOKEN), false)
   assert.match(explain(repo, "fatal: remote helper 'https' not found", { credential: 'github.com', hasToken: true }), /^访问 github\.com 上的 o\/r 失败：/, '本机 git 的问题不当成找不到仓库')
@@ -55,14 +88,29 @@ test('git 的报错换成中文原因，报错里出现的令牌被抹掉', () =
 
 test('访问远程的环境：不继承宿主机的 GIT_CONFIG_PARAMETERS、GIT_SSL_NO_VERIFY，HOME 换成平台的目录，强制校验证书', () => {
   const repo = githubForge().parse('https://github.com/o/r')!
-  const env = remoteEnv(repo, 'Authorization: Basic abc', '/srv/eos/git-home', { PATH: '/bin', HOME: '/root', GIT_CONFIG_PARAMETERS: "'url.x.insteadof'='https://github.com/'", GIT_SSL_NO_VERIFY: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.proxy', GIT_CONFIG_VALUE_0: 'http://proxy:3128' })
+  const env = remoteEnv(repo, 'Authorization: Basic abc', '/srv/eos/git-home', {
+    PATH: '/bin',
+    HOME: '/root',
+    GIT_CONFIG_PARAMETERS: "'url.x.insteadof'='https://github.com/'",
+    GIT_SSL_NO_VERIFY: '1',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.proxy',
+    GIT_CONFIG_VALUE_0: 'http://proxy:3128',
+  })
   assert.equal(env.GIT_CONFIG_PARAMETERS, undefined)
   assert.equal(env.GIT_SSL_NO_VERIFY, undefined)
   assert.equal(env.HOME, '/srv/eos/git-home')
   assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
   assert.equal(env.GIT_CONFIG_NOSYSTEM, '1')
   const pairs = Object.fromEntries(Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]))
-  assert.deepEqual(pairs, { 'http.proxy': 'http://proxy:3128', 'credential.helper': '', 'http.sslVerify': 'true', 'http.lowSpeedLimit': '1000', 'http.lowSpeedTime': '60', 'http.https://github.com/.extraheader': 'Authorization: Basic abc' })
+  assert.deepEqual(pairs, {
+    'http.proxy': 'http://proxy:3128',
+    'credential.helper': '',
+    'http.sslVerify': 'true',
+    'http.lowSpeedLimit': '1000',
+    'http.lowSpeedTime': '60',
+    'http.https://github.com/.extraheader': 'Authorization: Basic abc',
+  })
 })
 
 /** 一个"远程"：bare 仓库放在 <root>/acme/app.git，由单独进程里的 git HTTP 服务提供，可以要求令牌。 */
@@ -87,25 +135,51 @@ const remote = async (token: string | undefined, o: { empty?: boolean; app?: { i
   const first = o.empty ? '' : commit('README.md')
   const record = join(dir, 'requests.jsonl')
   writeFileSync(record, '')
-  const appEnv = o.app === undefined ? {} : { EOS_TEST_APP_ID: o.app.id, EOS_TEST_APP_KEY: o.app.publicKeyPath, EOS_TEST_APP_INSTALLED: o.app.installed.join(','), ...(o.app.ttlMs === undefined ? {} : { EOS_TEST_APP_TTL_MS: String(o.app.ttlMs) }) }
-  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'tests', 'git-server-main.ts'), root, token ?? '-', record], { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, ...appEnv } })
+  const appEnv =
+    o.app === undefined
+      ? {}
+      : {
+          EOS_TEST_APP_ID: o.app.id,
+          EOS_TEST_APP_KEY: o.app.publicKeyPath,
+          EOS_TEST_APP_INSTALLED: o.app.installed.join(','),
+          ...(o.app.ttlMs === undefined ? {} : { EOS_TEST_APP_TTL_MS: String(o.app.ttlMs) }),
+        }
+  const child: ChildProcess = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'tests', 'git-server-main.ts'), root, token ?? '-', record], {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, ...appEnv },
+  })
   cleanup.push(() => child.kill())
-  const port = await new Promise<number>(r => child.stdout!.on('data', (b: Buffer) => { const m = /port (\d+)/.exec(b.toString()); if (m) r(Number(m[1])) }))
+  const port = await new Promise<number>(r =>
+    child.stdout!.on('data', (b: Buffer) => {
+      const m = /port (\d+)/.exec(b.toString())
+      if (m) r(Number(m[1]))
+    }),
+  )
   const forge = githubForge({ host: `127.0.0.1:${port}`, scheme: 'http' })
   const data = join(dir, 'data')
   const store = new Store(join(data, 'eos.db'))
   const credentials = new Credentials(join(data, 'eos.db'), KEY)
-  cleanup.push(() => { credentials.close(); store.close() })
+  cleanup.push(() => {
+    credentials.close()
+    store.close()
+  })
   const sup = new Supervisor({ store, executor: new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复')), dataDir: data, credentials, forges: [forge], pollMs: 2 })
   const url = `http://127.0.0.1:${port}/acme/app`
-  const requests = () => readFileSync(record, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l) as { path: string; auth: string | null })
+  const requests = () =>
+    readFileSync(record, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map(l => JSON.parse(l) as { path: string; auth: string | null })
   return { dir, data, store, credentials, sup, url, first, commit, requests, credential: `127.0.0.1:${port}`, forge }
 }
 
-const filesUnder = (d: string): string[] => readdirSync(d).flatMap(n => {
-  const f = join(d, n)
-  return statSync(f, { throwIfNoEntry: false })?.isDirectory() ? filesUnder(f) : [f]
-})
+const filesUnder = (d: string): string[] =>
+  readdirSync(d).flatMap(n => {
+    const f = join(d, n)
+    return statSync(f, { throwIfNoEntry: false })?.isDirectory() ? filesUnder(f) : [f]
+  })
 
 test('私有远程仓库：带凭据里的令牌克隆成镜像，在默认分支最新提交上建 worktree；令牌不落盘', async () => {
   const r = await remote(TOKEN)
@@ -167,9 +241,9 @@ test('镜像的配置里有不是平台写的项（例如代理、include）：�
 test('第二个任务先更新镜像：基线是远程最新的提交', async () => {
   const r = await remote(TOKEN)
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
-  const a = await r.sup.create({ repo: r.url, workflow: 'feature', request: '一' }) as { id: string }
+  const a = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '一' })) as { id: string }
   const second = r.commit('NEXT.md')
-  const b = await r.sup.create({ repo: r.url, workflow: 'feature', request: '二' }) as { id: string }
+  const b = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '二' })) as { id: string }
   assert.equal(r.store.meta(a.id).baseSha, r.first)
   assert.equal(r.store.meta(b.id).baseSha, second)
   assert.equal(r.store.meta(a.id).repo, r.store.meta(b.id).repo, '同一个镜像')
@@ -189,7 +263,7 @@ test('令牌无效、没有令牌、仓库不存在、空仓库：创建失败�
   assert.match(await fail(r.url.replace('/app', '/nope')), /找不到仓库 .*acme\/nope/)
   assert.deepEqual(r.store.list(), [])
   const e = await remote(undefined, { empty: true })
-  assert.match((await e.sup.create({ repo: e.url, workflow: 'feature', request: '需求' }) as { error: string }).error, /acme\/app 还没有任何提交（空仓库）/)
+  assert.match(((await e.sup.create({ repo: e.url, workflow: 'feature', request: '需求' })) as { error: string }).error, /acme\/app 还没有任何提交（空仓库）/)
   assert.deepEqual(e.store.list(), [])
   assert.equal(existsSync(mirrorDir(e.data, e.forge.parse(e.url)!)), false, '空仓库也不留镜像')
 })
@@ -198,10 +272,16 @@ test('公开仓库不需要令牌；认不出的远程地址报出支持的写�
   const r = await remote(undefined)
   const c = await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })
   assert.equal(c.ok, true, JSON.stringify(c))
-  assert.ok(r.requests().every(q => q.auth === null), '没有令牌时不带认证头')
-  assert.match((await r.sup.create({ repo: 'https://gitlab.com/a/b', workflow: 'feature', request: '需求' }) as { error: string }).error, /认不出仓库地址：https:\/\/gitlab\.com\/a\/b。目前支持 https:\/\/github\.com/)
+  assert.ok(
+    r.requests().every(q => q.auth === null),
+    '没有令牌时不带认证头',
+  )
+  assert.match(
+    ((await r.sup.create({ repo: 'https://gitlab.com/a/b', workflow: 'feature', request: '需求' })) as { error: string }).error,
+    /认不出仓库地址：https:\/\/gitlab\.com\/a\/b。目前支持 https:\/\/github\.com/,
+  )
   const before = r.requests().length
-  assert.match((await r.sup.create({ repo: r.url, workflow: 'nope', request: '需求' }) as { error: string }).error, /平台上没有工作流「nope」/)
+  assert.match(((await r.sup.create({ repo: r.url, workflow: 'nope', request: '需求' })) as { error: string }).error, /平台上没有工作流「nope」/)
   assert.equal(r.requests().length, before)
 })
 
@@ -213,7 +293,10 @@ test('凭据存在但读不出来（没有主密钥）：先匿名试；私有�
   const sup = new Supervisor({ store: r.store, executor: new FakeExecutor(async () => '回复'), dataDir: r.data, credentials: noKey, forges: [r.forge] })
   const err = (await sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
   assert.match(err.error, new RegExp(`这是私有仓库或需要登录.*（没用上的凭据：没有设置主密钥`))
-  assert.ok(r.requests().every(q => q.auth === null), '没带令牌')
+  assert.ok(
+    r.requests().every(q => q.auth === null),
+    '没带令牌',
+  )
   const pub = await remote(undefined)
   assert.deepEqual(pub.credentials.put(LOCAL_OWNER, pub.credential, 'token', TOKEN), { ok: true })
   const noKeyPub = new Credentials(join(pub.data, 'eos.db'), undefined)
@@ -359,23 +442,60 @@ test('平台动作：本机仓库的任务跳过推送并写明原因；前面�
   const dir = mkdtempSync(join(ROOT, 'node_modules', '.eos-push-'))
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }))
   let pushed = 0
-  const platform = async (c: { kind: 'platform'; action: 'push' | 'pull-request' }) => { pushed++; return { check: c, passed: true, detail: '' } }
-  const failed = await runChecks(dir, [{ kind: 'run', run: ['false'], timeoutSec: 5 }, { kind: 'platform', action: 'push' }], process.env, undefined, platform)
-  assert.deepEqual(failed.map(x => [x.passed, x.detail]), [[false, failed[0]!.detail], [false, '前面的检查没有通过，这一步没有做']])
+  const platform = async (c: { kind: 'platform'; action: 'push' | 'pull-request' }) => {
+    pushed++
+    return { check: c, passed: true, detail: '' }
+  }
+  const failed = await runChecks(
+    dir,
+    [
+      { kind: 'run', run: ['false'], timeoutSec: 5 },
+      { kind: 'platform', action: 'push' },
+    ],
+    process.env,
+    undefined,
+    platform,
+  )
+  assert.deepEqual(
+    failed.map(x => [x.passed, x.detail]),
+    [
+      [false, failed[0]!.detail],
+      [false, '前面的检查没有通过，这一步没有做'],
+    ],
+  )
   assert.equal(pushed, 0)
-  const ok = await runChecks(dir, [{ kind: 'run', run: ['true'], timeoutSec: 5 }, { kind: 'platform', action: 'push' }], process.env, undefined, platform)
-  assert.deepEqual(ok.map(x => x.passed), [true, true])
+  const ok = await runChecks(
+    dir,
+    [
+      { kind: 'run', run: ['true'], timeoutSec: 5 },
+      { kind: 'platform', action: 'push' },
+    ],
+    process.env,
+    undefined,
+    platform,
+  )
+  assert.deepEqual(
+    ok.map(x => x.passed),
+    [true, true],
+  )
   assert.equal(pushed, 1)
   // 本机仓库的任务：走完整个流程，推送这一步算通过并说明跳过。
   const r = await remote(undefined)
   const sup = shipper(r)
   const local = join(dir, 'local')
   mkdirSync(local)
-  for (const a of [['init', '-q', '-b', 'main'], ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', a, { cwd: local })
+  for (const a of [
+    ['init', '-q', '-b', 'main'],
+    ['-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'],
+  ])
+    execFileSync('git', a, { cwd: local })
   const c = (await sup.create({ repo: local, workflow: 'ship', request: '需求' })) as { id: string }
   const task = await (sup.start(c.id) as { done: Promise<import('../src/engine/types.ts').Task> }).done
   assert.equal(task.status, 'done', task.failure)
-  const push = task.log.filter(e => e.type === 'check').flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results).find(x => x.check.kind === 'platform')!
+  const push = task.log
+    .filter(e => e.type === 'check')
+    .flatMap(e => (e as Extract<(typeof task.log)[number], { type: 'check' }>).results)
+    .find(x => x.check.kind === 'platform')!
   assert.match(push.detail, /任务用的是本机仓库 .*，没有远程仓库，跳过推送/)
   assert.equal(r.requests().length, 0)
 })
@@ -429,8 +549,14 @@ test('任务中止后不做平台动作', async () => {
   const ac = new AbortController()
   ac.abort()
   let pushed = 0
-  const out = await runChecks(dir, [{ kind: 'platform', action: 'push' }], process.env, ac.signal, async c => { pushed++; return { check: c, passed: true, detail: '' } })
-  assert.deepEqual(out.map(x => x.detail), ['任务已中止，这一步没有做'])
+  const out = await runChecks(dir, [{ kind: 'platform', action: 'push' }], process.env, ac.signal, async c => {
+    pushed++
+    return { check: c, passed: true, detail: '' }
+  })
+  assert.deepEqual(
+    out.map(x => x.detail),
+    ['任务已中止，这一步没有做'],
+  )
   assert.equal(pushed, 0)
 })
 
@@ -500,10 +626,14 @@ const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean
   const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
   const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: o.request ?? '给首页加一个按钮\n点了以后跳到设置页' })) as { id: string }
   const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
-  const result = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(x => x.check.kind === 'platform').at(-1)!
+  const result = task.log
+    .flatMap(e => (e.type === 'check' ? e.results : []))
+    .filter(x => x.check.kind === 'platform')
+    .at(-1)!
   return { task, result, meta: r.store.meta(c.id), id: c.id }
 }
-const apiCalls = (r: Awaited<ReturnType<typeof remote>>) => r.requests().filter(q => q.path.startsWith('/api/')) as { path: string; method: string; auth: string | null; body?: Record<string, string> }[]
+const apiCalls = (r: Awaited<ReturnType<typeof remote>>) =>
+  r.requests().filter(q => q.path.startsWith('/api/')) as { path: string; method: string; auth: string | null; body?: Record<string, string> }[]
 
 test('平台动作 pull-request：推送后向默认分支开 PR，标题是需求第一行，检查结果带分支和 PR 两个链接', async () => {
   const r = await remote(TOKEN)
@@ -513,8 +643,17 @@ test('平台动作 pull-request：推送后向默认分支开 PR，标题是需�
   assert.equal(meta.baseBranch, 'main')
   assert.equal(result.passed, true)
   assert.match(result.detail, /已开 PR #1：http:\/\/127\.0\.0\.1:\d+\/acme\/app\/pull\/1/)
-  assert.deepEqual(result.links?.map(l => [l.kind, l.label]), [['branch', `分支 ${meta.branch}`], ['pull-request', 'PR #1']])
-  assert.deepEqual(linksOf(task).map(l => l.kind), ['branch', 'pull-request'])
+  assert.deepEqual(
+    result.links?.map(l => [l.kind, l.label]),
+    [
+      ['branch', `分支 ${meta.branch}`],
+      ['pull-request', 'PR #1'],
+    ],
+  )
+  assert.deepEqual(
+    linksOf(task).map(l => l.kind),
+    ['branch', 'pull-request'],
+  )
   const posts = apiCalls(r).filter(q => q.method === 'POST')
   assert.equal(posts.length, 1)
   assert.deepEqual({ ...posts[0]!.body, body: undefined }, { title: '给首页加一个按钮', head: meta.branch, base: 'main', body: undefined })
@@ -540,7 +679,10 @@ test('任务没有改动：推送了，但不开 PR，算通过并写明原因�
   const { task, result } = await runPr(r, { write: false })
   assert.equal(task.status, 'done', task.failure)
   assert.match(result.detail, /任务分支和 main 没有差别，没有开 PR/)
-  assert.deepEqual(result.links?.map(l => l.kind), ['branch'])
+  assert.deepEqual(
+    result.links?.map(l => l.kind),
+    ['branch'],
+  )
 })
 
 test('开 PR 时令牌不对、没有令牌：报中文原因，不含令牌', async () => {
@@ -571,11 +713,18 @@ test('分支已经有打开的 PR、要开的目标分支不同：也复用它�
   const reused = await r.forge.openPullRequest(repo, TOKEN, { head: first.meta.branch, base: 'develop', sha: 'x'.repeat(40), title: 'x', body: 'y' })
   assert.deepEqual(reused, { number: 1, url: first.result.links![1]!.url, reused: true })
   // 旧任务：meta 里没有 baseBranch（直接改数据库模拟旧版本建的任务）。
-  const sup = new Supervisor({ store: r.store, executor: new FakeExecutor(async ({ key }) => {
-    if (key.endsWith('/review')) return PASS
-    writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'old.txt'), 'old\n')
-    return '改好了'
-  }), dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const sup = new Supervisor({
+    store: r.store,
+    executor: new FakeExecutor(async ({ key }) => {
+      if (key.endsWith('/review')) return PASS
+      writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'old.txt'), 'old\n')
+      return '改好了'
+    }),
+    dataDir: r.data,
+    credentials: r.credentials,
+    forges: [r.forge],
+    pollMs: 2,
+  })
   const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: '旧任务' })) as { id: string }
   const meta = r.store.meta(c.id)
   const { baseBranch: _dropped, ...old } = meta
@@ -591,7 +740,10 @@ test('分支已经有打开的 PR、要开的目标分支不同：也复用它�
 
 test('GitHub 的 422 只给 field 和 code 时，报错里写出来', async () => {
   const r = await remote(TOKEN)
-  await assert.rejects(r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: 'no-such-branch', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), /开 PR 失败（HTTP 422）：Validation Failed；head invalid/)
+  await assert.rejects(
+    r.forge.openPullRequest(r.forge.parse(r.url)!, TOKEN, { head: 'no-such-branch', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }),
+    /开 PR 失败（HTTP 422）：Validation Failed；head invalid/,
+  )
 })
 
 const control = (r: Awaited<ReturnType<typeof remote>>, what: string) => fetch(`${r.url.replace('/acme/app', '')}/__control/${what}`)
@@ -603,7 +755,10 @@ test('推送成功、开 PR 失败：任务失败，原因写明已推送和开 
   const { task, result, meta } = await runPr(r)
   assert.equal(task.status, 'failed')
   assert.match(task.failure ?? '', new RegExp(`已把分支 ${meta.branch}（[0-9a-f]{12}）推到 .*，但开 PR 失败：.* 不允许在 .*acme/app 开 PR：令牌没有 Pull requests 的写权限`))
-  assert.deepEqual(result.links?.map(l => l.kind), ['branch'])
+  assert.deepEqual(
+    result.links?.map(l => l.kind),
+    ['branch'],
+  )
   assert.ok(!JSON.stringify(task).includes(TOKEN))
   assert.equal(remoteSha(r, meta.branch), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim(), '推送已经做了')
 })
@@ -643,7 +798,10 @@ test('GitHub API 连不上：报中文原因和底层原因', async () => {
   const port = (probe.address() as import('node:net').AddressInfo).port
   await new Promise(res => probe.close(res))
   const forge = githubForge({ host: `127.0.0.1:${port}`, scheme: 'http' })
-  await assert.rejects(forge.openPullRequest(forge.parse(`http://127.0.0.1:${port}/a/b`)!, TOKEN, { head: 'h', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }), new RegExp(`访问 127\\.0\\.0\\.1:${port} 失败：fetch failed：ECONNREFUSED`))
+  await assert.rejects(
+    forge.openPullRequest(forge.parse(`http://127.0.0.1:${port}/a/b`)!, TOKEN, { head: 'h', base: 'main', sha: 'x'.repeat(40), title: 't', body: 'b' }),
+    new RegExp(`访问 127\\.0\\.0\\.1:${port} 失败：fetch failed：ECONNREFUSED`),
+  )
 })
 
 /** 一个 GitHub App：现场生成的 RSA 密钥对，公钥写到文件交给测试服务。 */
@@ -668,13 +826,18 @@ test('GitHub App：只配 App、不配令牌，克隆、推送、开 PR 都用�
   assert.equal(task.status, 'done', task.failure)
   assert.match(result.detail, /已开 PR #1/)
   // 只换了一次令牌，只授权 app 这一个仓库（App 也装在 acme/other 上）。
-  assert.deepEqual(mints(r).map(m => m.body), [{ repositories: ['app'] }])
-  const tokens = new Set(r.requests().flatMap(q => {
-    const a = q.auth ?? ''
-    if (a.startsWith('Basic ')) return [Buffer.from(a.slice(6), 'base64').toString('utf8').split(':')[1]!]
-    if (a.startsWith('Bearer ghs_')) return [a.slice(7)]
-    return []
-  }))
+  assert.deepEqual(
+    mints(r).map(m => m.body),
+    [{ repositories: ['app'] }],
+  )
+  const tokens = new Set(
+    r.requests().flatMap(q => {
+      const a = q.auth ?? ''
+      if (a.startsWith('Basic ')) return [Buffer.from(a.slice(6), 'base64').toString('utf8').split(':')[1]!]
+      if (a.startsWith('Bearer ghs_')) return [a.slice(7)]
+      return []
+    }),
+  )
   assert.equal(tokens.size, 1, `git 和 PR 接口用的是同一个安装令牌：${[...tokens].join(',')}`)
   const ghs = [...tokens][0]!
   assert.match(ghs, /^ghs_/)
@@ -703,7 +866,10 @@ test('GitHub App 没装到这个仓库：退回个人访问令牌；没有令牌
   appCred(r, app, { slug: 'eos-test' })
   const failed = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { ok: boolean; error: string }
   assert.equal(failed.ok, false)
-  assert.match(failed.error, /这是私有仓库或需要登录.*（没用上的凭据：凭据「github-app\..*」的 GitHub App 没有安装到 acme\/app：到 https:\/\/.*\/apps\/eos-test\/installations\/new 把它安装到这个仓库）/)
+  assert.match(
+    failed.error,
+    /这是私有仓库或需要登录.*（没用上的凭据：凭据「github-app\..*」的 GitHub App 没有安装到 acme\/app：到 https:\/\/.*\/apps\/eos-test\/installations\/new 把它安装到这个仓库）/,
+  )
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
   const ok = await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })
   assert.equal(ok.ok, true, JSON.stringify(ok))
@@ -722,7 +888,13 @@ test('GitHub App 的私钥不对、凭据格式不对：报中文原因', async 
   const wrongKey = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
   assert.match(wrongKey.error, /^127\.0\.0\.1:\d+ 不认凭据「github-app\..*」的 App：App id 或私钥不对/)
   assert.doesNotMatch(wrongKey.error, /添加名字为/, '不叫人去加令牌')
-  assert.ok(r.requests().slice(before).every(q => !(q.auth ?? '').includes(Buffer.from(`x-access-token:${TOKEN}`).toString('base64'))), '没有用个人令牌')
+  assert.ok(
+    r
+      .requests()
+      .slice(before)
+      .every(q => !(q.auth ?? '').includes(Buffer.from(`x-access-token:${TOKEN}`).toString('base64'))),
+    '没有用个人令牌',
+  )
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, `github-app.${r.credential}`, 'github-app', JSON.stringify({ appid: 1, privateKey: app.privateKey })), { ok: true })
   const badJson = (await r.sup.create({ repo: r.url, workflow: 'feature', request: '需求' })) as { error: string }
   assert.match(badJson.error, /不是有效的 GitHub App 凭据：appId/)
@@ -788,12 +960,15 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   const r = await remote(TOKEN)
   const web = await webOn(r)
   const name = `github-app.${r.credential}`
-  const before = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const before = (await (await fetch(`${web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.deepEqual(before, { usable: true, callbackUrl: `${web.base}/api/forge-apps/callback`, apps: [{ name, host: r.credential, appNameMax: 34 }] })
 
   // 写接口照样只接受同源请求。
-  assert.equal((await fetch(`${web.base}/api/forge-apps/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, appName: 'eos-test' }) })).status, 403)
-  const started = await (await web.post('/api/forge-apps/register', { name, appName: 'Eos-Test' })).json() as { ok: true; action: string; fields: Record<string, string> }
+  assert.equal(
+    (await fetch(`${web.base}/api/forge-apps/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, appName: 'eos-test' }) })).status,
+    403,
+  )
+  const started = (await (await web.post('/api/forge-apps/register', { name, appName: 'Eos-Test' })).json()) as { ok: true; action: string; fields: Record<string, string> }
   assert.equal(started.ok, true)
   const action = new URL(started.action)
   assert.equal(`${action.origin}${action.pathname}`, `http://${r.credential}/settings/apps/new`)
@@ -801,8 +976,12 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   assert.ok(state.length >= 40, 'state 是足够长的随机串')
   const manifest = JSON.parse(started.fields.manifest!)
   assert.deepEqual(manifest, {
-    name: 'Eos-Test', url: web.base, redirect_url: `${web.base}/api/forge-apps/callback`, public: false,
-    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' }, default_events: [],
+    name: 'Eos-Test',
+    url: web.base,
+    redirect_url: `${web.base}/api/forge-apps/callback`,
+    public: false,
+    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+    default_events: [],
   })
 
   const done = await submitManifest(started.action, started.fields)
@@ -814,7 +993,7 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   assert.equal(value.slug, 'eos-test')
   assert.match(value.privateKey, /BEGIN RSA PRIVATE KEY/)
   assert.equal(r.credentials.list(LOCAL_OWNER).find(i => i.name === name)?.kind, 'github-app')
-  const after = await (await fetch(`${web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  const after = (await (await fetch(`${web.base}/api/forge-apps`)).json()) as import('../src/web/types.ts').ForgeAppsResponse
   assert.equal(after.apps[0]!.registered?.installUrl, `http://${r.credential}/apps/eos-test/installations/new`)
 
   // 同一个回调地址再来一次（例如浏览器后退、别人拿到了这个地址）：state 只能用一次。
@@ -829,7 +1008,10 @@ test('清单流程注册 GitHub App：表单提交到 GitHub，跳回回调后�
   await fetch(`http://${r.credential}/__control/install?repo=acme/app`)
   const created = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'x' })
   assert.equal(created.ok, true, JSON.stringify(created))
-  assert.ok(r.requests().some(q => q.path === '/api/v3/app/installations/1000/access_tokens'), '换了安装令牌')
+  assert.ok(
+    r.requests().some(q => q.path === '/api/v3/app/installations/1000/access_tokens'),
+    '换了安装令牌',
+  )
 })
 
 test('清单流程的回调：不是本平台发起的 state、没带 code、code 换不到凭据，都不存任何东西，回到页面说明原因', async () => {
@@ -847,7 +1029,7 @@ test('清单流程的回调：不是本平台发起的 state、没带 code、cod
   assert.deepEqual(r.credentials.list(LOCAL_OWNER), [])
 
   // 发起注册之后、跳回之前，别处已经存了这个名字的凭据：不覆盖它。
-  const started = await (await web.post('/api/forge-apps/register', { name, appName: 'eos-race' })).json() as { action: string; fields: Record<string, string> }
+  const started = (await (await web.post('/api/forge-apps/register', { name, appName: 'eos-race' })).json()) as { action: string; fields: Record<string, string> }
   r.credentials.put(LOCAL_OWNER, name, 'github-app', '{"appId":1,"privateKey":"old PRIVATE KEY"}')
   const raced = await submitManifest(started.action, started.fields)
   assert.match(new URLSearchParams(raced.page.split('?')[1]).get('error')!, /注册期间已经有了凭据.*没有覆盖它/)
@@ -860,7 +1042,7 @@ test('清单流程的回调：不是本平台发起的 state、没带 code、cod
   assert.equal((await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'bad/org' })).status, 400)
   assert.equal((await web.post('/api/forge-apps/register', { name: 'github-app.gitlab.com', appName: 'eos' })).status, 400)
   // 注册在组织下：表单提交到组织的页面。
-  const org = await (await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'acme' })).json() as { action: string }
+  const org = (await (await web.post('/api/forge-apps/register', { name, appName: 'eos', org: 'acme' })).json()) as { action: string }
   assert.equal(new URL(org.action).pathname, '/organizations/acme/settings/apps/new')
 })
 

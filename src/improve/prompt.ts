@@ -39,8 +39,13 @@ export const improvePrompt = (p: {
 }): string => {
   const roleOf = (r: string | undefined) => (r === undefined ? '' : `，被评判的角色 ${r}${p.roleTemplates[r] === undefined ? '' : `（模板 ${p.roleTemplates[r]}）`}`)
   // 证据文字来自 agent 和仓库，放进代码块：里面的标题、代码块伪造不了别的证据或平台的说明。
-  const signals = p.signals.map(s => `### ${s.id}｜${SIGNAL_NAMES[s.kind]}｜任务 ${s.task}${s.node === undefined ? '' : `，节点 ${s.node}`}${roleOf(s.role)}\n${fence(s.text)}\n${s.text}\n${fence(s.text)}`).join('\n\n')
-  const counts = (t: TargetEvidence) => Object.entries(t.counts).map(([k, n]) => `${SIGNAL_NAMES[k as SignalKind]} ${n}`).join('，')
+  const signals = p.signals
+    .map(s => `### ${s.id}｜${SIGNAL_NAMES[s.kind]}｜任务 ${s.task}${s.node === undefined ? '' : `，节点 ${s.node}`}${roleOf(s.role)}\n${fence(s.text)}\n${s.text}\n${fence(s.text)}`)
+    .join('\n\n')
+  const counts = (t: TargetEvidence) =>
+    Object.entries(t.counts)
+      .map(([k, n]) => `${SIGNAL_NAMES[k as SignalKind]} ${n}`)
+      .join('，')
   const summary = p.candidates.map(c => `- ${TARGET_NAMES[c.kind]}「${c.name}」：${c.tasks} 个任务用到，其中 ${c.affected} 个有证据（${counts(c)}）`).join('\n')
   const contents = p.candidates.map(c => `### ${c.kind} ${c.name}（当前第 ${c.version} 版）\n${fence(c.content)}\n${c.content.trimEnd()}\n${fence(c.content)}`).join('\n\n')
   return [

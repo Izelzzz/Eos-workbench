@@ -21,12 +21,18 @@ for (let round = 0; round < rounds; round++) {
   const d = mkdtempSync(join(tmpdir(), 'eos-lock-race-'))
   writeFileSync(join(d, 't.pid'), '999999999') // 上一个 runner 被 SIGKILL 后留下的锁
   const at = Date.now() + 2500
-  const results = await Promise.all(Array.from({ length: PROCS }, () => new Promise<string>(ok => {
-    const p = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', child, d, String(at)], { stdio: ['ignore', 'pipe', 'inherit'] })
-    let out = ''
-    p.stdout.on('data', c => (out += c))
-    p.on('exit', () => ok(out.trim()))
-  })))
+  const results = await Promise.all(
+    Array.from(
+      { length: PROCS },
+      () =>
+        new Promise<string>(ok => {
+          const p = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', child, d, String(at)], { stdio: ['ignore', 'pipe', 'inherit'] })
+          let out = ''
+          p.stdout.on('data', c => (out += c))
+          p.on('exit', () => ok(out.trim()))
+        }),
+    ),
+  )
   const winners = results.filter(r => r === 'won').length
   if (winners !== 1) {
     bad++

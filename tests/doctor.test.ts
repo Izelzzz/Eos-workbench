@@ -7,13 +7,27 @@ import { atLeast, evaluate, formatItems, gather, type Facts } from '../src/runne
 
 const ROOT = join(import.meta.dirname, '..')
 const dirs: string[] = []
-after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) })
+after(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true })
+})
 const tmp = () => {
   const d = mkdtempSync(join(ROOT, 'node_modules', '.eos-doctor-'))
   dirs.push(d)
   return d
 }
-const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, sandbox: { backend: 'bwrap' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5', checkUser: { kind: 'none' }, agentUser: { kind: 'none' }, droppedProxies: [] }
+const good: Facts = {
+  node: '24.10.0',
+  nodeRequired: '>=24.9.0',
+  modelKey: { source: 'credentials' },
+  masterKey: { kind: 'ok', id: '0123456789abcdef' },
+  git: { version: '2.43.0' },
+  sandbox: { backend: 'bwrap' },
+  dataDir: '/srv/eos',
+  dsh: '0.2.2-rc.5',
+  checkUser: { kind: 'none' },
+  agentUser: { kind: 'none' },
+  droppedProxies: [],
+}
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -25,14 +39,44 @@ test('版本比较按主、次、修订号', () => {
 
 test('环境都满足时每项都通过', () => {
   const items = evaluate(good)
-  assert.deepEqual(items.map(i => [i.name, i.status]), [['Node', 'ok'], ['DeepSeek API key', 'ok'], ['凭据主密钥', 'ok'], ['沙箱', 'ok'], ['凭据隔离', 'warn'], ['git', 'ok'], ['数据目录', 'ok'], ['dsh', 'ok']])
+  assert.deepEqual(
+    items.map(i => [i.name, i.status]),
+    [
+      ['Node', 'ok'],
+      ['DeepSeek API key', 'ok'],
+      ['凭据主密钥', 'ok'],
+      ['沙箱', 'ok'],
+      ['凭据隔离', 'warn'],
+      ['git', 'ok'],
+      ['数据目录', 'ok'],
+      ['dsh', 'ok'],
+    ],
+  )
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, sandbox: { backend: 'none' }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）', checkUser: { kind: 'fail', error: 'EOS_CHECK_USER=eos-check，但系统里没有这个用户' }, agentUser: { kind: 'none' }, droppedProxies: [] }
+  const bad: Facts = {
+    node: '22.23.5',
+    nodeRequired: '>=24.9.0',
+    modelKey: { source: 'missing' },
+    masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' },
+    git: { missing: true },
+    sandbox: { backend: 'none' },
+    dataDir: '/srv/eos',
+    dataDirError: '没有写权限（EACCES）',
+    checkUser: { kind: 'fail', error: 'EOS_CHECK_USER=eos-check，但系统里没有这个用户' },
+    agentUser: { kind: 'none' },
+    droppedProxies: [],
+  }
   const items = evaluate(bad)
-  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail'])
-  assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
+  assert.deepEqual(
+    items.map(i => i.status),
+    ['warn', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail'],
+  )
+  assert.ok(
+    items.every(i => i.fix !== undefined && i.fix !== ''),
+    JSON.stringify(items),
+  )
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
   assert.match(text, /✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：在 Web 的「凭据」页添加名为 deepseek/)
@@ -61,7 +105,10 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
   assert.equal(sandbox({ backend: 'bwrap' }).status, 'ok')
   assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间里；能写的 agent 有私有的 \/tmp，只读的 agent 看到的是共用的 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'full' }).status, 'ok')
-  assert.match(sandbox({ backend: 'landlock', enforcement: 'full' }).detail, /^Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 \/tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境.*各任务共用 \/tmp/)
+  assert.match(
+    sandbox({ backend: 'landlock', enforcement: 'full' }).detail,
+    /^Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 \/tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境.*各任务共用 \/tmp/,
+  )
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'partial' }).status, 'warn')
   assert.equal(sandbox({ backend: 'none' }).status, 'fail', 'dsh refuses to run commands without a sandbox, so tasks cannot run')
   assert.equal(sandbox({ backend: 'platform', platform: 'darwin' }).status, 'ok', 'macOS and Windows are not probed and must not block startup')
@@ -70,7 +117,10 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
 test('设置了主密钥时如实说明谁能读到；没有独立用户时是 ⚠；没设置主密钥时不提示', () => {
   const isolation = (s: Facts['sandbox']) => formatItems(evaluate({ ...good, sandbox: s }).filter(i => i.name === '凭据隔离'))
   for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
-    assert.match(isolation(s), /^⚠ 凭据隔离：agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到\n  怎么修：用独立的用户运行检查命令和 agent/)
+    assert.match(
+      isolation(s),
+      /^⚠ 凭据隔离：agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到\n  怎么修：用独立的用户运行检查命令和 agent/,
+    )
   }
   assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥；没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key；检查命令/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
@@ -81,11 +131,17 @@ test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓
   const text = formatItems(evaluate(both))
   assert.match(text, /✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境/)
   assert.match(text, /✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境/)
-  assert.match(text, /✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到/)
+  assert.match(
+    text,
+    /✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到/,
+  )
   const checkOnly = evaluate({ ...both, agentUser: { kind: 'none' } }).find(i => i.name === '凭据隔离')
   assert.equal(checkOnly?.status, 'warn')
   assert.equal(evaluate({ ...both, sandbox: { backend: 'none' } }).find(i => i.name === '凭据隔离')?.status, 'warn', '没有沙箱时 agent 能读到 dsh 的模型 key')
-  for (const [field, name, caps] of [['checkUser', '检查命令的用户', /SETUID、SETGID/], ['agentUser', 'agent 的用户', /SETUID、SETGID、KILL/]] as const) {
+  for (const [field, name, caps] of [
+    ['checkUser', '检查命令的用户', /SETUID、SETGID/],
+    ['agentUser', 'agent 的用户', /SETUID、SETGID、KILL/],
+  ] as const) {
     const failed = evaluate({ ...both, [field]: { kind: 'fail', error: '切换不到：setpriv: setresuid failed: Operation not permitted' } }).find(i => i.name === name)
     assert.equal(failed?.status, 'fail', name)
     assert.match(failed?.fix ?? '', caps)
@@ -97,7 +153,14 @@ test('gather：设置了 agent 的用户但没有设置 dsh 的入口时是 ✗�
   const launcher = process.env.EOS_DSH_LAUNCHER
   delete process.env.EOS_DSH_LAUNCHER
   try {
-    const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'ok', user: { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' } } })
+    const f = gather({
+      root: ROOT,
+      dataDir: join(tmp(), 'data'),
+      modelKey: { source: 'missing' },
+      masterKey: { kind: 'missing' },
+      checkUser: { kind: 'none' },
+      agentUser: { kind: 'ok', user: { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' } },
+    })
     // 本机没有切换用户的能力时先报切换不过去；有能力（root）时报没有入口。两种都是 ✗。
     assert.equal(f.agentUser.kind, 'fail')
     if (process.getuid?.() === 0) assert.match(f.agentUser.kind === 'fail' ? f.agentUser.error : '', /没有设置 EOS_DSH_LAUNCHER/)
@@ -114,11 +177,25 @@ test('代理地址带账号密码、没有传给检查命令时提示', () => {
 })
 
 test('gather：设置了检查命令的用户时真的切换一次；系统里没有这个用户时记成失败', () => {
-  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'invalid', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' }, agentUser: { kind: 'none' } })
+  const f = gather({
+    root: ROOT,
+    dataDir: join(tmp(), 'data'),
+    modelKey: { source: 'missing' },
+    masterKey: { kind: 'missing' },
+    checkUser: { kind: 'invalid', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' },
+    agentUser: { kind: 'none' },
+  })
   assert.deepEqual(f.checkUser, { kind: 'fail', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' })
   // 测试进程没有切换用户的能力（CI 和本机都不是带 SETUID 的平台进程）：探测要报失败，而不是当成能切换。
   if (process.getuid?.() !== 0) {
-    const g = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'ok', user: { name: 'nobody', gid: 65534, home: '/nonexistent' } }, agentUser: { kind: 'none' } })
+    const g = gather({
+      root: ROOT,
+      dataDir: join(tmp(), 'data'),
+      modelKey: { source: 'missing' },
+      masterKey: { kind: 'missing' },
+      checkUser: { kind: 'ok', user: { name: 'nobody', gid: 65534, home: '/nonexistent' } },
+      agentUser: { kind: 'none' },
+    })
     assert.equal(g.checkUser.kind, 'fail')
   }
 })
@@ -126,11 +203,21 @@ test('gather：设置了检查命令的用户时真的切换一次；系统里�
 test('模型 key 显示来源：凭据存储、环境变量；读不出来时是 ✗，不悄悄改用环境变量', () => {
   assert.match(formatItems(evaluate(good)), /✓ DeepSeek API key：来自凭据存储（凭据 deepseek）/)
   assert.match(formatItems(evaluate({ ...good, modelKey: { source: 'env' } })), /✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）/)
-  assert.match(formatItems(evaluate({ ...good, modelKey: { source: 'error', error: '凭据 deepseek 解密失败' } })), /✗ DeepSeek API key：凭据存储里的 deepseek 读不出来：凭据 deepseek 解密失败\n  怎么修：/)
+  assert.match(
+    formatItems(evaluate({ ...good, modelKey: { source: 'error', error: '凭据 deepseek 解密失败' } })),
+    /✗ DeepSeek API key：凭据存储里的 deepseek 读不出来：凭据 deepseek 解密失败\n  怎么修：/,
+  )
 })
 
 test('gather：读 package.json 的 engines 和 dsh 版本；只记 key 的来源，不带值；数据目录建不出来时记下原因', () => {
-  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'credentials', value: 'sk-secret-value' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } })
+  const f = gather({
+    root: ROOT,
+    dataDir: join(tmp(), 'data'),
+    modelKey: { source: 'credentials', value: 'sk-secret-value' },
+    masterKey: { kind: 'missing' },
+    checkUser: { kind: 'none' },
+    agentUser: { kind: 'none' },
+  })
   assert.equal(f.nodeRequired, '>=24.9.0')
   assert.equal(f.node, process.versions.node)
   assert.deepEqual(f.modelKey, { source: 'credentials' })

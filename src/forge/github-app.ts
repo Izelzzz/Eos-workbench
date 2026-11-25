@@ -7,13 +7,15 @@ import { z } from 'zod'
 import { ForgeError, NotInstalled, type AppRegistration, type RemoteRepo } from './types.ts'
 
 /** 凭据存储里 github-app 凭据的值：JSON。slug 用来给出"安装到仓库"的地址（清单流程注册时拿到）。 */
-export const appCredential = z.object({
-  appId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).transform(String),
-  privateKey: z.string().includes('PRIVATE KEY', { message: '不是 PEM 格式的私钥' }),
-  slug: z.string().optional(),
-  /** App 在托管平台上的页面（清单流程注册时拿到），安装页在它下面。GitHub Enterprise 的路径和 github.com 不同，所以记下原样的地址。 */
-  htmlUrl: z.string().url().optional(),
-}).passthrough()
+export const appCredential = z
+  .object({
+    appId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).transform(String),
+    privateKey: z.string().includes('PRIVATE KEY', { message: '不是 PEM 格式的私钥' }),
+    slug: z.string().optional(),
+    /** App 在托管平台上的页面（清单流程注册时拿到），安装页在它下面。GitHub Enterprise 的路径和 github.com 不同，所以记下原样的地址。 */
+    htmlUrl: z.string().url().optional(),
+  })
+  .passthrough()
 export type AppCredential = z.infer<typeof appCredential>
 
 /** github-app 凭据的名字。 */
@@ -68,14 +70,22 @@ export class GitHubApp {
     try {
       res = await (this.o.fetch ?? fetch)(`${this.o.apiUrl}${path}`, {
         method: init.method ?? 'GET',
-        headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'eos-workbench', authorization: auth, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
+        headers: {
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'eos-workbench',
+          authorization: auth,
+          ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       })
       text = await res.text()
     } catch (e) {
       const err = e as Error & { cause?: { code?: string; message?: string } }
-      throw new ForgeError(`访问 ${new URL(this.o.apiUrl).host} 失败：${[err.name === 'TimeoutError' ? `${API_TIMEOUT_MS / 1000} 秒没有响应` : err.message, err.cause?.code ?? err.cause?.message].filter(Boolean).join('：')}`)
+      throw new ForgeError(
+        `访问 ${new URL(this.o.apiUrl).host} 失败：${[err.name === 'TimeoutError' ? `${API_TIMEOUT_MS / 1000} 秒没有响应` : err.message, err.cause?.code ?? err.cause?.message].filter(Boolean).join('：')}`,
+      )
     }
     let body: unknown
     try {
@@ -95,7 +105,10 @@ export class GitHubApp {
   token(repo: RemoteRepo): Promise<Cached> {
     const key = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`
     const hit = this.cache.get(key)
-    const fresh = hit?.then(c => (c.expiresAt - REFRESH_BEFORE_MS > this.now() ? c : undefined), () => undefined)
+    const fresh = hit?.then(
+      c => (c.expiresAt - REFRESH_BEFORE_MS > this.now() ? c : undefined),
+      () => undefined,
+    )
     const next = (fresh ?? Promise.resolve(undefined)).then(c => c ?? this.mint(repo))
     this.cache.set(key, next)
     // 换取失败不留在缓存里：下次重新换。
@@ -121,9 +134,11 @@ export class GitHubApp {
     const got = await this.call(`/app/installations/${id}/access_tokens`, jwt, { method: 'POST', body: { repositories: [repo.name] } })
     const parsed = accessToken.safeParse(got.body).data
     if (got.status !== 201 || parsed === undefined) {
-      throw new ForgeError(got.status === 403 || got.status === 422
-        ? `App 在 ${where} 的安装没有授权这个仓库、缺少权限，或者仓库改过名（HTTP ${got.status}）：在 App 的安装设置里勾选这个仓库，并给 Contents 读写、Pull requests 读写；仓库改过名时，用 GitHub 上现在的地址建任务`
-        : `换 App 的安装令牌失败（HTTP ${got.status}）`)
+      throw new ForgeError(
+        got.status === 403 || got.status === 422
+          ? `App 在 ${where} 的安装没有授权这个仓库、缺少权限，或者仓库改过名（HTTP ${got.status}）：在 App 的安装设置里勾选这个仓库，并给 Contents 读写、Pull requests 读写；仓库改过名时，用 GitHub 上现在的地址建任务`
+          : `换 App 的安装令牌失败（HTTP ${got.status}）`,
+      )
     }
     const expiresAt = Date.parse(parsed.expires_at)
     if (Number.isNaN(expiresAt)) throw new ForgeError(`${repo.host} 返回的令牌到期时间不对：${parsed.expires_at}`)
@@ -174,7 +189,9 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
       text = await res.text()
     } catch (e) {
       const err = e as Error & { cause?: { code?: string; message?: string } }
-      throw new ForgeError(`访问 ${new URL(o.api).host} 失败：${[err.name === 'TimeoutError' ? `${API_TIMEOUT_MS / 1000} 秒没有响应` : err.message, err.cause?.code ?? err.cause?.message].filter(Boolean).join('：')}`)
+      throw new ForgeError(
+        `访问 ${new URL(o.api).host} 失败：${[err.name === 'TimeoutError' ? `${API_TIMEOUT_MS / 1000} 秒没有响应` : err.message, err.cause?.code ?? err.cause?.message].filter(Boolean).join('：')}`,
+      )
     }
     if (res.status === 404 || res.status === 422) throw new ForgeError(`${o.host} 不认这次注册返回的 code（一小时内有效，只能用一次）：重新注册一次`)
     let body: unknown
@@ -206,4 +223,3 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
     }
   },
 })
-

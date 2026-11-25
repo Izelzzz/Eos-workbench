@@ -26,7 +26,9 @@ const explainApi = (repo: RemoteRepo, op: 'list' | 'create', status: number, bod
     return `${repo.host} 拒绝了${doing} 的请求：${hasToken ? `凭据「${credential}」里的令牌无效或已过期。在凭据页替换这条凭据` : `没有带令牌，开 PR 需要令牌。在凭据页添加名字为「${credential}」、类型为 Git 令牌的凭据`}`
   }
   if (status === 403) {
-    const who = app ? `凭据「${credential}」的 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限（在 App 的设置里加上，并在安装里接受新权限），` : `令牌没有 Pull requests 的${op === 'list' ? '读权限、组织要求 SSO 授权' : '写权限'}，`
+    const who = app
+      ? `凭据「${credential}」的 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限（在 App 的设置里加上，并在安装里接受新权限），`
+      : `令牌没有 Pull requests 的${op === 'list' ? '读权限、组织要求 SSO 授权' : '写权限'}，`
     return `${repo.host} 不允许在 ${where} ${doing}：${who}或者被限流了（${said || status}）`
   }
   if (status === 404) return `找不到仓库 ${where}，或者凭据「${credential}」里的令牌看不到它`
@@ -59,7 +61,13 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     try {
       res = await fetch(`${api}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}${path}`, {
         method: init.method ?? 'GET',
-        headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'eos-workbench', ...(token === undefined ? {} : { authorization: `Bearer ${token}` }), ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
+        headers: {
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'eos-workbench',
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+          ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       })
@@ -73,7 +81,8 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     } catch {
       body = undefined
     }
-    if (!res.ok && !(res.status === 422 && init.method === 'POST')) throw new ForgeError(explainApi(repo, init.method === 'POST' ? 'create' : 'list', res.status, body, credential, token !== undefined))
+    if (!res.ok && !(res.status === 422 && init.method === 'POST'))
+      throw new ForgeError(explainApi(repo, init.method === 'POST' ? 'create' : 'list', res.status, body, credential, token !== undefined))
     return { status: res.status, body }
   }
   const h = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -104,7 +113,10 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       if (found !== undefined) return found
       // 这次推的提交已经通过某个 PR 合并了（例如之前开的 PR 合并后又重跑交付）：如实报告，不当成"没有差别"。
       const closed = await call(repo, token, credential, `/pulls?state=closed&head=${encodeURIComponent(`${repo.owner}:${p.head}`)}`)
-      const merged = z.array(closedPull).safeParse(closed.body).data?.find(x => x.merged_at != null && x.head.sha === p.sha)
+      const merged = z
+        .array(closedPull)
+        .safeParse(closed.body)
+        .data?.find(x => x.merged_at != null && x.head.sha === p.sha)
       if (merged !== undefined) return { merged: { number: merged.number, url: merged.html_url } }
       const created = await call(repo, token, credential, '/pulls', { method: 'POST', body: { title: p.title, head: p.head, base: p.base, body: p.body } })
       if (created.status === 422) {

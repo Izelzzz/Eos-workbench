@@ -30,7 +30,9 @@ const scan = () => {
       // pid 可能被复用：命令行变了就当成新进程。
       if (prev === undefined || prev.cmd !== cmd) procs.set(pid, { pid, ppid, cmd, hasKey })
       else prev.hasKey ||= hasKey
-    } catch { /* 进程已经退出或读不了 */ }
+    } catch {
+      /* 进程已经退出或读不了 */
+    }
   }
 }
 
@@ -55,14 +57,19 @@ const finish = (code: number | null, error?: string) => {
   const holders = all.filter(p => p.hasKey).map(p => ({ class: classify(p), cmd: p.cmd }))
   const leaks = holders.filter(h => h.class === 'leak')
   const report = {
-    e2eExit: code, ...(error === undefined ? {} : { error }), holders, leaks,
+    e2eExit: code,
+    ...(error === undefined ? {} : { error }),
+    holders,
+    leaks,
     platformChildrenSeen: underPlatform.length,
     platformChildrenSample: [...new Set(underPlatform.map(p => p.cmd.replace(/\s.*/, '')))],
     dshSeen: underPlatform.filter(p => /dsh/.test(p.cmd)).length,
     checkCommandsSeen: underPlatform.filter(p => /npm test|node --test/.test(p.cmd)).length,
   }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
-  process.stdout.write(`\n主密钥探针：E2E 退出码 ${code}；平台起的子进程看到 ${underPlatform.length} 个（dsh ${report.dshSeen}，检查命令 ${report.checkCommandsSeen}），其中带主密钥的 ${leaks.length} 个\n`)
+  process.stdout.write(
+    `\n主密钥探针：E2E 退出码 ${code}；平台起的子进程看到 ${underPlatform.length} 个（dsh ${report.dshSeen}，检查命令 ${report.checkCommandsSeen}），其中带主密钥的 ${leaks.length} 个\n`,
+  )
   process.exit(code === 0 && leaks.length === 0 && underPlatform.length > 0 ? 0 : 1)
 }
 

@@ -5,7 +5,21 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { newTask, reduce } from '../engine/machine.ts'
 import type { ConventionDoc, Event, Step, Task, TaskStatus } from '../engine/types.ts'
-import type { Actor, ConventionKind, ConventionRow, ConventionSummary, Decision, EventRow, ProposalEvent, ProposalInput, ProposalRow, ProposalStatus, TaskMeta, TaskSummary, TraceRow } from './types.ts'
+import type {
+  Actor,
+  ConventionKind,
+  ConventionRow,
+  ConventionSummary,
+  Decision,
+  EventRow,
+  ProposalEvent,
+  ProposalInput,
+  ProposalRow,
+  ProposalStatus,
+  TaskMeta,
+  TaskSummary,
+  TraceRow,
+} from './types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import { DEFAULT_MAX_FIXES } from '../workflow/parse.ts'
 import type { Workflow } from '../workflow/types.ts'
@@ -81,13 +95,26 @@ CREATE TABLE IF NOT EXISTS proposal_events (
  * 读出时补上默认值，引擎内部只信任完整的 Task。
  */
 export const upgradeTask = (t: Task): Task => ({
-  ...t, docs: t.docs ?? [], fixes: t.fixes ?? 0, scopeNotices: t.scopeNotices ?? {},
+  ...t,
+  docs: t.docs ?? [],
+  fixes: t.fixes ?? 0,
+  scopeNotices: t.scopeNotices ?? {},
   workflow: {
-    ...t.workflow, docs: t.workflow.docs ?? [],
+    ...t.workflow,
+    docs: t.workflow.docs ?? [],
     // 第 2 块之前的角色没有写入路径、工具组、技能和 MCP：按原来的行为补上（可写角色能写整个 worktree）。
-    roles: Object.fromEntries(Object.entries(t.workflow.roles).map(([k, r]) => [k, {
-      ...r, writePaths: r.writePaths ?? (r.write === 'worktree' ? ['**'] : []), denyTools: r.denyTools ?? [], skills: r.skills ?? [], mcp: r.mcp ?? [],
-    }])),
+    roles: Object.fromEntries(
+      Object.entries(t.workflow.roles).map(([k, r]) => [
+        k,
+        {
+          ...r,
+          writePaths: r.writePaths ?? (r.write === 'worktree' ? ['**'] : []),
+          denyTools: r.denyTools ?? [],
+          skills: r.skills ?? [],
+          mcp: r.mcp ?? [],
+        },
+      ]),
+    ),
     nodes: t.workflow.nodes.map(n => ({ ...n, checks: n.checks ?? [], ...(n.kind === 'agent' ? { maxFixes: n.maxFixes ?? DEFAULT_MAX_FIXES } : {}) })),
   },
   ...(t.dialog === undefined ? {} : { dialog: { ...t.dialog, review: t.dialog.review ?? (t.dialog.round > 1 ? 'reply' : 'first') } }),
@@ -126,14 +153,16 @@ export class Store {
 
   private append(id: string, at: number, actor: Actor, event: EventRow['event'], accepted: boolean, reason?: string): void {
     const next = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM events WHERE task_id = ?').get(id) as { n: number }).n
-    this.db.prepare('INSERT INTO events (task_id, seq, at, actor, event, accepted, reason) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    this.db
+      .prepare('INSERT INTO events (task_id, seq, at, actor, event, accepted, reason) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, next, at, actor, JSON.stringify(event), accepted ? 1 : 0, reason ?? null)
   }
 
   create(p: { id: string; request: string; context?: string; workflow: Workflow; workflowSource: string; docs?: ConventionDoc[]; meta: TaskMeta }, at: number, actor: Actor = 'cli'): Task {
     return this.tx(() => {
       const task = newTask({ id: p.id, request: p.request, workflow: p.workflow, docs: p.docs ?? [], ...(p.context === undefined ? {} : { context: p.context }) }, at)
-      this.db.prepare('INSERT INTO tasks (id, created_at, updated_at, status, request, workflow_name, workflow_source, meta, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      this.db
+        .prepare('INSERT INTO tasks (id, created_at, updated_at, status, request, workflow_name, workflow_source, meta, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(p.id, at, at, task.status, p.request, p.workflow.name, p.workflowSource, JSON.stringify(p.meta), JSON.stringify(task))
       this.append(p.id, at, actor, { kind: 'created' }, true)
       return task
@@ -172,8 +201,14 @@ export class Store {
   }
 
   list(): TaskSummary[] {
-    return (this.db.prepare('SELECT id, status, request, workflow_name, created_at, updated_at FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[])
-      .map(r => ({ id: String(r.id), status: r.status as TaskStatus, request: String(r.request), workflow: String(r.workflow_name), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) }))
+    return (this.db.prepare('SELECT id, status, request, workflow_name, created_at, updated_at FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[]).map(r => ({
+      id: String(r.id),
+      status: r.status as TaskStatus,
+      request: String(r.request),
+      workflow: String(r.workflow_name),
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at),
+    }))
   }
 
   /** 追加一次调用的 trace 事件（只追加）。 */
@@ -191,14 +226,22 @@ export class Store {
   }
 
   trace(id: string): TraceRow[] {
-    return (this.db.prepare('SELECT call_id, seq, event FROM trace WHERE task_id = ? ORDER BY call_id, seq').all(id) as Record<string, unknown>[])
-      .map(r => ({ call: String(r.call_id), seq: Number(r.seq), event: JSON.parse(String(r.event)) as TraceEvent }))
+    return (this.db.prepare('SELECT call_id, seq, event FROM trace WHERE task_id = ? ORDER BY call_id, seq').all(id) as Record<string, unknown>[]).map(r => ({
+      call: String(r.call_id),
+      seq: Number(r.seq),
+      event: JSON.parse(String(r.event)) as TraceEvent,
+    }))
   }
 
   events(id: string): EventRow[] {
-    return (this.db.prepare('SELECT seq, at, actor, event, accepted, reason FROM events WHERE task_id = ? ORDER BY seq').all(id) as Record<string, unknown>[])
-      .map(r => ({ seq: Number(r.seq), at: Number(r.at), actor: r.actor as Actor, event: JSON.parse(String(r.event)), accepted: r.accepted === 1,
-        ...(r.reason === null ? {} : { reason: String(r.reason) }) }))
+    return (this.db.prepare('SELECT seq, at, actor, event, accepted, reason FROM events WHERE task_id = ? ORDER BY seq').all(id) as Record<string, unknown>[]).map(r => ({
+      seq: Number(r.seq),
+      at: Number(r.at),
+      actor: r.actor as Actor,
+      event: JSON.parse(String(r.event)),
+      accepted: r.accepted === 1,
+      ...(r.reason === null ? {} : { reason: String(r.reason) }),
+    }))
   }
 
   /** 团队约定（工作流和文档）：每次保存追加一个新版本，旧版本不改不删。最新版本就是正在使用的版本。 */
@@ -208,8 +251,7 @@ export class Store {
 
   private insertConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): ConventionRow {
     const version = (this.db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS n FROM conventions WHERE kind = ? AND name = ?').get(p.kind, p.name) as { n: number }).n
-    this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(p.kind, p.name, version, p.content, p.note, p.actor, at)
+    this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(p.kind, p.name, version, p.content, p.note, p.actor, at)
     return { ...p, version, createdAt: at }
   }
 
@@ -222,8 +264,20 @@ export class Store {
   /** 改进提案：写入提案和第一条「待审批」状态。提案本身不改任何约定。 */
   addProposal(p: ProposalInput, at: number): ProposalRow {
     return this.tx(() => {
-      const r = this.db.prepare('INSERT INTO proposals (created_at, target_kind, target_name, base_version, content, rationale, evidence, scope, generator, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(at, p.target.kind, p.target.name, p.baseVersion, p.content, p.rationale, JSON.stringify(p.evidence), JSON.stringify(p.scope), p.generator === undefined ? null : JSON.stringify(p.generator), p.actor)
+      const r = this.db
+        .prepare('INSERT INTO proposals (created_at, target_kind, target_name, base_version, content, rationale, evidence, scope, generator, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(
+          at,
+          p.target.kind,
+          p.target.name,
+          p.baseVersion,
+          p.content,
+          p.rationale,
+          JSON.stringify(p.evidence),
+          JSON.stringify(p.scope),
+          p.generator === undefined ? null : JSON.stringify(p.generator),
+          p.actor,
+        )
       const id = Number(r.lastInsertRowid)
       this.appendProposalEvent(id, { at, status: 'pending', actor: p.actor })
       return this.proposalRow(id)!
@@ -232,7 +286,8 @@ export class Store {
 
   private appendProposalEvent(id: number, e: Omit<ProposalEvent, 'seq'>): void {
     const seq = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM proposal_events WHERE proposal_id = ?').get(id) as { n: number }).n
-    this.db.prepare('INSERT INTO proposal_events (proposal_id, seq, at, status, actor, reason, version) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    this.db
+      .prepare('INSERT INTO proposal_events (proposal_id, seq, at, status, actor, reason, version) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, seq, e.at, e.status, e.actor, e.reason ?? null, e.version ?? null)
   }
 
@@ -240,14 +295,26 @@ export class Store {
     const r = this.db.prepare('SELECT * FROM proposals WHERE id = ?').get(id) as Record<string, unknown> | undefined
     if (r === undefined) return undefined
     const events = (this.db.prepare('SELECT * FROM proposal_events WHERE proposal_id = ? ORDER BY seq').all(id) as Record<string, unknown>[]).map(e => ({
-      seq: Number(e.seq), at: Number(e.at), status: e.status as ProposalStatus, actor: String(e.actor),
-      ...(e.reason === null ? {} : { reason: String(e.reason) }), ...(e.version === null ? {} : { version: Number(e.version) }),
+      seq: Number(e.seq),
+      at: Number(e.at),
+      status: e.status as ProposalStatus,
+      actor: String(e.actor),
+      ...(e.reason === null ? {} : { reason: String(e.reason) }),
+      ...(e.version === null ? {} : { version: Number(e.version) }),
     }))
     return {
-      id, createdAt: Number(r.created_at), target: { kind: r.target_kind as ConventionKind, name: String(r.target_name) }, baseVersion: Number(r.base_version),
-      content: String(r.content), rationale: String(r.rationale), evidence: JSON.parse(String(r.evidence)) as string[],
-      scope: JSON.parse(String(r.scope)) as ProposalRow['scope'], ...(r.generator === null ? {} : { generator: JSON.parse(String(r.generator)) as ProposalRow['generator'] }),
-      actor: String(r.actor), status: events.at(-1)!.status, events,
+      id,
+      createdAt: Number(r.created_at),
+      target: { kind: r.target_kind as ConventionKind, name: String(r.target_name) },
+      baseVersion: Number(r.base_version),
+      content: String(r.content),
+      rationale: String(r.rationale),
+      evidence: JSON.parse(String(r.evidence)) as string[],
+      scope: JSON.parse(String(r.scope)) as ProposalRow['scope'],
+      ...(r.generator === null ? {} : { generator: JSON.parse(String(r.generator)) as ProposalRow['generator'] }),
+      actor: String(r.actor),
+      status: events.at(-1)!.status,
+      events,
     }
   }
 
@@ -265,7 +332,12 @@ export class Store {
    * 批准：目标约定的最新版本不是提案基于的版本时记「已过期」并拒绝批准；再用 validate 校验内容（在同一个事务里，
    * 期间别的进程改不了它引用的约定），不合格就不批准、保持待审批；都通过才写入约定的新版本，记「已批准」和新版本号。
    */
-  decideProposal(id: number, d: { status: 'approved'; note: (row: ProposalRow) => string; reason?: string; validate: (row: ProposalRow) => string[] } | { status: 'rejected'; reason: string }, at: number, actor: string): Decision {
+  decideProposal(
+    id: number,
+    d: { status: 'approved'; note: (row: ProposalRow) => string; reason?: string; validate: (row: ProposalRow) => string[] } | { status: 'rejected'; reason: string },
+    at: number,
+    actor: string,
+  ): Decision {
     return this.tx((): Decision => {
       const row = this.proposalRow(id)
       if (row === undefined) return { ok: false, reason: 'missing' }
@@ -291,17 +363,18 @@ export class Store {
   seedConvention(p: { kind: ConventionKind; name: string; content: string; note: string; actor: string }, at: number): boolean {
     return this.tx(() => {
       if (this.db.prepare('SELECT 1 FROM conventions WHERE kind = ? AND name = ? LIMIT 1').get(p.kind, p.name) !== undefined) return false
-      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)')
-        .run(p.kind, p.name, p.content, p.note, p.actor, at)
+      this.db.prepare('INSERT INTO conventions (kind, name, version, content, note, actor, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)').run(p.kind, p.name, p.content, p.note, p.actor, at)
       return true
     })
   }
 
   /** 某个约定的指定版本；不给版本就是最新版本。 */
   convention(kind: ConventionKind, name: string, version?: number): ConventionRow | undefined {
-    const row = (version === undefined
-      ? this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? ORDER BY version DESC LIMIT 1').get(kind, name)
-      : this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? AND version = ?').get(kind, name, version)) as Record<string, unknown> | undefined
+    const row = (
+      version === undefined
+        ? this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? ORDER BY version DESC LIMIT 1').get(kind, name)
+        : this.db.prepare('SELECT * FROM conventions WHERE kind = ? AND name = ? AND version = ?').get(kind, name, version)
+    ) as Record<string, unknown> | undefined
     return row === undefined ? undefined : conventionRow(row)
   }
 
@@ -312,12 +385,18 @@ export class Store {
 
   /** 每个约定一行：最新版本号和更新时间。 */
   conventions(kind: ConventionKind): ConventionSummary[] {
-    return (this.db.prepare('SELECT name, MAX(version) AS version, MAX(created_at) AS updated_at FROM conventions WHERE kind = ? GROUP BY name ORDER BY name').all(kind) as Record<string, unknown>[])
-      .map(r => ({ kind, name: String(r.name), version: Number(r.version), updatedAt: Number(r.updated_at) }))
+    return (
+      this.db.prepare('SELECT name, MAX(version) AS version, MAX(created_at) AS updated_at FROM conventions WHERE kind = ? GROUP BY name ORDER BY name').all(kind) as Record<string, unknown>[]
+    ).map(r => ({ kind, name: String(r.name), version: Number(r.version), updatedAt: Number(r.updated_at) }))
   }
 }
 
 const conventionRow = (r: Record<string, unknown>): ConventionRow => ({
-  kind: r.kind as ConventionKind, name: String(r.name), version: Number(r.version), content: String(r.content),
-  note: String(r.note), actor: String(r.actor), createdAt: Number(r.created_at),
+  kind: r.kind as ConventionKind,
+  name: String(r.name),
+  version: Number(r.version),
+  content: String(r.content),
+  note: String(r.note),
+  actor: String(r.actor),
+  createdAt: Number(r.created_at),
 })

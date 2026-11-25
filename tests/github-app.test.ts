@@ -39,7 +39,13 @@ const fakeGitHub = (o: { installed?: boolean; failMint?: number } = {}) => {
 }
 
 const make = (gh: ReturnType<typeof fakeGitHub>, now?: () => number) =>
-  new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 42, privateKey: pem }), credentialName: 'github-app.github.com', fetch: gh.fetch, ...(now === undefined ? {} : { now }) })
+  new GitHubApp({
+    apiUrl: 'https://api.github.com',
+    credential: appCredential.parse({ appId: 42, privateKey: pem }),
+    credentialName: 'github-app.github.com',
+    fetch: gh.fetch,
+    ...(now === undefined ? {} : { now }),
+  })
 
 test('同时要令牌：只换一次；有效期内复用；离到期不到 5 分钟时换新的', async () => {
   const gh = fakeGitHub()
@@ -65,10 +71,21 @@ test('换令牌失败不留在缓存里：下次重新换；没装到仓库时�
 
 test('凭据里的私钥不是 PEM、读不出来：报中文原因', async () => {
   assert.equal(appCredential.safeParse({ appId: 1, privateKey: 'nope' }).success, false)
-  assert.throws(() => new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 1, privateKey: '-----BEGIN PRIVATE KEY-----\nxx\n-----END PRIVATE KEY-----' }), credentialName: 'github-app.github.com' }), /凭据「github-app\.github\.com」里的私钥读不出来/)
+  assert.throws(
+    () =>
+      new GitHubApp({
+        apiUrl: 'https://api.github.com',
+        credential: appCredential.parse({ appId: 1, privateKey: '-----BEGIN PRIVATE KEY-----\nxx\n-----END PRIVATE KEY-----' }),
+        credentialName: 'github-app.github.com',
+      }),
+    /凭据「github-app\.github\.com」里的私钥读不出来/,
+  )
 })
 
 test('私钥不是 RSA：报中文原因（签出来的不是 RS256）', () => {
   const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
-  assert.throws(() => new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 1, privateKey: ec }), credentialName: 'github-app.github.com' }), /私钥是 ec 类型，GitHub App 的私钥应该是 RSA/)
+  assert.throws(
+    () => new GitHubApp({ apiUrl: 'https://api.github.com', credential: appCredential.parse({ appId: 1, privateKey: ec }), credentialName: 'github-app.github.com' }),
+    /私钥是 ec 类型，GitHub App 的私钥应该是 RSA/,
+  )
 })

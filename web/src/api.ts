@@ -3,20 +3,53 @@ import type { Insights } from '../../src/engine/insights.ts'
 import type { TaskSummary } from '../../src/store/types.ts'
 import type { ConventionKind, ConventionRow } from '../../src/store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, ConventionsResponse, CreateResponse, DecideResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo,
-  FileChange, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
-  CredentialsResponse, DeleteCredentialResponse, SaveCredentialRequest, SaveCredentialResponse,
-  ForgeAppsResponse, RegisterAppRequest, RegisterAppResponse,
+  ActionResponse,
+  AnswerResponse,
+  ConventionDetail,
+  ConventionsResponse,
+  CreateResponse,
+  DecideResponse,
+  FieldError,
+  GenerateResponse,
+  ImprovementComparison,
+  ProposalDetail,
+  ProposalInfo,
+  FileChange,
+  FileDiff,
+  SaveConventionResponse,
+  TaskChanges,
+  TaskDetail,
+  WorkflowInfo,
+  CredentialsResponse,
+  DeleteCredentialResponse,
+  SaveCredentialRequest,
+  SaveCredentialResponse,
+  ForgeAppsResponse,
+  RegisterAppRequest,
+  RegisterAppResponse,
 } from '../../src/web/types.ts'
 import type { CredentialKind } from '../../src/credentials/types.ts'
 
 export type { Insights }
-export type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, TaskDetail, TaskSummary, WorkflowInfo }
+export type {
+  ConventionDetail,
+  ConventionKind,
+  ConventionRow,
+  ConventionsResponse,
+  FieldError,
+  GenerateResponse,
+  ImprovementComparison,
+  ProposalDetail,
+  ProposalInfo,
+  TaskDetail,
+  TaskSummary,
+  WorkflowInfo,
+}
 export type { FileChange, FileDiff, TaskChanges }
 export type { CredentialKind, CredentialsResponse, ForgeAppsResponse }
 export type { Span, SpanKind, SpanStatus } from '../../src/trace/types.ts'
 
-const get = async <T,>(path: string): Promise<T> => {
+const get = async <T>(path: string): Promise<T> => {
   const res = await fetch(path, { cache: 'no-store' })
   const body = await res.json()
   if (!res.ok) throw new Error(body.error ?? `请求失败：${res.status}`)
@@ -26,8 +59,7 @@ const get = async <T,>(path: string): Promise<T> => {
 export const listTasks = () => get<TaskSummary[]>('/api/tasks')
 export const getTask = (id: string) => get<TaskDetail>(`/api/tasks/${encodeURIComponent(id)}`)
 export const getChanges = (id: string) => get<TaskChanges>(`/api/tasks/${encodeURIComponent(id)}/changes`)
-export const getFileDiff = (id: string, head: string, path: string) =>
-  get<FileDiff>(`/api/tasks/${encodeURIComponent(id)}/changes/diff?${new URLSearchParams({ head, path })}`)
+export const getFileDiff = (id: string, head: string, path: string) => get<FileDiff>(`/api/tasks/${encodeURIComponent(id)}/changes/diff?${new URLSearchParams({ head, path })}`)
 export const getInsights = () => get<Insights>('/api/insights')
 
 /** 写接口统一走这里：JSON 请求体，浏览器自动带上同源 Origin。网络或服务端错误都变成 { ok: false, error }。 */
@@ -42,16 +74,13 @@ const post = async <T extends { ok: boolean }>(path: string, body: unknown): Pro
 
 export const listWorkflows = () => get<WorkflowInfo[]>('/api/workflows')
 export const createTask = (input: { repo: string; workflow: string; request: string }) => post<CreateResponse>('/api/tasks', input)
-export const answerQuestion = (id: string, questionId: string, text: string) =>
-  post<AnswerResponse>(`/api/tasks/${encodeURIComponent(id)}/answer`, { questionId, text })
-export const taskAction = (id: string, action: 'resume' | 'retry' | 'abort') =>
-  post<ActionResponse>(`/api/tasks/${encodeURIComponent(id)}/${action}`, {})
+export const answerQuestion = (id: string, questionId: string, text: string) => post<AnswerResponse>(`/api/tasks/${encodeURIComponent(id)}/answer`, { questionId, text })
+export const taskAction = (id: string, action: 'resume' | 'retry' | 'abort') => post<ActionResponse>(`/api/tasks/${encodeURIComponent(id)}/${action}`, {})
 
 export const listConventions = () => get<ConventionsResponse>('/api/conventions')
 const conventionPath = (kind: ConventionKind, name: string) => `/api/conventions/${kind}/${encodeURIComponent(name)}`
 export const getConvention = (kind: ConventionKind, name: string) => get<ConventionDetail>(conventionPath(kind, name))
-export const saveConvention = (kind: ConventionKind, name: string, body: { content: string; note?: string; validateOnly?: boolean }) =>
-  post<SaveConventionResponse>(conventionPath(kind, name), body)
+export const saveConvention = (kind: ConventionKind, name: string, body: { content: string; note?: string; validateOnly?: boolean }) => post<SaveConventionResponse>(conventionPath(kind, name), body)
 
 export const listProposals = () => get<ProposalInfo[]>('/api/improve/proposals')
 export const getProposal = (id: number) => get<ProposalDetail>(`/api/improve/proposals/${id}`)

@@ -40,19 +40,34 @@ const parseRole = (key: string, raw: unknown, lookup: TemplateLookup): { role?: 
   return errors.length > 0 ? { errors } : { role: { id: key as RoleId, ...toAgentConfig(r.data) }, errors: [] }
 }
 
-const deliverable = z.object({
-  path: relPath,
-  sections: names.default([]),
-}, { error: '必须是对象，例如 { path: docs/spec.md, sections: [背景, 验收标准] }' }).strict()
+const deliverable = z
+  .object(
+    {
+      path: relPath,
+      sections: names.default([]),
+    },
+    { error: '必须是对象，例如 { path: docs/spec.md, sections: [背景, 验收标准] }' },
+  )
+  .strict()
 
-const runCheck = z.object({
-  run: z.array(text, { error: '必须是命令和参数组成的列表，例如 [npm, test]' }).min(1, { error: '命令不能为空' }),
-  timeoutSec: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 秒' }).max(3600, { error: '最多 3600 秒' }).default(DEFAULT_CHECK_TIMEOUT_SEC),
-}, { error: '必须是对象，例如 { run: [npm, test] }' }).strict()
+const runCheck = z
+  .object(
+    {
+      run: z.array(text, { error: '必须是命令和参数组成的列表，例如 [npm, test]' }).min(1, { error: '命令不能为空' }),
+      timeoutSec: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 秒' }).max(3600, { error: '最多 3600 秒' }).default(DEFAULT_CHECK_TIMEOUT_SEC),
+    },
+    { error: '必须是对象，例如 { run: [npm, test] }' },
+  )
+  .strict()
 
-const platformCheck = z.object({
-  platform: z.enum(PLATFORM_ACTIONS, { error: `只能是 ${PLATFORM_ACTIONS.join('、')}` }),
-}, { error: '必须是对象，例如 { platform: push }' }).strict()
+const platformCheck = z
+  .object(
+    {
+      platform: z.enum(PLATFORM_ACTIONS, { error: `只能是 ${PLATFORM_ACTIONS.join('、')}` }),
+    },
+    { error: '必须是对象，例如 { platform: push }' },
+  )
+  .strict()
 
 const checkFields = {
   deliverables: z.array(deliverable, { error: '必须是列表' }).default([]),
@@ -61,30 +76,45 @@ const checkFields = {
 
 const common = { id, task: text, inputs: z.array(id, { error: '必须是列表' }).default([]) }
 
-const nodeSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('agent'), ...common, role: id, ...checkFields,
-    maxFixes: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(0, { error: '不能小于 0' }).max(10, { error: '最多 10 次' }).default(DEFAULT_MAX_FIXES),
-  }).strict(),
-  z.object({
-    kind: z.literal('dialog'),
-    ...common,
-    role: id.optional(),
-    ...checkFields,
-    with: id,
-    escalate: id.optional(),
-    maxRounds: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 轮' }).max(20, { error: '最多 20 轮' }).default(DEFAULT_MAX_ROUNDS),
-  }).strict(),
-], { error: 'kind 只能是 agent 或 dialog' })
+const nodeSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z
+      .object({
+        kind: z.literal('agent'),
+        ...common,
+        role: id,
+        ...checkFields,
+        maxFixes: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(0, { error: '不能小于 0' }).max(10, { error: '最多 10 次' }).default(DEFAULT_MAX_FIXES),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('dialog'),
+        ...common,
+        role: id.optional(),
+        ...checkFields,
+        with: id,
+        escalate: id.optional(),
+        maxRounds: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 轮' }).max(20, { error: '最多 20 轮' }).default(DEFAULT_MAX_ROUNDS),
+      })
+      .strict(),
+  ],
+  { error: 'kind 只能是 agent 或 dialog' },
+)
 
-const workflowSchema = z.object({
-  name: id,
-  description: z.string().optional(),
-  docs: z.array(text, { error: '必须是约定文档名组成的列表' }).default([]),
-  roles: z.record(id, z.unknown(), { error: '必须是对象' }),
-  nodes: z.array(nodeSchema, { error: '必须是列表' }).min(1, { error: '至少要有一个节点' }),
-}, { error: '工作流必须是对象' }).strict()
-
+const workflowSchema = z
+  .object(
+    {
+      name: id,
+      description: z.string().optional(),
+      docs: z.array(text, { error: '必须是约定文档名组成的列表' }).default([]),
+      roles: z.record(id, z.unknown(), { error: '必须是对象' }),
+      nodes: z.array(nodeSchema, { error: '必须是列表' }).min(1, { error: '至少要有一个节点' }),
+    },
+    { error: '工作流必须是对象' },
+  )
+  .strict()
 
 /** 结构正确之后的引用检查：角色存在、只引用前面的节点、对话和重新确认的对象是 agent 节点。 */
 const semantic = (wf: Workflow): WorkflowError[] => {
@@ -96,7 +126,13 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     if (n.role !== undefined && wf.roles[n.role] === undefined) errors.push({ path: at('role'), message: `没有名为「${n.role}」的角色` })
     // 交付物由写文件的那个角色产出：agent 节点是它自己，对话节点是被评审的节点。交付物在它的可写范围外时，
     // 写了会被撤销、检查永远过不了，所以在这里就报错，不留到任务里卡住。
-    const writer = n.kind === 'agent' ? n.role : (() => { const t = seen.get(n.with); return t?.kind === 'agent' ? t.role : undefined })()
+    const writer =
+      n.kind === 'agent'
+        ? n.role
+        : (() => {
+            const t = seen.get(n.with)
+            return t?.kind === 'agent' ? t.role : undefined
+          })()
     const writerRole = writer === undefined ? undefined : wf.roles[writer]
     if (writerRole?.write === 'none' && n.checks.some(c => c.kind === 'file')) {
       errors.push({ path: at('deliverables'), message: `角色「${writer}」只读（write: none），写不出交付物文件；把它的 write 改成 worktree` })
@@ -104,7 +140,10 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     if (writerRole?.write === 'worktree') {
       n.checks.forEach(c => {
         if (c.kind === 'file' && !matchesAny(writerRole.writePaths, c.path)) {
-          errors.push({ path: at('deliverables'), message: `交付物「${c.path}」不在角色「${writer}」的可写范围（${writerRole.writePaths.join('、')}）内，写了会被撤销；把它加进 writePaths，或换一个范围内的路径` })
+          errors.push({
+            path: at('deliverables'),
+            message: `交付物「${c.path}」不在角色「${writer}」的可写范围（${writerRole.writePaths.join('、')}）内，写了会被撤销；把它加进 writePaths，或换一个范围内的路径`,
+          })
         }
       })
     }
@@ -113,7 +152,10 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     // 所以交付节点的 maxRounds 越小，推出去的未评审改动越少。
     if (n.checks.some(c => c.kind === 'platform')) {
       if (n.kind !== 'dialog' || n.role !== undefined) {
-        errors.push({ path: at('checks'), message: '平台动作（platform）只能放在没有评审角色的对话节点里：评审通过之后单独加一个交付节点，例如 { id: deliver, kind: dialog, with: build, checks: [{ platform: push }] }' })
+        errors.push({
+          path: at('checks'),
+          message: '平台动作（platform）只能放在没有评审角色的对话节点里：评审通过之后单独加一个交付节点，例如 { id: deliver, kind: dialog, with: build, checks: [{ platform: push }] }',
+        })
       } else if (![...seen.values()].some(p => p.kind === 'dialog' && p.role !== undefined)) {
         errors.push({ path: at('checks'), message: '平台动作（platform）所在的交付节点前面要有带评审角色的对话节点：先评审，通过了再推送' })
       }
@@ -153,10 +195,7 @@ export const parseWorkflow = (source: string, lookup: TemplateLookup = () => und
   const rawRoles = (y.value as { roles?: unknown } | null)?.roles
   const roleEntries = typeof rawRoles === 'object' && rawRoles !== null && !Array.isArray(rawRoles) ? Object.entries(rawRoles) : []
   const roleResults = roleEntries.map(([k, r]) => [k, parseRole(k, r, lookup)] as const)
-  const structural = [
-    ...(parsed.success ? [] : parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) }))),
-    ...roleResults.flatMap(([, r]) => r.errors),
-  ]
+  const structural = [...(parsed.success ? [] : parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) }))), ...roleResults.flatMap(([, r]) => r.errors)]
   if (!parsed.success || structural.length > 0) return { ok: false, errors: structural }
   const p = parsed.data
   const workflow: Workflow = {
@@ -170,8 +209,14 @@ export const parseWorkflow = (source: string, lookup: TemplateLookup = () => und
         ...deliverables.map(d => ({ kind: 'file' as const, path: d.path, sections: d.sections })),
         ...runs.map(r => ('platform' in r ? { kind: 'platform' as const, action: r.platform } : { kind: 'run' as const, run: r.run, timeoutSec: r.timeoutSec })),
       ]
-      return { ...rest, checks, id: n.id as NodeId, inputs: n.inputs as NodeId[], ...(n.role === undefined ? {} : { role: n.role as RoleId }),
-        ...(n.kind === 'dialog' ? { with: n.with as NodeId, ...(n.escalate === undefined ? {} : { escalate: n.escalate as NodeId }) } : {}) }
+      return {
+        ...rest,
+        checks,
+        id: n.id as NodeId,
+        inputs: n.inputs as NodeId[],
+        ...(n.role === undefined ? {} : { role: n.role as RoleId }),
+        ...(n.kind === 'dialog' ? { with: n.with as NodeId, ...(n.escalate === undefined ? {} : { escalate: n.escalate as NodeId }) } : {}),
+      }
     }) as WorkflowNode[],
   }
   const errors = semantic(workflow)

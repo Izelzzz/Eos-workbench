@@ -4,7 +4,17 @@ import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeCheck, describeFailures } from './checks.ts'
 import {
-  checksStuckQuestion, critiquePrompt, fixInstructPrompt, fixPrompt, instructPrompt, producePrompt, reapplyPrompt, reconfirmPrompt, respondPrompt, scopeNotice, stuckQuestion,
+  checksStuckQuestion,
+  critiquePrompt,
+  fixInstructPrompt,
+  fixPrompt,
+  instructPrompt,
+  producePrompt,
+  reapplyPrompt,
+  reconfirmPrompt,
+  respondPrompt,
+  scopeNotice,
+  stuckQuestion,
 } from './prompts.ts'
 import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, Question, ReviewKind, Step, Task } from './types.ts'
 import { isCheck, isTerminal } from './types.ts'
@@ -41,7 +51,10 @@ const issue = (task: Task, c: Omit<Call, 'id'>): Task => {
 }
 
 const runChecks = (task: Task, n: WorkflowNode): Task => ({
-  ...task, status: 'running', pending: { id: nextId(task), node: n.id, purpose: 'check', checks: n.checks }, nextCall: task.nextCall + 1,
+  ...task,
+  status: 'running',
+  pending: { id: nextId(task), node: n.id, purpose: 'check', checks: n.checks },
+  nextCall: task.nextCall + 1,
 })
 
 const current = (task: Task): WorkflowNode | undefined => task.workflow.nodes[task.cursor]
@@ -87,8 +100,7 @@ const afterChecks = (task: Task, d: DialogNode, at: number): Task => {
   return critique(task, d, critiquePrompt(task, d, review))
 }
 
-const passRound = (task: Task, d: DialogNode, at: number): Task =>
-  advance(append(task, { type: 'note', at, node: d.id, text: `第 ${task.dialog!.round} 轮通过` }), at)
+const passRound = (task: Task, d: DialogNode, at: number): Task => advance(append(task, { type: 'note', at, node: d.id, text: `第 ${task.dialog!.round} 轮通过` }), at)
 
 /** agent 节点的产出（或补齐）之后：有检查就跑检查，没有就进入下一个节点。 */
 const afterWork = (task: Task, n: AgentNode, at: number): Task => (n.checks.length > 0 ? runChecks(task, n) : advance(task, at))
@@ -132,8 +144,12 @@ const platformFailed = (task: Task, n: WorkflowNode, results: CheckResult[], at:
   if (!results.every(r => r.passed || r.check.kind === 'platform')) return undefined
   const failed = results.filter(r => !r.passed)
   if (failed.length === 0) return undefined
-  const failure = explain({ where: `「${n.id}」的${failed.map(r => describeCheck(r.check)).join('、')}`, error: failed.map(r => r.detail).join('\n'), task: task.id,
-    fix: '这是平台替任务做的动作，agent 改不了：按原因处理远程仓库或凭据' })
+  const failure = explain({
+    where: `「${n.id}」的${failed.map(r => describeCheck(r.check)).join('、')}`,
+    error: failed.map(r => r.detail).join('\n'),
+    task: task.id,
+    fix: '这是平台替任务做的动作，agent 改不了：按原因处理远程仓库或凭据',
+  })
   return append({ ...runChecks(task, n), status: 'failed', failure }, { type: 'note', at, node: n.id, text: '平台动作没有完成，任务暂停，等人工处理后重试' })
 }
 
@@ -159,8 +175,19 @@ const reformat = (task: Task, d: DialogNode, at: number, again: (t: Task) => Tas
   const retries = task.dialog!.formatRetries
   const next = again(withDialog(task, { formatRetries: retries >= MAX_FORMAT_RETRIES ? 0 : retries + 1 }))
   if (retries < MAX_FORMAT_RETRIES) return next
-  return append({ ...next, status: 'failed', failure: explain({ where: `「${d.id}」的回复`, error: `连续 ${retries + 1} 次无法解析成要求的 JSON 格式`, task: task.id,
-    fix: '模型偶尔会这样：直接重试；反复出现时在日志里看它的原始回复，必要时调整这个角色的提示词' }) }, { type: 'note', at, node: d.id, text: '回复格式无法解析，任务暂停，等人工重试' })
+  return append(
+    {
+      ...next,
+      status: 'failed',
+      failure: explain({
+        where: `「${d.id}」的回复`,
+        error: `连续 ${retries + 1} 次无法解析成要求的 JSON 格式`,
+        task: task.id,
+        fix: '模型偶尔会这样：直接重试；反复出现时在日志里看它的原始回复，必要时调整这个角色的提示词',
+      }),
+    },
+    { type: 'note', at, node: d.id, text: '回复格式无法解析，任务暂停，等人工重试' },
+  )
 }
 
 /** 一轮评审没过：还有轮次就交回被评审方；用完了先请上游重新确认（一次），再问用户。 */
@@ -180,8 +207,10 @@ const notPassed = (task: Task, d: DialogNode, critique: string, at: number): Tas
  * 一个会话最多只有一条待通知的记录：要再收到一次回复，就得先往这个会话发一次调用，而那次调用会把它带走。
  */
 const noteReverted = (task: Task, call: Call, reverted: string[], at: number): Task =>
-  append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },
-    { type: 'note', at, node: call.node, text: `${REVERTED_NOTE_PREFIX}${reverted.length} 处越界改动：${reverted.join('、')}` })
+  append(
+    { ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },
+    { type: 'note', at, node: call.node, text: `${REVERTED_NOTE_PREFIX}${reverted.length} 处越界改动：${reverted.join('、')}` },
+  )
 
 const onReply = (task: Task, call: Call, text: string, at: number): Task => {
   switch (call.purpose) {
@@ -235,9 +264,7 @@ const onLoopAnswer = (task: Task, text: string): Task => {
   const n = current(task)
   if (n?.kind === 'agent') return issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })
   const d = dialogNode(task)
-  return d.escalate !== undefined
-    ? toUpstream(task, d, reconfirmPrompt(task, d, { instruction: text }))
-    : toTarget(task, d, 'instruct', instructPrompt(text))
+  return d.escalate !== undefined ? toUpstream(task, d, reconfirmPrompt(task, d, { instruction: text })) : toTarget(task, d, 'instruct', instructPrompt(text))
 }
 
 export const reduce = (task: Task, event: Event, at: number): Step => {
@@ -249,9 +276,21 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       const reverted = event.reverted ?? []
       const recorded = append(
         { ...task, pending: undefined, question: undefined, status: 'running', sessions: { ...task.sessions, [call.session]: event.sessionId } },
-        { type: 'call', at, call: call.id, node: call.node, role: call.role, purpose: call.purpose, ...(task.dialog === undefined ? {} : { round: task.dialog.round }),
-          prompt: call.prompt, reply: event.text, usage: event.usage, ms: event.ms, ...(event.model === undefined ? {} : { model: event.model }),
-          ...(reverted.length === 0 ? {} : { reverted }) },
+        {
+          type: 'call',
+          at,
+          call: call.id,
+          node: call.node,
+          role: call.role,
+          purpose: call.purpose,
+          ...(task.dialog === undefined ? {} : { round: task.dialog.round }),
+          prompt: call.prompt,
+          reply: event.text,
+          usage: event.usage,
+          ms: event.ms,
+          ...(event.model === undefined ? {} : { model: event.model }),
+          ...(reverted.length === 0 ? {} : { reverted }),
+        },
       )
       return ok(onReply(reverted.length === 0 ? recorded : noteReverted(recorded, call, reverted, at), call, event.text, at))
     }
@@ -260,14 +299,18 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       const run = task.pending
       if (run === undefined || !isCheck(run) || run.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次检查的结果')
       if (event.results.length !== run.checks.length) return ignore(task, `检查结果有 ${event.results.length} 条，应该是 ${run.checks.length} 条`)
-      const recorded = append({ ...task, pending: undefined, status: 'running' },
-        { type: 'check', at, call: run.id, node: run.node, ...(task.dialog === undefined ? {} : { round: task.dialog.round }), results: event.results, ms: event.ms })
+      const recorded = append(
+        { ...task, pending: undefined, status: 'running' },
+        { type: 'check', at, call: run.id, node: run.node, ...(task.dialog === undefined ? {} : { round: task.dialog.round }), results: event.results, ms: event.ms },
+      )
       return ok(onChecked(recorded, run, event.results, at))
     }
 
     case 'call_failed':
       if (task.pending?.id !== event.call || task.status === 'failed') return ignore(task, '不是当前这次调用')
-      return ok(append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${failureFacts(event.error)}` }))
+      return ok(
+        append({ ...task, status: 'failed', failure: event.error, question: undefined }, { type: 'note', at, node: task.pending.node, text: `${CALL_FAILED_PREFIX}${failureFacts(event.error)}` }),
+      )
 
     case 'asked': {
       if (task.pending === undefined || isCheck(task.pending) || task.pending.id !== event.call) return ignore(task, '不是当前这次调用')
@@ -300,7 +343,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['purpose'] }): string => {
   const n = wf.nodes.find(x => x.id === call.node)
   if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'fix' || call.purpose === 'critique') return call.node
-  return call.purpose === 'reconfirm' ? n.escalate ?? call.node : n.with
+  return call.purpose === 'reconfirm' ? (n.escalate ?? call.node) : n.with
 }
 
 /** 当前节点在流程中的位置说明，给命令行和日志用。 */
@@ -311,4 +354,3 @@ export const describePosition = (task: Task): string => {
   const d = task.dialog
   return `${n.id} 第 ${d.round}/${(n as DialogNode).maxRounds} 轮 · ${d.phase}${d.escalated ? ' · 已重新确认' : ''}`
 }
-

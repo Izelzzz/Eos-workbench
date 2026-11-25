@@ -44,7 +44,11 @@ const isKind = (k: string): k is CredentialKind => (CREDENTIAL_KINDS as readonly
 export class Credentials {
   private readonly db: DatabaseSync
 
-  constructor(path: string, private readonly key: MasterKey | undefined, private readonly now: () => number = Date.now) {
+  constructor(
+    path: string,
+    private readonly key: MasterKey | undefined,
+    private readonly now: () => number = Date.now,
+  ) {
     this.db = new DatabaseSync(path, { timeout: 10_000 })
     this.db.exec('PRAGMA journal_mode = WAL;')
     this.db.exec(SCHEMA)
@@ -65,12 +69,15 @@ export class Credentials {
   }
 
   list(owner: Owner): CredentialInfo[] {
-    return this.db.prepare('SELECT name, kind, key_id, created_at, updated_at FROM credentials WHERE owner = ? ORDER BY name').all(owner).flatMap(raw => {
-      const r = infoRow.safeParse(raw).data
-      // 格式不对的行也列出来（类型标成 unknown），让人能找到并删掉。
-      if (r === undefined) return [{ name: String((raw as { name?: unknown }).name), kind: 'unknown' as const, keyId: '', createdAt: 0, updatedAt: 0 }]
-      return [{ name: r.name, kind: isKind(r.kind) ? r.kind : 'unknown' as const, keyId: r.key_id, createdAt: r.created_at, updatedAt: r.updated_at }]
-    })
+    return this.db
+      .prepare('SELECT name, kind, key_id, created_at, updated_at FROM credentials WHERE owner = ? ORDER BY name')
+      .all(owner)
+      .flatMap(raw => {
+        const r = infoRow.safeParse(raw).data
+        // 格式不对的行也列出来（类型标成 unknown），让人能找到并删掉。
+        if (r === undefined) return [{ name: String((raw as { name?: unknown }).name), kind: 'unknown' as const, keyId: '', createdAt: 0, updatedAt: 0 }]
+        return [{ name: r.name, kind: isKind(r.kind) ? r.kind : ('unknown' as const), keyId: r.key_id, createdAt: r.created_at, updatedAt: r.updated_at }]
+      })
   }
 
   /** 新建或替换一条凭据。替换时保留创建时间。 */
@@ -86,8 +93,11 @@ export class Credentials {
     cipher.setAAD(aad(owner, name, kind))
     const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
     const at = this.now()
-    this.db.prepare(`INSERT INTO credentials (owner, name, kind, key_id, iv, tag, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (owner, name) DO UPDATE SET kind = excluded.kind, key_id = excluded.key_id, iv = excluded.iv, tag = excluded.tag, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at`)
+    this.db
+      .prepare(
+        `INSERT INTO credentials (owner, name, kind, key_id, iv, tag, ciphertext, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (owner, name) DO UPDATE SET kind = excluded.kind, key_id = excluded.key_id, iv = excluded.iv, tag = excluded.tag, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at`,
+      )
       .run(owner, name, kind, this.key.id, iv, cipher.getAuthTag(), ciphertext, at, at)
     return { ok: true }
   }
@@ -99,7 +109,8 @@ export class Credentials {
     const r = sealedRow.safeParse(raw).data
     if (r === undefined) return { kind: 'error', error: `凭据 ${name} 在数据库里的记录格式不对，请删掉重新录入` }
     if (!isKind(r.kind)) return { kind: 'error', error: `凭据 ${name} 的类型「${r.kind}」不认识，请删掉重新录入` }
-    if (r.key_id !== this.key.id) return { kind: 'error', error: `凭据 ${name} 是用另一个主密钥（指纹 ${r.key_id}）加密的，当前主密钥的指纹是 ${this.key.id}。换回原来的 ${MASTER_KEY_ENV}，或重新录入这条凭据` }
+    if (r.key_id !== this.key.id)
+      return { kind: 'error', error: `凭据 ${name} 是用另一个主密钥（指纹 ${r.key_id}）加密的，当前主密钥的指纹是 ${this.key.id}。换回原来的 ${MASTER_KEY_ENV}，或重新录入这条凭据` }
     try {
       const decipher = createDecipheriv('aes-256-gcm', this.key.key, r.iv, { authTagLength: 16 })
       decipher.setAAD(aad(owner, r.name, r.kind))

@@ -15,7 +15,9 @@ mkdirSync(out, { recursive: true })
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(scale) })
 const errors: string[] = []
-page.on('console', (m: any) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`) })
+page.on('console', (m: any) => {
+  if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`)
+})
 page.on('pageerror', (e: Error) => errors.push(`pageerror: ${e.message}`))
 
 await page.goto(`${base}/#/`)
@@ -44,7 +46,7 @@ const modelSections = await page.locator('.detail .block h3').allInnerTexts()
 await page.screenshot({ path: join(out, '4-model.png') })
 
 const question = page.locator('.trace-row.kind-question').first()
-if (await question.count() > 0) {
+if ((await question.count()) > 0) {
   await question.click()
   await page.screenshot({ path: join(out, '5-question.png') })
 }

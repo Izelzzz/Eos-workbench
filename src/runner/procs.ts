@@ -15,7 +15,11 @@ export type Procfs = {
 }
 
 const linux: Procfs = {
-  pids: () => readdirSync('/proc').filter(n => /^\d+$/.test(n)).map(Number).filter(p => p !== process.pid),
+  pids: () =>
+    readdirSync('/proc')
+      .filter(n => /^\d+$/.test(n))
+      .map(Number)
+      .filter(p => p !== process.pid),
   cwdOf: pid => {
     try {
       return readlinkSync(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, '')

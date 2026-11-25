@@ -3,8 +3,13 @@ import type { SignalKind, TargetKind } from '../engine/evidence.ts'
 import type { ProposalStatus } from '../store/types.ts'
 
 export const SIGNAL_NAMES: Record<SignalKind, string> = {
-  review_changes: '评审要求修改', check_failed: '检查没通过', format_retry: '回复格式无法解析', escalated: '打满轮次，请上游重新确认',
-  stuck: '走到尽头，问用户', scope_reverted: '越界改动被撤销', call_failed: '调用失败',
+  review_changes: '评审要求修改',
+  check_failed: '检查没通过',
+  format_retry: '回复格式无法解析',
+  escalated: '打满轮次，请上游重新确认',
+  stuck: '走到尽头，问用户',
+  scope_reverted: '越界改动被撤销',
+  call_failed: '调用失败',
 }
 export const TARGET_NAMES: Record<TargetKind, string> = { template: 'Agent 模板', skill: '技能', doc: '约定文档', workflow: '工作流' }
 export const KIND_NAMES = { workflow: '工作流', doc: '约定文档', template: 'Agent 模板', skill: '技能' } as const

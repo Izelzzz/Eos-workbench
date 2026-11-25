@@ -21,12 +21,26 @@ function FileDiffView(props: { id: string; head: string; file: FileChange }) {
     setError(undefined)
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const load = () => getFileDiff(props.id, props.head, f.path).then(
-      x => { if (!stopped) { setD(x); setError(undefined) } },
-      (e: Error) => { if (!stopped) { setError(e.message); timer = setTimeout(load, RETRY_MS) } },
-    )
+    const load = () =>
+      getFileDiff(props.id, props.head, f.path).then(
+        x => {
+          if (!stopped) {
+            setD(x)
+            setError(undefined)
+          }
+        },
+        (e: Error) => {
+          if (!stopped) {
+            setError(e.message)
+            timer = setTimeout(load, RETRY_MS)
+          }
+        },
+      )
     void load()
-    return () => { stopped = true; clearTimeout(timer) }
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+    }
   }, [props.id, props.head, f.path, f.binary])
   if (f.binary) return <p className="muted">二进制文件，不显示内容。</p>
   if (error) return <p className="error">{error}（自动重试中）</p>
@@ -35,9 +49,19 @@ function FileDiffView(props: { id: string; head: string; file: FileChange }) {
   return (
     <>
       <pre className="diff" aria-label={`${f.path} 的差异`}>
-        {d.diff.split('\n').map((l, i) => <div key={i} className={lineClass(l)}>{l === '' ? ' ' : l}</div>)}
+        {d.diff.split('\n').map((l, i) => (
+          <div key={i} className={lineClass(l)}>
+            {l === '' ? ' ' : l}
+          </div>
+        ))}
       </pre>
-      {d.truncated && <p className="muted">{'bytes' in d.truncated ? `差异超过 ${Math.round(d.truncated.bytes / 1024 / 1024)}MB，只显示前面一部分。` : `差异共 ${d.truncated.lines} 行、${d.truncated.chars} 个字符，太长，只显示前面一部分。`}</p>}
+      {d.truncated && (
+        <p className="muted">
+          {'bytes' in d.truncated
+            ? `差异超过 ${Math.round(d.truncated.bytes / 1024 / 1024)}MB，只显示前面一部分。`
+            : `差异共 ${d.truncated.lines} 行、${d.truncated.chars} 个字符，太长，只显示前面一部分。`}
+        </p>
+      )}
     </>
   )
 }
@@ -57,50 +81,86 @@ export function Changes(props: { id: string; version: number; pr?: { label: stri
   useEffect(() => {
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const load = () => getChanges(props.id).then(
-      d => { if (!stopped) { setData(d); setError(undefined) } },
-      (e: Error) => { if (!stopped) { setError(e.message); timer = setTimeout(load, RETRY_MS) } },
-    )
+    const load = () =>
+      getChanges(props.id).then(
+        d => {
+          if (!stopped) {
+            setData(d)
+            setError(undefined)
+          }
+        },
+        (e: Error) => {
+          if (!stopped) {
+            setError(e.message)
+            timer = setTimeout(load, RETRY_MS)
+          }
+        },
+      )
     void load()
-    return () => { stopped = true; clearTimeout(timer) }
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+    }
   }, [props.id, props.version])
-  const toggle = (path: string) => setOpen(prev => {
-    const next = new Set(prev)
-    if (next.has(path)) next.delete(path)
-    else next.add(path)
-    return next
-  })
+  const toggle = (path: string) =>
+    setOpen(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
   const add = data?.files.reduce((n, f) => n + f.add, 0) ?? 0
   const del = data?.files.reduce((n, f) => n + f.del, 0) ?? 0
   return (
     <section className="changes" aria-label="改动">
       <h2>改动</h2>
       {error && <p className="error">{error}（自动重试中）</p>}
-      {data === undefined ? (error ? null : <p className="muted">加载中…</p>)
-        : data.files.length === 0 ? <p className="muted">还没有提交的改动（相对基线 <span className="mono">{data.base.slice(0, 12)}</span>）。</p>
-        : (
-          <>
-            <p className="muted">
-              相对基线 <span className="mono">{data.base.slice(0, 12)}</span>：{data.files.length + data.omitted} 个文件，<span className="diff-add">+{add}</span> <span className="diff-del">-{del}</span>
-              {data.omitted > 0 && `（文件太多，只列出前 ${data.files.length} 个，增删行数也只算这些）`}
+      {data === undefined ? (
+        error ? null : (
+          <p className="muted">加载中…</p>
+        )
+      ) : data.files.length === 0 ? (
+        <p className="muted">
+          还没有提交的改动（相对基线 <span className="mono">{data.base.slice(0, 12)}</span>）。
+        </p>
+      ) : (
+        <>
+          <p className="muted">
+            相对基线 <span className="mono">{data.base.slice(0, 12)}</span>：{data.files.length + data.omitted} 个文件，<span className="diff-add">+{add}</span>{' '}
+            <span className="diff-del">-{del}</span>
+            {data.omitted > 0 && `（文件太多，只列出前 ${data.files.length} 个，增删行数也只算这些）`}
+          </p>
+          {props.pr !== undefined && (data.files.length + data.omitted > LARGE_FILES || add + del > LARGE_LINES) && (
+            <p className="notice">
+              改动较大，建议到{' '}
+              <a href={props.pr.url} target="_blank" rel="noreferrer">
+                {props.pr.label}
+              </a>{' '}
+              的页面看 diff（可以逐行评论）。
             </p>
-            {props.pr !== undefined && (data.files.length + data.omitted > LARGE_FILES || add + del > LARGE_LINES) && (
-              <p className="notice">改动较大，建议到 <a href={props.pr.url} target="_blank" rel="noreferrer">{props.pr.label}</a> 的页面看 diff（可以逐行评论）。</p>
-            )}
-            <ul className="change-files">
-              {data.files.map(f => (
-                <li key={f.path}>
-                  <button className="change-file" aria-expanded={open.has(f.path)} onClick={() => toggle(f.path)}>
-                    <span className={`change-status ${f.status}`}>{STATUS_NAME[f.status]}</span>
-                    <span className="mono change-path">{f.from === undefined ? f.path : `${f.from} → ${f.path}`}</span>
-                    <span className="change-count">{f.binary ? '二进制' : <><span className="diff-add">+{f.add}</span> <span className="diff-del">-{f.del}</span></>}</span>
-                  </button>
-                  {open.has(f.path) && <FileDiffView id={props.id} head={data.head} file={f} />}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+          )}
+          <ul className="change-files">
+            {data.files.map(f => (
+              <li key={f.path}>
+                <button className="change-file" aria-expanded={open.has(f.path)} onClick={() => toggle(f.path)}>
+                  <span className={`change-status ${f.status}`}>{STATUS_NAME[f.status]}</span>
+                  <span className="mono change-path">{f.from === undefined ? f.path : `${f.from} → ${f.path}`}</span>
+                  <span className="change-count">
+                    {f.binary ? (
+                      '二进制'
+                    ) : (
+                      <>
+                        <span className="diff-add">+{f.add}</span> <span className="diff-del">-{f.del}</span>
+                      </>
+                    )}
+                  </span>
+                </button>
+                {open.has(f.path) && <FileDiffView id={props.id} head={data.head} file={f} />}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   )
 }

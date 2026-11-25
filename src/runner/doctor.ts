@@ -45,7 +45,11 @@ export type Facts = {
   droppedProxies: string[]
 }
 
-const parts = (v: string): number[] => v.replace(/^v/, '').split('.').map(x => Number.parseInt(x, 10) || 0)
+const parts = (v: string): number[] =>
+  v
+    .replace(/^v/, '')
+    .split('.')
+    .map(x => Number.parseInt(x, 10) || 0)
 
 /** a ≥ b（按主、次、修订号比较）。 */
 export const atLeast = (a: string, b: string): boolean => {
@@ -57,10 +61,16 @@ export const atLeast = (a: string, b: string): boolean => {
 const nodeItem = (f: Facts): Item => {
   if (f.nodeRequired === undefined) return { name: 'Node', status: 'warn', detail: `${f.node}；读不出 Eos 的 package.json 里的 engines.node`, fix: '在仓库目录重新拉取代码，确认 package.json 完整' }
   const min = /^>=\s*(\d+(\.\d+){0,2})$/.exec(f.nodeRequired.trim())?.[1]
-  if (min === undefined) return { name: 'Node', status: 'warn', detail: `${f.node}；认不出 engines.node 的写法「${f.nodeRequired}」，没法判断版本够不够`, fix: '把 package.json 的 engines.node 写成 ">=主.次.修订" 的形式' }
+  if (min === undefined)
+    return { name: 'Node', status: 'warn', detail: `${f.node}；认不出 engines.node 的写法「${f.nodeRequired}」，没法判断版本够不够`, fix: '把 package.json 的 engines.node 写成 ">=主.次.修订" 的形式' }
   return atLeast(f.node, min)
     ? { name: 'Node', status: 'ok', detail: `${f.node}（要求 ${f.nodeRequired}）` }
-    : { name: 'Node', status: 'warn', detail: `${f.node}，低于 Eos 要求的 ${f.nodeRequired}（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题`, fix: `安装 Node ${min} 或更新的版本，再用它启动平台` }
+    : {
+        name: 'Node',
+        status: 'warn',
+        detail: `${f.node}，低于 Eos 要求的 ${f.nodeRequired}（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题`,
+        fix: `安装 Node ${min} 或更新的版本，再用它启动平台`,
+      }
 }
 
 /** 没设置只提示：现在还没有功能离不开凭据。设置了但格式不对一定是配错了，拦下。 */
@@ -79,12 +89,30 @@ const masterKeyItem = (f: Facts): Item =>
 const sandboxItem = (f: Facts): Item => {
   const name = '沙箱'
   switch (f.sandbox.backend) {
-    case 'bwrap': return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
-    case 'landlock': return f.sandbox.enforcement === 'full'
-      ? { name, status: 'ok', detail: 'Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp' }
-      : { name, status: 'warn', detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）', fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）' }
-    case 'none': return { name, status: 'fail', detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来', fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）' }
-    case 'platform': return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
+    case 'bwrap':
+      return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
+    case 'landlock':
+      return f.sandbox.enforcement === 'full'
+        ? {
+            name,
+            status: 'ok',
+            detail: 'Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp',
+          }
+        : {
+            name,
+            status: 'warn',
+            detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）',
+            fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）',
+          }
+    case 'none':
+      return {
+        name,
+        status: 'fail',
+        detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来',
+        fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）',
+      }
+    case 'platform':
+      return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
   }
 }
 
@@ -95,18 +123,34 @@ const sandboxItem = (f: Facts): Item => {
 const checkUserItem = (f: Facts): Item[] => {
   const name = '检查命令的用户'
   switch (f.checkUser.kind) {
-    case 'none': return []
-    case 'ok': return [{ name, status: 'ok', detail: `检查命令以 ${f.checkUser.name} 运行，没有任何特权，读不到平台和 dsh 进程的环境` }]
-    case 'fail': return [{ name, status: 'fail', detail: f.checkUser.error, fix: `${CHECK_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这两项，见 docs/deploy.md）；不在容器里时去掉 ${CHECK_USER_ENV}` }]
+    case 'none':
+      return []
+    case 'ok':
+      return [{ name, status: 'ok', detail: `检查命令以 ${f.checkUser.name} 运行，没有任何特权，读不到平台和 dsh 进程的环境` }]
+    case 'fail':
+      return [
+        {
+          name,
+          status: 'fail',
+          detail: f.checkUser.error,
+          fix: `${CHECK_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这两项，见 docs/deploy.md）；不在容器里时去掉 ${CHECK_USER_ENV}`,
+        },
+      ]
   }
 }
 
 /** 代理地址带账号密码时不传给检查命令：联网的检查（npm install 等）在必须走代理的服务器上会失败。 */
 const proxyItem = (f: Facts): Item[] =>
-  f.droppedProxies.length === 0 ? [] : [{
-    name: '检查命令的代理', status: 'warn', detail: `${f.droppedProxies.join('、')} 带账号密码，没有传给检查命令：检查命令跑的是 agent 改过的代码`,
-    fix: '换成不需要账号密码的代理（例如按来源地址放行），或让检查命令不需要联网（依赖由 agent 装好）',
-  }]
+  f.droppedProxies.length === 0
+    ? []
+    : [
+        {
+          name: '检查命令的代理',
+          status: 'warn',
+          detail: `${f.droppedProxies.join('、')} 带账号密码，没有传给检查命令：检查命令跑的是 agent 改过的代码`,
+          fix: '换成不需要账号密码的代理（例如按来源地址放行），或让检查命令不需要联网（依赖由 agent 装好）',
+        },
+      ]
 
 /**
  * dsh 和 agent 用哪个用户运行（切换由 dsh 的入口 deploy/dsh-launch.mjs 做，这里真的切换一次确认平台有这个能力）。
@@ -115,9 +159,19 @@ const proxyItem = (f: Facts): Item[] =>
 const agentUserItem = (f: Facts): Item[] => {
   const name = 'agent 的用户'
   switch (f.agentUser.kind) {
-    case 'none': return []
-    case 'ok': return [{ name, status: 'ok', detail: `dsh 和 agent 以 ${f.agentUser.name} 运行，没有任何特权，读不到平台进程的环境` }]
-    case 'fail': return [{ name, status: 'fail', detail: f.agentUser.error, fix: `${AGENT_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID、KILL 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这三项，见 docs/deploy.md）；不在容器里时去掉 ${AGENT_USER_ENV}` }]
+    case 'none':
+      return []
+    case 'ok':
+      return [{ name, status: 'ok', detail: `dsh 和 agent 以 ${f.agentUser.name} 运行，没有任何特权，读不到平台进程的环境` }]
+    case 'fail':
+      return [
+        {
+          name,
+          status: 'fail',
+          detail: f.agentUser.error,
+          fix: `${AGENT_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID、KILL 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这三项，见 docs/deploy.md）；不在容器里时去掉 ${AGENT_USER_ENV}`,
+        },
+      ]
   }
 }
 
@@ -129,17 +183,26 @@ const agentUserItem = (f: Facts): Item[] => {
 const isolationItem = (f: Facts): Item[] => {
   if (f.masterKey.kind !== 'ok') return []
   const sandboxed = f.sandbox.backend !== 'none'
-  const checks = f.checkUser.kind === 'ok'
-    ? `检查命令以 ${f.checkUser.name} 运行，主密钥和模型 key 都读不到`
-    : '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到'
-  const agentMaster = f.agentUser.kind === 'ok'
-    ? `agent 以 ${f.agentUser.name} 运行，读不到平台进程环境里的主密钥`
-    : sandboxed ? 'agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住' : '没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥'
+  const checks = f.checkUser.kind === 'ok' ? `检查命令以 ${f.checkUser.name} 运行，主密钥和模型 key 都读不到` : '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到'
+  const agentMaster =
+    f.agentUser.kind === 'ok'
+      ? `agent 以 ${f.agentUser.name} 运行，读不到平台进程环境里的主密钥`
+      : sandboxed
+        ? 'agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住'
+        : '没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥'
   const agentModel = sandboxed ? 'agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住' : '没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key'
   const detail = `${agentMaster}；${agentModel}；${checks}`
   const ok = f.checkUser.kind === 'ok' && f.agentUser.kind === 'ok' && sandboxed
   if (ok) return [{ name: '凭据隔离', status: 'ok', detail }]
-  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: '用独立的用户运行检查命令和 agent（Docker 部署就是这样，见 docs/deploy.md「用户和权限」），并让沙箱可用；在那之前只在可信的仓库和需求上使用' }]
+  return [
+    {
+      name: '凭据隔离',
+      status: 'warn',
+      doctorOnly: true,
+      detail,
+      fix: '用独立的用户运行检查命令和 agent（Docker 部署就是这样，见 docs/deploy.md「用户和权限」），并让沙箱可用；在那之前只在可信的仓库和需求上使用',
+    },
+  ]
 }
 
 const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
@@ -148,10 +211,14 @@ const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDEN
 const modelKeyItem = (f: Facts): Item => {
   const name = 'DeepSeek API key'
   switch (f.modelKey.source) {
-    case 'credentials': return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
-    case 'env': return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
-    case 'missing': return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
-    case 'error': return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
+    case 'credentials':
+      return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'env':
+      return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'missing':
+      return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
+    case 'error':
+      return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
   }
 }
 
@@ -172,14 +239,17 @@ export const evaluate = (f: Facts): Item[] => [
   f.dataDirError === undefined
     ? { name: '数据目录', status: 'ok', detail: `${f.dataDir} 可写` }
     : { name: '数据目录', status: 'fail', detail: `${f.dataDir}：${f.dataDirError}`, fix: '用 --data <目录> 或环境变量 EOS_HOME 换一个平台进程能写的目录，或修改这个目录的权限' },
-  f.dsh === undefined
-    ? { name: 'dsh', status: 'fail', detail: '没有安装，或安装不完整', fix: '在仓库目录运行 npm install' }
-    : { name: 'dsh', status: 'ok', detail: f.dsh },
+  f.dsh === undefined ? { name: 'dsh', status: 'fail', detail: '没有安装，或安装不完整', fix: '在仓库目录运行 npm install' } : { name: 'dsh', status: 'ok', detail: f.dsh },
 ]
 
 /** 数据目录建不出来、不可写时，常见的错误码给中文说明，原始错误码放在括号里。 */
 const DIR_ERRORS: Record<string, string> = {
-  EACCES: '没有写权限', EPERM: '没有权限', EROFS: '所在的文件系统是只读的', ENOTDIR: '路径里有一段不是目录（是普通文件）', EEXIST: '已经有同名的文件', ENOSPC: '磁盘空间不足',
+  EACCES: '没有写权限',
+  EPERM: '没有权限',
+  EROFS: '所在的文件系统是只读的',
+  ENOTDIR: '路径里有一段不是目录（是普通文件）',
+  EEXIST: '已经有同名的文件',
+  ENOSPC: '磁盘空间不足',
 }
 
 const dataDirError = (dir: string): string | undefined => {
@@ -199,7 +269,11 @@ const gitState = (): Facts['git'] => {
     return { version: /\d+\.\d+(\.\d+)?/.exec(out)?.[0] ?? out.trim() }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { missing: true }
-    return { error: String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]! }
+    return {
+      error: String((e as { stderr?: unknown }).stderr ?? (e as Error).message)
+        .trim()
+        .split('\n')[0]!,
+    }
   }
 }
 
@@ -243,14 +317,21 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
     return f
   }
   return {
-    node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
+    node: process.versions.node,
+    ...(required === undefined ? {} : { nodeRequired: required }),
+    modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
-    git: gitState(), sandbox: dshSandbox(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
-    checkUser: userFact(o.checkUser), agentUser: agentFact(o.agentUser), droppedProxies: droppedProxies(process.env),
+    git: gitState(),
+    sandbox: dshSandbox(),
+    dataDir: o.dataDir,
+    ...(error === undefined ? {} : { dataDirError: error }),
+    ...(dsh === undefined ? {} : { dsh }),
+    checkUser: userFact(o.checkUser),
+    agentUser: agentFact(o.agentUser),
+    droppedProxies: droppedProxies(process.env),
   }
 }
 
 const MARK: Record<Status, string> = { ok: '✓', warn: '⚠', fail: '✗' }
 
-export const formatItems = (items: Item[]): string =>
-  items.map(i => `${MARK[i.status]} ${i.name}：${i.detail}${i.status === 'ok' || i.fix === undefined ? '' : `\n  怎么修：${i.fix}`}`).join('\n')
+export const formatItems = (items: Item[]): string => items.map(i => `${MARK[i.status]} ${i.name}：${i.detail}${i.status === 'ok' || i.fix === undefined ? '' : `\n  怎么修：${i.fix}`}`).join('\n')

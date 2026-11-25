@@ -15,7 +15,9 @@ import { FakeExecutor } from './fake-executor.ts'
 import { workflow } from './helpers.ts'
 
 const dirs: string[] = []
-after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) })
+after(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true })
+})
 const tmp = () => {
   const d = mkdtempSync(join(import.meta.dirname, '..', 'node_modules', '.eos-changes-'))
   dirs.push(d)
@@ -164,7 +166,10 @@ test('head 必须在基线和任务分支之间：基线之前的历史提交不
   assert.equal(onBranch(w, head), true)
   // agent 在 worktree 里切到别处：列表和校验都以任务分支的 ref 为准。
   git(w.worktree, 'checkout', '-q', '--detach', c0)
-  assert.deepEqual(committedChanges(w).files.map(f => f.path), ['a.txt'])
+  assert.deepEqual(
+    committedChanges(w).files.map(f => f.path),
+    ['a.txt'],
+  )
   assert.equal(committedChanges(w).head, head)
   assert.equal(onBranch(w, c0), false)
 })

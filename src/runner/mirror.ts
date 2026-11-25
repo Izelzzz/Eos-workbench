@@ -23,8 +23,7 @@ export type Mirror = { gitDir: string; branch: string; baseSha: string }
 export const REMOTE_TIMEOUT_MS = 30 * 60 * 1000
 
 /** GitHub 的 owner 和仓库名不分大小写：镜像路径用小写，同一个仓库不会因为写法不同克隆两份。 */
-export const mirrorDir = (dataDir: string, r: RemoteRepo): string =>
-  join(resolve(dataDir), 'repos', r.host, r.owner.toLowerCase(), `${r.name.toLowerCase()}.git`)
+export const mirrorDir = (dataDir: string, r: RemoteRepo): string => join(resolve(dataDir), 'repos', r.host, r.owner.toLowerCase(), `${r.name.toLowerCase()}.git`)
 
 /** 给 git 子进程加配置：接在环境里已有的 GIT_CONFIG_COUNT 项后面。 */
 export const withGitConfig = (env: NodeJS.ProcessEnv, pairs: [string, string][]): NodeJS.ProcessEnv => {
@@ -80,7 +79,10 @@ export const foreignConfig = (gitDir: string): string[] => {
 
 /** raw：git 的原始报错（已抹掉令牌和认证头），给调用方按具体情况再判断。 */
 export class MirrorError extends Error {
-  constructor(message: string, readonly raw = '') {
+  constructor(
+    message: string,
+    readonly raw = '',
+  ) {
     super(message)
   }
 }
@@ -93,7 +95,8 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
   const raw = scrub(stderr, o.secrets ?? [])
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
   if (/Authentication failed|could not read Username|terminal prompts disabled|returned error: 40[13]|HTTP 40[13]|403 Forbidden|401 Unauthorized/i.test(raw)) {
-    if (o.hasToken && o.credential.startsWith('github-app.')) return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」的 GitHub App 换来的令牌没有权限，检查 App 在这个仓库的安装和 Contents 权限（任务改了 .github/workflows 时还要 Workflows 权限）；改好后重试会重新换令牌`
+    if (o.hasToken && o.credential.startsWith('github-app.'))
+      return `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」的 GitHub App 换来的令牌没有权限，检查 App 在这个仓库的安装和 Contents 权限（任务改了 .github/workflows 时还要 Workflows 权限）；改好后重试会重新换令牌`
     return o.hasToken
       ? `${repo.host} 拒绝了访问 ${where}：凭据「${o.credential}」里的令牌无效、已过期，或者没有授权这个仓库。在凭据页替换这条凭据`
       : `${repo.host} 拒绝了访问 ${where}：这是私有仓库或需要登录。在凭据页添加名字为「${o.credential}」、类型为 Git 令牌的凭据`
@@ -108,8 +111,7 @@ export const explain = (repo: RemoteRepo, stderr: string, o: { credential: strin
 export type RemoteAuth = { header?: string; credential: string; secret?: string }
 
 /** 报错里要抹掉的内容：令牌本身，和认证头里的凭据部分（例如 Basic 后面的 base64）。 */
-export const secretsOf = (auth: { header?: string; secret?: string }): string[] =>
-  [auth.secret ?? '', auth.header?.replace(/^Authorization:\s*\w+\s+/i, '') ?? ''].filter(x => x !== '')
+export const secretsOf = (auth: { header?: string; secret?: string }): string[] => [auth.secret ?? '', auth.header?.replace(/^Authorization:\s*\w+\s+/i, '') ?? ''].filter(x => x !== '')
 
 /** 本进程里每个镜像正在进行的操作：同一个镜像的操作排队，依次进行。 */
 const queues = new Map<string, Promise<unknown>>()
@@ -120,18 +122,20 @@ type Git = (args: string[]) => Promise<string>
  * 对一个镜像做一次访问远程的操作：本进程内排队、跨进程加锁，准备好 git 的环境，核对镜像的配置，再执行 fn。
  * create：镜像不存在时新建（失败时删掉这次新建的）；不 create 时镜像必须已经存在。
  */
-const withMirror = <T,>(dataDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
+const withMirror = <T>(dataDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
   const gitDir = mirrorDir(dataDir, repo)
   const prev = queues.get(gitDir) ?? Promise.resolve()
   const next = prev.catch(() => {}).then(() => once(dataDir, gitDir, repo, auth, create, fn))
   queues.set(gitDir, next)
-  void next.catch(() => {}).finally(() => {
-    if (queues.get(gitDir) === next) queues.delete(gitDir)
-  })
+  void next
+    .catch(() => {})
+    .finally(() => {
+      if (queues.get(gitDir) === next) queues.delete(gitDir)
+    })
   return next
 }
 
-const once = async <T,>(dataDir: string, gitDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
+const once = async <T>(dataDir: string, gitDir: string, repo: RemoteRepo, auth: RemoteAuth, create: boolean, fn: (git: Git, gitDir: string) => Promise<T>): Promise<T> => {
   const lockId = `mirror-${createHash('sha256').update(gitDir).digest('hex').slice(0, 16)}`
   const lock = acquire(join(resolve(dataDir), 'locks'), lockId)
   if ('heldBy' in lock) throw new MirrorError(`另一个进程（${lock.heldBy}）正在使用 ${repo.owner}/${repo.name} 的镜像，稍后再试`)
@@ -161,7 +165,8 @@ const once = async <T,>(dataDir: string, gitDir: string, repo: RemoteRepo, auth:
       await run('git', ['init', '--bare', '-q', gitDir], { env })
     }
     const foreign = foreignConfig(gitDir)
-    if (foreign.length > 0) throw new MirrorError(`镜像 ${gitDir} 的配置里有不是平台写的项（${foreign.join('、')}），为了不把令牌发到别处，没有访问远程。请人工检查这个镜像，确认后删掉这些项或删掉整个镜像`)
+    if (foreign.length > 0)
+      throw new MirrorError(`镜像 ${gitDir} 的配置里有不是平台写的项（${foreign.join('、')}），为了不把令牌发到别处，没有访问远程。请人工检查这个镜像，确认后删掉这些项或删掉整个镜像`)
     return await fn(git, gitDir)
   } catch (e) {
     if (fresh) rmSync(gitDir, { recursive: true, force: true })

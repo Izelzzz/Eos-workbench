@@ -30,7 +30,7 @@ export type RunnerOptions = {
 /** 错误的完整信息：git 的 stderr、错误文字、堆栈。只进日志文件。 */
 const fullError = (e: unknown): string => {
   const stderr = (e as { stderr?: unknown }).stderr
-  return [stderr === undefined ? '' : `stderr：${String(stderr).trim()}`, e instanceof Error ? e.stack ?? e.message : String(e)].filter(x => x !== '').join('\n')
+  return [stderr === undefined ? '' : `stderr：${String(stderr).trim()}`, e instanceof Error ? (e.stack ?? e.message) : String(e)].filter(x => x !== '').join('\n')
 }
 
 /** 原因取一行：git 常在 fatal/error 前面先打提示或警告，有 fatal/error 行就用它，否则用第一行。 */
@@ -44,8 +44,7 @@ export const nonceOf = (taskId: string, call: Call) => `${taskId}/${call.id}`
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-const label = (task: Task, call: Call) =>
-  `[${call.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] ${call.role} · ${call.purpose}`
+const label = (task: Task, call: Call) => `[${call.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] ${call.role} · ${call.purpose}`
 
 export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const now = o.now ?? Date.now
@@ -102,7 +101,9 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       o.store.appendTrace(id, call.id, [{ kind: 'call_start', t: now(), call: { node: call.node, role: call.role, purpose: call.purpose, prompt: call.prompt } }])
       try {
         reply = await o.executor.send({
-          key, nonce, prompt: call.prompt,
+          key,
+          nonce,
+          prompt: call.prompt,
           onEvent: e => {
             // trace 只是观测数据：写不进去（例如数据库忙）也不能打断 agent 的调用。
             try {
@@ -112,7 +113,10 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
             }
           },
           spec: {
-            model: role.model, ...(role.effort === undefined ? {} : { effort: role.effort }), write: role.write, cwd: meta.worktree,
+            model: role.model,
+            ...(role.effort === undefined ? {} : { effort: role.effort }),
+            write: role.write,
+            cwd: meta.worktree,
             profile: { denyTools: role.denyTools, skills, mcp: role.mcp, background: role.write !== 'worktree' },
           },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
@@ -140,8 +144,16 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     }
     const u = reply.usage
     log(`✓ ${label(task, call)}：${(reply.ms / 1000).toFixed(1)}s，输入 ${u.input}，输出 ${u.output}，缓存读 ${u.cacheRead}`)
-    dispatch({ kind: 'replied', call: call.id, sessionId: reply.sessionId, text: reply.text, usage: reply.usage, ms: reply.ms,
-      ...(reply.model === undefined ? {} : { model: reply.model }), ...(reverted.length === 0 ? {} : { reverted }) })
+    dispatch({
+      kind: 'replied',
+      call: call.id,
+      sessionId: reply.sessionId,
+      text: reply.text,
+      usage: reply.usage,
+      ms: reply.ms,
+      ...(reply.model === undefined ? {} : { model: reply.model }),
+      ...(reverted.length === 0 ? {} : { reverted }),
+    })
   }
 
   /**

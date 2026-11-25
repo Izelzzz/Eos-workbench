@@ -21,27 +21,31 @@ const VALUE2 = `ghp_e2e_${randomBytes(12).toString('hex')}`
 const key = randomBytes(32).toString('base64')
 
 const servers: ChildProcess[] = []
-process.on('exit', () => { for (const p of servers) p.kill('SIGKILL') })
-
-const start = (port: number, withKey: boolean) => new Promise<{ p: ChildProcess; output: () => string }>((resolve, reject) => {
-  let output = ''
-  const env = { ...process.env, DEEPSEEK_API_KEY: 'unused-in-this-e2e', ...(withKey ? { EOS_MASTER_KEY: key } : {}) }
-  if (!withKey) delete env.EOS_MASTER_KEY
-  const p = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--port', String(port), '--data', data], { cwd: ROOT, env })
-  servers.push(p)
-  const on = (b: Buffer) => {
-    output += b.toString()
-    if (/http:\/\/127\.0\.0\.1:\d+/.test(output)) resolve({ p, output: () => output })
-  }
-  p.stdout.on('data', on)
-  p.stderr.on('data', on)
-  p.on('exit', c => reject(new Error(`eos web 退出了（${c}）：${output}`)))
+process.on('exit', () => {
+  for (const p of servers) p.kill('SIGKILL')
 })
 
-const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap(n => {
-  const f = join(dir, n)
-  return statSync(f).isDirectory() ? filesUnder(f) : [f]
-})
+const start = (port: number, withKey: boolean) =>
+  new Promise<{ p: ChildProcess; output: () => string }>((resolve, reject) => {
+    let output = ''
+    const env = { ...process.env, DEEPSEEK_API_KEY: 'unused-in-this-e2e', ...(withKey ? { EOS_MASTER_KEY: key } : {}) }
+    if (!withKey) delete env.EOS_MASTER_KEY
+    const p = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--port', String(port), '--data', data], { cwd: ROOT, env })
+    servers.push(p)
+    const on = (b: Buffer) => {
+      output += b.toString()
+      if (/http:\/\/127\.0\.0\.1:\d+/.test(output)) resolve({ p, output: () => output })
+    }
+    p.stdout.on('data', on)
+    p.stderr.on('data', on)
+    p.on('exit', c => reject(new Error(`eos web 退出了（${c}）：${output}`)))
+  })
+
+const filesUnder = (dir: string): string[] =>
+  readdirSync(dir).flatMap(n => {
+    const f = join(dir, n)
+    return statSync(f).isDirectory() ? filesUnder(f) : [f]
+  })
 
 const checks: Record<string, boolean> = {}
 const responses: string[] = []
@@ -51,8 +55,12 @@ const errors: string[] = []
 const withPage = async (base: string, scale = 2) => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: scale })
   page.on('pageerror', (e: Error) => errors.push(`pageerror: ${e.message}`))
-  page.on('console', (m: any) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`) })
-  page.on('response', async (r: any) => { if (r.url().includes('/api/')) responses.push(await r.text().catch(() => '')) })
+  page.on('console', (m: any) => {
+    if (m.type() === 'error') errors.push(`console: ${m.text()}`)
+  })
+  page.on('response', async (r: any) => {
+    if (r.url().includes('/api/')) responses.push(await r.text().catch(() => ''))
+  })
   await page.goto(`${base}/#/credentials`)
   return page
 }
@@ -81,8 +89,8 @@ await page.getByLabel('名字').fill('github.com')
 await page.getByLabel('值').fill(`${VALUE}-replaced`)
 await page.getByRole('button', { name: '保存' }).click()
 await page.waitForSelector('text=已替换凭据 github.com')
-checks['同名保存是替换，类型沿用原来的'] = (await page.locator('table.tasks tbody tr').count()) === 2
-  && (await page.locator('table.tasks tbody tr', { hasText: 'github.com' }).innerText()).includes('Git 令牌')
+checks['同名保存是替换，类型沿用原来的'] =
+  (await page.locator('table.tasks tbody tr').count()) === 2 && (await page.locator('table.tasks tbody tr', { hasText: 'github.com' }).innerText()).includes('Git 令牌')
 await page.reload()
 await page.waitForSelector('table.tasks tbody tr')
 const html = await page.content()
@@ -128,7 +136,14 @@ checks['服务的输出里没有值'] = !leakIn(serverOutput) && !leakIn(b.outpu
 checks['数据目录（数据库、WAL、日志）里没有值'] = dataFiles.length > 0 && !dataFiles.some(f => leakIn(readFileSync(f)))
 checks['页面没有报错'] = errors.length === 0
 
-const report = { checks, passed: Object.values(checks).filter(Boolean).length, total: Object.keys(checks).length, responses: responses.length, dataFiles: dataFiles.map(f => f.slice(data.length + 1)), errors }
+const report = {
+  checks,
+  passed: Object.values(checks).filter(Boolean).length,
+  total: Object.keys(checks).length,
+  responses: responses.length,
+  dataFiles: dataFiles.map(f => f.slice(data.length + 1)),
+  errors,
+}
 writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))
 process.exit(report.passed === report.total ? 0 : 1)

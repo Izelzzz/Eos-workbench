@@ -18,7 +18,9 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
 const errors: string[] = []
 page.on('pageerror', (e: Error) => errors.push(e.message))
-page.on('console', (m: any) => { if (m.type() === 'error') errors.push(m.text()) })
+page.on('console', (m: any) => {
+  if (m.type() === 'error') errors.push(m.text())
+})
 await page.goto(`${base}/#/tasks/${id}`)
 await page.waitForSelector('.summary')
 
@@ -28,7 +30,7 @@ while (Date.now() < until) {
   const status = await page.locator('.summary .pill').first().innerText()
   if (status === '已完成' || status === '失败' || status === '已中止') break
   const form = page.getByRole('form', { name: '回答提问' })
-  if (await form.count() === 0) {
+  if ((await form.count()) === 0) {
     await page.waitForTimeout(1000)
     continue
   }
@@ -47,7 +49,11 @@ while (Date.now() < until) {
   }
   // 回答后表单应当消失（或换成下一个问题），页面显示"已回答"
   await page.waitForFunction((q: string) => !document.querySelector('.question-text') || document.querySelector('.question-text')!.textContent !== q, question, { timeout: 15_000 })
-  const notice = await page.locator('.notice').first().innerText().catch(() => '')
+  const notice = await page
+    .locator('.notice')
+    .first()
+    .innerText()
+    .catch(() => '')
   await page.screenshot({ path: join(out, `q${n}-after.png`) })
   appendFileSync(log, `${JSON.stringify({ n, question, options, answer, notice })}\n`)
   console.log(JSON.stringify({ n, question, answer, notice }))

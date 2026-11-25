@@ -15,6 +15,9 @@ export const allPassed = (results: CheckResult[]): boolean => results.every(r =>
 
 /** 没通过的检查逐条列出，带上原因。 */
 export const describeFailures = (results: CheckResult[]): string =>
-  results.filter(r => !r.passed).map(r => `- ${describeCheck(r.check)}：没有通过${r.detail.trim() === '' ? '' : `\n\n${r.detail.trim()}`}`).join('\n\n')
+  results
+    .filter(r => !r.passed)
+    .map(r => `- ${describeCheck(r.check)}：没有通过${r.detail.trim() === '' ? '' : `\n\n${r.detail.trim()}`}`)
+    .join('\n\n')
 
 export const describeRequirements = (checks: Check[]): string => checks.map(c => `- ${describeCheck(c)}`).join('\n')

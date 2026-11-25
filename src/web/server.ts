@@ -25,7 +25,26 @@ import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type {
-  ActionResponse, AnswerResponse, ConventionDetail, CredentialsResponse, ForgeAppsResponse, RegisterAppResponse, DeleteCredentialResponse, SaveCredentialResponse, ConventionsResponse, CreateResponse, DecideResponse, GenerateResponse, ImprovementComparison, ProposalDetail, ProposalInfo, FileDiff, SaveConventionResponse, TaskChanges, TaskDetail, WorkflowInfo,
+  ActionResponse,
+  AnswerResponse,
+  ConventionDetail,
+  CredentialsResponse,
+  ForgeAppsResponse,
+  RegisterAppResponse,
+  DeleteCredentialResponse,
+  SaveCredentialResponse,
+  ConventionsResponse,
+  CreateResponse,
+  DecideResponse,
+  GenerateResponse,
+  ImprovementComparison,
+  ProposalDetail,
+  ProposalInfo,
+  FileDiff,
+  SaveConventionResponse,
+  TaskChanges,
+  TaskDetail,
+  WorkflowInfo,
 } from './types.ts'
 
 /** /api/conventions/<workflow|doc|template|skill>/<名字>，名字可以是中文（URL 编码）。 */
@@ -34,7 +53,6 @@ const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$
 /** /api/improve/proposals/<id>，以及审批：/api/improve/proposals/<id>/(approve|reject)。 */
 const PROPOSAL = /^\/api\/improve\/proposals\/(\d{1,15})$/
 const DECIDE = /^\/api\/improve\/proposals\/(\d{1,15})\/(approve|reject)$/
-
 
 const decodeName = (raw: string): string | undefined => {
   try {
@@ -47,10 +65,13 @@ const decodeName = (raw: string): string | undefined => {
 /** 检查产出的链接：同一个地址只保留一条，排在它最后一次出现的位置，标签用最新的。 */
 export const linksOf = (t: Task): CheckLink[] => {
   const byUrl = new Map<string, CheckLink>()
-  for (const e of t.log) if (e.type === 'check') for (const r of e.results) for (const l of r.links ?? []) {
-    byUrl.delete(l.url)
-    byUrl.set(l.url, l)
-  }
+  for (const e of t.log)
+    if (e.type === 'check')
+      for (const r of e.results)
+        for (const l of r.links ?? []) {
+          byUrl.delete(l.url)
+          byUrl.set(l.url, l)
+        }
   return [...byUrl.values()]
 }
 
@@ -61,23 +82,24 @@ const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.j
 const MAX_BODY = 64 * 1024
 
 /** 读 JSON 请求体。超过上限的照样读完（只是不保存），这样客户端能收到 413 而不是断开的连接。 */
-const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unknown }> => new Promise(resolve => {
-  let size = 0
-  const chunks: Buffer[] = []
-  req.on('data', (c: Buffer) => {
-    size += c.length
-    if (size <= MAX_BODY) chunks.push(c)
+const readJson = (req: IncomingMessage): Promise<{ tooBig: true } | { value: unknown }> =>
+  new Promise(resolve => {
+    let size = 0
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => {
+      size += c.length
+      if (size <= MAX_BODY) chunks.push(c)
+    })
+    req.on('end', () => {
+      if (size > MAX_BODY) return resolve({ tooBig: true })
+      try {
+        resolve({ value: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
+      } catch {
+        resolve({ value: undefined })
+      }
+    })
+    req.on('error', () => resolve({ value: undefined }))
   })
-  req.on('end', () => {
-    if (size > MAX_BODY) return resolve({ tooBig: true })
-    try {
-      resolve({ value: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
-    } catch {
-      resolve({ value: undefined })
-    }
-  })
-  req.on('error', () => resolve({ value: undefined }))
-})
 
 /**
  * 外部地址（EOS_PUBLIC_URL）：部署在容器或反向代理后面时，浏览器地址栏里的地址。只取 http(s) 的 origin，
@@ -155,7 +177,15 @@ export const tail = (path: string, max: number): string => {
  * credentials：凭据存储。凭据的值只写不读：接口不返回值，错误信息里也不带值。
  * 现在没有登录，所有凭据都属于 LOCAL_OWNER；接上登录后按登录的用户取 owner。
  */
-export const createWebServer = (o: { store: Store; supervisor: Supervisor; replay: Pick<Executor, 'traceOf'>; staticDir: string; credentials: Credentials; improve?: { executor: Executor; dataDir: string }; publicUrl?: URL }): Server => {
+export const createWebServer = (o: {
+  store: Store
+  supervisor: Supervisor
+  replay: Pick<Executor, 'traceOf'>
+  staticDir: string
+  credentials: Credentials
+  improve?: { executor: Executor; dataDir: string }
+  publicUrl?: URL
+}): Server => {
   const allowedOrigin = (req: IncomingMessage) => originFor(req.headers.host, req.socket.localPort, o.publicUrl)
 
   /** 已完成调用的回放结果不会再变，按任务和调用缓存。 */
@@ -179,11 +209,21 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     if (task === undefined) return undefined
     const meta = o.store.meta(id)
     return {
-      ...summaryOf(task), request: task.request, position: describePosition(task),
+      ...summaryOf(task),
+      request: task.request,
+      position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       logPath: o.supervisor.logPath(id),
-      repo: meta.repo, ...(meta.remote === undefined ? {} : { remote: meta.remote }), links: linksOf(task), branch: meta.branch, worktree: meta.worktree, baseSha: meta.baseSha, report: report(task), metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)), trace: buildTrace(task, await traceRows(task)),
+      repo: meta.repo,
+      ...(meta.remote === undefined ? {} : { remote: meta.remote }),
+      links: linksOf(task),
+      branch: meta.branch,
+      worktree: meta.worktree,
+      baseSha: meta.baseSha,
+      report: report(task),
+      metrics: taskMetrics(task, Date.now(), o.store.createdAt(id)),
+      trace: buildTrace(task, await traceRows(task)),
       runnerAlive: o.supervisor.running(id),
       ...(meta.conventions === undefined ? {} : { conventions: meta.conventions }),
     }
@@ -199,7 +239,13 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     if (req.headers.origin === undefined || req.headers.origin !== allowedOrigin(req)) {
       // 浏览器在外部地址上，Host 却是本机地址：反向代理把 Host 改写了。
       const rewritten = o.publicUrl !== undefined && req.headers.origin === o.publicUrl.origin
-      return [403, { ok: false, error: rewritten ? `只接受来自本页面的请求：Origin 是 ${o.publicUrl!.origin}，Host 却是 ${req.headers.host ?? '（空）'}，反向代理要把原始 Host 传过来` : '只接受来自本页面的请求' }]
+      return [
+        403,
+        {
+          ok: false,
+          error: rewritten ? `只接受来自本页面的请求：Origin 是 ${o.publicUrl!.origin}，Host 却是 ${req.headers.host ?? '（空）'}，反向代理要把原始 Host 传过来` : '只接受来自本页面的请求',
+        },
+      ]
     }
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) return [415, { ok: false, error: '请求体必须是 JSON' }]
     const read = await readJson(req)
@@ -249,8 +295,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     o.supervisor.conventions.list('workflow').map(w => ({ name: w.name, version: w.version, ...(w.description === undefined ? {} : { description: w.description }), nodes: w.nodes }))
 
   const conventions = (): ConventionsResponse => ({
-    workflows: workflows(), docs: o.supervisor.conventions.list('doc'),
-    templates: o.supervisor.conventions.list('template'), skills: o.supervisor.conventions.list('skill'),
+    workflows: workflows(),
+    docs: o.supervisor.conventions.list('doc'),
+    templates: o.supervisor.conventions.list('template'),
+    skills: o.supervisor.conventions.list('skill'),
   })
 
   const convention = (kind: ConventionKind, name: string): ConventionDetail | undefined => {
@@ -294,12 +342,13 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   // 只为用到这个约定第 v-1 或 v 版的任务算指标（指标要重放整个日志）；metrics 按任务缓存，同一个请求里多条提案共用。
   type Loaded = { id: string; createdAt: number; task: CompareSample['task']; used: { used?: NonNullable<CompareSample['used']> } }
   /** 所有任务的状态和用到的约定版本，各读一次（同一个请求里多条提案共用）。 */
-  const loadAll = (): Loaded[] => o.store.list().flatMap(s => {
-    const task = o.store.get(s.id)
-    if (task === undefined) return []
-    const conventions = o.store.meta(s.id).conventions
-    return [{ id: s.id, createdAt: s.createdAt, task, used: conventions === undefined ? {} : { used: conventions } }]
-  })
+  const loadAll = (): Loaded[] =>
+    o.store.list().flatMap(s => {
+      const task = o.store.get(s.id)
+      if (task === undefined) return []
+      const conventions = o.store.meta(s.id).conventions
+      return [{ id: s.id, createdAt: s.createdAt, task, used: conventions === undefined ? {} : { used: conventions } }]
+    })
   const compareSamples = (target: ProposalInfo['target'], version: number, now: number, metrics: Map<string, CompareSample['metrics']>, all: Loaded[] = loadAll()): CompareSample[] =>
     all.flatMap(s => {
       const { task, used } = s
@@ -329,15 +378,29 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     {
       const tasks = (body.tasks as string[] | undefined)?.map(t => t.trim()).filter(t => t !== '')
       const r = await generate({
-        store: o.store, conventions: o.supervisor.conventions, executor: o.improve.executor, dataDir: o.improve.dataDir,
-        workflow: body.workflow.trim(), ...(tasks === undefined || tasks.length === 0 ? {} : { tasks }), actor: 'web', now: Date.now,
+        store: o.store,
+        conventions: o.supervisor.conventions,
+        executor: o.improve.executor,
+        dataDir: o.improve.dataDir,
+        workflow: body.workflow.trim(),
+        ...(tasks === undefined || tasks.length === 0 ? {} : { tasks }),
+        actor: 'web',
+        now: Date.now,
       })
       if (!r.ok) {
         const call = r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms, replyHead: r.call.reply.slice(0, 500) } }
         return [GENERATE_STATUS[r.cause], { ok: false, error: r.error, ...call }]
       }
-      return [200, { ok: true, created: r.created, refused: r.refused, ...(r.skipped === undefined ? {} : { skipped: r.skipped }),
-        ...(r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms } }) }]
+      return [
+        200,
+        {
+          ok: true,
+          created: r.created,
+          refused: r.refused,
+          ...(r.skipped === undefined ? {} : { skipped: r.skipped }),
+          ...(r.call === undefined ? {} : { call: { ...(r.call.model === undefined ? {} : { model: r.call.model }), usage: r.call.usage, ms: r.call.ms } }),
+        },
+      ]
     }
   }
   const decide = (id: number, action: string, body: Record<string, unknown>): [number, DecideResponse] => {
@@ -350,7 +413,9 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   }
 
   const credentialList = (): CredentialsResponse => ({
-    usable: o.credentials.usable, ...(o.credentials.keyId === undefined ? { hint: GENERATE_HINT } : { keyId: o.credentials.keyId }), items: o.credentials.list(LOCAL_OWNER),
+    usable: o.credentials.usable,
+    ...(o.credentials.keyId === undefined ? { hint: GENERATE_HINT } : { keyId: o.credentials.keyId }),
+    items: o.credentials.list(LOCAL_OWNER),
   })
 
   // 名字放在请求体里、不放进 URL：用户把值误填进名字时，值也不会进 URL 和访问记录。
@@ -360,8 +425,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     if (typeof body.value !== 'string') return [400, { ok: false, error: '需要 value（凭据的值）' }]
     if (typeof body.kind !== 'string' || !(CREDENTIAL_KINDS as readonly string[]).includes(body.kind)) return [400, { ok: false, error: `kind 只能是 ${CREDENTIAL_KINDS.join('、')}` }]
     // github-app. 开头的名字留给 GitHub App 的凭据：平台按这个名字找 App，放成别的类型会挡住 App 和令牌。
-    if (name.startsWith('github-app.') !== (body.kind === 'github-app')) return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
-    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app') return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
+    if (name.startsWith('github-app.') !== (body.kind === 'github-app'))
+      return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
+    if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app')
+      return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
     const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
     return r.ok ? [200, r] : [o.credentials.usable ? 400 : 409, r]
   }
@@ -376,7 +443,9 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
   const forgeApps = (req: IncomingMessage): ForgeAppsResponse => {
     const items = o.credentials.list(LOCAL_OWNER)
     return {
-      usable: o.credentials.usable, ...(o.credentials.usable ? {} : { hint: GENERATE_HINT }), callbackUrl: callbackUrl(req),
+      usable: o.credentials.usable,
+      ...(o.credentials.usable ? {} : { hint: GENERATE_HINT }),
+      callbackUrl: callbackUrl(req),
       apps: appRegistrations().map(a => {
         // 和发起注册时的判断一致：这个名字已经有凭据（不管能不能读出来），就算已注册，不再给注册表单。
         const saved = items.find(i => i.name === a.credentialName)
@@ -533,7 +602,13 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
           const d = fileDiff(meta, head, path)
           return d === undefined ? json(res, 404, { error: `这个提交里没有改动文件 ${path}` }) : json(res, 200, d satisfies FileDiff)
         } catch (e) {
-          return json(res, 500, { error: `读不到改动（worktree ${meta.worktree}）：${String((e as { stderr?: unknown }).stderr ?? (e as Error).message).trim().split('\n')[0]}` })
+          return json(res, 500, {
+            error: `读不到改动（worktree ${meta.worktree}）：${
+              String((e as { stderr?: unknown }).stderr ?? (e as Error).message)
+                .trim()
+                .split('\n')[0]
+            }`,
+          })
         }
       }
       const m = /^\/api\/tasks\/([\w-]+)$/.exec(url.pathname)
