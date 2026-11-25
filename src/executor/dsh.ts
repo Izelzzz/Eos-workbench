@@ -9,7 +9,7 @@
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
@@ -92,7 +92,8 @@ const readSessionLogFile = (root: string, sessionId: string): Buffer | undefined
   if (!existsSync(root)) return undefined
   for (const dir of readdirSync(root)) {
     const file = join(root, dir, sessionId, SESSION_LOG_FILE)
-    if (existsSync(file)) return readFileSync(file)
+    // 和以别的用户读的实现（check-user.ts 的 readSessionLogAs，用 [ -f ]）一致：只认普通文件。
+    if (existsSync(file) && statSync(file).isFile()) return readFileSync(file)
   }
   return undefined
 }

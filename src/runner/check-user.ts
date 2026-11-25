@@ -106,21 +106,47 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string, waitMs =
  * 把 user 在 dir 里建的文件和目录开放给组读写（不跟符号链接，只改它自己的）。平台（同组）提交、撤销越界改动时要读、删它们：
  * agent 和检查命令是别的用户，建出 0600 的文件、0755 的目录时，平台读不了也删不掉里面的东西。
  */
-export const shareWithGroup = async (user: CheckUser, dir: string): Promise<void> => {
+export const shareWithGroup = async (user: CheckUser, dir: string): Promise<string | undefined> => {
   let real: string
   try {
     real = realpathSync(dir)
   } catch {
-    return
+    return undefined
   }
-  const [cmd, ...args] = asUser(user, ['find', real, '-user', user.name, '(', '-type', 'f', '-o', '-type', 'd', ')', '!', '-perm', '-g+rw', '-exec', 'chmod', 'g+rwX', '{}', '+'])
-  await new Promise<void>(done => {
-    const p = spawn(cmd!, args, { cwd: '/', stdio: 'ignore' })
+  // 文件要组内可读写；目录还要组内可进入（g+x）。
+  const [cmd, ...args] = asUser(user, [
+    'find',
+    real,
+    '-user',
+    user.name,
+    '(',
+    '-type',
+    'f',
+    '!',
+    '-perm',
+    '-g+rw',
+    '-o',
+    '-type',
+    'd',
+    '!',
+    '-perm',
+    '-g+rwx',
+    ')',
+    '-exec',
+    'chmod',
+    'g+rwX',
+    '{}',
+    '+',
+  ])
+  return new Promise(done => {
+    let err = ''
+    const p = spawn(cmd!, args, { cwd: '/', stdio: ['ignore', 'ignore', 'pipe'] })
     const timer = setTimeout(() => p.kill('SIGKILL'), 60_000)
-    p.on('error', () => done())
-    p.on('close', () => {
+    p.stderr.setEncoding('utf8').on('data', (c: string) => (err = (err + c).slice(-500)))
+    p.on('error', e => done(e.message))
+    p.on('close', (code, signal) => {
       clearTimeout(timer)
-      done()
+      done(code === 0 ? undefined : err.trim() || (signal === null ? `退出码 ${code}` : `被信号 ${signal} 终止（超时）`))
     })
   })
 }

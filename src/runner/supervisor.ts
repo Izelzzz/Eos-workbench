@@ -72,6 +72,12 @@ export class Supervisor {
     this.conventions.seed(Date.now())
   }
 
+  /** 把 user 在 worktree 里建的私有文件开放给组；失败时只记一条警告，之后的提交、撤销可能因此读不了这些文件。 */
+  private async share(user: CheckUser, worktree: string, log: (line: string) => void): Promise<void> {
+    const error = await shareWithGroup(user, worktree)
+    if (error !== undefined) log(`  （警告：没能把 ${user.name} 在 worktree 里建的文件开放给平台：${error}。之后的提交、撤销可能读不了它们）`)
+  }
+
   /**
    * 校验输入、建 worktree、写入存储。所有错误都是给用户看的中文。
    * repo 可以是平台所在机器上的 git 仓库路径，或托管平台上的仓库地址（例如 https://github.com/<owner>/<repo>）：
@@ -275,9 +281,15 @@ export class Supervisor {
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
         // 接下来提交、撤销越界改动由平台做：agent 和检查命令建的、只有它们自己能读写的文件和目录，先开放给组（平台在组里）。
-        for (const u of [this.o.agentUser, this.o.checkUser]) if (u !== undefined) await shareWithGroup(u, worktree)
+        for (const u of [this.o.agentUser, this.o.checkUser]) if (u !== undefined) await this.share(u, worktree, log)
       },
-      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser), redact),
+      checker: async (t, run, signal) => {
+        const worktree = this.o.store.meta(t.id).worktree
+        const results = await runChecks(worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser)
+        // 检查命令建的文件（构建产物等）之后由平台提交、清理：同样先开放给组。
+        if (this.o.checkUser !== undefined) await this.share(this.o.checkUser, worktree, log)
+        return redactDeep(results, redact)
+      },
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)

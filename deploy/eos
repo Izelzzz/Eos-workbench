@@ -52,7 +52,8 @@ prepare_dsh() {
     # 有旧数据、还没迁移：只在启动平台时做，别的命令（eos doctor）不写标记，留给下一次启动平台。
     [ "${1:-}" = web ] || return 0
     new="$data/dsh.agent-new"
-    [ ! -e "$new" ] || as_agent rm -rf "$new" || return 1
+    # 上次没做完留下的：里面的东西属于 eos-agent，由它删；目录本身属于 eos，由 eos 删。
+    if [ -e "$new" ]; then as_agent find "$new" -mindepth 1 -delete && rmdir "$new" || return 1; fi
     mkdir "$new" && chgrp eos-dsh "$new" && chmod 2770 "$new" || return 1
     # 让 eos-agent 读得到旧文件。.credentials.yaml 不改：组内可读时 dsh 拒绝启动，迁移失败、还用旧目录时也不能坏掉它。
     chgrp -R eos-dsh "$dsh" && find "$dsh" ! -name .credentials.yaml -exec chmod g+rX {} + || return 1

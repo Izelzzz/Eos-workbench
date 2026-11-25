@@ -123,7 +123,7 @@ test('reading a dsh session log as the agent user finds the same file the defaul
     assert.deepEqual(read(root, 'session-abc'), Buffer.from([1, 2, 3]))
     assert.equal(read(root, 'session-missing'), undefined)
     assert.equal(read(root, '../escape'), undefined, 'ids are checked before they reach the shell')
-    // 有日志但读不出来（这里让 cat 读一个目录）时抛错，不当成没有日志：否则平台会在已有的会话 id 上新开会话。
+    // 日志的位置是个目录（不是文件）：和默认实现一样不认，当作没有。读失败时抛错见下一个测试。
     mkdirSync(join(root, '--wt--', 'session-dir', 'session.v4.jsonl.zstd'), { recursive: true })
     const bad = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
     assert.equal(bad(root, 'session-dir'), undefined, 'a directory is not a log file: the -f test skips it')
