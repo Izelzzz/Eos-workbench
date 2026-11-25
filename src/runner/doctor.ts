@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
-import { dshInstall, dshSandbox, type DshSandbox } from '../executor/dsh.ts'
+import { dshInstall, dshSandbox, modelBaseUrl, type DshSandbox } from '../executor/dsh.ts'
 import { AGENT_USER_ENV, CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
 import { droppedProxies } from './checks.ts'
 
@@ -43,6 +43,8 @@ export type Facts = {
   agentUser: UserFact
   /** 带账号密码、所以没有传给检查命令的代理变量。 */
   droppedProxies: string[]
+  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
+  modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
 }
 
 const parts = (v: string): number[] =>
@@ -222,6 +224,39 @@ const modelKeyItem = (f: Facts): Item => {
   }
 }
 
+/** 官方的模型接口主机：EOS_MODEL_BASE_URL 指向它时不用提示 */
+const OFFICIAL_MODEL_HOST = 'api.deepseek.com'
+
+/** 模型接口地址：设成别的主机时，模型请求和模型 key 都会发到那里，部署时误设或被人改了要能马上看到。 */
+const modelBaseUrlItem = (f: Facts): Item[] => {
+  const name = '模型接口地址'
+  if (f.modelBaseUrl === undefined) return []
+  if (f.modelBaseUrl.kind === 'invalid') {
+    return [{ name, status: 'fail', detail: f.modelBaseUrl.error, fix: '改正环境变量 EOS_MODEL_BASE_URL（https 地址，或本机的 http 地址，不带用户名和密码）；用官方接口时删掉它' }]
+  }
+  const u = f.modelBaseUrl
+  if (u.host === OFFICIAL_MODEL_HOST) return [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${u.host}${u.path}` }]
+  // 本机地址（例如 CI 的假模型、本机的网关）：key 不出这台机器，只在 eos doctor 里提示，免得每次启动都打印、让人习惯忽略提示
+  return u.loopback
+    ? [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向本机的 ${u.host}${u.path}：模型请求和模型 key 会发给本机上的这个服务`,
+          fix: '确认它是你在本机运行的模型网关或测试服务',
+          doctorOnly: true,
+        },
+      ]
+    : [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向 ${u.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
+          fix: '确认这是你信任的模型网关；不需要时删掉 EOS_MODEL_BASE_URL，改用官方接口',
+        },
+      ]
+}
+
 export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
   modelKeyItem(f),
@@ -231,6 +266,7 @@ export const evaluate = (f: Facts): Item[] => [
   ...agentUserItem(f),
   ...proxyItem(f),
   ...isolationItem(f),
+  ...modelBaseUrlItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
     : 'missing' in f.git
@@ -299,7 +335,10 @@ const hasCapKill = (): boolean => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState }): Facts => {
+export const gather = (
+  o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState },
+  env: NodeJS.ProcessEnv = process.env,
+): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
@@ -328,7 +367,21 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
     ...(dsh === undefined ? {} : { dsh }),
     checkUser: userFact(o.checkUser),
     agentUser: agentFact(o.agentUser),
-    droppedProxies: droppedProxies(process.env),
+    droppedProxies: droppedProxies(env),
+    ...modelBaseUrlFact(env),
+  }
+}
+
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]']
+
+const modelBaseUrlFact = (env: NodeJS.ProcessEnv): Pick<Facts, 'modelBaseUrl'> => {
+  try {
+    const url = modelBaseUrl(env)
+    if (url === undefined) return {}
+    const u = new URL(url)
+    return { modelBaseUrl: { kind: 'ok', host: u.host, path: u.pathname, loopback: LOOPBACK.includes(u.hostname) } }
+  } catch (e) {
+    return { modelBaseUrl: { kind: 'invalid', error: (e as Error).message } }
   }
 }
 
