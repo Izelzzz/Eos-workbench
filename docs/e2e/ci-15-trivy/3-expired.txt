@@ -1,3 +1,28 @@
+# 到期日改成过去（2026-11-01）
+# 命令：trivy fs /src --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /scan/.trivyignore.yaml --show-suppressed --exit-code 1 --no-progress -q（/src 里只有 package-lock.json，/scan/.trivyignore.yaml 是下面这份）
+# --- 用的 .trivyignore.yaml ---
+# # Trivy 的豁免清单（.github/scripts/image-scan.sh 用）。改它属于重档：每条写明漏洞、包（purls 锁到版本，升级后自动不再匹配）、
+# # 理由（statement）和到期日（expired_at，过期后不再豁免，扫描会重新拦下，到时重新评估）。
+# vulnerabilities:
+#   # undici 8.11.2 由 dsh 的依赖带进来（package-lock.json 里是间接依赖）。用户的决定：等 dsh 发新正式版再升级，不自己 override。
+#   - id: CVE-2026-109383
+#     purls: ['pkg:npm/undici@8.11.2']
+#     statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
+#     expired_at: 2026-11-01
+#   - id: CVE-2026-109829
+#     purls: ['pkg:npm/undici@8.11.2']
+#     statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
+#     expired_at: 2026-11-01
+#   - id: CVE-2026-109869
+#     purls: ['pkg:npm/undici@8.11.2']
+#     statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
+#     expired_at: 2026-11-01
+#   - id: CVE-2026-87018
+#     purls: ['pkg:npm/undici@8.11.2']
+#     statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
+#     expired_at: 2026-11-01
+# ---
+
 
 Report Summary
 

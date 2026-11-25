@@ -2,7 +2,7 @@
 
 在开发环境里跑的（2026-11-25，Trivy 0.76.2，按 digest 锁定）。这里构建不了平台镜像（Docker Hub 拉基础镜像返回 429），所以：
 
-- 拦截路径用 Trivy 自己的镜像当被扫描对象，跑的是 `.github/scripts/image-scan.sh` 本身，只多加了 `--network host` 和代理证书（这个环境的出网代理在本机端口上）。
+- 拦截路径用 Trivy 自己的镜像当被扫描对象，跑的是 `.github/scripts/image-scan.sh` 本身，只给 `docker run` 多加了 `--network host` 和代理证书（这个环境的出网代理在本机端口上）。本地是 root 运行，所以 `--user` 以非 root 运行、结束时删掉漏洞库缓存这一点要看 CI 的日志。
 - 豁免清单用 `trivy fs` 扫 `package-lock.json` 验证，参数和 `image-scan.sh` 一样（`--severity HIGH,CRITICAL --ignore-unfixed --ignorefile --show-suppressed --exit-code 1`）。
 
 平台镜像本身的扫描结果见这个 PR 在 CI 上 `image-build` job 的「扫描漏洞」一步。
@@ -13,3 +13,6 @@
 | `2-ignored.txt` | `.trivyignore.yaml` 原样 | undici 的 4 条在 Suppressed 一节，退出码 0 |
 | `3-expired.txt` | 到期日改成过去 | 4 条不再豁免，退出码 1 |
 | `4-otherversion.txt` | purls 改成别的版本 | 不匹配，4 条不再豁免，退出码 1（升级 undici 之后条目自动失效） |
+| `5-expiring-soon.txt` | 到期日改成 3 天后 | 扫描前给出「豁免快到期」的提示 |
+
+每个文件开头写了用的命令和 `.trivyignore.yaml` 的内容。

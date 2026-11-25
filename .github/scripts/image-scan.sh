@@ -12,10 +12,18 @@ first=$(sed -n 's/^first=//p' "$out")
 root=$(git rev-parse --show-toplevel)
 work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/image-scan.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+# 豁免 7 天内到期时先提示：到期那天起所有 PR 和发布都会被拦
+today=$(date -u +%s)
+while read -r d; do
+  left=$(( ($(date -u -d "$d" +%s) - today) / 86400 ))
+  if [ "$left" -le 7 ]; then echo "::warning title=镜像漏洞扫描::.trivyignore.yaml 里有豁免 ${d} 到期（还剩 ${left} 天）：到期后扫描会重新拦下，请提前重新评估"; fi
+done < <(sed -n 's/^[[:space:]]*expired_at:[[:space:]]*\([0-9-]*\).*/\1/p' "$root/.trivyignore.yaml" | sort -u)
 docker save "$first" -o "$work/image.tar"
 mkdir -p "$work/cache"
 status=0
-docker run --rm \
+# 以当前用户运行：缓存目录里的漏洞库是当前用户的文件，结束时能删掉。漏洞库每次都下载最新的（不锁版本）：
+# 漏洞库里新出的、已有修复版本的漏洞会让不相干的 PR 和发布变红，这是有意的（用户的决定），处理方法见下面的报错
+docker run --rm --user "$(id -u):$(id -g)" \
   -v "$work/image.tar:/scan/image.tar:ro" \
   -v "$root/.trivyignore.yaml:/scan/.trivyignore.yaml:ro" \
   -v "$work/cache:/cache" \
