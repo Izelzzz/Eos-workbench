@@ -1,0 +1,72 @@
+# 构建 Docker 镜像并发布到 ghcr（路线图第 3 项）。用法见 docs/deploy.md「用发布的镜像」。
+# - 推送 v* 标签：发布 <版本号>（去掉 v）；不是预发布版（版本号里没有 -）时同时发布 latest。
+# - 合并到 main：发布 main 和 sha-<短提交号>。
+# - PR：按同样的步骤算标签（用固定的 v0.0.0-ci）、构建、冒烟，不登录、不推送。
+#   每个 PR 都跑：镜像里有 src/、web/ 的构建，只按路径触发会漏掉弄坏镜像的改动。
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+# 每个提交一组：main 上连续合并时不会跳过中间的提交（每个提交都要有自己的 sha- 标签）。几次发布可能并行，
+# 浮动标签 main 由 image-push.sh 核对 main 分支还指向本提交才推。PR 上新的推送取消旧的。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/izelzzz/eos-workbench
+  # 和 ci.yml、Dockerfile 的 Node 版本一致
+  NODE_VERSION: 24.22.3
+
+jobs:
+  build:
+    name: image-build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node .github/scripts/image-tags.ts "$IMAGE" tag v0.0.0-ci "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
+      - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
+
+  publish:
+    name: image-publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 算出标签
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: node .github/scripts/image-tags.ts "$IMAGE" "$REF_TYPE" "$REF_NAME" "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
+      - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
+      - name: 登录 ghcr
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: 推送
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/image-push.sh "$RUNNER_TEMP/tags"
