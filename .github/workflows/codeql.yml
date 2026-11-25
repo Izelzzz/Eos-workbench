@@ -1,0 +1,42 @@
+# CodeQL 代码扫描（JavaScript/TypeScript）。仓库是公开的，代码扫描免费。
+# 结果在仓库的 Security → Code scanning 页；PR 上由 GitHub 的「CodeQL」检查显示新出现的告警。
+# job 名字（codeql）会设成必需检查，改名前先改分支保护。见 docs/roadmap.md 的 CI 一项。
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # 每周一次扫 main：查询规则会更新，没改代码也可能查出新问题
+  schedule:
+    - cron: '23 4 * * 1'
+
+# 默认只读；上传结果需要的 security-events: write 只给下面这一个 job。这个工作流不使用任何仓库密钥。
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: codeql
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: javascript-typescript
+          # 解释型语言，不需要构建
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:javascript-typescript
