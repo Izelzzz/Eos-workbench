@@ -82,7 +82,7 @@ test('改了检查规则或允许清单：给出提示，提示里列出是哪�
   assert.deepEqual(r.errors, [])
   assert.equal(r.warnings.length, 1)
   assert.match(r.warnings[0]!, /\.gitleaksignore、\.github\/workflows\/ci\.yml/)
-  for (const p of ['.gitleaks.toml', '.github/e2e-paths.txt', '.github/scripts/pr-checklist.ts']) {
+  for (const p of ['.gitleaks.toml', '.github/e2e-paths.txt', '.github/scripts/pr-checklist.ts', '.github/lint/eslint.config.mjs', '.github/codeql/codeql-config.yml']) {
     assert.equal(check({ body: proof, changed: ch(p), rules }).warnings.length, 1, p)
   }
   assert.deepEqual(check({ body: proof, changed: ch('docs/a.md', '.github/README.md'), rules }).warnings, [])

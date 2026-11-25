@@ -70,7 +70,7 @@ export function sections(body: string): { title: string; content: string }[] {
 /** 决定 CI 查什么、放行什么的文件。PR 改它们就能放宽自己的检查，所以要醒目地提示。 */
 export function isGuardFile(path: string): boolean {
   return path === '.gitleaksignore' || path === '.gitleaks.toml' || path === '.github/e2e-paths.txt' ||
-    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/')
+    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/') || path.startsWith('.github/lint/') || path.startsWith('.github/codeql/')
 }
 
 export type Result = { errors: string[]; warnings: string[]; notes: string[] }
@@ -115,7 +115,7 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
   // 路径到空白或标点为止；* 不当通配，截到它前面的目录，按目录匹配。
   // 证据文件名可能是中文，所以路径后面紧跟的中文字会被当成路径的一部分：路径后面要留空格或标点。
   // 只写目录时，这个目录下有任何新增或修改的文件就算数。
-  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
+  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`

@@ -1,0 +1,12 @@
+{
+  "name": "eos-lint-tools",
+  "private": true,
+  "description": "lint 工具单独安装：仓库编译用 TypeScript 7，没有 typescript-eslint 需要的 JS API，这里装 TS 6 只给 lint 用",
+  "type": "module",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2"
+  }
+}
