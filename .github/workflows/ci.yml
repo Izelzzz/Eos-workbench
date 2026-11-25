@@ -1,5 +1,5 @@
 # 类型检查、单元测试、构建网页。见 docs/roadmap.md 的 CI 一项。
-# job 名字（typecheck、unit-test、build-web）会设成必需检查，改名前先改分支保护。
+# job 名字（typecheck、unit-test、build-web、lint）会设成必需检查，改名前先改分支保护。
 name: CI
 
 on:
@@ -67,3 +67,24 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:web
+
+  # lint 工具单独装在 .github/lint/：仓库编译用 TypeScript 7，没有 typescript-eslint 需要的 JS API，
+  # 那里装 TS 6 只给 lint 用。规则见 .github/lint/eslint.config.mjs（架构规则、通用规则和逐条列出的例外）
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: .github/lint/package-lock.json
+      - run: npm ci --prefix .github/lint
+      - name: 规则自己的测试
+        run: node --test .github/lint/rules.test.mjs
+      - name: lint
+        run: .github/lint/node_modules/.bin/eslint -c .github/lint/eslint.config.mjs --max-warnings 0 .

@@ -115,7 +115,7 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
   // 路径到空白或标点为止；* 不当通配，截到它前面的目录，按目录匹配。
   // 证据文件名可能是中文，所以路径后面紧跟的中文字会被当成路径的一部分：路径后面要留空格或标点。
   // 只写目录时，这个目录下有任何新增或修改的文件就算数。
-  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）\[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
+  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
