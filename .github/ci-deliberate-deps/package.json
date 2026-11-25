@@ -1,6 +1,0 @@
-{
-  "name": "ci-deliberate-deps",
-  "private": true,
-  "description": "CI 故意失败的验证用：依赖一个有已知高危漏洞的旧版本，验证 dependency-review 会变红。下一个提交撤掉",
-  "dependencies": { "lodash": "4.17.20" }
-}
