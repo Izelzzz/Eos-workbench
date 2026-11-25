@@ -1,0 +1,6 @@
+# 格式化只管代码；这些目录不是产品代码，或者不由本仓库维护
+docs/
+poc/
+vendor/
+**/node_modules/
+**/dist/
