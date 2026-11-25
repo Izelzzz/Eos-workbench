@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, needsE2E, parseNameStatusZ, parseRules, sections, stripHtmlComments, type Change } from './pr-checklist.ts'
+import { check, command, gitRepo, oneLine, needsE2E, parseNameStatusZ, parseReport, parseRules, sections, stripHtmlComments, type Change, type Repo } from './pr-checklist.ts'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -219,4 +219,193 @@ test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响�
   assert.deepEqual(tick.errors, ['「能用证据证明的」一节是空的'])
   const para = check({ body: '## 能用证据证明的\n\n- 见 a <!-- 这里\n\n## 证明不了的\n- A --> B\n', changed: ch('docs/a.md'), rules })
   assert.deepEqual(para.errors, [])
+})
+
+// ── 证据对得上最终代码 ──────────────────────────────────────────────────
+const C = 'a'.repeat(40)
+/** 桩：changedAfter 里的文件在 C 之后又改过 */
+const stub = (o: { report?: unknown; inHistory?: boolean; changedAfter?: string[] }): Repo => ({
+  report: () => (o.report === undefined ? { commit: C, uncommitted: [] } : (o.report as never)),
+  inHistory: () => o.inHistory ?? true,
+  changedSince: () => o.changedAfter ?? [],
+  samePrChange: (_c: string, p: string) => !(o.changedAfter ?? []).includes(p),
+})
+const withEvidence = (extra = '') => `${proof}\n## 端到端验证\n\n见 docs/e2e/x/\n${extra}`
+const changedWith = (...src: string[]) => ch(...src, 'docs/e2e/x/report.json', 'docs/e2e/x/run.log')
+
+test('证据对得上：报告的提交在历史里，PR 改过的「需要」文件此后没变 → 通过', () => {
+  const r = check({ body: withEvidence(), changed: changedWith('src/engine/prompts.ts'), rules, repo: stub({}) })
+  assert.deepEqual(r.errors, [])
+  assert.deepEqual(r.warnings, [])
+  assert.match(r.notes.join(), /对得上最终代码/)
+})
+
+test('跑完 E2E 又改了「需要」的文件 → 报错；写了「证据之后的改动」一节 → 改成要人确认的提示', () => {
+  const stale = stub({ changedAfter: ['src/engine/prompts.ts'] })
+  const r = check({ body: withEvidence(), changed: changedWith('src/engine/prompts.ts', 'src/runner/runner.ts'), rules, repo: stale })
+  assert.equal(r.errors.length, 1)
+  assert.match(r.errors[0]!, /src\/engine\/prompts\.ts/)
+  assert.doesNotMatch(r.errors[0]!, /runner\.ts/)
+  const ok = check({ body: withEvidence('\n## 证据之后的改动\n\n只改了一行注释\n'), changed: changedWith('src/engine/prompts.ts'), rules, repo: stale })
+  assert.deepEqual(ok.errors, [])
+  assert.match(ok.warnings.join(), /只改了一行注释/)
+  // 这一节是空的不算
+  assert.equal(check({ body: withEvidence('\n## 证据之后的改动\n\n'), changed: changedWith('src/engine/prompts.ts'), rules, repo: stale }).errors.length, 1)
+})
+
+test('之后只改了测试或文档（不需要 E2E 的文件）不报错', () => {
+  const r = check({ body: withEvidence(), changed: changedWith('src/engine/prompts.ts', 'tests/x.test.ts'), rules, repo: stub({ changedAfter: ['tests/x.test.ts', 'docs/a.md'] }) })
+  assert.deepEqual(r.errors, [])
+})
+
+test('报告的提交不在 PR 历史里、跑的时候有没提交的改动、报告坏了 → 报错；报告没记提交、证据里没报告 → 提示', () => {
+  const notInHistory = check({ body: withEvidence(), changed: changedWith('src/a.ts'), rules, repo: stub({ inHistory: false }) })
+  assert.match(notInHistory.errors.join(), /不在这个 PR 的历史里/)
+  const dirty = check({ body: withEvidence(), changed: changedWith('src/a.ts'), rules, repo: stub({ report: { commit: C, uncommitted: ['src/a.ts', 'docs/notes.md'] } }) })
+  assert.match(dirty.errors.join(), /没提交的改动：src\/a\.ts/)
+  assert.doesNotMatch(dirty.errors.join(), /notes\.md/)
+  const broken: Repo = { ...stub({}), report: () => undefined }
+  assert.match(check({ body: withEvidence(), changed: changedWith('src/a.ts'), rules, repo: broken }).errors.join(), /不是 E2E 报告的格式/)
+  const noCommit = check({ body: withEvidence(), changed: changedWith('src/a.ts'), rules, repo: stub({ report: { uncommitted: [] } }) })
+  assert.deepEqual(noCommit.errors, [])
+  assert.match(noCommit.warnings.join(), /没有记下跑的是哪个提交/)
+  const noReport = check({ body: withEvidence(), changed: ch('src/a.ts', 'docs/e2e/x/run.log'), rules, repo: stub({}) })
+  assert.deepEqual(noReport.errors, [])
+  assert.match(noReport.warnings.join(), /没有带提交记录的 E2E 报告/)
+  // 跑的过程中提交变了
+  const moved = check({ body: withEvidence(), changed: changedWith('src/a.ts'), rules, repo: stub({ report: { commit: C, commitAtEnd: 'c'.repeat(40) } }) })
+  assert.match(moved.errors.join(), /跑的过程中提交变了/)
+  // 不在历史里（rebase 过）也能写理由放行
+  const rebased = check({ body: withEvidence('\n## 证据之后的改动\n\nrebase 到最新的 main，代码没变\n'), changed: changedWith('src/a.ts'), rules, repo: stub({ inHistory: false }) })
+  assert.deepEqual(rebased.errors, [])
+  assert.match(rebased.warnings.join(), /rebase 到最新的 main/)
+})
+
+test('只引用了证据目录里的某个文件时，同目录的 report.json 也会核对；别的目录的不算', () => {
+  const body = `${proof}\n## 端到端验证\n\n见 docs/e2e/x/run.log\n`
+  const stale = stub({ changedAfter: ['src/engine/prompts.ts'] })
+  assert.equal(check({ body, changed: changedWith('src/engine/prompts.ts'), rules, repo: stale }).errors.length, 1)
+  const other = check({ body, changed: ch('src/engine/prompts.ts', 'docs/e2e/x/run.log', 'docs/e2e/y/report.json'), rules, repo: stale })
+  assert.deepEqual(other.errors, [])
+  assert.match(other.warnings.join(), /没有带提交记录的 E2E 报告/)
+})
+
+test('报告在边界按格式校验：不是对象、字段类型不对都不算报告', () => {
+  for (const bad of ['null', '[]', '"x"', '{"commit":1}', '{"uncommitted":"src/a.ts"}', '{"uncommitted":[1]}', 'not json']) {
+    assert.equal(parseReport(bad), undefined, bad)
+  }
+  assert.deepEqual(parseReport('{"commit":"abc","uncommitted":["a"],"other":1}'), { commit: 'abc', uncommitted: ['a'] })
+})
+
+test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之后改提示词变红、只改测试和只合进 main 不变红、证据提交不在历史里变红）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pr-evidence-'))
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, encoding: 'utf8' }).trim()
+  const write = (p: string, s: string) => {
+    mkdirSync(join(dir, p, '..'), { recursive: true })
+    writeFileSync(join(dir, p), s)
+  }
+  const commit = (m: string) => {
+    git('add', '-A')
+    git('commit', '-qm', m)
+    return git('rev-parse', 'HEAD')
+  }
+  /** 在 base 上模拟 GitHub 的合并提交（HEAD^1 = base，HEAD^2 = PR 最新提交），返回改动和核对结果 */
+  const verify = (base: string, head: string, body = withEvidence()) => {
+    git('checkout', '-q', '--detach', base)
+    git('merge', '-q', '--no-ff', '--no-edit', head)
+    const changed = parseNameStatusZ(git('diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD') + '\0')
+    const r = check({ body, changed, rules, repo: gitRepo(dir, head) })
+    git('checkout', '-q', '-f', 'pr')
+    return r
+  }
+  try {
+    git('init', '-q', '-b', 'main')
+    write('src/engine/prompts.ts', 'v1\na\nb\nc\nd\n')
+    write('src/other.ts', 'o1\n')
+    write('src/old.ts', 'old\n')
+    const base = commit('base')
+    git('checkout', '-q', '-b', 'pr')
+    write('src/engine/prompts.ts', 'v2\na\nb\nc\nd\n')
+    write('src/feature.ts', 'f1\n')
+    const tested = commit('改提示词')
+    write('docs/e2e/x/report.json', JSON.stringify({ commit: tested, uncommitted: [] }))
+    write('docs/e2e/x/run.log', 'ok')
+    const withProof = commit('证据')
+    assert.deepEqual(verify(base, withProof).errors, [], 'E2E 之后只加了证据')
+
+    write('tests/x.test.ts', 't')
+    const onlyTests = commit('只改测试')
+    assert.deepEqual(verify(base, onlyTests).errors, [], '之后只改测试')
+
+    // main 前进（改了 PR 没碰的文件），PR 合进 main
+    git('checkout', '-q', 'main')
+    write('src/other.ts', 'o2\n')
+    const main2 = commit('main 前进')
+    git('checkout', '-q', 'pr')
+    git('merge', '-q', '--no-edit', 'main')
+    const merged = git('rev-parse', 'HEAD')
+    assert.deepEqual(verify(main2, merged).errors, [], '只合进 main')
+
+    // main 新增、删除了「需要」的文件，PR 合进 main：PR 自己的改动没变，不算
+    git('checkout', '-q', 'main')
+    write('src/new.ts', 'n\n')
+    rmSync(join(dir, 'src/old.ts'))
+    const main2b = commit('main 新增和删除文件')
+    git('checkout', '-q', 'pr')
+    git('merge', '-q', '--no-edit', 'main')
+    assert.deepEqual(verify(main2b, git('rev-parse', 'HEAD')).errors, [], 'main 新增、删除文件')
+
+    // 合过 main 之后，PR 再改跑 E2E 时没碰过的文件、再新增文件：算变了
+    write('src/other.ts', 'o3\n')
+    assert.match(verify(main2b, commit('证据之后改了没碰过的文件')).errors.join(), /src\/other\.ts/, '改没碰过的文件')
+    write('src/other.ts', 'o2\n')
+    write('src/added.ts', 'a\n')
+    assert.match(verify(main2b, commit('证据之后新增文件')).errors.join(), /src\/added\.ts/, '证据之后新增文件')
+    rmSync(join(dir, 'src/added.ts'))
+    commit('撤回')
+
+    // main 也改了 PR 改过的文件（不冲突的另一处），PR 再合进 main：PR 自己的改动没变，不算
+    git('checkout', '-q', 'main')
+    write('src/engine/prompts.ts', 'v1\na\nb\nc\nmain 改的一行\n')
+    const main3 = commit('main 改了同一个文件')
+    git('checkout', '-q', 'pr')
+    git('merge', '-q', '--no-edit', 'main')
+    const sameFile = git('rev-parse', 'HEAD')
+    assert.deepEqual(verify(main3, sameFile).errors, [], 'main 和 PR 改了同一个文件，PR 自己的改动没变')
+
+    write('src/engine/prompts.ts', 'v3\na\nb\nc\nmain 改的一行\n')
+    const changedAgain = commit('证据之后又改提示词')
+    assert.match(verify(main3, changedAgain).errors.join(), /src\/engine\/prompts\.ts/, '证据之后改提示词')
+
+    // 改回去：最终和 main 一样（不在 PR 的改动里，PR 还改了 src/feature.ts），但和跑 E2E 时不一样
+    write('src/engine/prompts.ts', 'v1\na\nb\nc\nmain 改的一行\n')
+    const reverted = commit('改回 main 的版本')
+    assert.match(verify(main3, reverted).errors.join(), /src\/engine\/prompts\.ts/, '改回去也算变了')
+    write('src/engine/prompts.ts', 'v2\na\nb\nc\nmain 改的一行\n')
+    commit('再改回来')
+
+    // 报告是符号链接：不读
+    rmSync(join(dir, 'docs/e2e/x/report.json'))
+    symlinkSync('/etc/hostname', join(dir, 'docs/e2e/x/report.json'))
+    const linked = commit('报告换成符号链接')
+    assert.match(verify(main3, linked).errors.join(), /读不出来/)
+    rmSync(join(dir, 'docs/e2e/x/report.json'))
+
+    // 报告太大：不读
+    write('docs/e2e/x/report.json', JSON.stringify({ commit: tested, uncommitted: [], pad: 'x'.repeat((1 << 20) + 1) }))
+    const huge = commit('报告太大')
+    assert.match(verify(main3, huge).errors.join(), /读不出来/)
+
+    // 证据记的提交不在 PR 的历史里
+    write('docs/e2e/x/report.json', JSON.stringify({ commit: 'b'.repeat(40), uncommitted: [] }))
+    const foreign = commit('别处的证据')
+    assert.match(verify(main3, foreign).errors.join(), /不在这个 PR 的历史里/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('输出到工作流的消息转义换行和 %，免得 PR 里的文字另起一行写成工作流命令', () => {
+  assert.equal(command('a\n::error::x%\r'), 'a%0A::error::x%25%0D')
+  assert.equal(oneLine('a\r\n::warning::x'), 'a ::warning::x')
 })

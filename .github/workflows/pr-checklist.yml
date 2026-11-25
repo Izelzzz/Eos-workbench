@@ -23,10 +23,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      # 检出合并提交；取两层历史，脚本用 HEAD^1..HEAD 得到这个 PR 相对 base 的改动
+      # 检出合并提交（HEAD^1 是 base，HEAD^2 是 PR 的最新提交），取完整历史：
+      # 脚本用 HEAD^1..HEAD 得到这个 PR 的改动，并核对 E2E 报告记的提交在 PR 的历史里、之后文件有没有再改
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -40,6 +41,7 @@ jobs:
       - name: 检查描述和 E2E 证据
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           base="$RUNNER_TEMP/base"; mkdir -p "$base"
           if git cat-file -e HEAD^1:.github/scripts/pr-checklist.ts 2>/dev/null; then
