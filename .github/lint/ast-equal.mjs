@@ -111,17 +111,20 @@ const parenMatters = n =>
 // 从语法树按 token 取注释（不自己扫描全文：模板字符串、JSX 文本里的 /* 和 // 会打乱扫描）
 function directives(f, src) {
   const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, kindOf(f))
+  // 已经报出的指令注释的位置（去重）
   const seen = new Set()
   const found = []
   const take = ranges => {
     for (const r of ranges ?? []) {
-      if (seen.has(r.pos)) continue
-      seen.add(r.pos)
       const t = src.slice(r.pos, r.end)
-      if (DIRECTIVE.test(t)) found.push(t)
+      if (seen.has(r.pos) || !DIRECTIVE.test(t)) continue
+      seen.add(r.pos)
+      found.push(t)
     }
   }
   const walk = n => {
+    // JSDoc 节点里面不再往下找：JSDoc 正文里写的 // 不是注释；JSDoc 本身在它所属节点的前导注释里已经取过
+    if (ts.isJSDoc(n)) return
     take(ts.getLeadingCommentRanges(src, n.pos))
     take(ts.getTrailingCommentRanges(src, n.end))
     // getChildren 连标点和关键字 token 也给（= ( , { 等），forEachChild 只给节点：跟在 token 后面的注释会漏
@@ -129,6 +132,13 @@ function directives(f, src) {
   }
   walk(sf)
   take(ts.getLeadingCommentRanges(src, sf.endOfFileToken.pos))
+  // TypeScript 自己认出的 @ts-ignore / @ts-expect-error（它的写法比上面的正则宽：/// @ts-ignore、/** @ts-ignore */、
+  // 块注释最后一行的 @ts-expect-error 都算）
+  for (const d of sf.commentDirectives ?? []) {
+    if (seen.has(d.range.pos)) continue
+    seen.add(d.range.pos)
+    found.push(src.slice(d.range.pos, d.range.end))
+  }
   return found
 }
 

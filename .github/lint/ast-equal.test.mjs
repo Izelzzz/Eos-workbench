@@ -94,6 +94,16 @@ test('跟在标点、关键字后面或在闭合符号前的指令注释也能�
   for (const [f] of cases) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)
 })
 
+test('TypeScript 认的其他 @ts- 写法也算指令；JSDoc 正文里的 // 不算', () => {
+  const moved = (f, c) => [f, `${c}\nexport const a: number = 'x'\n`, `export const a: number =\n  ${c}\n  'x'\n`]
+  const cases = [moved('t1.ts', '/// @ts-ignore'), moved('t2.ts', '/** @ts-ignore */'), moved('t3.ts', '/*\n * @ts-expect-error */')]
+  const r = run(cases)
+  assert.equal(r.code, 1, r.out)
+  for (const [f] of cases) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)
+  const doc = run([['d.ts', '/**\n * @param x 写法 // @ts-ignore\n */\nexport const f = (x: number) => x;\n', '/**\n * @param x 写法 // @ts-ignore\n */\nexport const f = (x: number) => x\n']])
+  assert.equal(doc.code, 0, doc.out)
+})
+
 test('JS 里 JSDoc 类型转换的括号不当成多余括号', () => {
   const r = run([['c.js', 'const y = 1\nexport const v = /** @type {number} */ (y)\n', 'const y = 1\nexport const v = /** @type {number} */ y\n']])
   assert.equal(r.code, 1, r.out)
