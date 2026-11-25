@@ -73,7 +73,8 @@ test('纯逻辑目录：数据库、虚拟机、联网的 npm 包也不许；动
   }
   assert.deepEqual(await rules('src/engine/x.ts', "export const a = () => import('node:fs')\n"), ['no-restricted-syntax'])
   for (const expr of ['globalThis.Date.now()', 'globalThis.process.env.X', "globalThis.fetch('x')"]) {
-    assert.deepEqual(await rules('src/engine/x.ts', `export const a = () => ${expr}\n`), ['no-restricted-properties'], expr)
+    // 现在 globalThis 本身也禁了，所以两条规则都报
+    assert.deepEqual(await rules('src/engine/x.ts', `export const a = () => ${expr}\n`), ['no-restricted-globals', 'no-restricted-properties'], expr)
   }
   // 纯逻辑目录以外照常
   assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('node:fs')\n"), [])
@@ -92,4 +93,33 @@ test('执行器规则：子目录和直接导入目录也拦；types 带 .js 扩
 test('.cts 和 .cjs 文件也检查', async () => {
   assert.deepEqual(await rules('src/engine/x.cts', `import * as m from 'node:fs'\nexport const a = m\n`), restricted)
   assert.deepEqual(await rules('src/runner/x.cjs', 'const unused = 1\nexport const a = 2\n'), ['@typescript-eslint/no-unused-vars'])
+})
+
+test('行内注释关不掉规则：eslint-disable 本身就报错', async () => {
+  const r = await rules('src/engine/x.ts', "// eslint-disable-next-line no-restricted-imports\nimport * as fs from 'node:fs'\nexport const a = fs\n")
+  assert.ok(r.includes('no-restricted-imports'), r.join())
+  const all = await rules('src/engine/x.ts', "/* eslint-disable */\nexport const a = () => Date.now()\n")
+  assert.ok(all.includes('no-restricted-globals'), all.join())
+})
+
+test('纯逻辑目录只能导入这两个目录里的模块，不能借别的模块间接做 I/O', async () => {
+  assert.deepEqual(await rules('src/engine/x.ts', "import { readFileSync } from '../store/fsutil.ts'\nexport const a = readFileSync\n"), restricted)
+  assert.deepEqual(await rules('src/workflow/x.ts', "import * as v from '../../vendor/x.ts'\nexport const a = v\n"), restricted)
+  assert.deepEqual(await rules('src/workflow/templates.ts', "import * as s from '../store/fsutil.ts'\nexport const a = s\n"), restricted)
+  assert.deepEqual(await rules('src/engine/x.ts', "import type { T } from '../workflow/types.ts'\nimport { y } from './y.ts'\nexport const a: T = y\n"), [])
+  assert.deepEqual(await rules('src/workflow/x.ts', "import { z } from 'zod'\nimport { parse } from 'yaml'\nexport const a = [z, parse]\n"), [])
+})
+
+test('其他目录用动态 import() 引执行器实现或 dsh 的包也拦', async () => {
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('../executor/dsh.ts')\n"), ['no-restricted-syntax'])
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('@deepseek-ai/dsh-session')\n"), ['no-restricted-syntax'])
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('../executor/types.ts')\n"), [])
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('node:fs')\n"), [])
+})
+
+test('纯逻辑目录不许用 globalThis，也不许 tty、async_hooks、crypto', async () => {
+  assert.deepEqual(await rules('src/engine/x.ts', 'const g = globalThis\nexport const a = () => g\n'), ['no-restricted-globals'])
+  for (const mod of ['node:tty', 'node:async_hooks', 'node:crypto']) {
+    assert.deepEqual(await rules('src/engine/x.ts', `import * as m from '${mod}'\nexport const a = m\n`), restricted, mod)
+  }
 })

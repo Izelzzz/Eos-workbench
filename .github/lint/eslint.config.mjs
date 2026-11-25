@@ -12,7 +12,9 @@ import tseslint from 'typescript-eslint'
 const PURE_IO_MODULES = [
   'fs', 'fs/promises', 'os', 'child_process', 'net', 'http', 'https', 'http2', 'dgram', 'dns', 'tls',
   'worker_threads', 'cluster', 'readline', 'process', 'timers', 'timers/promises', 'perf_hooks',
-  'vm', 'inspector', 'module', 'v8',
+  'vm', 'inspector', 'module', 'v8', 'tty', 'async_hooks',
+  // 随机数也会让纯逻辑不可重放
+  'crypto',
 ].flatMap((m) => [m, `node:${m}`])
   // node:sqlite 只有带 node: 前缀的写法；仓库的存储层用它，纯逻辑目录里最可能这样读写磁盘
   .concat(['node:sqlite'])
@@ -21,7 +23,13 @@ const PURE_IO_MODULES = [
 const pureImports = {
   paths: PURE_IO_MODULES.map((name) => ({ name, message: 'src/workflow、src/engine 是纯逻辑：不读写文件、不访问网络、不读时钟（CLAUDE.md 代码约定）' })),
 }
+// 纯逻辑目录的相对导入只能停在这两个目录之内：否则可以借 src/ 里别的模块间接做 I/O
+const pureRelativeImports = {
+  regex: '^\\.\\./(?!(engine|workflow)/)',
+  message: 'src/workflow、src/engine 是纯逻辑：只能导入这两个目录里的模块，不能借别的模块间接读写文件、访问网络（CLAUDE.md 代码约定）',
+}
 const pureGlobals = [
+  { name: 'globalThis', message: 'src/workflow、src/engine 是纯逻辑：不经 globalThis 取全局（CLAUDE.md 代码约定）' },
   ...['fetch', 'WebSocket', 'XMLHttpRequest', 'performance', 'setTimeout', 'setInterval', 'setImmediate', 'process'].map((name) => ({
     name, message: 'src/workflow、src/engine 是纯逻辑：不访问网络、不读时钟、不碰进程（CLAUDE.md 代码约定）',
   })),
@@ -40,7 +48,12 @@ const executorImports = {
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', 'web/dist/**', 'poc/**', 'docs/**', 'vendor/**', '.github/lint/**'],
+    // .eos/ 是平台数据目录（任务 worktree 是整仓副本），.claude/ 里也可能有 worktree；本地运行时不扫它们
+    ignores: ['**/node_modules/**', '**/dist/**', 'web/dist/**', 'poc/**', 'docs/**', 'vendor/**', '.github/lint/**', '.eos/**', '.claude/**'],
+  },
+  {
+    // 不许用 eslint-disable 之类的行内注释关掉规则：例外只能写在本文件里，改本文件时 pr-checklist 会提示要人确认
+    linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' },
   },
   {
     files: ['**/*.{ts,tsx,mts,cts,mjs,cjs,js}'],
@@ -78,7 +91,17 @@ export default tseslint.config(
   {
     files: ['src/**', 'web/src/**'],
     ignores: ['src/executor/**', 'src/cli.ts'],
-    rules: { 'no-restricted-imports': ['error', executorImports] },
+    rules: {
+      'no-restricted-imports': ['error', executorImports],
+      // 动态 import() 绕得过 no-restricted-imports
+      'no-restricted-syntax': ['error', {
+        selector: `ImportExpression[source.value=/${executorImports.patterns[2].regex.replaceAll('/', '\\/')}/]`,
+        message: executorImports.patterns[2].message,
+      }, {
+        selector: 'ImportExpression[source.value=/^@deepseek-ai\\//]',
+        message: executorImports.patterns[0].message,
+      }],
+    },
   },
   {
     files: ['src/executor/**'],
@@ -94,7 +117,7 @@ export default tseslint.config(
   {
     files: ['src/workflow/**', 'src/engine/**'],
     rules: {
-      'no-restricted-imports': ['error', { ...pureImports, ...executorImports }],
+      'no-restricted-imports': ['error', { ...pureImports, patterns: [...executorImports.patterns, pureRelativeImports] }],
       'no-restricted-globals': ['error', ...pureGlobals],
       // 动态 import() 绕得过上面的导入限制；纯逻辑里也用不到它
       'no-restricted-syntax': ['error', { selector: 'ImportExpression', message: 'src/workflow、src/engine 是纯逻辑：不用动态 import()（CLAUDE.md 代码约定）' }],
@@ -114,7 +137,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         paths: pureImports.paths.filter((p) => p.name !== 'node:fs'),
-        patterns: executorImports.patterns,
+        patterns: [...executorImports.patterns, pureRelativeImports],
       }],
     },
   },
