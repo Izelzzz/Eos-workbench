@@ -21,7 +21,10 @@ git(repo, 'add', '.')
 git(repo, 'commit', '-q', '-m', 'init')
 // 和平台建 worktree 一样：在 worktrees 目录（共用组、setgid）下 git worktree add。
 git(repo, 'worktree', 'add', '-q', worktree)
-const mode = (p: string) => { const s = statSync(p); return { gid: s.gid, mode: (s.mode & 0o7777).toString(8) } }
+const mode = (p: string) => {
+  const s = statSync(p)
+  return { gid: s.gid, mode: (s.mode & 0o7777).toString(8) }
+}
 
 // 代替 dsh 进程：同一个用户（eos），环境里有模型 key。
 const fakeDsh = spawn('sleep', ['600'], { env: { ...process.env, DEEPSEEK_API_KEY: 'sk-probe-not-a-real-key' }, detached: true, stdio: 'ignore' })
@@ -30,9 +33,16 @@ const fakeDsh = spawn('sleep', ['600'], { env: { ...process.env, DEEPSEEK_API_KE
 // 包装用 process.execve 换成 setpriv 再换成 dsh，进程号不变：等这个进程的命令行变成 dsh。
 const capsOf = (pid: number) => Object.fromEntries([...readFileSync(`/proc/${pid}/status`, 'utf8').matchAll(/^(Uid|CapEff|CapAmb|NoNewPrivs):\s*(\S+)/gm)].map(m => [m[1], m[2]]))
 const launched = spawn(process.execPath, [process.env.EOS_DSH_LAUNCHER!, '--profile', 'sdk'], {
-  env: { ...process.env, DEEPSEEK_API_KEY: 'sk-probe-not-a-real-key', DSH_HOME: join(data, 'dsh-probe') }, stdio: ['pipe', 'ignore', 'ignore'],
+  env: { ...process.env, DEEPSEEK_API_KEY: 'sk-probe-not-a-real-key', DSH_HOME: join(data, 'dsh-probe') },
+  stdio: ['pipe', 'ignore', 'ignore'],
 })
-const cmdlineOf = (pid: number) => { try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').slice(0, 2).join(' ') } catch { return '' } }
+const cmdlineOf = (pid: number) => {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').slice(0, 2).join(' ')
+  } catch {
+    return ''
+  }
+}
 for (let i = 0; i < 100 && !cmdlineOf(launched.pid!).includes('@deepseek-ai/dsh/'); i++) await new Promise(r => setTimeout(r, 100))
 const realDsh = { pid: launched.pid, cmdline: cmdlineOf(launched.pid!), caps: cmdlineOf(launched.pid!).includes('@deepseek-ai/dsh/') ? capsOf(launched.pid!) : 'dsh 没有起来' }
 
@@ -55,7 +65,14 @@ launched.kill('SIGTERM')
 const dshExit = await new Promise<{ code: number | null; signal: string | null }>(r => launched.once('exit', (code, signal) => r({ code, signal })))
 
 // 检查命令里跑 git：worktree 和它的 git 目录属于平台用户。
-const [gitCheck] = await runChecks(worktree, [{ kind: 'run', run: ['sh', '-c', 'git status --porcelain && git diff --check && git log --oneline -1'], timeoutSec: 30 }], process.env, undefined, undefined, user.user)
+const [gitCheck] = await runChecks(
+  worktree,
+  [{ kind: 'run', run: ['sh', '-c', 'git status --porcelain && git diff --check && git log --oneline -1'], timeoutSec: 30 }],
+  process.env,
+  undefined,
+  undefined,
+  user.user,
+)
 
 // 超时：检查命令和它的子进程要被结束（平台不能直接给 eos-check 的进程发信号）。
 const started = Date.now()
@@ -66,15 +83,18 @@ const leftover = spawnSync('ps', ['-u', user.user.name, '-o', 'pid=,comm='], { e
 
 process.kill(-fakeDsh.pid!, 'SIGKILL')
 
-console.log(JSON.stringify({
-  platform: { uid: process.getuid?.(), groups: process.getgroups?.(), caps: /^CapEff:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8'))?.[1] },
-  checkUser: user.user.name,
-  // 平台给的 SIGTERM 直接到 dsh，退出时报的就是这个信号。
-  realDsh: { ...realDsh, exitAfterSigterm: dshExit },
-  gitCaps,
-  worktreeDir: mode(join(data, 'worktrees')), worktreeFile: mode(join(worktree, 'a.txt')),
-  viaCheck: { result: viaCheck, scan: JSON.parse(readFileSync(viaCheckOut, 'utf8')), outputFile: mode(viaCheckOut) },
-  control: { status: control.status, stderr: control.stderr, scan: JSON.parse(readFileSync(join(data, 'scan-control.json'), 'utf8')) },
-  gitCheck: { passed: gitCheck?.passed, detail: gitCheck?.detail },
-  timeout: { passed: hung?.passed, detail: hung?.detail.split('\n')[0], ms: Date.now() - started, leftoverCheckUserProcesses: leftover === '' ? [] : leftover.split('\n') },
-}))
+console.log(
+  JSON.stringify({
+    platform: { uid: process.getuid?.(), groups: process.getgroups?.(), caps: /^CapEff:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8'))?.[1] },
+    checkUser: user.user.name,
+    // 平台给的 SIGTERM 直接到 dsh，退出时报的就是这个信号。
+    realDsh: { ...realDsh, exitAfterSigterm: dshExit },
+    gitCaps,
+    worktreeDir: mode(join(data, 'worktrees')),
+    worktreeFile: mode(join(worktree, 'a.txt')),
+    viaCheck: { result: viaCheck, scan: JSON.parse(readFileSync(viaCheckOut, 'utf8')), outputFile: mode(viaCheckOut) },
+    control: { status: control.status, stderr: control.stderr, scan: JSON.parse(readFileSync(join(data, 'scan-control.json'), 'utf8')) },
+    gitCheck: { passed: gitCheck?.passed, detail: gitCheck?.detail },
+    timeout: { passed: hung?.passed, detail: hung?.detail.split('\n')[0], ms: Date.now() - started, leftoverCheckUserProcesses: leftover === '' ? [] : leftover.split('\n') },
+  }),
+)

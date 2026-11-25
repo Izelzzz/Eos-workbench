@@ -55,14 +55,36 @@ try {
   const upgraded = exec(NEW, ['eos', 'sh', '-c', 'stat -c "%U:%G %a" /data/worktrees /data/worktrees/old-task /data/worktrees/old-task/old.txt'])
   const oldWritable = exec(NEW, ['-u', 'eos-check', 'eos', 'sh', '-c', 'echo by-check >> /data/worktrees/old-task/old.txt && echo ok'])
   // 3. 和 deploy/eos 启动平台时同样的降权方式。
-  const inner = exec(NEW, ['-e', 'HOME=/home/eos', 'eos', 'setpriv', '--reuid=eos', '--regid=eos', '--init-groups', '--inh-caps=+setuid,+setgid', '--ambient-caps=+setuid,+setgid', '--',
-    'sh', '-c', 'umask 002 && cd /app && node --import tsx scripts/check-user-probe-inner.ts'])
-  const platformEnv = exec(NEW, ['-u', 'eos', 'eos', 'sh', '-c', 'p=$(pgrep -u eos -o -f "src/cli.ts web"); tr "\\0" "\\n" < /proc/$p/environ | grep -E "^(HOME|USER)="; grep -E "^(Cap(Inh|Prm|Eff|Amb)|NoNewPrivs):" /proc/$p/status; echo umask=$(grep -E "^Umask" /proc/$p/status)'])
+  const inner = exec(NEW, [
+    '-e',
+    'HOME=/home/eos',
+    'eos',
+    'setpriv',
+    '--reuid=eos',
+    '--regid=eos',
+    '--init-groups',
+    '--inh-caps=+setuid,+setgid',
+    '--ambient-caps=+setuid,+setgid',
+    '--',
+    'sh',
+    '-c',
+    'umask 002 && cd /app && node --import tsx scripts/check-user-probe-inner.ts',
+  ])
+  const platformEnv = exec(NEW, [
+    '-u',
+    'eos',
+    'eos',
+    'sh',
+    '-c',
+    'p=$(pgrep -u eos -o -f "src/cli.ts web"); tr "\\0" "\\n" < /proc/$p/environ | grep -E "^(HOME|USER)="; grep -E "^(Cap(Inh|Prm|Eff|Amb)|NoNewPrivs):" /proc/$p/status; echo umask=$(grep -E "^Umask" /proc/$p/status)',
+  ])
   const report = {
     commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
     uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts'], { cwd: ROOT, encoding: 'utf8' }).trim(),
-    oldImage: OLD, oldUser: oldUser.out.trim().split('\n'),
-    upgraded: upgraded.out.trim().split('\n'), oldWorktreeWritableByCheckUser: oldWritable.out.trim(),
+    oldImage: OLD,
+    oldUser: oldUser.out.trim().split('\n'),
+    upgraded: upgraded.out.trim().split('\n'),
+    oldWorktreeWritableByCheckUser: oldWritable.out.trim(),
     doctor: { code: doctor.code, out: doctor.out.trim().split('\n') },
     processes: processes.out.trim().split('\n'),
     platformProcess: platformEnv.out.trim().split('\n'),
@@ -71,5 +93,9 @@ try {
   writeFileSync(join(OUT, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 } finally {
-  try { compose(NEW, 'down', '-v') } catch (e) { process.stderr.write(`清理失败：${(e as Error).message}\n`) }
+  try {
+    compose(NEW, 'down', '-v')
+  } catch (e) {
+    process.stderr.write(`清理失败：${(e as Error).message}\n`)
+  }
 }

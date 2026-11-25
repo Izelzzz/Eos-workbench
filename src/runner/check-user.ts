@@ -45,7 +45,14 @@ export const resolveCheckUser = (env: NodeJS.ProcessEnv, passwd?: () => string):
  * 平台进程带着切换用户用的 SETUID、SETGID，检查命令不能带着它们（否则能切回平台的用户）。
  */
 export const asUser = (user: CheckUser, argv: string[]): string[] => [
-  'setpriv', `--reuid=${user.name}`, `--regid=${user.gid}`, '--init-groups', '--inh-caps=-all', '--ambient-caps=-all', '--', ...argv,
+  'setpriv',
+  `--reuid=${user.name}`,
+  `--regid=${user.gid}`,
+  '--init-groups',
+  '--inh-caps=-all',
+  '--ambient-caps=-all',
+  '--',
+  ...argv,
 ]
 
 /** 真的切换一次，确认平台进程有切换用户的能力。成功时 undefined，否则返回原因。 */
@@ -53,7 +60,7 @@ export const probeSwitch = (user: CheckUser): string | undefined => {
   const [cmd, ...args] = asUser(user, ['true'])
   const r = spawnSync(cmd!, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 })
   if (r.error !== undefined) return r.error.message
-  return r.status === 0 ? undefined : (r.stderr.trim() || `退出码 ${r.status ?? '（被信号终止）'}`)
+  return r.status === 0 ? undefined : r.stderr.trim() || `退出码 ${r.status ?? '（被信号终止）'}`
 }
 
 /** 找出工作目录在 $1 里的进程并结束，打印它们的进程号。以检查命令的用户运行：平台读不到别的用户进程的工作目录。 */
@@ -83,5 +90,8 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string): Promise
       done(text)
     })
   })
-  return out.split('\n').filter(l => /^\d+$/.test(l)).map(Number)
+  return out
+    .split('\n')
+    .filter(l => /^\d+$/.test(l))
+    .map(Number)
 }
