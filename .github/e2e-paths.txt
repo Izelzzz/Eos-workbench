@@ -1,0 +1,36 @@
+# 哪些路径的改动需要端到端验证（E2E）。
+# CI（.github/scripts/pr-checklist.ts）和人读的都是这一份，CLAUDE.md 自检第 3 条引用它。
+#
+# 每行：「需要」或「不需要」，空格，路径模式。* 不跨目录，** 跨目录。
+# 按顺序匹配，第一条匹配到的算数；一条都不匹配的路径默认「需要」。
+# 加严（新增「需要」）可以由 agent 提出；放宽（新增「不需要」、删掉「需要」）由人批准。
+
+# 平台代码，包括内置的工作流模板、Agent 模板、技能、提示词等非代码文件
+需要 src/**
+# 网页源码和构建配置
+需要 web/**
+需要 tsconfig.json
+# 依赖：不区分运行时和开发依赖，只改开发依赖时在描述里写豁免理由
+需要 package.json
+需要 package-lock.json
+需要 vendor/**
+# 部署
+需要 Dockerfile
+需要 compose*.yaml
+需要 compose*.yml
+需要 .dockerignore
+
+不需要 docs/**
+不需要 tests/**
+不需要 poc/**
+# 只用于验证的脚本（E2E、探针、截图）
+不需要 scripts/**
+不需要 .github/**
+# gitleaks 的配置和允许清单（CI 第一批 2/3 加的；改它们时 pr-checklist 会提示要人确认）
+不需要 .gitleaksignore
+不需要 .gitleaks.toml
+不需要 .claude/**
+# src/ 下的 .md 已经在上面按「需要」匹配
+不需要 **/*.md
+不需要 LICENSE
+不需要 .gitignore
