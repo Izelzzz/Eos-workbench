@@ -2,7 +2,7 @@
 // 它们和平台不是同一个用户，读不到平台进程环境（/proc/<pid>/environ）里的主密钥；检查命令也读不到 dsh 进程环境里的模型 key。
 // 没有设置时它们和平台是同一个用户（本机开发时就是这样）。
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 
 export const CHECK_USER_ENV = 'EOS_CHECK_USER'
 /** dsh 和 agent 的用户。平台用它结束 agent 留下的进程、读 dsh 的会话日志；切换由 dsh 的入口（deploy/dsh-launch.mjs）做。 */
@@ -73,7 +73,7 @@ const KILL_IN_DIR = 'for p in /proc/[0-9]*; do c=$(readlink "$p/cwd" 2>/dev/null
  * 平台撤销越界改动之前调用，和 procs.ts 的 killProcessesIn 一起：那边只结束得了平台用户自己的进程。
  * 异步：不在扫描 /proc 期间卡住 Web 服务。worktree 已经不在时什么都不做。
  */
-export const killUserProcessesIn = async (user: CheckUser, dir: string): Promise<number[]> => {
+export const killUserProcessesIn = async (user: CheckUser, dir: string, waitMs = 2000): Promise<number[]> => {
   let real: string
   try {
     real = realpathSync(dir)
@@ -92,24 +92,53 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string): Promise
       done(text)
     })
   })
-  return out
+  const pids = out
     .split('\n')
     .filter(l => /^\d+$/.test(l))
     .map(Number)
+  // 等它们真正退出（/proc/<pid> 不分用户都看得到）：撤销越界改动时不能还有进程在写 worktree。
+  const deadline = Date.now() + waitMs
+  while (Date.now() < deadline && pids.some(p => existsSync(`/proc/${p}`))) await new Promise(r => setTimeout(r, 20))
+  return pids
+}
+
+/**
+ * 把 user 在 dir 里建的文件和目录开放给组读写（不跟符号链接，只改它自己的）。平台（同组）提交、撤销越界改动时要读、删它们：
+ * agent 和检查命令是别的用户，建出 0600 的文件、0755 的目录时，平台读不了也删不掉里面的东西。
+ */
+export const shareWithGroup = async (user: CheckUser, dir: string): Promise<void> => {
+  let real: string
+  try {
+    real = realpathSync(dir)
+  } catch {
+    return
+  }
+  const [cmd, ...args] = asUser(user, ['find', real, '-user', user.name, '(', '-type', 'f', '-o', '-type', 'd', ')', '!', '-perm', '-g+rw', '-exec', 'chmod', 'g+rwX', '{}', '+'])
+  await new Promise<void>(done => {
+    const p = spawn(cmd!, args, { cwd: '/', stdio: 'ignore' })
+    const timer = setTimeout(() => p.kill('SIGKILL'), 60_000)
+    p.on('error', () => done())
+    p.on('close', () => {
+      clearTimeout(timer)
+      done()
+    })
+  })
 }
 
 /** 在 $1 下找 $2 这个会话的日志，找到就原样输出（以 dsh 的用户运行：会话目录是 0700，只有它能读）。 */
 const CAT_SESSION_LOG = 'for f in "$1"/*/"$2"/"$3"; do if [ -f "$f" ]; then exec cat "$f"; fi; done; exit 3'
 
 /**
- * 以 user 读一个 dsh 会话的日志：找到时返回原始字节，没有时 undefined。和直接读文件（dsh.ts 的默认实现）找的是同一个位置。
- * 同步：dsh.ts 读日志的地方本来就是同步的。
+ * 以 user 读一个 dsh 会话的日志：找到时返回原始字节，没有这个会话时 undefined，读不出来（切换失败、超时、太大）时抛错。
+ * 和直接读文件（dsh.ts 的默认实现）找的是同一个位置。同步：dsh.ts 读日志的地方本来就是同步的。
  */
 export const readSessionLogAs =
   (user: CheckUser, file: string) =>
   (sessionsRoot: string, sessionId: string): Buffer | undefined => {
     if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return undefined
     const [cmd, ...args] = asUser(user, ['sh', '-c', CAT_SESSION_LOG, 'sh', sessionsRoot, sessionId, file])
-    const r = spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
-    return r.status === 0 ? r.stdout : undefined
+    const r = spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
+    if (r.status === 0) return r.stdout
+    if (r.status === 3) return undefined
+    throw new Error(`以 ${user.name} 读会话日志 ${sessionId} 失败：${r.error?.message ?? (r.stderr?.toString().trim() || `退出码 ${r.status ?? '（被信号终止）'}`)}`)
   }

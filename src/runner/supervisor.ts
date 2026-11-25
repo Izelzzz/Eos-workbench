@@ -9,7 +9,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
-import { killUserProcessesIn, type CheckUser } from './check-user.ts'
+import { killUserProcessesIn, shareWithGroup, type CheckUser } from './check-user.ts'
 import { KILL_WAIT_MS, killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
@@ -274,6 +274,8 @@ export class Supervisor {
         if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令或 agent 留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
+        // 接下来提交、撤销越界改动由平台做：agent 和检查命令建的、只有它们自己能读写的文件和目录，先开放给组（平台在组里）。
+        for (const u of [this.o.agentUser, this.o.checkUser]) if (u !== undefined) await shareWithGroup(u, worktree)
       },
       checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser), redact),
       afterWrite: (t, call) => {

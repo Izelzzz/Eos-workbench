@@ -97,6 +97,20 @@ const readSessionLogFile = (root: string, sessionId: string): Buffer | undefined
   return undefined
 }
 
+const parseLogSafe = (raw: Buffer): LogEvent[] | undefined => {
+  try {
+    return parseSessionLog(raw)
+  } catch {
+    return undefined
+  }
+}
+
+/** 会话日志第一行是会话头，里面的 cwd 就是这个会话的工作区（写入边界）。 */
+const workspaceIn = (events: LogEvent[] | undefined): string | undefined => {
+  const head = events?.[0] as { type?: string; cwd?: unknown } | undefined
+  return head?.type === 'session' && typeof head.cwd === 'string' ? head.cwd : undefined
+}
+
 const PRESET: Record<AgentSpec['write'], string> = { none: 'read-only', worktree: 'workspace-write' }
 
 /**
@@ -428,7 +442,7 @@ export class DshExecutor implements Executor {
     /** 测试用：替换真正启动 dsh 进程的构造。 */
     createHarness?: (options: DeepSeekHarnessOptions) => Harness
     /**
-     * 读一个会话的日志（压缩的原始字节），没有时 undefined。默认直接读文件。
+     * 读一个会话的日志（压缩的原始字节）：没有这个会话时 undefined，有但读不出来时抛错。默认直接读文件。
      * 部署镜像里 dsh 以别的用户运行，会话目录只有它能读（0700），由平台换成以那个用户读的实现（src/cli.ts）。
      */
     readSessionLog?: (sessionsRoot: string, sessionId: string) => Buffer | undefined
@@ -507,12 +521,6 @@ export class DshExecutor implements Executor {
     return [...(block ?? '').matchAll(/^\s*-\s*`([^`]+)`/gm)].map(m => m[1]!).sort()
   }
 
-  /** 会话日志第一行是会话头，里面的 cwd 就是这个会话的工作区（写入边界）。 */
-  private workspaceOf(id: string): string | undefined {
-    const head = this.readLog(id)?.[0] as { type?: string; cwd?: unknown } | undefined
-    return head?.type === 'session' && typeof head.cwd === 'string' ? head.cwd : undefined
-  }
-
   private async answer(sessionId: string, questions: { id: string; question: string; options?: { label: string }[] }[], signal: AbortSignal) {
     const ask = this.asks.get(sessionId)
     if (ask === undefined) return { cancelled: true as const }
@@ -559,8 +567,10 @@ export class DshExecutor implements Executor {
     await this.closing.get(spec.cwd)
     const h = this.harness(spec, modelKey, keyId)
     let s: HarnessSession
-    if (this.rawLog(id) !== undefined) {
-      const workspace = this.workspaceOf(id)
+    // 读日志失败（不是没有日志）时这里抛错：不能当成新会话，否则会跳过续接和下面的工作区核对。
+    const raw = this.rawLog(id)
+    if (raw !== undefined) {
+      const workspace = workspaceIn(parseLogSafe(raw))
       if (workspace === undefined || resolve(workspace) !== resolve(spec.cwd)) {
         throw new Error(`这个 agent 会话的可写范围是 ${workspace ?? '（读不到）'}，不是任务的 worktree ${spec.cwd}（会话创建于写入范围修复之前）。为了安全不再续接：请中止这个任务后重新发起。`)
       }

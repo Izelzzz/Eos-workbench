@@ -214,6 +214,16 @@ const nodeRequired = (root: string): string | undefined => {
   }
 }
 
+/** 本进程的有效能力里有 CAP_KILL（第 5 位）。读不出来时当作没有。 */
+const hasCapKill = (): boolean => {
+  try {
+    const hex = /^CapEff:\s*([0-9a-f]+)$/m.exec(readFileSync('/proc/self/status', 'utf8'))?.[1]
+    return hex !== undefined && (BigInt(`0x${hex}`) & 0x20n) !== 0n
+  } catch {
+    return false
+  }
+}
+
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
 export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState }): Facts => {
   const required = nodeRequired(o.root)
@@ -224,11 +234,19 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
     const e = probeSwitch(u.user)
     return e === undefined ? { kind: 'ok', name: u.user.name } : { kind: 'fail', error: `切换不到 ${u.user.name}：${e}` }
   }
+  // agent 的用户还要两样：切换由 dsh 的入口做（没有设置入口时 dsh 还是平台的用户）；dsh 属于别的用户，平台要有 KILL 才能关掉它。
+  const agentFact = (u: CheckUserState): UserFact => {
+    const f = userFact(u)
+    if (f.kind !== 'ok') return f
+    if ((process.env.EOS_DSH_LAUNCHER ?? '') === '') return { kind: 'fail', error: `设置了 ${AGENT_USER_ENV}，但没有设置 EOS_DSH_LAUNCHER：dsh 不会切换到 ${f.name}，还是平台的用户` }
+    if (!hasCapKill()) return { kind: 'fail', error: `平台进程没有 KILL 能力：dsh 以 ${f.name} 运行，平台关不掉它（换 key、释放进程时）` }
+    return f
+  }
   return {
     node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
     git: gitState(), sandbox: dshSandbox(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
-    checkUser: userFact(o.checkUser), agentUser: userFact(o.agentUser), droppedProxies: droppedProxies(process.env),
+    checkUser: userFact(o.checkUser), agentUser: agentFact(o.agentUser), droppedProxies: droppedProxies(process.env),
   }
 }
 

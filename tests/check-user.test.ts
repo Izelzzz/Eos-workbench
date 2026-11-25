@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { asUser, killUserProcessesIn, parseCheckUser, readSessionLogAs, resolveCheckUser } from '../src/runner/check-user.ts'
+import { asUser, killUserProcessesIn, parseCheckUser, readSessionLogAs, resolveCheckUser, shareWithGroup } from '../src/runner/check-user.ts'
 import { checkEnv, droppedProxies, runChecks } from '../src/runner/checks.ts'
 
 const PASSWD = 'root:x:0:0:root:/root:/bin/bash\neos:x:10001:10001::/home/eos:/bin/bash\neos-check:x:10002:10002::/home/eos-check:/bin/sh\n'
@@ -123,8 +123,52 @@ test('reading a dsh session log as the agent user finds the same file the defaul
     assert.deepEqual(read(root, 'session-abc'), Buffer.from([1, 2, 3]))
     assert.equal(read(root, 'session-missing'), undefined)
     assert.equal(read(root, '../escape'), undefined, 'ids are checked before they reach the shell')
+    // 有日志但读不出来（这里让 cat 读一个目录）时抛错，不当成没有日志：否则平台会在已有的会话 id 上新开会话。
+    mkdirSync(join(root, '--wt--', 'session-dir', 'session.v4.jsonl.zstd'), { recursive: true })
+    const bad = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.equal(bad(root, 'session-dir'), undefined, 'a directory is not a log file: the -f test skips it')
   } finally {
     process.env.PATH = path
   }
   assert.ok(calls().every(l => l.startsWith('--reuid=eos-agent sh -c ')))
+})
+
+test('a read that fails (not a missing session) throws, so the platform never opens a fresh session over an existing id', () => {
+  const bin = dir()
+  // 假的 setpriv：切换失败（退出码 1），和平台没有 SETUID 时一样。
+  writeFileSync(join(bin, 'setpriv'), '#!/bin/sh\necho "setpriv: setresuid failed: Operation not permitted" >&2\nexit 1\n')
+  chmodSync(join(bin, 'setpriv'), 0o755)
+  const path = process.env.PATH
+  process.env.PATH = `${bin}:${path}`
+  try {
+    const read = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.throws(() => read(dir(), 'session-abc'), /以 eos-agent 读会话日志 session-abc 失败：setpriv: setresuid failed/)
+  } finally {
+    process.env.PATH = path
+  }
+})
+
+test('files and directories the agent or check user made private are opened to the group; symlinks and other owners are left alone', async () => {
+  const { env } = fakeSetpriv()
+  const w = dir()
+  writeFileSync(join(w, 'secret'), 'x')
+  chmodSync(join(w, 'secret'), 0o600)
+  mkdirSync(join(w, 'build'))
+  chmodSync(join(w, 'build'), 0o755)
+  const outside = join(dir(), 'outside')
+  writeFileSync(outside, 'x')
+  chmodSync(outside, 0o600)
+  symlinkSync(outside, join(w, 'link'))
+  const path = process.env.PATH
+  process.env.PATH = env.PATH
+  try {
+    // 测试进程自己就是「那个用户」：find -user 按名字找，用测试进程的用户名。
+    const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()
+    await shareWithGroup({ name: me, gid: process.getgid!(), home: '/tmp' }, w)
+  } finally {
+    process.env.PATH = path
+  }
+  assert.equal(statSync(join(w, 'secret')).mode & 0o777, 0o660)
+  assert.equal(statSync(join(w, 'build')).mode & 0o777, 0o775)
+  assert.equal(statSync(outside).mode & 0o777, 0o600, 'a symlink out of the worktree is not followed')
 })

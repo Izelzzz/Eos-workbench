@@ -93,6 +93,19 @@ test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓
   }
 })
 
+test('gather：设置了 agent 的用户但没有设置 dsh 的入口时是 ✗（dsh 不会切换用户），而不是误报已隔离', () => {
+  const launcher = process.env.EOS_DSH_LAUNCHER
+  delete process.env.EOS_DSH_LAUNCHER
+  try {
+    const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'ok', user: { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' } } })
+    // 本机没有切换用户的能力时先报切换不过去；有能力（root）时报没有入口。两种都是 ✗。
+    assert.equal(f.agentUser.kind, 'fail')
+    if (process.getuid?.() === 0) assert.match(f.agentUser.kind === 'fail' ? f.agentUser.error : '', /没有设置 EOS_DSH_LAUNCHER/)
+  } finally {
+    if (launcher !== undefined) process.env.EOS_DSH_LAUNCHER = launcher
+  }
+})
+
 test('代理地址带账号密码、没有传给检查命令时提示', () => {
   const item = evaluate({ ...good, droppedProxies: ['HTTPS_PROXY'] }).find(i => i.name === '检查命令的代理')
   assert.equal(item?.status, 'warn')
