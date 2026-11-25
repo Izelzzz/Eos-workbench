@@ -36,7 +36,8 @@
   - 平台给别的用户的进程发不了信号，超时和中止时以 `eos-check` 运行 `kill` 结束检查命令的进程组。
   - 检查命令单独用一个用户，不和 agent 共用：同一个 uid 时，检查命令能读到 dsh 进程环境里的模型 key。
   - 检查命令拿到证书和不带账号密码的代理设置（用户选的方案）。带账号密码的代理不传，doctor 提示。
-- **③c（下一步）**：dsh 以 `eos-agent` 运行，并清掉 `SETUID`、`SETGID`。在那之前，agent 和平台同一个用户，并继承这两个能力（见「已知限制」）。
+  - 平台的子进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs`、git 经镜像里的 `/usr/local/bin/git` 启动，先用 `setpriv` 清掉全部能力（代码评审发现：不清的话 dsh 在沙箱外启动的 MCP 服务和 git 能切换到 root、改写 `/app`）。实测真实 dsh 进程的能力是 0。dsh 由 SDK 以 `node <入口>` 启动，加不了命令前缀，所以包装是一个 Node 脚本，每个 dsh 多一个 Node 父进程；`--pdeathsig` 保证包装被杀时 dsh 也结束。
+- **③c（下一步）**：在同一个包装里把 dsh 换成 `eos-agent`。在那之前，agent 和平台同一个用户，挡住它读平台进程环境的只有 Landlock。
 
 ### 访问：容器里监听 0.0.0.0，宿主机只绑 127.0.0.1
 
@@ -72,12 +73,12 @@
 ## 影响范围
 
 - 新增：`Dockerfile`、`.dockerignore`、`compose.yaml`、`docs/deploy.md`、`scripts/deploy-e2e.ts`。
-- ③b：`Dockerfile`（建 `eos-check` 和共用组 `eos-work`，以 root 启动，`EOS_CHECK_USER`）、`compose.yaml`（`cap_add: SETUID, SETGID`）、`deploy/eos`（降权入口）、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`（「检查命令的用户」「检查命令的代理」两项）。不在容器里、没有设置 `EOS_CHECK_USER` 时行为不变。
-- ③c 会改：`Dockerfile`（建 `eos-agent`）、`src/executor/dsh.ts`（以独立用户启动 dsh）。
+- ③b：`Dockerfile`（建 `eos-check` 和共用组 `eos-work`，以 root 启动，`EOS_CHECK_USER`、`EOS_DSH_LAUNCHER`）、`compose.yaml`（`cap_add: SETUID, SETGID`）、`deploy/eos`（降权入口）、`deploy/dsh-launch.mjs` 和 `deploy/git`（清掉能力）、`src/cli.ts`（dsh 入口可换）、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`（「检查命令的用户」「检查命令的代理」两项）。不在容器里、没有设置 `EOS_CHECK_USER` 时行为不变。
+- ③c 会改：`Dockerfile`（建 `eos-agent`）、`deploy/dsh-launch.mjs`（换用户）。
 
 ## 已知限制
 
-- **③b 之后、③c 之前，agent 继承平台切换用户的能力**：dsh 和 agent 是平台的子进程，ambient 的 `SETUID`、`SETGID` 会传下去，agent 能切换到任何用户，包括 root（探针的正对照里，平台用户切换到 root 成功）。Landlock 仍然限制它的写入，也挡住它读别的进程的环境，所以现在挡住 agent 的只有沙箱。③c 让 dsh 先清掉这两个能力、换成 `eos-agent` 再启动。
+- **平台进程自己能切换到任何用户，包括 root**（探针的正对照）：root 只有这两个能力，但拥有 `/app` 等 root 的文件。平台进程本来就可信；它启动的进程都清掉了能力。新增直接启动子进程的地方（不经 git、dsh、检查命令）时，要同样清掉。
 - **检查命令能读世界可读的文件**：`eos.db`（trace、加密的凭据）、所有仓库和 worktree。它写不了它们，也读不到主密钥，所以解不开凭据。
 - **各任务的 worktree 都归 `eos-work`**：一个任务的检查命令能改别的任务的 worktree（以前和平台同一个用户时，它能改整个 `/data`）。
 - **检查命令自己建的、不给组写权限的文件**（例如显式 `chmod 755` 的目录），平台撤销越界改动或提交时可能处理不了。

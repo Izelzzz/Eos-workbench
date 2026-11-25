@@ -35,10 +35,12 @@ RUN groupadd --gid 10010 eos-work \
  && useradd --create-home --uid 10002 --shell /usr/sbin/nologin --groups eos-work eos-check \
  && mkdir -p /data/repos && chown -R eos:eos /data
 COPY --from=build --chown=root:root /app /app
-COPY --chown=root:root --chmod=755 deploy/eos /usr/local/bin/eos
+COPY --chown=root:root --chmod=755 deploy/eos deploy/git /usr/local/bin/
 WORKDIR /app
 # 不设 NODE_ENV：dsh 把平台的环境传给 agent，NODE_ENV=production 会让 agent 的 npm install 不装 devDependencies。
 ENV EOS_HOME=/data EOS_CHECK_USER=eos-check
+# dsh 经 deploy/dsh-launch.mjs 启动：先清掉平台切换用户用的能力。
+ENV EOS_DSH_LAUNCHER=/app/deploy/dsh-launch.mjs
 # agent 在 Landlock 下能写 /tmp。平台和 dsh 会加载的缓存不能放在那里，否则 agent 能往里放代码、在沙箱外运行：
 # 关掉平台 tsx 的编译缓存和 Node 的字节码缓存（dsh 会打开它，默认放在 /tmp）；dsh 的 native 模块缓存放到平台用户的家目录（agent 写不了）。
 ENV TSX_DISABLE_CACHE=1 NODE_DISABLE_COMPILE_CACHE=1 NARB_NATIVE_CACHE_DIR=/home/eos/.cache/native-addons

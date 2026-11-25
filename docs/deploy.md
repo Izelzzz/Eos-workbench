@@ -2,7 +2,7 @@
 
 适合一个小团队共用一台服务器。设计和取舍见 [ADR-006](adr/006-docker-deployment.md)。
 
-> **agent 和平台还是同一个用户，只靠沙箱隔开。** 检查命令（`npm test` 等）已经换成独立的用户 `eos-check` 运行，读不到平台和 dsh 进程环境里的主密钥和模型 key（`docs/e2e/deploy-3b-check-user/`）。agent 还和平台同一个用户：它读不到这两个值，靠的只是 Landlock（见「沙箱」）；它还继承了平台切换用户的能力。agent 换成独立的用户是路线图第 3 项接下来的 PR，在那之前只在可信的仓库和需求上使用，模型 key 用额度受限的。
+> **agent 和平台还是同一个用户，只靠沙箱隔开。** 检查命令（`npm test` 等）已经换成独立的用户 `eos-check` 运行，读不到平台和 dsh 进程环境里的主密钥和模型 key（`docs/e2e/deploy-3b-check-user/`）。agent 还和平台同一个用户：它读不到这两个值，靠的只是 Landlock（见「沙箱」）。agent 换成独立的用户是路线图第 3 项接下来的 PR，在那之前只在可信的仓库和需求上使用，模型 key 用额度受限的。
 >
 > **没有登录。** 能打开 Eos 地址的人都能建任务、看所有 trace、在服务器的仓库上跑 agent。默认只监听服务器的 `127.0.0.1`，请保持这个默认，或者放在带认证的反向代理后面。登录是路线图第 7 项。
 
@@ -134,13 +134,14 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 | 用户 | 运行什么 | 能读 | 能写 |
 |---|---|---|---|
 | root | 只有 1 号进程（`docker-init`），以及 `docker compose exec` 不加 `-u` 时的命令 | 只有 `SETUID`、`SETGID` 两个能力，读写不了别的用户的文件 | 同左 |
-| `eos` | 平台、git、dsh 和 agent | `/data` 全部、自己进程的环境（主密钥、模型 key）；agent 在 Landlock 里读不到别的进程的环境 | `/data` 全部；agent 只能写自己的 worktree 和 `/tmp` |
+| `eos` | 平台、git、dsh 和 agent、MCP 服务；只有平台进程自己带着 `SETUID`、`SETGID` | `/data` 全部、自己进程的环境（主密钥、模型 key）；agent 在 Landlock 里读不到别的进程的环境 | `/data` 全部；agent 只能写自己的 worktree 和 `/tmp` |
 | `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到 `eos` 和 root 进程的环境 | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
 - compose 去掉了全部能力，只加回 `SETUID`、`SETGID`。`eos` 命令以 root 启动，降到 `eos` 时把这两个能力带过去（ambient），平台用它们把检查命令切换到 `eos-check`；切换时清掉全部能力，检查命令切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
 - worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
-- 平台给 `eos-check` 的进程发不了信号，超时或中止时以 `eos-check` 的身份结束检查命令的进程组。
-- **还没做到的**：agent 和平台同一个用户，而且继承了平台的 `SETUID`、`SETGID`，能切换到任何用户（包括 root）。Landlock 仍然限制它的写入，挡住它读别的进程的环境，所以现在挡住 agent 的只有沙箱。下一个 PR 让 dsh 以独立的用户 `eos-agent` 运行，并清掉这两个能力。
+- 平台的子进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs` 启动，git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。
+- 平台给 `eos-check` 的进程发不了信号：超时或中止时以 `eos-check` 的身份结束检查命令的进程组，撤销越界改动前以它的身份结束它留在 worktree 里的进程。
+- **还没做到的**：agent 和平台同一个用户，挡住它读平台进程环境的只有 Landlock。下一个 PR 让 dsh 以独立的用户 `eos-agent` 运行。
 
 ## 沙箱
 

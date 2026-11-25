@@ -9,15 +9,21 @@ const field = name => new RegExp(`^${name}:\\s*(.*)$`, 'm').exec(status)?.[1]?.t
 
 const procs = []
 for (const pid of readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) !== process.pid)) {
-  let uid, comm
+  let uid, ppid, comm, capEff, capAmb, cmdline
   try {
-    uid = /^Uid:\s*(\d+)/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1]
+    const st = readFileSync(`/proc/${pid}/status`, 'utf8')
+    uid = /^Uid:\s*(\d+)/m.exec(st)?.[1]
+    ppid = /^PPid:\s*(\d+)/m.exec(st)?.[1]
+    capEff = /^CapEff:\s*(\S+)/m.exec(st)?.[1]
+    capAmb = /^CapAmb:\s*(\S+)/m.exec(st)?.[1]
     comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim()
+    // 命令行所有用户都能读；只留前两段（程序和脚本），不带参数。
+    cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').slice(0, 2).join(' ')
   } catch { continue }
   let vars, environ = 'readable'
   try { vars = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0') } catch (e) { environ = e.code }
   const found = vars === undefined ? [] : WATCH.filter(k => vars.some(v => v.startsWith(`${k}=`) && v.length > k.length + 1))
-  procs.push({ pid: Number(pid), uid: Number(uid), comm, environ, found })
+  procs.push({ pid: Number(pid), ppid: Number(ppid), uid: Number(uid), comm, cmdline, capEff, capAmb, environ, found })
 }
 
 const tryRun = (cmd, args) => {
@@ -38,7 +44,7 @@ console.log(JSON.stringify({
   noNewPrivs: field('NoNewPrivs'),
   envHasSecrets: WATCH.filter(k => process.env[k] !== undefined),
   secretsFoundIn: procs.filter(p => p.found.length > 0).map(p => ({ pid: p.pid, uid: p.uid, comm: p.comm, found: p.found })),
-  processes: procs.map(({ pid, uid, comm, environ }) => ({ pid, uid, comm, environ })),
+  processes: procs.map(({ found, ...p }) => p),
   switchToRoot: tryRun('setpriv', ['--reuid=0', '--regid=0', '--clear-groups', 'true']),
   switchToEos: tryRun('setpriv', ['--reuid=eos', '--regid=eos', '--clear-groups', 'true']),
   writeTrackedFileInWorktree: worktreeFile === undefined ? 'skipped' : tryWrite(worktreeFile, true),

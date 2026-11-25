@@ -132,6 +132,8 @@ try {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
     '检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key': scanned !== undefined && scanned.uid !== 10001 && scanned.secretsFoundIn.length === 0
       && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10001 && p.environ !== 'readable')),
+    'dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）': scanned !== undefined && dshPids.length > 0
+      && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && /^0+$/.test(p.capEff ?? '') && /^0+$/.test(p.capAmb ?? ''))),
     '任务完成': task.status === 'done',
     '平台的检查命令（npm test）以 eos-check 运行': testUsers.out.split('\n').includes('eos-check'),
     'worktree 里 npm test 通过': tests.code === 0 && /ℹ fail 0/.test(tests.out),

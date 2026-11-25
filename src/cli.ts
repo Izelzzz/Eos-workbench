@@ -111,7 +111,8 @@ const redact = (() => {
   return (text: string) => redactText(text, secrets())
 })()
 
-const dshBin = (): string => dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install')
+/** dsh 的入口。部署镜像里设置 EOS_DSH_LAUNCHER，经包装启动（deploy/dsh-launch.mjs：先清掉平台切换用户用的能力）。 */
+const dshBin = (): string => process.env.EOS_DSH_LAUNCHER || (dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install'))
 
 const taskOf = (id: string | undefined): Task => {
   if (id === undefined) return fail('需要任务 id')
