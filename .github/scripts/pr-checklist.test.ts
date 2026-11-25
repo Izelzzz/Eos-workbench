@@ -355,6 +355,15 @@ test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之�
     git('merge', '-q', '--no-edit', 'main')
     assert.deepEqual(verify(main2b, git('rev-parse', 'HEAD')).errors, [], 'main 新增、删除文件')
 
+    // 合过 main 之后，PR 再改跑 E2E 时没碰过的文件、再新增文件：算变了
+    write('src/other.ts', 'o3\n')
+    assert.match(verify(main2b, commit('证据之后改了没碰过的文件')).errors.join(), /src\/other\.ts/, '改没碰过的文件')
+    write('src/other.ts', 'o2\n')
+    write('src/added.ts', 'a\n')
+    assert.match(verify(main2b, commit('证据之后新增文件')).errors.join(), /src\/added\.ts/, '证据之后新增文件')
+    rmSync(join(dir, 'src/added.ts'))
+    commit('撤回')
+
     // main 也改了 PR 改过的文件（不冲突的另一处），PR 再合进 main：PR 自己的改动没变，不算
     git('checkout', '-q', 'main')
     write('src/engine/prompts.ts', 'v1\na\nb\nc\nmain 改的一行\n')

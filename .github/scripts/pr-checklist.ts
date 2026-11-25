@@ -376,7 +376,7 @@ export function gitRepo(cwd: string, head: string): Repo {
       const mbNow = tryGit('merge-base', head, base())?.trim()
       if (mbThen === undefined || mbNow === undefined || mbThen === mbNow) return false
       const [tested, before, after] = [blob(commit, path), blob(mbThen, path), blob(mbNow, path)]
-      // 跑 E2E 时 PR 还没碰这个文件（包括 base 之后才新增、删除的文件）：最终版本要和 base 现在的一样
+      // 跑 E2E 时 PR 还没碰这个文件（包括 base 之后才新增、删除的文件）：最终版本要和 PR 最后合进来的 base 版本一样
       if (tested === before) return after === final
       // 文件在某一边不存在（新增或删除），合并不了，当成对不上
       if (tested === undefined || before === undefined || after === undefined || final === undefined) return false
