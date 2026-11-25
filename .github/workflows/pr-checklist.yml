@@ -1,0 +1,52 @@
+# 检查 PR 有没有走完 CLAUDE.md 自检里的流程（只查形式），见 .github/scripts/pr-checklist.ts。
+# job 名字（pr-checklist）会设成必需检查，改名前先改分支保护。
+#
+# 安全：用 pull_request（不是 pull_request_target）。来自 fork 的 PR 拿到的是只读令牌、
+# 没有仓库密钥；描述经环境变量传给脚本，不拼进 shell 命令。
+name: PR checklist
+
+on:
+  pull_request:
+    # edited：改了描述就重新检查
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-checklist:
+    name: pr-checklist
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # 检出合并提交；取两层历史，脚本用 HEAD^1..HEAD 得到这个 PR 相对 base 的改动
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+      # 这个 PR 里的脚本的测试（脚本本身的改动也要过测试）
+      - name: 检查脚本自己的测试
+        run: node --test '.github/scripts/*.test.ts'
+      # 脚本和规则（e2e-paths.txt）从 base（HEAD^1）取，不用这个 PR 里的版本：
+      # PR 改脚本或规则放宽不了对自己的检查，改动合并后才对后面的 PR 生效。
+      # base 上还没有脚本时（第一次引入）只能用 PR 里的，并给出提示。
+      - name: 检查描述和 E2E 证据
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          base="$RUNNER_TEMP/base"; mkdir -p "$base"
+          if git cat-file -e HEAD^1:.github/scripts/pr-checklist.ts 2>/dev/null; then
+            git archive HEAD^1 .github/scripts .github/e2e-paths.txt | tar -x -C "$base"
+            script="$base/.github/scripts/pr-checklist.ts"
+          else
+            echo "::warning title=需要人确认::base 上还没有检查脚本，这次用的是 PR 自己的脚本和规则"
+            script=.github/scripts/pr-checklist.ts
+          fi
+          node "$script"
