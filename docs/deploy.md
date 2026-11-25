@@ -50,7 +50,7 @@ docker compose exec eos eos doctor
 |---|---|
 | `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时，例如 `v0.1.0` 发布 `0.1.0` |
 | `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-` 的）。给旧版本补发修订版时它也会指过去 |
-| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main |
+| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main。连续合并时只有 main 分支最新的那个提交会推它 |
 | `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main，不会被覆盖 |
 
 仍然需要克隆仓库：要用里面的 `compose.yaml`。在 `.env` 里加一行，指定镜像：
@@ -225,6 +225,8 @@ git pull
 docker compose -f compose.yaml build
 docker compose up -d --build
 ```
+
+用发布的镜像（`.env` 里设了 `EOS_IMAGE`）时不要用这组命令，见「用发布的镜像」的升级步骤：`--build` 会用本地的代码构建，盖掉拉下来的镜像。
 
 - 第二行只重建 Eos 的基础镜像。用了派生镜像（`compose.override.yaml`）时必须先跑它，否则派生镜像会建在旧的基础镜像上；没有派生镜像时它和第三行重复，没有坏处。
 - 换的只是容器，卷不动。升级前先备份。

@@ -14,6 +14,6 @@ docker build --pull "${args[@]}" \
   --label org.opencontainers.image.revision="$GITHUB_SHA" \
   --label org.opencontainers.image.version="$version" \
   .
-# 镜像能启动、平台的启动包装能降到 eos 用户（Docker 默认带 SETUID、SETGID、KILL）。
-docker run --rm "$first" eos --help > /dev/null
+# 冒烟：用和 compose.yaml 一样的能力和 no-new-privileges 启动，平台的启动包装要能降到 eos 用户。只走到命令行解析，不起 Web。
+docker run --rm --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --security-opt no-new-privileges:true "$first" eos --help > /dev/null
 docker image inspect "$first" --format '{{json .Config.Labels}}'

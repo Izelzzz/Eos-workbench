@@ -1,0 +1,21 @@
+# image-push.sh：用假的 docker、curl（PATH 前面）核对推送顺序和 main 的跳过逻辑。
+tags=ghcr.io/izelzzz/eos-workbench:sha-0123456 ghcr.io/izelzzz/eos-workbench:main
+first=ghcr.io/izelzzz/eos-workbench:sha-0123456
+version=main-0123456
+
+## main 分支还是本提交：sha- 和 main 都推，main 在最后
+[假 docker] push ghcr.io/izelzzz/eos-workbench:sha-0123456
+[假 curl] https://api.github.com/repos/Izelzzz/Eos-workbench/commits/main
+[假 docker] push ghcr.io/izelzzz/eos-workbench:main
+exit=0
+
+## main 已经是更新的提交：只推 sha-，跳过 main
+[假 docker] push ghcr.io/izelzzz/eos-workbench:sha-0123456
+[假 curl] https://api.github.com/repos/Izelzzz/Eos-workbench/commits/main
+跳过 ghcr.io/izelzzz/eos-workbench:main：main 已经是 fedcba9876543210fedcba9876543210fedcba98，不是 0123456789abcdef0123456789abcdef01234567
+exit=0
+
+## 版本号标签：不查 main，全推
+[假 docker] push ghcr.io/izelzzz/eos-workbench:1.2.3
+[假 docker] push ghcr.io/izelzzz/eos-workbench:latest
+exit=0

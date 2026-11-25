@@ -14,7 +14,8 @@ on:
 permissions:
   contents: read
 
-# 每个提交一组：main 上连续合并时不会跳过中间的提交（每个提交都要有自己的 sha- 标签）。PR 上新的推送取消旧的。
+# 每个提交一组：main 上连续合并时不会跳过中间的提交（每个提交都要有自己的 sha- 标签）。几次发布可能并行，
+# 浮动标签 main 由 image-push.sh 核对 main 分支还指向本提交才推。PR 上新的推送取消旧的。
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -66,4 +67,6 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
       - name: 推送
-        run: for t in $(sed -n 's/^tags=//p' "$RUNNER_TEMP/tags"); do docker push "$t"; done
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/scripts/image-push.sh "$RUNNER_TEMP/tags"

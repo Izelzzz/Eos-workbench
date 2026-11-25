@@ -14,8 +14,8 @@ test('a pre-release tag does not move latest', () => {
   assert.deepEqual(imageTags(IMAGE, 'tag', 'v1.3.0-rc.1', SHA).tags, [`${IMAGE}:1.3.0-rc.1`])
 })
 
-test('main publishes main and a short sha tag', () => {
-  assert.deepEqual(imageTags(IMAGE, 'branch', 'main', SHA), { tags: [`${IMAGE}:main`, `${IMAGE}:sha-0123456`], version: 'main-0123456' })
+test('main publishes a short sha tag, then main', () => {
+  assert.deepEqual(imageTags(IMAGE, 'branch', 'main', SHA), { tags: [`${IMAGE}:sha-0123456`, `${IMAGE}:main`], version: 'main-0123456' })
 })
 
 test('other refs and tags that are not valid image tags are refused', () => {

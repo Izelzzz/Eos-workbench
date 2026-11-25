@@ -7,7 +7,7 @@ export type ImageTags = { tags: string[]; version: string }
 const TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 
 /**
- * v* 标签：<版本号>（去掉 v），版本号里没有 -（不是预发布版）时加 latest。main 分支：main 和 sha-<前 7 位>。
+ * v* 标签：<版本号>（去掉 v），版本号里没有 -（不是预发布版）时加 latest。main 分支：sha-<前 7 位> 和 main。
  * 其他 ref 和不合法的版本号抛错：工作流只在这两种 push 上发布。
  */
 export const imageTags = (image: string, refType: string, refName: string, sha: string): ImageTags => {
@@ -19,7 +19,8 @@ export const imageTags = (image: string, refType: string, refName: string, sha: 
   }
   if (refType === 'branch' && refName === 'main') {
     if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`提交号 ${sha} 不对`)
-    return { tags: [`${image}:main`, `${image}:sha-${sha.slice(0, 7)}`], version: `main-${sha.slice(0, 7)}` }
+    // main 放在最后：推送时最后才动浮动标签，层都已经传上去了，核对 main 分支到推完之间的时间最短（image-push.sh）。
+    return { tags: [`${image}:sha-${sha.slice(0, 7)}`, `${image}:main`], version: `main-${sha.slice(0, 7)}` }
   }
   throw new Error(`不发布 ${refType} ${refName}`)
 }

@@ -1,0 +1,5 @@
+$ docker run --rm --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --security-opt no-new-privileges:true eos-image-check eos --help   # 和 compose 一样的能力（image-build.sh 的冒烟）
+exit=0
+$ 同上，少了 KILL   # 反例
+eos：切换不到平台用户 eos。容器要有 SETUID、SETGID、KILL 三个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」
+exit=1
