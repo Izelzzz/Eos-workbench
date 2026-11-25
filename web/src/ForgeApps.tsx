@@ -74,7 +74,7 @@ export function ForgeApps({ query }: { query: string }) {
 
   /** login：授权人；授权读不出来时没有。 */
   const revoke = async (name: string, login?: string) => {
-    const who = login === undefined ? '这条授权' : `@${login} 的授权`
+    const who = login === undefined ? '这条授权' : ` @${login} 的授权`
     if (!confirm(`撤销${who}？之后平台改用 App 自己的身份（或凭据页的 Git 令牌）访问仓库。`)) return
     setError(undefined)
     setResult(new URLSearchParams())
