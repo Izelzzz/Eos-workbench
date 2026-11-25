@@ -485,9 +485,12 @@ export class DshExecutor implements Executor {
     return join(this.opts.dshHome, 'eos-process-cwd')
   }
 
-  /** MCP 服务子进程的工作目录：平台自己的目录，不是任务的 worktree（见 patchRows 里的说明）。 */
+  /**
+   * MCP 服务子进程的工作目录：不是任务的 worktree（见 patchRows 里的说明）。MCP 服务要能在里面写缓存、日志；
+   * 平台只把它当 cwd 交给 dsh、不往里写，所以部署镜像里它属于 dsh 的用户（deploy/eos 建），平台只在它不存在时建一个。
+   */
   get mcpCwd(): string {
-    return join(this.opts.dshHome, 'eos-mcp-cwd')
+    return join(this.opts.dshHome, 'mcp-cwd')
   }
 
   /** 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。 */
@@ -517,7 +520,7 @@ export class DshExecutor implements Executor {
     const dir = this.profileDir(profile)
     const skillsDir = join(dir, 'skills')
     this.platformDir(skillsDir)
-    this.platformDir(this.mcpCwd)
+    if (!existsSync(this.mcpCwd)) mkdirSync(this.mcpCwd, { recursive: true })
     for (const s of profile.skills) {
       // 技能名在边界上已经校验过（只有小写字母、数字和连字符），可以直接当目录名。
       mkdirSync(join(skillsDir, s.name), { recursive: true, mode: 0o755 })

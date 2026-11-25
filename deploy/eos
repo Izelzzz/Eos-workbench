@@ -37,8 +37,8 @@ prepare() {
   # 放在迁移之后：上面的 chmod -R g+w 也会改到它。每次启动都设一遍，已有部署升级后也会改过来。
   chmod 2755 "$data/worktrees"
 }
-# dsh 的数据目录：dsh 以 eos-agent 运行，平台要往里写能力面（profiles），并以 eos-agent 的身份读会话日志（见 src/cli.ts）。
-# 目录本身属于 eos、组 eos-dsh、2770：检查命令进不去。dsh 在里面建的目录是 0700，属于 eos-agent。
+# dsh 的数据目录：dsh 以 eos-agent 运行，平台往 eos-profiles/ 写能力面，并以 eos-agent 的身份读会话日志（见 src/cli.ts）。
+# 目录本身属于 eos、组 eos-dsh、3770：检查命令进不去。dsh 在里面建的目录是 0700，属于 eos-agent。
 as_agent() {
   # 主组按 passwd 里的 gid（和 deploy/dsh-launch.mjs 一样），不假定有同名的组。
   setpriv --reuid="$EOS_AGENT_USER" --regid="$(id -g "$EOS_AGENT_USER")" --init-groups --inh-caps=-all --ambient-caps=-all -- "$@"
@@ -47,13 +47,16 @@ as_agent() {
 # 平台自己的目录（eos-*）先建好、组内不可写：eos-agent 不能在里面放链接，让平台顺着链接写到别处（src/executor/dsh.ts 的 platformDir）。
 own_dsh() {
   mkdir -p "$1" && chgrp eos-dsh "$1" && chmod 3770 "$1" || return 1
-  for d in eos-profiles eos-process-cwd eos-mcp-cwd; do
+  for d in eos-profiles eos-process-cwd; do
     if [ -L "$1/$d" ] || { [ -e "$1/$d" ] && [ "$(stat -c %U "$1/$d")" != eos ]; }; then
-      echo "eos：$1/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写；删掉它后重启" >&2
+      echo "eos：$1/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写。删掉它后重启：docker compose run --rm -u eos-agent eos rm -rf $1/$d" >&2
       continue
     fi
     mkdir -p "$1/$d" && chmod 2755 "$1/$d" || return 1
   done
+  # MCP 服务的工作目录：MCP 服务以 eos-agent 运行，要能在里面写缓存、日志。平台只把它当 cwd 传给 dsh，不往里写，
+  # 所以交给 eos-agent（src/executor/dsh.ts 的 mcpCwd）。
+  [ -d "$1/mcp-cwd" ] && [ ! -L "$1/mcp-cwd" ] || as_agent mkdir -p "$1/mcp-cwd" || return 1
 }
 prepare_dsh() {
   dsh="$data/dsh"
@@ -63,7 +66,7 @@ prepare_dsh() {
   [ ! -e "$data/.dsh-agent" ] || { own_dsh "$dsh"; return; }
   if [ ! -e "$dsh" ] && [ -d "$data/dsh.agent-new" ]; then
     echo "eos：上次迁移 $dsh 停在了中间：复制好的在 $data/dsh.agent-new，旧的在 $data/dsh.before-agent*。确认后运行 mv $data/dsh.agent-new $dsh 再启动" >&2
-    return 1
+    return 2
   fi
   if [ -d "$dsh" ] && [ -n "$(ls -A "$dsh")" ]; then
     # 有旧数据、还没迁移：只在启动平台时做，别的命令（eos doctor）不写标记，留给下一次启动平台。
@@ -75,7 +78,8 @@ prepare_dsh() {
     # 让 eos-agent 读得到旧文件。.credentials.yaml 不改：组内可读时 dsh 拒绝启动，迁移失败、还用旧目录时也不能坏掉它。
     chgrp -R eos-dsh "$dsh" && find "$dsh" ! -name .credentials.yaml -exec chmod g+rX {} + || return 1
     # --no-overwrite-dir：目标目录本身属于 eos，eos-agent 改不了它的权限和时间。
-    as_agent sh -c 'cd "$1" && tar --exclude=./.credentials.yaml -cf - . | tar -xpf - --no-overwrite-dir -C "$2"' sh "$dsh" "$new" || return 1
+    # 平台自己的 eos-* 不复制：复制出来的属于 eos-agent，平台会拒绝往里写；复制完由 own_dsh 重新建。
+    as_agent sh -c 'cd "$1" && tar --exclude=./.credentials.yaml --exclude="./eos-*" -cf - . | tar -xpf - --no-overwrite-dir -C "$2"' sh "$dsh" "$new" || return 1
     # 备份名已被占用（例如删了标记重做）时换一个名字，不把目录挪进旧备份里。第二步失败时挪回去。
     backup="$data/dsh.before-agent"
     [ ! -e "$backup" ] || backup="$data/dsh.before-agent-$(date +%Y%m%d%H%M%S)"
@@ -89,7 +93,8 @@ prepare_dsh() {
 # 数据目录有问题时不在这里退出：让 eos doctor、启动检查说明原因。
 prepare || echo "eos：没能把 $data/worktrees 设成共用组 eos-work，检查命令可能写不了 worktree" >&2
 if [ -n "${EOS_AGENT_USER:-}" ]; then
-  prepare_dsh "${1:-}" || echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2
+  # 迁移停在中间（返回 2）时不启动平台：启动后平台会建一个空的 dsh 目录，下次再迁移就会删掉复制好的数据。
+  prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" = web ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
 fi
 
 cd /app

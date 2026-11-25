@@ -381,7 +381,13 @@ test('the platform will not write its capability files through a link someone el
   assert.deepEqual(readdirSync(outside), [], 'nothing was written through the link')
   rmSync(join(home, 'eos-profiles'))
   const ok = new DshExecutor({ dshHome: home, dshBin: 'dsh', modelKey: () => 'k', createHarness })
-  await launch(ok, created, 't2/plan', bare)
+  // 部署里平台的 umask 是 002（deploy/eos）：不显式给权限的话，建出来的就是组内可写。
+  const umask = process.umask(0o002)
+  try {
+    await launch(ok, created, 't2/plan', bare)
+  } finally {
+    process.umask(umask)
+  }
   const patch = join(ok.profileDir(bare), 'cordis.patch.yml')
   assert.equal(statSync(patch).mode & 0o022, 0, 'not group or world writable')
   assert.equal(statSync(ok.profileDir(bare)).mode & 0o022, 0)
@@ -397,10 +403,10 @@ test('each MCP server becomes an inserted mcp-client row whose child runs in a p
   assert.equal(inserted[0]!.name, '@deepseek-ai/dsh-mcp-client')
   assert.deepEqual(inserted[0]!.config, {
     transport: 'stdio', serverName: 'docs', command: 'node', args: ['server.mjs'], env: { DOCS_ROOT: '/srv/docs' },
-    cwd: join(home, 'eos-mcp-cwd'), toolCallTimeoutMs: 60_000, closeTimeoutMs: 5_000, expandTemplates: false, failOnStartupError: true,
+    cwd: join(home, 'mcp-cwd'), toolCallTimeoutMs: 60_000, closeTimeoutMs: 5_000, expandTemplates: false, failOnStartupError: true,
   })
   assert.notEqual(inserted[0]!.config.cwd, '/data/worktrees/t1', 'the MCP child must not run in the task worktree')
-  assert.ok(existsSync(join(home, 'eos-mcp-cwd')), 'that directory exists before dsh spawns the server')
+  assert.ok(existsSync(join(home, 'mcp-cwd')), 'that directory exists before dsh spawns the server')
 })
 
 test('the same worktree runs one dsh process per capability profile, and roles with the same profile share one', async () => {

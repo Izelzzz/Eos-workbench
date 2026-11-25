@@ -109,7 +109,9 @@ const symlinkAttack = {
   plantLinkInProfiles: attack('ln -s /data "$1/eos-profiles/planted"'),
   replacePatchFile: attack('f=$(ls "$1"/eos-profiles/*/cordis.patch.yml | head -1); rm -f "$f" && ln -s /data/eos.db "$f"'),
   renameProcessCwd: attack('mv "$1/eos-process-cwd" "$1/moved2"'),
-  modes: execFileSync('sh', ['-c', 'stat -c "%A %U:%G %n" "$1" "$1"/eos-profiles "$1"/eos-profiles/* "$1"/eos-process-cwd "$1"/eos-mcp-cwd', 'sh', join(data, 'dsh')], { encoding: 'utf8' })
+  // 反过来：MCP 服务（eos-agent）要能在自己的工作目录里写。
+  mcpWritesItsCwd: attack('touch "$1/mcp-cwd/cache-file" && rm "$1/mcp-cwd/cache-file"'),
+  modes: execFileSync('sh', ['-c', 'stat -c "%A %U:%G %n" "$1" "$1"/eos-profiles "$1"/eos-profiles/* "$1"/eos-process-cwd "$1"/mcp-cwd', 'sh', join(data, 'dsh')], { encoding: 'utf8' })
     .trim()
     .split('\n'),
 }
