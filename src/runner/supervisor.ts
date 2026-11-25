@@ -9,6 +9,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
+import { killUserProcessesIn, type CheckUser } from './check-user.ts'
 import { KILL_WAIT_MS, killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
@@ -59,6 +60,8 @@ export class Supervisor {
     credentials?: Credentials
     /** 认得的代码托管平台，默认只有 github.com。 */
     forges?: Forge[]
+    /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
+    checkUser?: CheckUser
   }) {
     this.locksDir = join(o.dataDir, 'locks')
     // 托管平台只建一次：GitHub App 的安装令牌缓存在它里面。
@@ -264,10 +267,13 @@ export class Supervisor {
         await this.o.executor.release(worktree)
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
+        // 检查命令（另一个用户）留下的进程平台杀不了，以那个用户去杀。
+        const byCheck = this.o.checkUser === undefined ? [] : await killUserProcessesIn(this.o.checkUser, worktree)
+        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
       },
-      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c)), redact),
+      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser), redact),
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)

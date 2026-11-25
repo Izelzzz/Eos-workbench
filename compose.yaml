@@ -23,6 +23,10 @@ services:
       - /tmp:exec,size=4g
     cap_drop:
       - ALL
+    # 只留切换用户的两个能力：平台以 eos 运行，检查命令切换到 eos-check（docs/deploy.md「用户和权限」）。
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
 
