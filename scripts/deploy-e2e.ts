@@ -9,6 +9,7 @@
 // 环境变量：EOS_E2E_COMPOSE_FILES 用冒号分隔的额外 compose 文件（例如构建机需要的网络设置）；EOS_E2E_URL 默认 http://127.0.0.1:4317。
 // 会占用宿主机的 4317 端口，不要在已经跑着 Eos 的服务器上运行。compose 项目名是 eos-deploy-e2e、镜像标签是 eos-workbench:e2e，结束时连数据卷一起删掉。
 import { execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -17,6 +18,8 @@ const OUT = join(ROOT, '.eos', 'deploy-e2e')
 const LOG = join(OUT, 'run.log')
 const BASE = process.env.EOS_E2E_URL ?? 'http://127.0.0.1:4317'
 const PROJECT = 'eos-deploy-e2e'
+// 主密钥用这次生成的值（没有凭据要解密）：让「检查命令和 agent 都读不到主密钥」在真实任务里也核对得到。
+const MASTER_KEY = process.env.EOS_MASTER_KEY || randomBytes(32).toString('base64')
 const files = ['compose.yaml', ...(process.env.EOS_E2E_COMPOSE_FILES ?? '').split(':').filter(Boolean)].flatMap(f => ['-f', f])
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
@@ -28,7 +31,7 @@ const log = (line: string) => {
 const compose = (...a: string[]) => {
   log(`$ docker compose ${a.join(' ')}`)
   // 用自己的镜像标签，不覆盖服务器上正在用的 eos-workbench:local。
-  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e' } })
+  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e', EOS_MASTER_KEY: MASTER_KEY } })
   if (out.trim() !== '') appendFileSync(LOG, `${out}\n`)
   return out
 }
@@ -136,6 +139,7 @@ try {
 
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
+    '设置了主密钥（扫描时平台进程的环境里有它）': /✓ 凭据主密钥：已设置/.test(doctor.out),
     '检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key': scanned !== undefined && scanned.uid !== 10001 && scanned.secretsFoundIn.length === 0
       && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.environ !== 'readable'))
       && scanned.processes.some((p: any) => p.uid === 10001 && p.environ !== 'readable'),
@@ -160,6 +164,11 @@ try {
   } catch {}
   throw e
 } finally {
+  // 删数据卷之前留下平台自己的日志（任务失败时看原因要用）。
+  try {
+    writeFileSync(join(OUT, 'platform.log'), compose('logs', '--no-color', 'eos'))
+    writeFileSync(join(OUT, 'task-logs.txt'), inContainer('for f in /data/logs/*; do echo "== $f"; cat "$f"; done').out)
+  } catch {}
   // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。清理本身失败时不盖掉原来的错误。
   try {
     compose('down', '-v')

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, chownSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { asUser, killUserProcessesIn, parseCheckUser, readSessionLogAs, resolveCheckUser, shareWithGroup } from '../src/runner/check-user.ts'
@@ -172,3 +172,25 @@ test('files and directories the agent or check user made private are opened to t
   assert.equal(statSync(join(w, 'build')).mode & 0o777, 0o775)
   assert.equal(statSync(outside).mode & 0o777, 0o600, 'a symlink out of the worktree is not followed')
 })
+
+test(
+  "files that landed in the user's own group (dsh writes through a chmod-0700 staging dir, which drops setgid) are moved to the worktree's group",
+  { skip: process.getuid?.() !== 0 ? 'needs root to create a file in another group' : false },
+  async () => {
+    const { env } = fakeSetpriv()
+    const w = dir()
+    chownSync(w, 0, 0)
+    writeFileSync(join(w, 'spec.md'), 'x')
+    chmodSync(join(w, 'spec.md'), 0o600)
+    chownSync(join(w, 'spec.md'), 0, 1)
+    const path = process.env.PATH
+    process.env.PATH = env.PATH
+    try {
+      await shareWithGroup({ name: 'root', gid: 0, home: '/root' }, w)
+    } finally {
+      process.env.PATH = path
+    }
+    assert.equal(statSync(join(w, 'spec.md')).gid, 0, 'moved to the worktree group')
+    assert.equal(statSync(join(w, 'spec.md')).mode & 0o777, 0o660)
+  },
+)

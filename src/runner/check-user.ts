@@ -2,7 +2,7 @@
 // 它们和平台不是同一个用户，读不到平台进程环境（/proc/<pid>/environ）里的主密钥；检查命令也读不到 dsh 进程环境里的模型 key。
 // 没有设置时它们和平台是同一个用户（本机开发时就是这样）。
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 
 export const CHECK_USER_ENV = 'EOS_CHECK_USER'
 /** dsh 和 agent 的用户。平台用它结束 agent 留下的进程、读 dsh 的会话日志；切换由 dsh 的入口（deploy/dsh-launch.mjs）做。 */
@@ -57,6 +57,22 @@ export const asUser = (user: CheckUser, argv: string[]): string[] => [
   ...argv,
 ]
 
+/** 本进程带着 ambient 能力（部署镜像里的平台进程，deploy/eos）。读一次就记住：能力在进程运行期间不变。 */
+let ambient: boolean | undefined
+const hasAmbientCaps = (): boolean => {
+  if (ambient === undefined) {
+    try {
+      ambient = !/^CapAmb:\s*0+$/m.test(readFileSync('/proc/self/status', 'utf8'))
+    } catch {
+      ambient = false
+    }
+  }
+  return ambient
+}
+
+/** 平台带着切换用户、发信号的能力时，先清掉再运行 argv（不换用户）。没有能力时原样返回。 */
+export const withoutCaps = (argv: string[]): string[] => (hasAmbientCaps() ? ['setpriv', '--inh-caps=-all', '--ambient-caps=-all', '--', ...argv] : argv)
+
 /** 真的切换一次，确认平台进程有切换用户的能力。成功时 undefined，否则返回原因。 */
 export const probeSwitch = (user: CheckUser): string | undefined => {
   const [cmd, ...args] = asUser(user, ['true'])
@@ -103,41 +119,30 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string, waitMs =
 }
 
 /**
- * 把 user 在 dir 里建的文件和目录开放给组读写（不跟符号链接，只改它自己的）。平台（同组）提交、撤销越界改动时要读、删它们：
- * agent 和检查命令是别的用户，建出 0600 的文件、0755 的目录时，平台读不了也删不掉里面的东西。
+ * 把 $1 下属于用户 $2 的文件和目录改成组 $3、组内可读写（目录还要可进入、带 setgid），不跟符号链接（find 默认 -P）。
+ * 只改它自己的：别人的文件它本来也改不了。
+ */
+const SHARE_WITH_GROUP = [
+  'find "$1" -user "$2" -type d \\( ! -gid "$3" -o ! -perm -2070 \\) -exec chgrp "$3" {} + -exec chmod g+rwxs {} +',
+  'find "$1" -user "$2" -type f \\( ! -gid "$3" -o ! -perm -060 \\) -exec chgrp "$3" {} + -exec chmod g+rw {} +',
+].join(' && ')
+
+/**
+ * 把 user 在 dir 里建的文件和目录交给 dir 的组（共用组 eos-work）并开放组读写。平台（在这个组里）提交、撤销越界改动时要读、删它们。
+ * agent 和检查命令是别的用户，建出 0600 的文件、0755 的目录时平台读不了、删不掉；
+ * 而且不是所有文件都继承 worktree 的组：dsh 写文件时先在一个 chmod 0700 的临时目录里建（chmod 清掉了 setgid），再改名过去，
+ * 这样的文件属于 agent 自己的主组，只开放组权限没有用，要先改组。成功时 undefined，否则返回原因。
  */
 export const shareWithGroup = async (user: CheckUser, dir: string): Promise<string | undefined> => {
   let real: string
+  let gid: number
   try {
     real = realpathSync(dir)
+    gid = statSync(real).gid
   } catch {
     return undefined
   }
-  // 文件要组内可读写；目录还要组内可进入（g+x）。
-  const [cmd, ...args] = asUser(user, [
-    'find',
-    real,
-    '-user',
-    user.name,
-    '(',
-    '-type',
-    'f',
-    '!',
-    '-perm',
-    '-g+rw',
-    '-o',
-    '-type',
-    'd',
-    '!',
-    '-perm',
-    '-g+rwx',
-    ')',
-    '-exec',
-    'chmod',
-    'g+rwX',
-    '{}',
-    '+',
-  ])
+  const [cmd, ...args] = asUser(user, ['sh', '-c', SHARE_WITH_GROUP, 'sh', real, user.name, String(gid)])
   return new Promise(done => {
     let err = ''
     const p = spawn(cmd!, args, { cwd: '/', stdio: ['ignore', 'ignore', 'pipe'] })

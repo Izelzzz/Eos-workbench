@@ -1,0 +1,100 @@
+{
+  "commit": "f5de7fc",
+  "uncommitted": "",
+  "task": "t2611250534036k5",
+  "status": "failed",
+  "failure": "哪一步：[spec] spec-writer · produce（调用 c1）\n原因：提交改动失败：error: open(\"docs/spec.md\"): Permission denied\n怎么修：任务的 worktree 被删除或损坏：确认 worktree 目录还在、主仓库里还有它的登记（git worktree list）。处理后在任务页点「重试」，或运行 npm run eos -- retry t2611250534036k5",
+  "answered": 2,
+  "checks": {
+    "容器里 eos doctor 没有 ✗": true,
+    "检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key": true,
+    "dsh 以 eos-agent 运行（读不到平台进程的环境）": true,
+    "dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）": true,
+    "任务完成": false,
+    "平台的检查命令（npm test）以 eos-check 运行": false,
+    "worktree 里 npm test 通过": true,
+    "agent 的改动提交到了任务分支": false,
+    "down 再 up 之后任务还在、状态不变": true,
+    "down 再 up 之后 worktree 还在，最新提交不变": false
+  },
+  "environment": "uid=10001(eos) gid=10001(eos) groups=10001(eos),10010(eos-work),10011(eos-dsh)\nv24.22.3\n11.19.1\n12.23.0\ngit version 2.43.0\nPython 3.12.3\ngcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nbubblewrap 0.9.0\nEOS_HOME=/data\n",
+  "doctor": "Eos 环境检查（数据目录 /data）\n✓ Node：24.22.3（要求 >=24.9.0）\n✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）\n⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据\n  怎么修：生成一个主密钥：openssl rand -base64 32（或 node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"），在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入\n✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp\n✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境\n✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境\n✓ git：2.43.0\n✓ 数据目录：/data 可写\n✓ dsh：0.2.2-rc.5\n",
+  "checkUserScan": {
+    "dshPids": [
+      138
+    ],
+    "scan": {
+      "uid": 10002,
+      "gid": 10002,
+      "groups": [
+        10002,
+        10010
+      ],
+      "home": "/home/eos-check",
+      "caps": {
+        "inheritable": "0000000000000000",
+        "permitted": "0000000000000000",
+        "effective": "0000000000000000",
+        "ambient": "0000000000000000"
+      },
+      "noNewPrivs": "1",
+      "envHasSecrets": [
+        "EOS_MASTER_KEY",
+        "DEEPSEEK_API_KEY"
+      ],
+      "secretsFoundIn": [],
+      "processes": [
+        {
+          "pid": 1,
+          "ppid": 0,
+          "uid": 0,
+          "comm": "docker-init",
+          "cmdline": "/sbin/docker-init --",
+          "capEff": "00000000000000e0",
+          "capAmb": "0000000000000000",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 138,
+          "ppid": 8,
+          "uid": 10003,
+          "comm": "MainThread",
+          "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+          "capEff": "0000000000000000",
+          "capAmb": "0000000000000000",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 32,
+          "ppid": 8,
+          "uid": 10001,
+          "comm": "esbuild",
+          "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+          "capEff": "00000000000000e0",
+          "capAmb": "00000000000000e0",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 8,
+          "ppid": 1,
+          "uid": 10001,
+          "comm": "MainThread",
+          "cmdline": "node --import",
+          "capEff": "00000000000000e0",
+          "capAmb": "00000000000000e0",
+          "environ": "EACCES"
+        }
+      ],
+      "switchToRoot": "setpriv: setresuid failed: Operation not permitted",
+      "switchToEos": "setpriv: setresuid failed: Operation not permitted",
+      "renameWorktreeDir": "skipped",
+      "writeTrackedFileInWorktree": "skipped",
+      "writeOutsideWorktree": {},
+      "readOutsideWorktree": {}
+    }
+  },
+  "testUsers": "",
+  "npmTest": "ℹ tests 0\nℹ suites 0\nℹ pass 0\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13.435095\n",
+  "commits": "",
+  "afterRecreate": "741eb0c init\ndsh\neos.db\neos.db-shm\neos.db-wal\nlocks\nlogs\nrepos\nworktrees\n"
+}
