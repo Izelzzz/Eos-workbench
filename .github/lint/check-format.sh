@@ -17,16 +17,18 @@ fi
 list="$(mktemp)"
 trap 'rm -f "$list"' EXIT
 # 三个点：和 base 的分叉点比，本地用 origin/main 时结果和 CI 一样
-git diff --name-only --diff-filter=A -z "$base"...HEAD -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs' >"$list"
+# --find-renames：改名不算新增，不受本地 diff.renames 配置影响
+git diff --name-only --find-renames --diff-filter=A -z "$base"...HEAD -- '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.mjs' '*.cjs' \
+  ':(exclude,top)docs/' ':(exclude,top)poc/' ':(exclude,top)vendor/' >"$list"
 files=()
 while IFS= read -r -d '' f; do files+=("$f"); done <"$list"
 if [ "${#files[@]}" -eq 0 ]; then
   echo "没有新增的代码文件，不需要检查格式"
   exit 0
 fi
-echo "新增的代码文件（docs/、poc/、vendor/ 等按 .prettierignore 跳过）："
+echo "新增的代码文件（根目录的 docs/、poc/、vendor/ 不查，node_modules/、dist/ 按 .prettierignore 跳过）："
 printf '  %s\n' "${files[@]}"
-if ! "$here/node_modules/.bin/prettier" --config "$here/prettier.config.json" --ignore-path "$here/.prettierignore" --check "${files[@]}"; then
-  echo "::error title=格式::新增的文件没有按 Prettier 格式化。本地运行：.github/lint/node_modules/.bin/prettier --config .github/lint/prettier.config.json --write <文件>"
+if ! "$here/node_modules/.bin/prettier" --config "$here/prettier.config.json" --no-editorconfig --ignore-path "$here/.prettierignore" --check "${files[@]}"; then
+  echo "::error title=格式::新增的文件没有按 Prettier 格式化。本地运行：.github/lint/node_modules/.bin/prettier --config .github/lint/prettier.config.json --no-editorconfig --write <文件>"
   exit 1
 fi
