@@ -58,7 +58,7 @@
 ## migration-edge.txt
 
 - 迁移停在两次 mv 之间：`eos web`、`eos resume` 都提示怎么恢复、退出码 1（`eos doctor` 照常运行），`dsh.agent-new` 里的数据还在，没有建空的 `/data/dsh`。
-- 删了标记重做：已经是新布局的目录不再复制（没有新的备份目录），`eos-*` 仍属于 eos，`mcp-cwd` 收紧到 2770，doctor 照常。
+- 删了标记重做：已经是新布局的目录不再复制（没有新的备份目录），`eos-*` 仍属于 eos，`mcp-cwd` 是 2770，doctor 照常。从旧的 0777 收紧到 2770 的证据在 `probe-report.json` 的 `beforeUpgrade` 和 `afterUpgrade`。
 
 ## 真实模型 E2E 之后的改动
 
