@@ -156,6 +156,10 @@ test('the dsh entry is the installed dsh, or the launcher the image names (which
   assert.throws(() => dshEntry({ EOS_DSH_LAUNCHER: '/nonexistent/dsh-launch.mjs' }, root), /EOS_DSH_LAUNCHER=\/nonexistent\/dsh-launch\.mjs，但这个文件不存在/)
 })
 
+test('the model endpoint (DEEPSEEK_BASE_URL) reaches dsh, so a deployment or the CI fake model can point it elsewhere; other DEEPSEEK_ variables do not', () => {
+  assert.deepEqual(agentEnv({ DEEPSEEK_BASE_URL: 'http://127.0.0.1:1/anthropic', DEEPSEEK_FILES_API_TIMEOUT: '1' }, 'k'), { DEEPSEEK_BASE_URL: 'http://127.0.0.1:1/anthropic', DEEPSEEK_API_KEY: 'k' })
+})
+
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {
   assert.deepEqual(agentEnv({ PATH: '/bin', npm_config_cache: undefined }, 'k'), { PATH: '/bin', DEEPSEEK_API_KEY: 'k' })
 })

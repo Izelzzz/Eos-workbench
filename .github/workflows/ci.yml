@@ -1,5 +1,5 @@
-# 类型检查、单元测试、构建网页、lint、格式化。见 docs/roadmap.md 的 CI 一项。
-# job 名字（typecheck、unit-test、build-web、lint、format）会设成必需检查，改名前先改分支保护。
+# 类型检查、单元测试、构建网页、确定性 E2E、lint、格式化。见 docs/roadmap.md 的 CI 一项。
+# job 名字（typecheck、unit-test、build-web、e2e-fake-model、lint、format）会设成必需检查，改名前先改分支保护。
 name: CI
 
 on:
@@ -67,6 +67,38 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:web
+
+  # 确定性 E2E：用假模型（scripts/fake-model/）代替真实模型，跑一遍 scripts/e2e.ts 的全部核对项。不需要模型 key 和外网。
+  # 覆盖平台、dsh、沙箱、git、检查命令；不覆盖模型本身的行为（提示词、技能、模板），那部分仍要真实模型的 E2E。
+  e2e-fake-model:
+    name: e2e-fake-model
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # 记下这台机器上 dsh 实际用的沙箱（bwrap 或 Landlock），排查时用
+      - name: 沙箱
+        run: node --import tsx src/cli.ts doctor --data "$RUNNER_TEMP/eos-doctor" || true
+      - name: 确定性 E2E
+        run: node --import tsx scripts/e2e-ci.ts
+      - name: 保存报告和日志
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-fake-model
+          path: |
+            .eos/e2e/report.json
+            .eos/e2e/run.log
+            .eos/e2e-ci/fake-model.log
+          if-no-files-found: warn
+          retention-days: 14
 
   # lint 工具单独装在 .github/lint/：仓库编译用 TypeScript 7，没有 typescript-eslint 需要的 JS API，
   # 那里装 TS 6 只给 lint 用。规则见 .github/lint/eslint.config.mjs（架构规则、通用规则和逐条列出的例外）

@@ -326,6 +326,7 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'no_proxy',
   'all_proxy',
   'NODE_USE_ENV_PROXY',
+  'DEEPSEEK_BASE_URL', // 模型接口地址，部署方设定；CI 的确定性 E2E 用它指向本机的假模型（scripts/fake-model/）
   'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
