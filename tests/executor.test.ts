@@ -163,6 +163,17 @@ test('the model endpoint comes only from the platform setting EOS_MODEL_BASE_URL
   }
   assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'http://relay.internal/anthropic' }, 'k'), /只能是 https 地址，或者本机的 http 地址/)
   assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'not a url' }, 'k'), /不是合法的地址/)
+  // 用户名和密码：拒绝，而且报错里不带它们
+  assert.throws(
+    () => agentEnv({ EOS_MODEL_BASE_URL: 'https://user:secret-pw@gateway.example/anthropic' }, 'k'),
+    (e: Error) => /不能带用户名和密码/.test(e.message) && !e.message.includes('secret-pw'),
+  )
+  assert.throws(
+    () => agentEnv({ EOS_MODEL_BASE_URL: 'http://user:secret-pw@relay.internal/anthropic' }, 'k'),
+    (e: Error) => !e.message.includes('secret-pw'),
+  )
+  // 交给 dsh 的是解析后的地址：主机名大小写等写法统一
+  assert.equal(agentEnv({ EOS_MODEL_BASE_URL: 'HTTP://LOCALHOST:1/anthropic' }, 'k').DEEPSEEK_BASE_URL, 'http://localhost:1/anthropic')
   assert.deepEqual(agentEnv({ EOS_MODEL_BASE_URL: '' }, 'k'), { DEEPSEEK_API_KEY: 'k' })
 })
 

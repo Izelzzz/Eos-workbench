@@ -349,15 +349,17 @@ export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.include
 export const modelBaseUrl = (env: NodeJS.ProcessEnv): string | undefined => {
   const raw = env.EOS_MODEL_BASE_URL
   if (raw === undefined || raw === '') return undefined
+  // 报错里不带原始地址：地址里可能写了用户名和密码
   let url: URL
   try {
     url = new URL(raw)
   } catch {
-    throw new Error(`EOS_MODEL_BASE_URL 不是合法的地址：${raw}`)
+    throw new Error('EOS_MODEL_BASE_URL 不是合法的地址')
   }
+  if (url.username !== '' || url.password !== '') throw new Error('EOS_MODEL_BASE_URL 里不能带用户名和密码')
   const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
-  if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return raw
-  throw new Error(`EOS_MODEL_BASE_URL 只能是 https 地址，或者本机的 http 地址：${raw}`)
+  if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return url.href
+  throw new Error(`EOS_MODEL_BASE_URL 只能是 https 地址，或者本机的 http 地址（现在是 ${url.protocol}//${url.host}）`)
 }
 
 export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => {

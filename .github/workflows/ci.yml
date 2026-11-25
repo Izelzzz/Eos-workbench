@@ -97,6 +97,15 @@ jobs:
           if curl -sS --max-time 5 https://api.deepseek.com >/dev/null 2>&1; then echo '外网还通，没断开'; exit 1; fi
       - name: 确定性 E2E
         run: node --import tsx scripts/e2e-ci.ts
+      # 恢复外网：后面上传 artifact、setup-node 保存缓存都要连 GitHub。E2E 失败也要恢复
+      - name: 恢复外网
+        if: always()
+        run: |
+          for t in iptables ip6tables; do
+            sudo $t -D OUTPUT -j REJECT || true
+            sudo $t -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
+            sudo $t -D OUTPUT -o lo -j ACCEPT || true
+          done
       - name: 保存报告和日志
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
