@@ -25,6 +25,8 @@ export interface Forge {
   forgetAppToken?(repo: RemoteRepo): void
   /** 用清单流程注册托管平台的 App（例如 GitHub App）；不支持时没有。 */
   readonly appRegistration?: AppRegistration
+  /** 某个人通过这个 App 授权给平台的用户令牌（OAuth）；不支持时没有。 */
+  readonly userAuthorization?: UserAuthorization
   /** 浏览器里打开这个分支的地址。 */
   branchUrl(repo: RemoteRepo, branch: string): string
   /**
@@ -49,12 +51,34 @@ export interface AppRegistration {
   readonly host: string
   /** App 名字最长多少个字符。 */
   readonly appNameMax: number
-  /** 浏览器提交清单用的表单。origin 是浏览器访问平台用的地址，callbackUrl 是注册完跳回的地址，state 原样带回。org 不给时注册在个人账号下。 */
-  form(p: { appName: string; origin: string; callbackUrl: string; state: string; org?: string }): { action: string; fields: Record<string, string> }
-  /** 用回调里的 code 换 App 的凭据：value 是存进凭据存储的值；installUrl 是把 App 安装到仓库的页面。出错时抛 ForgeError。 */
-  complete(code: string): Promise<{ value: string; appName: string; appUrl: string; installUrl: string | undefined }>
+  /** 浏览器提交清单用的表单。origin 是浏览器访问平台用的地址，callbackUrl 是注册完跳回的地址，userCallbackUrl 是以后用户授权完跳回的地址，state 原样带回。org 不给时注册在个人账号下。 */
+  form(p: { appName: string; origin: string; callbackUrl: string; userCallbackUrl: string; state: string; org?: string }): { action: string; fields: Record<string, string> }
+  /** 用回调里的 code 换 App 的凭据：value 是存进凭据存储的值（记下注册时写进 App 的用户授权回调地址 userCallbackUrl）；installUrl 是把 App 安装到仓库的页面。出错时抛 ForgeError。 */
+  complete(code: string, p: { userCallbackUrl: string }): Promise<{ value: string; appName: string; appUrl: string; installUrl: string | undefined }>
   /** 已保存的 App 凭据对应的安装页面；凭据里没有记下 App 的短名时没有。 */
   installUrl(value: string): string | undefined
+}
+
+/**
+ * 用户授权（OAuth）：一个人在托管平台上授权给平台的 App，平台拿到代表这个人的令牌，以他的身份推送、开 PR。
+ * 令牌会过期时带着刷新令牌，平台快过期时换新的。app 是 App 凭据的值（里面有 client id 和 secret），user 是用户令牌凭据的值。
+ * 出错时抛 ForgeError（消息是给用户看的中文，不含令牌）。
+ */
+export interface UserAuthorization {
+  /** 用户令牌在凭据存储里的名字（按主机）。 */
+  readonly credentialName: string
+  /** 浏览器去授权的地址。callbackUrl 是授权完跳回的地址，要和注册 App 时写进去的一样，不一样时抛 ForgeError（说明该用哪个地址打开平台）。 */
+  authorizeUrl(app: string, p: { callbackUrl: string; state: string }): string
+  /** 回调带回的 code 换令牌，并查出授权的人。value 存进凭据存储。 */
+  complete(app: string, p: { code: string; callbackUrl: string }, now: number): Promise<{ value: string; login: string }>
+  /** 读出令牌和授权的人；refresh 为 true 表示快过期了，用之前先换新的。值不对时抛 ForgeError。 */
+  read(user: string, now: number): { login: string; token: string; refresh: boolean; expiresAt?: number }
+  /** 这条授权是不是给这个 App 的（删掉 App 重新注册后，旧 App 的授权不能再用）。 */
+  matches(app: string, user: string): boolean
+  /** 用刷新令牌换新的令牌，返回新的 value（刷新令牌也会换新，旧的作废）。 */
+  refresh(app: string, user: string, now: number): Promise<string>
+  /** 在托管平台上撤销这次授权。令牌过期了就确认不了（抛 ForgeError）：调用方先续期再撤销。 */
+  revoke(app: string, user: string): Promise<void>
 }
 
 export type PullRequest = { number: number; url: string; reused: boolean }

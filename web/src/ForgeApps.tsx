@@ -1,8 +1,8 @@
-// 代码托管页：用清单流程注册托管平台的 App（现在只有 GitHub App）。平台用 App 访问仓库：按仓库授权，令牌一小时有效、自动换新。
+// 代码托管页：用清单流程注册托管平台的 App（现在只有 GitHub App），再用托管平台的账号授权（OAuth），平台以授权人的身份推送、开 PR。
 // 注册时浏览器把清单提交到托管平台，用户在那里确认后跳回平台；平台用带回的 code 换 App 的 id 和私钥，存进凭据存储。
 import { useEffect, useState } from 'react'
 import type { ForgeAppsResponse } from './api.ts'
-import { listForgeApps, registerForgeApp } from './api.ts'
+import { authorizeForgeUser, listForgeApps, registerForgeApp, revokeForgeUser } from './api.ts'
 import { ago } from './format.ts'
 
 /** 把字段作为表单 POST 到托管平台：清单要以表单提交，浏览器整页跳过去。 */
@@ -35,6 +35,7 @@ export function ForgeApps({ query }: { query: string }) {
   const [appName, setAppName] = useState(() => `eos-${Math.random().toString(36).slice(2, 8)}`)
   const [org, setOrg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string>()
 
   useEffect(() => {
     listForgeApps().then(setData, e => setError(`加载失败：${(e as Error).message}`))
@@ -51,6 +52,7 @@ export function ForgeApps({ query }: { query: string }) {
   const register = async (name: string) => {
     setBusy(true)
     setError(undefined)
+    setNotice(undefined)
     setResult(new URLSearchParams())
     const r = await registerForgeApp({ name, appName, ...(org.trim() === '' ? {} : { org: org.trim() }) })
     if (!r.ok) {
@@ -60,14 +62,40 @@ export function ForgeApps({ query }: { query: string }) {
     submitForm(r.action, r.fields)
   }
 
+  /** 用 GitHub 账号授权：浏览器整页跳到托管平台的授权页，授权完跳回本页。 */
+  const authorize = async (name: string) => {
+    setBusy(true)
+    setError(undefined)
+    setNotice(undefined)
+    setResult(new URLSearchParams())
+    const r = await authorizeForgeUser(name)
+    if (!r.ok) {
+      setBusy(false)
+      return setError(r.error)
+    }
+    location.assign(r.url)
+  }
+
+  /** login：授权人；授权读不出来时没有。 */
+  const revoke = async (name: string, login?: string) => {
+    const who = login === undefined ? '这条授权' : ` @${login} 的授权`
+    if (!confirm(`撤销${who}？之后平台改用 App 自己的身份（或凭据页的 Git 令牌）访问仓库。`)) return
+    setError(undefined)
+    setResult(new URLSearchParams())
+    const r = await revokeForgeUser(name)
+    if (!r.ok) return setError(r.error)
+    setNotice(r.warning === undefined ? `已撤销${who}` : `已在平台上删掉${who}。${r.warning}`)
+    setData(await listForgeApps())
+  }
+
   const registered = result.get('registered')
   const justDone = data?.apps.find(a => a.name === registered)
   return (
     <div className="credentials">
       <h1>代码托管</h1>
       <p className="muted">
-        平台用 App 访问仓库：按仓库授权，令牌一小时有效、到期前自动换新，不依赖某个人的令牌。App 的私钥加密存在凭据存储里，只由平台使用。没有 App、或 App 没装到某个仓库时，平台改用凭据页里的 Git
-        令牌。
+        先注册一个 App 并装到要用的仓库，再用 GitHub 账号授权：平台以授权人的身份克隆、推送、开 PR。没人授权时用 App 自己的身份；App 没装到某个仓库时，改用凭据页里的 Git 令牌。App
+        的私钥和授权的令牌都加密存在凭据存储里，只由平台使用。
       </p>
       {result.get('error') !== null && (
         <p className="error" role="alert">
@@ -87,6 +115,16 @@ export function ForgeApps({ query }: { query: string }) {
             </>
           )}
           。
+        </p>
+      )}
+      {result.get('authorized') !== null && (
+        <p className="notice" role="status">
+          已用 @{result.get('authorized')} 的 GitHub 账号授权：之后推送和开 PR 都以 @{result.get('authorized')} 的身份进行（仓库要装了 App）。
+        </p>
+      )}
+      {notice && (
+        <p className="notice" role="status">
+          {notice}
         </p>
       )}
       {error && (
@@ -120,6 +158,39 @@ export function ForgeApps({ query }: { query: string }) {
                       </a>
                       ：只勾选要让平台访问的仓库。
                     </p>
+                  )}
+                  {a.user !== undefined && (
+                    <div className="forge-user">
+                      <h3>用 GitHub 账号授权</h3>
+                      <p className="muted">
+                        授权后，平台以授权人的身份推送、开 PR（PR 作者是这个人），只能访问装了 App、而且这个人有权限的仓库。令牌 8 小时过期，平台自动续期。没人授权时用 App 自己的身份。
+                      </p>
+                      {a.user.authorized !== undefined &&
+                        ('login' in a.user.authorized ? (
+                          <p>
+                            已授权：<b>@{a.user.authorized.login}</b>，更新于 {ago(a.user.authorized.updatedAt)}。{' '}
+                            <button type="button" onClick={() => void revoke(a.name, (a.user!.authorized as { login: string }).login)}>
+                              撤销授权
+                            </button>
+                          </p>
+                        ) : (
+                          <p className="error">
+                            授权读不出来：{a.user.authorized.error}{' '}
+                            <button type="button" onClick={() => void revoke(a.name)}>
+                              撤销授权
+                            </button>
+                          </p>
+                        ))}
+                      {a.user.unavailable !== undefined ? (
+                        <p className="muted">现在不能授权：{a.user.unavailable}</p>
+                      ) : (
+                        <div>
+                          <button type="button" className={a.user.authorized === undefined ? 'primary' : ''} disabled={busy || !data.usable} onClick={() => void authorize(a.name)}>
+                            {busy ? '正在跳转…' : a.user.authorized === undefined ? `用 ${a.host} 账号授权` : '换一个人重新授权'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <p className="muted">
                     要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。

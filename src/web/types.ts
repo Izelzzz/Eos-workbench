@@ -81,9 +81,22 @@ export type SaveCredentialResponse = { ok: true } | { ok: false; error: string }
 export type DeleteCredentialResponse = { ok: true } | { ok: false; error: string }
 
 /** 托管平台 App（例如 GitHub App）的注册情况。name 是它在凭据存储里的名字；registered 是已经存了凭据。 */
-export type ForgeAppInfo = { name: string; host: string; appNameMax: number; registered?: { updatedAt: number; installUrl?: string } }
+export type ForgeAppInfo = {
+  name: string
+  host: string
+  appNameMax: number
+  registered?: { updatedAt: number; installUrl?: string }
+  /**
+   * 用户授权（OAuth）：托管平台支持时才有。authorized 是已经授权的人（error 是授权读不出来时的原因）；
+   * unavailable 是现在不能发起授权的原因（例如 App 是早先注册的、没有 client id）。
+   */
+  user?: { authorized?: { login: string; updatedAt: number } | { error: string }; unavailable?: string }
+}
 /** callbackUrl：注册完托管平台跳回的地址，就是浏览器现在访问平台用的地址加上回调路径。 */
 export type ForgeAppsResponse = { usable: boolean; hint?: string; callbackUrl: string; apps: ForgeAppInfo[] }
 export type RegisterAppRequest = { name: string; appName: string; org?: string }
 /** 浏览器把 fields 作为表单字段 POST 到 action（托管平台的页面）。 */
+export type AuthorizeUserResponse = { ok: true; url: string } | { ok: false; error: string }
+/** warning：平台这边已经删掉了授权，但没能在托管平台上撤销（要用户自己去撤销）。 */
+export type RevokeUserResponse = { ok: true; warning?: string } | { ok: false; error: string }
 export type RegisterAppResponse = { ok: true; action: string; fields: Record<string, string> } | { ok: false; error: string }

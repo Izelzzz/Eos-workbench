@@ -150,6 +150,8 @@ a.button.primary { background: var(--running); border-color: var(--running); col
 
 /* 代码托管页 */
 .forge-app { margin-top: 20px; }
+.forge-user { margin: 16px 0; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.forge-user h3 { margin: 0 0 6px; font-size: 15px; }
 
 /* 团队约定页 */
 .conventions { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: start; }

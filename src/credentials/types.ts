@@ -6,9 +6,10 @@ export const LOCAL_OWNER = 'local' as Owner
 
 /**
  * api-key：模型服务的 key；token：Git 托管服务的令牌（个人访问令牌等）；
- * github-app：GitHub App 的 id 和私钥（JSON），平台用它换短期的安装令牌。
+ * github-app：GitHub App 的 id 和私钥（JSON），平台用它换短期的安装令牌；
+ * github-user：某个人通过 GitHub App 授权给平台的用户令牌（JSON，带刷新令牌），平台以这个人的身份推送、开 PR。
  */
-export const CREDENTIAL_KINDS = ['api-key', 'token', 'github-app'] as const
+export const CREDENTIAL_KINDS = ['api-key', 'token', 'github-app', 'github-user'] as const
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number]
 
 /**

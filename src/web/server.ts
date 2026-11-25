@@ -31,6 +31,9 @@ import type {
   CredentialsResponse,
   ForgeAppsResponse,
   RegisterAppResponse,
+  AuthorizeUserResponse,
+  RevokeUserResponse,
+  ForgeAppInfo,
   DeleteCredentialResponse,
   SaveCredentialResponse,
   ConventionsResponse,
@@ -148,6 +151,8 @@ export const listenPlan = (host: string, port: number, publicUrl: URL | undefine
 
 /** 托管平台注册完 App 跳回的路径。 */
 export const APP_CALLBACK = '/api/forge-apps/callback'
+/** 用户在托管平台上授权（OAuth）完跳回的路径。注册 App 时写进 App 的回调地址。 */
+export const USER_CALLBACK = '/api/forge-apps/user-callback'
 /** 发起注册后多久内要完成（在托管平台的页面上确认）。 */
 const PENDING_MS = 30 * 60 * 1000
 
@@ -427,6 +432,8 @@ export const createWebServer = (o: {
     // github-app. 开头的名字留给 GitHub App 的凭据：平台按这个名字找 App，放成别的类型会挡住 App 和令牌。
     if (name.startsWith('github-app.') !== (body.kind === 'github-app'))
       return [400, { ok: false, error: '名字以 github-app. 开头的凭据只能是 GitHub App 的凭据，GitHub App 的凭据名字也必须以 github-app. 开头' }]
+    // github-user. 开头的名字留给 GitHub 的用户授权：只能在代码托管页授权得到，不能手填（手填的拿不到刷新令牌，也认不出是谁）。
+    if (name.startsWith('github-user.') || body.kind === 'github-user') return [400, { ok: false, error: 'GitHub 的用户授权只能在代码托管页「用 GitHub 账号授权」得到，不能在这里填' }]
     if (o.credentials.list(LOCAL_OWNER).some(i => i.name === name && i.kind === 'github-app') && body.kind !== 'github-app')
       return [409, { ok: false, error: '这条是 GitHub App 的凭据，不能换成别的类型；要换就先删掉' }]
     const r = o.credentials.put(LOCAL_OWNER, name, body.kind as CredentialKind, body.value)
@@ -436,9 +443,62 @@ export const createWebServer = (o: {
   // 清单流程注册 App：发起时记下一个随机的 state，托管平台跳回时原样带回；只认平台自己发起、没过期、没用过的 state。
   // 回调是浏览器从托管平台跳过来的 GET，没有 Origin 可查，state 就是它的同源证明（挡住别人诱导浏览器带着他自己的 code 来存凭据）。
   // 只存在内存里：平台重启后，进行中的注册要重新发起。
-  const pending = new Map<string, { name: string; expires: number }>()
+  // 用户授权（OAuth）沿用同一套 state，kind 区分是哪种流程：一种流程的 state 不能拿去完成另一种。
+  const pending = new Map<string, { kind: 'register' | 'authorize'; name: string; expires: number; callbackUrl?: string }>()
   const appRegistrations = () => o.supervisor.forges.flatMap(f => (f.appRegistration === undefined ? [] : [f.appRegistration]))
   const callbackUrl = (req: IncomingMessage) => `${allowedOrigin(req)}${APP_CALLBACK}`
+  const userCallbackUrl = (req: IncomingMessage) => `${allowedOrigin(req)}${USER_CALLBACK}`
+  /** 发起一个流程：记下 state。进行中的太多时返回 undefined（不挤掉别人进行中的）。 */
+  const begin = (kind: 'register' | 'authorize', name: string, callbackUrl?: string): string | undefined => {
+    const now = Date.now()
+    for (const [k, v] of pending) if (v.expires <= now) pending.delete(k)
+    if (pending.size >= 32) return undefined
+    const state = randomBytes(32).toString('base64url')
+    pending.set(state, { kind, name, expires: now + PENDING_MS, ...(callbackUrl === undefined ? {} : { callbackUrl }) })
+    return state
+  }
+  /** 取出并作废 state（只能用一次，并发的第二次也拿不到）；不是这种流程的、过期的都当作没有。 */
+  const finish = (kind: 'register' | 'authorize', state: string) => {
+    const p = pending.get(state)
+    pending.delete(state)
+    return p !== undefined && p.kind === kind && p.expires > Date.now() ? p : undefined
+  }
+  /** App 凭据名对应的托管平台和它的用户授权。 */
+  const userAuthOf = (appName: unknown) => {
+    const forge = o.supervisor.forges.find(f => f.appRegistration?.credentialName === appName)
+    return forge?.userAuthorization === undefined ? undefined : { app: forge.appRegistration!.credentialName, ua: forge.userAuthorization }
+  }
+
+  /** 这个 App 的用户授权现在的情况：谁授权了；不能发起授权时的原因。 */
+  const userInfo = (appName: string, appValue: string | undefined, items: ReturnType<Credentials['list']>, callback: string): ForgeAppInfo['user'] => {
+    const u = userAuthOf(appName)
+    if (u === undefined) return undefined
+    const saved = items.find(i => i.name === u.ua.credentialName)
+    let authorized: NonNullable<ForgeAppInfo['user']>['authorized']
+    if (saved !== undefined) {
+      const got = o.credentials.get(LOCAL_OWNER, u.ua.credentialName)
+      try {
+        authorized =
+          got.kind !== 'ok'
+            ? { error: got.kind === 'error' ? got.error : '读不到' }
+            : appValue !== undefined && !u.ua.matches(appValue, got.value)
+              ? { error: '这条授权是给之前注册的那个 App 的，用不了：撤销后重新授权' }
+              : { login: u.ua.read(got.value, Date.now()).login, updatedAt: saved.updatedAt }
+      } catch (e) {
+        authorized = { error: (e as Error).message }
+      }
+    }
+    let unavailable: string | undefined
+    if (appValue === undefined) unavailable = '先注册 App'
+    else {
+      try {
+        u.ua.authorizeUrl(appValue, { callbackUrl: callback, state: 'check' })
+      } catch (e) {
+        unavailable = (e as Error).message
+      }
+    }
+    return { ...(authorized === undefined ? {} : { authorized }), ...(unavailable === undefined ? {} : { unavailable }) }
+  }
 
   const forgeApps = (req: IncomingMessage): ForgeAppsResponse => {
     const items = o.credentials.list(LOCAL_OWNER)
@@ -449,10 +509,13 @@ export const createWebServer = (o: {
       apps: appRegistrations().map(a => {
         // 和发起注册时的判断一致：这个名字已经有凭据（不管能不能读出来），就算已注册，不再给注册表单。
         const saved = items.find(i => i.name === a.credentialName)
-        if (saved === undefined) return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax }
-        const value = o.credentials.get(LOCAL_OWNER, a.credentialName)
-        const installUrl = value.kind === 'ok' ? a.installUrl(value.value) : undefined
-        return { name: a.credentialName, host: a.host, appNameMax: a.appNameMax, registered: { updatedAt: saved.updatedAt, ...(installUrl === undefined ? {} : { installUrl }) } }
+        const value = saved === undefined ? undefined : o.credentials.get(LOCAL_OWNER, a.credentialName)
+        const appValue = value?.kind === 'ok' ? value.value : undefined
+        const user = userInfo(a.credentialName, appValue, items, userCallbackUrl(req))
+        const base = { name: a.credentialName, host: a.host, appNameMax: a.appNameMax, ...(user === undefined ? {} : { user }) }
+        if (saved === undefined) return base
+        const installUrl = appValue === undefined ? undefined : a.installUrl(appValue)
+        return { ...base, registered: { updatedAt: saved.updatedAt, ...(installUrl === undefined ? {} : { installUrl }) } }
       }),
     }
   }
@@ -468,23 +531,20 @@ export const createWebServer = (o: {
     if (!o.credentials.usable) return [409, { ok: false, error: `平台没有主密钥，注册后存不了 App 的凭据。${GENERATE_HINT}` }]
     // 已经注册过：不悄悄换掉正在用的 App（换掉后，装了旧 App 的仓库都要重新安装）。
     if (o.credentials.list(LOCAL_OWNER).some(i => i.name === reg.credentialName)) return [409, { ok: false, error: `已经有凭据「${reg.credentialName}」；要换一个 App，先在凭据页删掉它` }]
-    const now = Date.now()
-    for (const [k, v] of pending) if (v.expires <= now) pending.delete(k)
     // 不挤掉进行中的注册：挤掉后，那个人在托管平台上建好的 App 回来时会被拒，成了没人用的 App。
-    if (pending.size >= 32) return [429, { ok: false, error: '进行中的注册太多了，过半小时再试' }]
-    const state = randomBytes(32).toString('base64url')
-    pending.set(state, { name: reg.credentialName, expires: now + PENDING_MS })
-    return [200, { ok: true, ...reg.form({ appName, origin: allowedOrigin(req)!, callbackUrl: callbackUrl(req), state, ...(org === undefined ? {} : { org }) }) }]
+    const state = begin('register', reg.credentialName, userCallbackUrl(req))
+    if (state === undefined) return [429, { ok: false, error: '进行中的注册太多了，过半小时再试' }]
+    return [
+      200,
+      { ok: true, ...reg.form({ appName, origin: allowedOrigin(req)!, callbackUrl: callbackUrl(req), userCallbackUrl: userCallbackUrl(req), state, ...(org === undefined ? {} : { org }) }) },
+    ]
   }
 
   /** 托管平台跳回来：核对 state，用 code 换 App 的凭据存起来，再跳回页面，结果放在页面地址里。 */
   const appCallback = async (url: URL): Promise<string> => {
     const back = (q: Record<string, string>) => `/#/forges?${new URLSearchParams(q)}`
-    const state = url.searchParams.get('state') ?? ''
-    const p = pending.get(state)
-    // 先删掉：同一个 state 只能用一次，并发的第二次也拿不到。
-    pending.delete(state)
-    if (p === undefined || p.expires <= Date.now()) {
+    const p = finish('register', url.searchParams.get('state') ?? '')
+    if (p === undefined) {
       // 带着 code 回来，说明托管平台那边已经建好了 App，只是这边认不出这次注册：提醒去删掉，免得留下没人用的 App。
       const orphan = url.searchParams.has('code') ? '。如果你刚在托管平台上确认了注册，那边已经建好了一个 App：到托管平台的 App 设置里删掉它' : ''
       return back({ error: `这次注册不是从本页面发起的，或者已经过期、已经用过（发起后 ${PENDING_MS / 60_000} 分钟内有效，平台重启后失效）：在本页面重新注册${orphan}` })
@@ -494,7 +554,7 @@ export const createWebServer = (o: {
     const reg = appRegistrations().find(a => a.credentialName === p.name)!
     let done
     try {
-      done = await reg.complete(code)
+      done = await reg.complete(code, { userCallbackUrl: p.callbackUrl! })
     } catch (e) {
       return back({ error: (e as Error).message })
     }
@@ -504,6 +564,85 @@ export const createWebServer = (o: {
     const r = o.credentials.put(LOCAL_OWNER, reg.credentialName, 'github-app', done.value)
     if (!r.ok) return back({ error: `${r.error}。${done.appUrl} 上新注册的 App 没有存下凭据，在那里删掉后重新注册` })
     return back({ registered: reg.credentialName, app: done.appName })
+  }
+
+  /** 发起用户授权（OAuth）：返回浏览器要去的托管平台授权页。已经有人授权时也可以再授权（换成新授权的人）。 */
+  const authorizeUser = (req: IncomingMessage, body: Record<string, unknown>): [number, AuthorizeUserResponse] => {
+    const u = userAuthOf(body.name)
+    if (u === undefined) return [400, { ok: false, error: '没有这个托管平台，或者它不支持用户授权' }]
+    if (!o.credentials.usable) return [409, { ok: false, error: `平台没有主密钥，存不了授权。${GENERATE_HINT}` }]
+    const app = o.credentials.get(LOCAL_OWNER, u.app)
+    if (app.kind !== 'ok') return [409, { ok: false, error: app.kind === 'error' ? app.error : '先注册 App，再用 GitHub 账号授权' }]
+    const callback = userCallbackUrl(req)
+    let url: string
+    try {
+      url = u.ua.authorizeUrl(app.value, { callbackUrl: callback, state: 'probe' })
+    } catch (e) {
+      return [409, { ok: false, error: (e as Error).message }]
+    }
+    const state = begin('authorize', u.app, callback)
+    if (state === undefined) return [429, { ok: false, error: '进行中的授权太多了，过半小时再试' }]
+    url = u.ua.authorizeUrl(app.value, { callbackUrl: callback, state })
+    return [200, { ok: true, url }]
+  }
+
+  /** 托管平台授权完跳回来：核对 state，用 code 换令牌存起来，再跳回页面。 */
+  const userCallback = async (url: URL): Promise<string> => {
+    const back = (q: Record<string, string>) => `/#/forges?${new URLSearchParams(q)}`
+    const p = finish('authorize', url.searchParams.get('state') ?? '')
+    if (p === undefined) return back({ error: `这次授权不是从本页面发起的，或者已经过期、已经用过（发起后 ${PENDING_MS / 60_000} 分钟内有效，平台重启后失效）：在本页面重新授权` })
+    const said = url.searchParams.get('error')
+    if (said === 'access_denied') return back({ error: '在 GitHub 上取消了授权，平台没有存任何东西' })
+    if (said !== null)
+      return back({ error: `GitHub 没有完成授权：${said.slice(0, 100)}${url.searchParams.has('error_description') ? `（${(url.searchParams.get('error_description') ?? '').slice(0, 300)}）` : ''}` })
+    const code = url.searchParams.get('code') ?? ''
+    if (!/^[\w-]{1,200}$/.test(code)) return back({ error: '托管平台没有带回 code：重新授权' })
+    const u = userAuthOf(p.name)!
+    const app = o.credentials.get(LOCAL_OWNER, u.app)
+    if (app.kind !== 'ok') return back({ error: '授权期间 App 的凭据被删掉了：重新注册 App 后再授权' })
+    let done
+    try {
+      done = await u.ua.complete(app.value, { code, callbackUrl: p.callbackUrl! }, Date.now())
+    } catch (e) {
+      return back({ error: (e as Error).message })
+    }
+    const r = o.credentials.put(LOCAL_OWNER, u.ua.credentialName, 'github-user', done.value)
+    if (!r.ok) return back({ error: r.error })
+    return back({ authorized: done.login })
+  }
+
+  /** 撤销用户授权：先在托管平台上撤销，再删掉平台存的令牌。托管平台那边撤销失败时照样删掉，并提醒去托管平台上撤销。 */
+  const revokeUser = async (body: Record<string, unknown>): Promise<[number, RevokeUserResponse]> => {
+    const u = userAuthOf(body.name)
+    if (u === undefined) return [400, { ok: false, error: '没有这个托管平台，或者它不支持用户授权' }]
+    const user = o.credentials.get(LOCAL_OWNER, u.ua.credentialName)
+    if (user.kind === 'absent') return [404, { ok: false, error: '没有人授权过' }]
+    const app = o.credentials.get(LOCAL_OWNER, u.app)
+    let warning: string | undefined
+    if (user.kind === 'ok' && app.kind === 'ok') {
+      const manual = '平台已经删掉了这个授权；到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它'
+      // 令牌过期了 GitHub 就不认它，撤销不掉：先续期，用新令牌撤销（续期得到的新令牌随授权一起作废，不用存）。
+      let value: string | undefined = user.value
+      if (u.ua.read(value, Date.now()).refresh) {
+        try {
+          value = await u.ua.refresh(app.value, value, Date.now())
+        } catch {
+          value = undefined
+          warning = `授权的令牌已经过期，续期也没成功，没能在 GitHub 上撤销：${manual}`
+        }
+      }
+      if (value !== undefined) {
+        try {
+          await u.ua.revoke(app.value, value)
+        } catch (e) {
+          warning = `${(e as Error).message}：${manual}`
+        }
+      }
+    } else {
+      warning = '平台读不出授权或 App 的凭据，没能在 GitHub 上撤销：到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它'
+    }
+    o.credentials.delete(LOCAL_OWNER, u.ua.credentialName)
+    return [200, { ok: true, ...(warning === undefined ? {} : { warning }) }]
   }
 
   const deleteCredential = (body: Record<string, unknown>): [number, DeleteCredentialResponse] => {
@@ -535,10 +674,14 @@ export const createWebServer = (o: {
         const gen = url.pathname === '/api/improve/generate'
         const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
         const reg = url.pathname === '/api/forge-apps/register'
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg) return json(res, 404, { error: '没有这个接口' })
+        const userAction = url.pathname === '/api/forge-apps/authorize' ? 'authorize' : url.pathname === '/api/forge-apps/revoke' ? 'revoke' : undefined
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg && userAction === undefined)
+          return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
         if (reg) return json(res, ...registerApp(req, g.body))
+        if (userAction === 'authorize') return json(res, ...authorizeUser(req, g.body))
+        if (userAction === 'revoke') return json(res, ...(await revokeUser(g.body)))
         if (cred !== undefined) return json(res, ...(cred === 'save' ? saveCredential(g.body) : deleteCredential(g.body)))
         if (gen) return json(res, ...(await startGenerate(g.body)))
         if (dec !== null) return json(res, ...decide(Number(dec[1]), dec[2]!, g.body))
@@ -554,8 +697,9 @@ export const createWebServer = (o: {
       if (url.pathname === '/api/conventions') return json(res, 200, conventions())
       if (url.pathname === '/api/credentials') return json(res, 200, credentialList())
       if (url.pathname === '/api/forge-apps') return json(res, 200, forgeApps(req))
-      if (url.pathname === APP_CALLBACK) {
-        res.writeHead(303, { location: await appCallback(url), 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+      if (url.pathname === APP_CALLBACK || url.pathname === USER_CALLBACK) {
+        const location = url.pathname === APP_CALLBACK ? await appCallback(url) : await userCallback(url)
+        res.writeHead(303, { location, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
         return void res.end()
       }
       const conv = CONVENTION.exec(url.pathname)
