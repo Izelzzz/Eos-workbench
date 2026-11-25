@@ -326,7 +326,6 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'no_proxy',
   'all_proxy',
   'NODE_USE_ENV_PROXY',
-  'DEEPSEEK_BASE_URL', // 模型接口地址，部署方设定；CI 的确定性 E2E 用它指向本机的假模型（scripts/fake-model/）
   'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
@@ -342,10 +341,33 @@ export const AGENT_ENV_KEEP: readonly string[] = [
 
 export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_')
 
-export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => ({
-  ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
-  DEEPSEEK_API_KEY: modelKey,
-})
+/**
+ * 模型接口地址：平台自己的配置 EOS_MODEL_BASE_URL，校验后作为 DEEPSEEK_BASE_URL 交给 dsh（dsh 把模型 key 发到这个地址）。
+ * 不直接放行 DEEPSEEK_BASE_URL：这个常见的变量名可能是服务器上为别的程序设的，原样放行会把 key 发到平台没批准过的地址。
+ * 只接受 https，或者发往本机的 http（CI 的确定性 E2E 用它连本机的假模型，见 scripts/fake-model/）。
+ */
+export const modelBaseUrl = (env: NodeJS.ProcessEnv): string | undefined => {
+  const raw = env.EOS_MODEL_BASE_URL
+  if (raw === undefined || raw === '') return undefined
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`EOS_MODEL_BASE_URL 不是合法的地址：${raw}`)
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+  if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) return raw
+  throw new Error(`EOS_MODEL_BASE_URL 只能是 https 地址，或者本机的 http 地址：${raw}`)
+}
+
+export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => {
+  const base = modelBaseUrl(env)
+  return {
+    ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
+    ...(base === undefined ? {} : { DEEPSEEK_BASE_URL: base }),
+    DEEPSEEK_API_KEY: modelKey,
+  }
+}
 
 export const sessionIdFor = (key: string): string => `session-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`
 

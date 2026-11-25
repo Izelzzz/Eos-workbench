@@ -156,8 +156,14 @@ test('the dsh entry is the installed dsh, or the launcher the image names (which
   assert.throws(() => dshEntry({ EOS_DSH_LAUNCHER: '/nonexistent/dsh-launch.mjs' }, root), /EOS_DSH_LAUNCHER=\/nonexistent\/dsh-launch\.mjs，但这个文件不存在/)
 })
 
-test('the model endpoint (DEEPSEEK_BASE_URL) reaches dsh, so a deployment or the CI fake model can point it elsewhere; other DEEPSEEK_ variables do not', () => {
-  assert.deepEqual(agentEnv({ DEEPSEEK_BASE_URL: 'http://127.0.0.1:1/anthropic', DEEPSEEK_FILES_API_TIMEOUT: '1' }, 'k'), { DEEPSEEK_BASE_URL: 'http://127.0.0.1:1/anthropic', DEEPSEEK_API_KEY: 'k' })
+test('the model endpoint comes only from the platform setting EOS_MODEL_BASE_URL (https, or http on this machine); a stray DEEPSEEK_BASE_URL is dropped', () => {
+  assert.deepEqual(agentEnv({ DEEPSEEK_BASE_URL: 'http://elsewhere/anthropic', DEEPSEEK_FILES_API_TIMEOUT: '1' }, 'k'), { DEEPSEEK_API_KEY: 'k' })
+  for (const ok of ['https://gateway.example/anthropic', 'http://127.0.0.1:8080/anthropic', 'http://localhost:1/anthropic', 'http://[::1]:1/anthropic']) {
+    assert.deepEqual(agentEnv({ EOS_MODEL_BASE_URL: ok }, 'k'), { DEEPSEEK_BASE_URL: ok, DEEPSEEK_API_KEY: 'k' }, ok)
+  }
+  assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'http://relay.internal/anthropic' }, 'k'), /只能是 https 地址，或者本机的 http 地址/)
+  assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'not a url' }, 'k'), /不是合法的地址/)
+  assert.deepEqual(agentEnv({ EOS_MODEL_BASE_URL: '' }, 'k'), { DEEPSEEK_API_KEY: 'k' })
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {

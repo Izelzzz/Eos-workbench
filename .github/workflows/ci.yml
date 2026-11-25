@@ -86,6 +86,15 @@ jobs:
       # 记下这台机器上 dsh 实际用的沙箱（bwrap 或 Landlock），排查时用
       - name: 沙箱
         run: node --import tsx src/cli.ts doctor --data "$RUNNER_TEMP/eos-doctor" || true
+      # 依赖装好后断开外网，只留本机：确定性 E2E 一个请求也不许发到真实的模型接口（或任何外部服务）
+      - name: 断开外网
+        run: |
+          for t in iptables ip6tables; do
+            sudo $t -A OUTPUT -o lo -j ACCEPT
+            sudo $t -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+            sudo $t -A OUTPUT -j REJECT
+          done
+          if curl -sS --max-time 5 https://api.deepseek.com >/dev/null 2>&1; then echo '外网还通，没断开'; exit 1; fi
       - name: 确定性 E2E
         run: node --import tsx scripts/e2e-ci.ts
       - name: 保存报告和日志

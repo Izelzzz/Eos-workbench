@@ -8,6 +8,7 @@ export type Block =
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean }
   | { type: string }
+/** content 在协议里也可以是一个字符串；服务入口（server.ts）先统一成块的数组 */
 export type Message = { role: 'user' | 'assistant' | 'system'; content: Block[] }
 export type Request = { model: string; messages: Message[]; tools?: { name: string }[] }
 
@@ -24,7 +25,8 @@ const ROLE_MARKERS: [Role, string][] = [
 ]
 
 const texts = (m: Message): string => m.content.map(b => (b.type === 'text' ? (b as { text: string }).text : '')).join('\n')
-const isPrompt = (m: Message) => m.role === 'user' && m.content.some(b => b.type === 'text')
+/** 平台发来的一条提示：用户消息、有文字、不是工具结果（dsh 可能在工具结果旁边附一段文字，那不算新的一轮） */
+const isPrompt = (m: Message) => m.role === 'user' && m.content.some(b => b.type === 'text') && !m.content.some(b => b.type === 'tool_result')
 
 export function roleOf(req: Request): Role | undefined {
   const first = req.messages.find(isPrompt)
@@ -84,8 +86,8 @@ test('有非数字时抛 TypeError', () => {
 
 const verdict = (v: { verdict: 'pass' | 'changes'; summary: string; issues: { severity: string; file?: string; message: string }[] }) => `\`\`\`json\n${JSON.stringify(v, null, 2)}\n\`\`\``
 
-/** 剧本：角色 × 这一轮是第几种情况 */
-function turnFor(role: Role, prompt: string, isFirstTurn: boolean): Turn {
+/** 剧本：角色 × 是不是这个会话的第一轮 */
+function turnFor(role: Role, isFirstTurn: boolean): Turn {
   switch (role) {
     case 'planner':
       return {
@@ -109,10 +111,10 @@ function turnFor(role: Role, prompt: string, isFirstTurn: boolean): Turn {
             final: '按评审意见补了非数字输入的测试（字符串、NaN、非数组）。验证：npm test 通过。',
           }
     case 'reviewer':
-      // 第一次评审打回一次（验证对话循环），之后的轮次（「第 N 轮」、方案重新确认后）都通过
-      return /第 \d+ 轮|方案已重新确认/.test(prompt)
-        ? { tools: [bash('查看改动', 'git diff HEAD~1')], final: verdict({ verdict: 'pass', summary: '补上了边界情况的测试，满足验收标准。', issues: [] }) }
-        : {
+      // 评审会话的第一轮打回一次（验证对话循环），之后各轮（复核、方案重新确认后）都通过。
+      // 按对话历史判断，不按提示词措辞：平台的各轮评审都在同一个 dsh 会话里（e2e.ts 核对过）
+      return isFirstTurn
+        ? {
             tools: [bash('查看改动', 'git log --oneline'), bash('运行测试', 'npm test')],
             final: verdict({
               verdict: 'changes',
@@ -120,6 +122,7 @@ function turnFor(role: Role, prompt: string, isFirstTurn: boolean): Turn {
               issues: [{ severity: 'major', file: 'test/math.test.js', message: '补充验收标准 3 的测试：数组里有非数字（含 NaN）、参数不是数组时抛 TypeError。' }],
             }),
           }
+        : { tools: [bash('查看改动', 'git diff HEAD~1')], final: verdict({ verdict: 'pass', summary: '补上了边界情况的测试，满足验收标准。', issues: [] }) }
   }
 }
 
@@ -129,6 +132,10 @@ export function decide(req: Request): Reply {
   if (role === undefined) return { kind: 'text', text: '假模型：认不出角色（feature 模板的角色提示词改过了？要同步改 scripts/fake-model/script.ts）' }
   const turn = turnOf(req)
   const isFirstTurn = !req.messages.slice(0, turn.index).some(m => m.role === 'assistant')
-  const plan = turnFor(role, turn.prompt, isFirstTurn)
-  return turn.toolsDone.length < plan.tools.length ? plan.tools[turn.toolsDone.length]! : { kind: 'text', text: plan.final }
+  const plan = turnFor(role, isFirstTurn)
+  const next = turn.toolsDone.length < plan.tools.length ? plan.tools[turn.toolsDone.length]! : { kind: 'text' as const, text: plan.final }
+  if (next.kind === 'tool' && req.tools !== undefined && !req.tools.some(t => t.name === next.name)) {
+    return { kind: 'text', text: `假模型：dsh 没有提供 ${next.name} 工具（改名了？要同步改 scripts/fake-model/script.ts）` }
+  }
+  return next
 }

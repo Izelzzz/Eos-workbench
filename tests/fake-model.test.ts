@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { decide, roleOf, type Message, type Request } from '../scripts/fake-model/script.ts'
 import { sse } from '../scripts/fake-model/server.ts'
 import { parseWorkflow } from '../src/workflow/parse.ts'
+import { critiquePrompt } from '../src/engine/prompts.ts'
+import { newTask } from '../src/engine/machine.ts'
+import type { DialogNode } from '../src/workflow/types.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const prompt = (text: string): Message => ({ role: 'user', content: [{ type: 'text', text }] })
@@ -87,4 +90,40 @@ test('SSE：工具调用以 tool_use 结束，文字以 end_turn 结束；每个
   assert.equal(t.at(-2).delta.stop_reason, 'tool_use')
   assert.deepEqual(JSON.parse(t.find(e => e.delta?.type === 'input_json_delta').delta.partial_json), { file_path: 'a', content: 'b' })
   assert.equal(events(sse({ kind: 'text', text: 'x' }, '2')).at(-2).delta.stop_reason, 'end_turn')
+})
+
+test('评审：用平台真正发的提示词，会话第一轮打回，复核和方案重新确认之后的轮次通过', () => {
+  const parsed = parseWorkflow(readFileSync(join(ROOT, 'src/workflow/templates/feature.yaml'), 'utf8'))
+  assert.ok(parsed.ok)
+  const base = newTask({ id: 't', request: '写 sum', workflow: parsed.workflow, docs: [] }, 0)
+  const task = { ...base, outputs: { ...base.outputs, plan: '方案', build: '实现了 sum' } }
+  const review = parsed.workflow.nodes.find(n => n.id === 'review') as DialogNode
+  /** 跑完这一轮（先做完剧本里的工具调用），返回历史和结论 */
+  const finish = (h: Message[]) => {
+    for (let i = 0; i < 5; i++) {
+      const r = decide(req(...h))
+      if (r.kind === 'text') return { h: [...h, answered(r.text)], verdict: JSON.parse(/```json\n([\s\S]*)\n```/.exec(r.text)![1]!).verdict }
+      h = [...h, ...called(r.name, `t${h.length}`)]
+    }
+    throw new Error('这一轮没有给出结论')
+  }
+  const first = finish([prompt(critiquePrompt(task, review, 'first'))])
+  assert.equal(first.verdict, 'changes')
+  const reply = finish([...first.h, prompt(critiquePrompt(task, review, 'reply'))])
+  assert.equal(reply.verdict, 'pass')
+  assert.equal(finish([...reply.h, prompt(critiquePrompt(task, review, 'revised'))]).verdict, 'pass')
+})
+
+test('dsh 没提供剧本要用的工具时说明是哪个，不往下走；工具结果旁边附的文字不算新的一轮', () => {
+  const r = decide({ model: 'm', messages: [prompt(ROLE.planner)], tools: [{ name: 'bash' }] })
+  assert.match(r.kind === 'text' ? r.text : '', /没有提供 ask_user_question/)
+  const withNote: Message = {
+    role: 'user',
+    content: [
+      { type: 'tool_result', tool_use_id: 'w', content: [] },
+      { type: 'text', text: '（提醒：文件已写入）' },
+    ],
+  }
+  const next = decide(req(prompt(ROLE.developer), { role: 'assistant', content: [{ type: 'tool_use', id: 'w', name: 'write', input: {} }] }, withNote))
+  assert.equal(next.kind === 'tool' && next.input.file_path, 'test/math.test.js')
 })
