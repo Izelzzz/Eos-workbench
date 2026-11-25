@@ -6,8 +6,8 @@
 |---|---|---|---|
 | `deploy-e2e-2-*.json/.log/.txt` | `scripts/deploy-e2e.ts`，最小工作流 `scripts/e2e/mini.yaml`（开发一次、平台跑 `npm test`），设了主密钥（生成的值） | e6a1498，工作区干净 | 是，第 2 次（用户在卡片上同意，要求任务简单一点） |
 | `deploy-e2e-1-failed-*` | 同上，standard 工作流 | f5de7fc | 是，第 1 次，失败（见下） |
-| `probe-report.json` | `scripts/agent-user-probe.ts` | 56ea601，工作区干净 | 否 |
-| `doctor-configs.txt` | `scripts/check-user-doctor-configs.sh eos-workbench:agent-user-probe` | 56ea601 的镜像 | 否 |
+| `probe-report.json` | `scripts/agent-user-probe.ts` | 7c1c72d（处理独立审查之后），工作区干净 | 否 |
+| `doctor-configs.txt` | `scripts/check-user-doctor-configs.sh eos-workbench:agent-user-probe` | 7c1c72d 的镜像 | 否 |
 | `without-caps.txt` | 在容器里以平台的身份经 `withoutCaps` 跑一条命令 | 56ea601 的镜像 | 否 |
 
 ## deploy-e2e-1-failed：第一次 E2E 发现的问题
