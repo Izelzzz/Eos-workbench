@@ -16,11 +16,17 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
       python3 python3-venv python3-pip build-essential pkg-config \
  && rm -rf /var/lib/apt/lists/*
 # Node 镜像自带的 npm 11.19.1 打包的 undici、brace-expansion 有已修复的高危漏洞（CI 的 Trivy 扫描会拦），换成修好的版本。
-# agent 跑任务时也用这个 npm。extra_ca 的用法见下面 build 阶段。
+# agent 跑任务时也用这个 npm。先下载、按 registry 记录的 sha512 校验再装（和 package-lock.json 一样锁住内容）。
+# CI（ci.yml）里用的是 Node 自带的 npm，两边的 npm 版本不同；改这里的版本时一起看 CI 要不要跟。extra_ca 的用法见下面 build 阶段。
+ARG NPM_VERSION=11.21.2
+ARG NPM_SHA512=7HPApk+AflMUavSseL1Pm6CnYqMIHk53x+KmuhqmTDqPkjPMgxIpTPcTqsE91EKNw4gFBJV9fnXiSdGm1DXq9A==
 RUN --mount=type=secret,id=extra_ca,required=false \
     if [ -f /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
-    npm install -g --no-audit --no-fund npm@11.21.2 \
- && npm cache clean --force
+    cd /tmp && npm pack --silent "npm@${NPM_VERSION}" > /dev/null \
+ && echo "${NPM_SHA512}" | base64 -d | od -An -tx1 -v | tr -d ' \n' > npm.sha512 \
+ && echo "$(cat npm.sha512)  npm-${NPM_VERSION}.tgz" | sha512sum -c - \
+ && npm install -g --no-audit --no-fund "./npm-${NPM_VERSION}.tgz" \
+ && rm -f "npm-${NPM_VERSION}.tgz" npm.sha512 && npm cache clean --force
 
 FROM base AS build
 WORKDIR /app
