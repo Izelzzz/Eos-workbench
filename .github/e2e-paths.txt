@@ -9,21 +9,26 @@
 # 按顺序匹配，第一条匹配到的算数；一条都不匹配的路径默认「需要」。
 # 加严（新增「需要」、把「确定性」「不需要」改成更严的）可以由 agent 提出；放宽由人批准。
 
-# 影响模型行为的平台文件：提示词、内置的工作流模板、Agent 模板、技能、约定文档。确定性 E2E 的假模型不看它们的内容，要真实模型
-需要 src/engine/prompts.ts
-需要 src/workflow/templates/**
-需要 src/workflow/agents/**
-需要 src/workflow/skills/**
-需要 src/workflow/docs/**
-# 确定性 E2E 跑到的平台代码：CLI、runner、引擎、存储、trace、工作流解析、执行器（dsh 的会话、续接、回复解析）
+# 确定性 E2E（scripts/e2e-ci.ts 跑的 CLI 流程）确实跑到、内容不进模型看到的提示词和工具、和凭据权限无关的平台文件，逐个列出。
+# 不按目录放：目录里还有影响模型的文件（runner/git.ts 拼提示词的「环境」一节、executor/dsh.ts 决定模型能用哪些工具、
+# engine/checks.ts 的检查说明进提示词），也有确定性 E2E 跑不到的（trace、engine 的 insights/evidence/compare、
+# runner/mirror.ts 的远程推送、doctor），以及安全相关的（runner/check-user.ts、dsh 的环境白名单）。新文件默认要真实模型。
 确定性 src/cli.ts
-确定性 src/runner/**
-确定性 src/engine/**
-确定性 src/store/**
-确定性 src/trace/**
-确定性 src/workflow/**
-确定性 src/executor/**
-# 其余平台代码（improve、conventions、forge、web、credentials 等）确定性 E2E 没跑到，仍要真实模型
+确定性 src/engine/machine.ts
+确定性 src/engine/types.ts
+确定性 src/engine/failure.ts
+确定性 src/store/store.ts
+确定性 src/store/types.ts
+确定性 src/runner/procs.ts
+确定性 src/runner/lock.ts
+确定性 src/runner/logs.ts
+确定性 src/workflow/parse.ts
+确定性 src/workflow/glob.ts
+确定性 src/workflow/types.ts
+确定性 src/workflow/templates.ts
+确定性 src/workflow/agent.ts
+确定性 src/executor/types.ts
+# 其余平台代码，包括提示词、内置的工作流模板、Agent 模板、技能、约定文档等影响模型行为的文件，都要真实模型
 需要 src/**
 # 网页源码和构建配置
 需要 web/**

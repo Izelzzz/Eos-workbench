@@ -213,7 +213,7 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
     r.notes.push(
       ci.length === 0
         ? '改动没有碰到需要 E2E 的路径（.github/e2e-paths.txt），不要求「端到端验证」一节'
-        : `改动只碰到「确定性」的路径（${list(ci)}）：由 CI 的 e2e-fake-model 验证，不要求真实模型的 E2E 和「端到端验证」一节`,
+        : `改动只碰到「确定性」的路径（${list(ci)}）：由 CI 的 e2e-fake-model 验证（合并前确认它通过），不要求真实模型的 E2E 和「端到端验证」一节`,
     )
     return r
   }

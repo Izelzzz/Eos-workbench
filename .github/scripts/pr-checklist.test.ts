@@ -24,6 +24,19 @@ test('仓库的规则文件：影响模型行为的文件、其余平台代码�
     'src/credentials/store.ts',
     'src/web/server.ts',
     'src/conventions/conventions.ts',
+    'src/runner/git.ts',
+    'src/runner/runner.ts',
+    'src/runner/supervisor.ts',
+    'src/runner/check-user.ts',
+    'src/runner/mirror.ts',
+    'src/runner/doctor.ts',
+    'src/engine/checks.ts',
+    'src/engine/verdict.ts',
+    'src/engine/evidence.ts',
+    'src/trace/build.ts',
+    'src/executor/dsh.ts',
+    'src/workflow/new-prompts.md',
+    'src/engine/new-module.ts',
     'src/workflow/skills/write-changes.md',
     'src/workflow/templates/standard.yaml',
     'web/src/App.tsx',
@@ -54,17 +67,7 @@ test('仓库的规则文件：影响模型行为的文件、其余平台代码�
     'LICENSE',
     '.gitignore',
   ]
-  const ci = [
-    'src/cli.ts',
-    'src/runner/runner.ts',
-    'src/engine/machine.ts',
-    'src/engine/verdict.ts',
-    'src/store/store.ts',
-    'src/trace/build.ts',
-    'src/workflow/parse.ts',
-    'src/workflow/templates.ts',
-    'src/executor/dsh.ts',
-  ]
+  const ci = ['src/cli.ts', 'src/engine/machine.ts', 'src/store/store.ts', 'src/runner/procs.ts', 'src/workflow/parse.ts', 'src/workflow/templates.ts', 'src/executor/types.ts']
   for (const p of need) assert.equal(e2eNeed(p, rules), 'real', p)
   for (const p of ci) assert.equal(e2eNeed(p, rules), 'ci', p)
   for (const p of skip) assert.equal(e2eNeed(p, rules), 'none', p)
@@ -243,10 +246,10 @@ test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响�
 })
 
 test('只碰到「确定性」的路径：不要求「端到端验证」一节，提示由 e2e-fake-model 验证；同时碰到要真实模型的路径时照旧要求', () => {
-  const only = check({ body: proof, changed: ch('src/runner/runner.ts', 'tests/runner.test.ts'), rules })
+  const only = check({ body: proof, changed: ch('src/engine/machine.ts', 'tests/engine.test.ts'), rules })
   assert.deepEqual(only.errors, [])
   assert.match(only.notes.join(), /e2e-fake-model/)
-  const mixed = check({ body: proof, changed: ch('src/runner/runner.ts', 'src/engine/prompts.ts'), rules })
+  const mixed = check({ body: proof, changed: ch('src/engine/machine.ts', 'src/engine/prompts.ts'), rules })
   assert.match(mixed.errors.join(), /端到端验证/)
   assert.match(mixed.notes.join(), /src\/engine\/prompts\.ts/)
   assert.doesNotMatch(mixed.notes.join(), /runner\.ts/)
