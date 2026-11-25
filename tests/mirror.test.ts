@@ -489,7 +489,7 @@ test('agent 把任务分支移到别的历史上：基线不再是祖先，不�
 const PR_FLOW = SHIP.replace('name: ship', 'name: ship-pr').replace('      - { platform: push }', '      - { platform: pull-request }')
 
 /** 跑一个开 PR 的任务：write 为 false 时开发不改任何文件。 */
-const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean; request?: string } = {}) => {
+const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean; request?: string; sup?: Supervisor } = {}) => {
   const saved = r.sup.conventions.save({ kind: 'workflow', name: 'ship-pr', content: PR_FLOW, actor: 'test' }, Date.now())
   assert.ok(saved.ok || JSON.stringify(saved).includes('完全一样'), JSON.stringify(saved))
   const executor = new FakeExecutor(async ({ key }) => {
@@ -497,7 +497,7 @@ const runPr = async (r: Awaited<ReturnType<typeof remote>>, o: { write?: boolean
     if (o.write !== false) writeFileSync(join(r.store.meta(key.split('/')[0]!).worktree, 'feature.txt'), 'new\n')
     return '改好了'
   })
-  const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const sup = o.sup ?? new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
   const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: o.request ?? '给首页加一个按钮\n点了以后跳到设置页' })) as { id: string }
   const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
   const result = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(x => x.check.kind === 'platform').at(-1)!
@@ -944,6 +944,7 @@ test('用户令牌快过期时先续期：并发的只续一次，刷新令牌�
   assert.notEqual(second.accessToken, first.accessToken)
   assert.notEqual(second.refreshToken, first.refreshToken, '刷新令牌换了新的')
   assert.ok(r.gitTokens().includes(second.accessToken) && !r.gitTokens().includes(first.accessToken), '用的是续期后的令牌')
+  assert.equal(second.clientId, first.clientId, '续期后仍记着授权给的是哪个 App')
 
   // 两个 Supervisor（代表命令行和 Web 两个进程）同时续期：锁文件排队，后拿到锁的重新读凭据，发现刚续过就不再续。
   const other = new Supervisor({ store: r.store, executor: new FakeExecutor(async () => PASS), dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
@@ -1097,4 +1098,33 @@ test('删掉 App 重新注册后，旧 App 的授权用不了：说清楚要重�
   assert.equal(r.gitTokens().length, gitBefore)
   const list = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
   assert.match((list.apps[0]!.user!.authorized as { error: string }).error, /之前注册的那个 App/)
+})
+
+test('只有认证被拒才在下次先续期：开 PR 因别的原因失败不续期；续期暂时出错时，下次仍先续期，不拿被拒过的令牌再试', async () => {
+  const r = await registeredApp()
+  await r.authorize()
+  const refreshes = () => r.requests().filter(q => q.path === '/login/oauth/access_token' && (q as unknown as { grant: string }).grant === 'refresh_token').length
+  // 开 PR 失败，但不是认证被拒（422）：下次不续期。用同一个 Supervisor（"被拒过"的记号在它里面）。
+  await fetch(`http://${r.credential}/__control/fail-post?status=422`)
+  const { task } = await runPr(r, { sup: r.sup })
+  assert.equal(task.status, 'failed')
+  await fetch(`http://${r.credential}/__control/fail-post?status=0`)
+  assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request: 'a' })).ok, true)
+  assert.equal(refreshes(), 0, '非认证的失败不触发续期')
+
+  // 令牌被拒（GitHub 上让它失效，平台记的到期时间还早）：访问失败，打上记号。
+  await fetch(`http://${r.credential}/__control/expire-user`)
+  assert.equal((await r.sup.create({ repo: r.url, workflow: 'feature', request: 'b' })).ok, false)
+  // 下次先续期，但 GitHub 暂时出错：失败，记号还在。
+  await fetch(`http://${r.credential}/__control/fail-refresh?times=1`)
+  const failed = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'c' })
+  assert.equal(failed.ok, false)
+  assert.match((failed as { error: string }).error, /temporarily_unavailable/)
+  const gitBefore = r.gitTokens().length
+  // 再下次：仍然先续期（不拿被拒过的令牌去试），这次成功。
+  const ok = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'd' })
+  assert.equal(ok.ok, true, JSON.stringify(ok))
+  assert.equal(refreshes(), 2, '续期出错后又续了一次')
+  const value = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
+  assert.ok(r.gitTokens().slice(gitBefore).every(t => t === value.accessToken), '没有再用被拒过的令牌')
 })

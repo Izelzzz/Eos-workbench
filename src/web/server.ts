@@ -541,13 +541,23 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     const app = o.credentials.get(LOCAL_OWNER, u.app)
     let warning: string | undefined
     if (user.kind === 'ok' && app.kind === 'ok') {
-      try {
-        // 令牌过期了 GitHub 就不认它，撤销不掉：先续期，用新令牌撤销（续期得到的新令牌随授权一起作废，不用存）。
-        let value = user.value
-        if (u.ua.read(value, Date.now()).refresh) value = await u.ua.refresh(app.value, value, Date.now())
-        await u.ua.revoke(app.value, value)
-      } catch (e) {
-        warning = `${(e as Error).message}：平台已经不再使用这个授权；到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它`
+      const manual = '平台已经删掉了这个授权；到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它'
+      // 令牌过期了 GitHub 就不认它，撤销不掉：先续期，用新令牌撤销（续期得到的新令牌随授权一起作废，不用存）。
+      let value: string | undefined = user.value
+      if (u.ua.read(value, Date.now()).refresh) {
+        try {
+          value = await u.ua.refresh(app.value, value, Date.now())
+        } catch {
+          value = undefined
+          warning = `授权的令牌已经过期，续期也没成功，没能在 GitHub 上撤销：${manual}`
+        }
+      }
+      if (value !== undefined) {
+        try {
+          await u.ua.revoke(app.value, value)
+        } catch (e) {
+          warning = `${(e as Error).message}：${manual}`
+        }
       }
     } else {
       warning = '平台读不出授权或 App 的凭据，没能在 GitHub 上撤销：到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它'
