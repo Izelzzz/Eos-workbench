@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, gitRepo, needsE2E, parseNameStatusZ, parseReport, parseRules, sections, stripHtmlComments, type Change, type Repo } from './pr-checklist.ts'
+import { check, command, gitRepo, oneLine, needsE2E, parseNameStatusZ, parseReport, parseRules, sections, stripHtmlComments, type Change, type Repo } from './pr-checklist.ts'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -322,6 +322,7 @@ test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之�
     git('init', '-q', '-b', 'main')
     write('src/engine/prompts.ts', 'v1\na\nb\nc\nd\n')
     write('src/other.ts', 'o1\n')
+    write('src/old.ts', 'old\n')
     const base = commit('base')
     git('checkout', '-q', '-b', 'pr')
     write('src/engine/prompts.ts', 'v2\na\nb\nc\nd\n')
@@ -344,6 +345,15 @@ test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之�
     git('merge', '-q', '--no-edit', 'main')
     const merged = git('rev-parse', 'HEAD')
     assert.deepEqual(verify(main2, merged).errors, [], '只合进 main')
+
+    // main 新增、删除了「需要」的文件，PR 合进 main：PR 自己的改动没变，不算
+    git('checkout', '-q', 'main')
+    write('src/new.ts', 'n\n')
+    rmSync(join(dir, 'src/old.ts'))
+    const main2b = commit('main 新增和删除文件')
+    git('checkout', '-q', 'pr')
+    git('merge', '-q', '--no-edit', 'main')
+    assert.deepEqual(verify(main2b, git('rev-parse', 'HEAD')).errors, [], 'main 新增、删除文件')
 
     // main 也改了 PR 改过的文件（不冲突的另一处），PR 再合进 main：PR 自己的改动没变，不算
     git('checkout', '-q', 'main')
@@ -372,6 +382,11 @@ test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之�
     assert.match(verify(main3, linked).errors.join(), /读不出来/)
     rmSync(join(dir, 'docs/e2e/x/report.json'))
 
+    // 报告太大：不读
+    write('docs/e2e/x/report.json', JSON.stringify({ commit: tested, uncommitted: [], pad: 'x'.repeat((1 << 20) + 1) }))
+    const huge = commit('报告太大')
+    assert.match(verify(main3, huge).errors.join(), /读不出来/)
+
     // 证据记的提交不在 PR 的历史里
     write('docs/e2e/x/report.json', JSON.stringify({ commit: 'b'.repeat(40), uncommitted: [] }))
     const foreign = commit('别处的证据')
@@ -379,4 +394,9 @@ test('真实 git：在 GitHub 那样的合并提交上核对证据（证据之�
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('输出到工作流的消息转义换行和 %，免得 PR 里的文字另起一行写成工作流命令', () => {
+  assert.equal(command('a\n::error::x%\r'), 'a%0A::error::x%25%0D')
+  assert.equal(oneLine('a\r\n::warning::x'), 'a ::warning::x')
 })

@@ -375,14 +375,17 @@ export function gitRepo(cwd: string, head: string): Repo {
       const mbThen = tryGit('merge-base', commit, base())?.trim()
       const mbNow = tryGit('merge-base', head, base())?.trim()
       if (mbThen === undefined || mbNow === undefined || mbThen === mbNow) return false
-      const [tested, before, after] = [content(commit, path), content(mbThen, path), content(mbNow, path)]
-      if (tested === undefined || before === undefined || after === undefined) return false
+      const [tested, before, after] = [blob(commit, path), blob(mbThen, path), blob(mbNow, path)]
+      // 跑 E2E 时 PR 还没碰这个文件（包括 base 之后才新增、删除的文件）：最终版本要和 base 现在的一样
+      if (tested === before) return after === final
+      // 文件在某一边不存在（新增或删除），合并不了，当成对不上
+      if (tested === undefined || before === undefined || after === undefined || final === undefined) return false
       const dir = mkdtempSync(join(tmpdir(), 'pr-checklist-'))
       try {
         const files = ['tested', 'before', 'after'].map(n => join(dir, n))
-        writeFileSync(files[0]!, tested)
-        writeFileSync(files[1]!, before)
-        writeFileSync(files[2]!, after)
+        const texts = [content(commit, path), content(mbThen, path), content(mbNow, path)]
+        if (texts.some(t => t === undefined)) return false
+        texts.forEach((t, i) => writeFileSync(files[i]!, t!))
         // 有冲突时 merge-file 退出码非 0，当成对不上
         const merged = tryGit('merge-file', '-p', files[0]!, files[1]!, files[2]!)
         return merged !== undefined && merged === content(head, path)
@@ -392,6 +395,11 @@ export function gitRepo(cwd: string, head: string): Repo {
     },
   }
 }
+
+/** 消息里有 PR 能控制的文字（文件名、报告内容）：换行会被当成新的工作流命令，按 GitHub 的规则转义 */
+export const command = (s: string) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+/** 普通日志行：去掉换行，免得另起一行写成工作流命令 */
+export const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ')
 
 function main(): void {
   const body = process.env.PR_BODY ?? ''
@@ -408,10 +416,11 @@ function main(): void {
   })()
   const repo = /^[0-9a-f]{40}$/.test(head) && parent2 === head ? gitRepo(process.cwd(), head) : undefined
   const r = check({ body, changed, rules, ...(repo === undefined ? {} : { repo }) })
-  if (repo === undefined) console.log(`::warning title=需要人确认::没有核对证据对得上最终代码：检出的不是 PR 的合并提交，或者没传 PR_HEAD_SHA（HEAD^2=${parent2 || '无'}）`)
-  for (const n of r.notes) console.log(n)
-  for (const w of r.warnings) console.log(`::warning title=需要人确认::${w}`)
-  for (const e of r.errors) console.log(`::error title=PR 流程检查::${e}`)
+  // 工作流配置坏了时要变红，不能悄悄跳过证据核对
+  if (repo === undefined) r.errors.push(`没法核对证据对得上最终代码：检出的不是 PR 的合并提交，或者没传 PR_HEAD_SHA（HEAD^2=${parent2 || '无'}）`)
+  for (const n of r.notes) console.log(oneLine(n))
+  for (const w of r.warnings) console.log(`::warning title=需要人确认::${command(w)}`)
+  for (const e of r.errors) console.log(`::error title=PR 流程检查::${command(e)}`)
   if (r.errors.length > 0) process.exit(1)
   console.log('PR 流程检查通过')
 }
