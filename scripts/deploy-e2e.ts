@@ -1,4 +1,4 @@
-// Docker Compose 部署的端到端验证：用真实模型在容器里跑完一个 standard 任务，再重建容器核对数据还在。
+// Docker Compose 部署的端到端验证：用真实模型在容器里跑完一个任务（默认最小的工作流），再重建容器核对数据还在。
 // 全程只经过部署出来的接口：docker compose（构建、启动、exec）和 Web 服务的 HTTP 接口，不读写宿主机上的数据目录。
 // 1. docker compose 构建并启动；容器里跑 eos doctor；
 // 2. 在容器的 /data/repos 里建一个示例仓库，通过 POST /api/tasks 发起任务，agent 提问时用接口回答；
@@ -67,6 +67,8 @@ const REQUEST = [
   '为它写 node:test 测试（放在 test/ 目录），`npm test` 必须通过。',
 ].join('\n')
 const REPO = '/data/repos/demo'
+// 默认用最小的工作流（scripts/e2e/mini.yaml：开发一次，平台跑 npm test），模型调用最少；EOS_E2E_WORKFLOW=standard 跑完整流程。
+const WORKFLOW = process.env.EOS_E2E_WORKFLOW || '/app/scripts/e2e/mini.yaml'
 
 compose('build')
 compose('down', '-v')
@@ -86,7 +88,7 @@ try {
     'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
   ].join(' && '))
 
-  const created = await api('/api/tasks', { repo: REPO, workflow: 'standard', request: REQUEST })
+  const created = await api('/api/tasks', { repo: REPO, workflow: WORKFLOW, request: REQUEST })
   log(`POST /api/tasks → ${created.status} ${JSON.stringify(created.body)}`)
   if (created.status !== 201) throw new Error('任务没有建起来')
   const id = created.body.id as string
@@ -153,7 +155,7 @@ try {
     'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
     'down 再 up 之后 worktree 还在，最新提交不变': afterWorktree.code === 0 && head !== '' && afterWorktree.out.startsWith(head),
   }
-  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, checkUserScan: { dshPids, scan: scanned ?? scan }, testUsers: testUsers.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
+  const report = { workflow: WORKFLOW, commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, checkUserScan: { dshPids, scan: scanned ?? scan }, testUsers: testUsers.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
   process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1

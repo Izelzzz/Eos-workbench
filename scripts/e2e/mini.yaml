@@ -1,0 +1,12 @@
+name: e2e-mini
+description: 部署 E2E 用的最小工作流：开发一次，平台在 worktree 里跑测试（失败时交回开发，最多一轮）。
+roles:
+  developer: { template: developer }
+nodes:
+  - id: build
+    kind: agent
+    role: developer
+    task: 实现下面的需求，并为它写 node:test 测试。最终回复用一两句话说明改了什么。
+    maxFixes: 1
+    checks:
+      - { run: [npm, test], timeoutSec: 300 }
