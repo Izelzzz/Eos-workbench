@@ -246,8 +246,8 @@ const inVerifiedDir = (worktree: string, parentRel: string, argv: string[]): voi
     execFileSync(cmd!, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
   } catch (e) {
     const err = e as { status?: number; code?: string; stderr?: unknown }
-    // 目录在核对和执行之间消失了：要删的东西已经不在，不算错。
-    if (err.code === 'ENOENT') return
+    // 目录在核对和执行之间消失了：要删的东西已经不在，不算错。目录还在时的 ENOENT 是程序（sh、setpriv）找不到，要报错。
+    if (err.code === 'ENOENT' && !existsSync(cwd)) return
     if (err.status === 3) throw new OutsideWorktree(`worktree 里的目录 ${parentRel || '.'} 被换成了指向外面的链接，平台没有删除也没有提交`)
     throw new Error(`撤销时 ${argv[0]} 失败（worktree 里的文件在撤销过程中被改动），没有提交：${String(err.stderr ?? '').trim().split('\n')[0] ?? ''}`)
   }

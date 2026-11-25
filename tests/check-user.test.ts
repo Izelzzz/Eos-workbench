@@ -164,7 +164,7 @@ test('files and directories the agent or check user made private are opened to t
   try {
     // 测试进程自己就是「那个用户」：find -user 按名字找，用测试进程的用户名。
     const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()
-    await shareWithGroup({ name: me, gid: process.getgid!(), home: '/tmp' }, w)
+    assert.equal(await shareWithGroup({ name: me, gid: process.getgid!(), home: '/tmp' }, w), undefined)
   } finally {
     process.env.PATH = path
   }
@@ -192,5 +192,28 @@ test(
     }
     assert.equal(statSync(join(w, 'spec.md')).gid, 0, 'moved to the worktree group')
     assert.equal(statSync(join(w, 'spec.md')).mode & 0o777, 0o660)
+  },
+)
+
+test(
+  "when the user is not in the worktree's group it only opens permissions (a chgrp would fail on every file) and reports success",
+  { skip: process.getuid?.() !== 0 ? 'needs root to give the worktree a group the user is not in' : false },
+  async () => {
+    const { env } = fakeSetpriv()
+    const w = dir()
+    // root 的组列表里没有 gid 12345：和「用户不在 worktree 的组里」一样。
+    chownSync(w, 0, 12345)
+    writeFileSync(join(w, 'out.txt'), 'x')
+    chmodSync(join(w, 'out.txt'), 0o600)
+    chownSync(join(w, 'out.txt'), 0, 0)
+    const path = process.env.PATH
+    process.env.PATH = env.PATH
+    try {
+      assert.equal(await shareWithGroup({ name: 'root', gid: 0, home: '/root' }, w), undefined)
+    } finally {
+      process.env.PATH = path
+    }
+    assert.equal(statSync(join(w, 'out.txt')).gid, 0, 'group unchanged')
+    assert.equal(statSync(join(w, 'out.txt')).mode & 0o777, 0o660)
   },
 )

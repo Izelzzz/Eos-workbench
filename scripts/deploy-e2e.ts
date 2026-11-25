@@ -166,9 +166,12 @@ try {
 } finally {
   // 删数据卷之前留下平台自己的日志（任务失败时看原因要用）。
   try {
-    writeFileSync(join(OUT, 'platform.log'), compose('logs', '--no-color', 'eos'))
-    writeFileSync(join(OUT, 'task-logs.txt'), inContainer('for f in /data/logs/*; do echo "== $f"; cat "$f"; done').out)
-  } catch {}
+    const big = { cwd: ROOT, encoding: 'utf8' as const, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e', EOS_MASTER_KEY: MASTER_KEY } }
+    writeFileSync(join(OUT, 'platform.log'), execFileSync('docker', ['compose', '-p', PROJECT, ...files, 'logs', '--no-color', 'eos'], big))
+    writeFileSync(join(OUT, 'task-logs.txt'), execFileSync('docker', ['compose', '-p', PROJECT, ...files, 'exec', '-T', '-u', 'eos', 'eos', 'sh', '-c', 'for f in /data/logs/*; do echo "== $f"; cat "$f"; done'], big))
+  } catch (e) {
+    log(`没能留下平台日志：${(e as Error).message}`)
+  }
   // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。清理本身失败时不盖掉原来的错误。
   try {
     compose('down', '-v')

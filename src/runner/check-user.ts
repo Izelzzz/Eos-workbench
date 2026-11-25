@@ -70,7 +70,10 @@ const hasAmbientCaps = (): boolean => {
   return ambient
 }
 
-/** 平台带着切换用户、发信号的能力时，先清掉再运行 argv（不换用户）。没有能力时原样返回。 */
+/**
+ * 平台带着 ambient 能力时（部署镜像的启动方式，deploy/eos）先清掉再运行 argv（不换用户），没有时原样返回。
+ * 以 root 或带着别的有效能力启动的平台不在这里处理：部署只支持 deploy/eos 的方式。
+ */
 export const withoutCaps = (argv: string[]): string[] => (hasAmbientCaps() ? ['setpriv', '--inh-caps=-all', '--ambient-caps=-all', '--', ...argv] : argv)
 
 /** 真的切换一次，确认平台进程有切换用户的能力。成功时 undefined，否则返回原因。 */
@@ -123,9 +126,15 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string, waitMs =
  * 只改它自己的：别人的文件它本来也改不了。
  */
 const SHARE_WITH_GROUP = [
-  'find "$1" -user "$2" -type d \\( ! -gid "$3" -o ! -perm -2070 \\) -exec chgrp "$3" {} + -exec chmod g+rwxs {} +',
-  'find "$1" -user "$2" -type f \\( ! -gid "$3" -o ! -perm -060 \\) -exec chgrp "$3" {} + -exec chmod g+rw {} +',
-].join(' && ')
+  // 用户不在 worktree 的组里（不在部署镜像里时可能这样）就改不了组，只开放权限。
+  'if id -G | tr " " "\\n" | grep -qx "$3"; then',
+  '  find "$1" -user "$2" -type d \\( ! -gid "$3" -o ! -perm -2070 \\) -exec chgrp "$3" {} + -exec chmod g+rwxs {} + &&',
+  '  find "$1" -user "$2" -type f \\( ! -gid "$3" -o ! -perm -060 \\) -exec chgrp "$3" {} + -exec chmod g+rw {} +;',
+  'else',
+  '  find "$1" -user "$2" -type d ! -perm -070 -exec chmod g+rwx {} + &&',
+  '  find "$1" -user "$2" -type f ! -perm -060 -exec chmod g+rw {} +;',
+  'fi',
+].join('\n')
 
 /**
  * 把 user 在 dir 里建的文件和目录交给 dir 的组（共用组 eos-work）并开放组读写。平台（在这个组里）提交、撤销越界改动时要读、删它们。
