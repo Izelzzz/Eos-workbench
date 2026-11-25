@@ -1,4 +1,4 @@
-// 代码托管页：用清单流程注册托管平台的 App（现在只有 GitHub App）。平台用 App 访问仓库：按仓库授权，令牌一小时有效、自动换新。
+// 代码托管页：用清单流程注册托管平台的 App（现在只有 GitHub App），再用托管平台的账号授权（OAuth），平台以授权人的身份推送、开 PR。
 // 注册时浏览器把清单提交到托管平台，用户在那里确认后跳回平台；平台用带回的 code 换 App 的 id 和私钥，存进凭据存储。
 import { useEffect, useState } from 'react'
 import type { ForgeAppsResponse } from './api.ts'
@@ -87,7 +87,7 @@ export function ForgeApps({ query }: { query: string }) {
   return (
     <div className="credentials">
       <h1>代码托管</h1>
-      <p className="muted">平台用 App 访问仓库：按仓库授权，令牌一小时有效、到期前自动换新，不依赖某个人的令牌。App 的私钥加密存在凭据存储里，只由平台使用。没有 App、或 App 没装到某个仓库时，平台改用凭据页里的 Git 令牌。</p>
+      <p className="muted">先注册一个 App 并装到要用的仓库，再用 GitHub 账号授权：平台以授权人的身份克隆、推送、开 PR。没人授权时用 App 自己的身份；App 没装到某个仓库时，改用凭据页里的 Git 令牌。App 的私钥和授权的令牌都加密存在凭据存储里，只由平台使用。</p>
       {result.get('error') !== null && <p className="error" role="alert">注册没有完成：{result.get('error')}</p>}
       {registered !== null && (
         <p className="notice" role="status">
