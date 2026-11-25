@@ -1,0 +1,170 @@
+2026-11-25T03:49:48.840Z $ docker compose build
+#1 [internal] load local bake definitions
+#1 reading from stdin 739B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 3.48kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/ubuntu:24.04
+#3 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/node:24.22.3-bookworm-slim
+#4 DONE 0.0s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 112B done
+#5 DONE 0.0s
+
+#6 [node 1/1] FROM docker.io/library/node:24.22.3-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530
+#6 resolve docker.io/library/node:24.22.3-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530 0.0s done
+#6 DONE 0.0s
+
+#7 [base 1/4] FROM docker.io/library/ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
+#7 resolve docker.io/library/ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b 0.0s done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 transferring context: 11.25kB done
+#8 DONE 0.0s
+
+#9 [base 4/4] RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx  && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack  && corepack enable  && apt-get update  && apt-get install -y --no-install-recommends       ca-certificates git bubblewrap       python3 python3-venv python3-pip build-essential pkg-config  && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [base 2/4] COPY --from=node /usr/local/bin/node /usr/local/bin/node
+#10 CACHED
+
+#11 [stage-3 2/4] COPY --from=build --chown=root:root /app /app
+#11 CACHED
+
+#12 [build 2/6] COPY package.json package-lock.json ./
+#12 CACHED
+
+#13 [build 3/6] COPY vendor ./vendor
+#13 CACHED
+
+#14 [build 4/6] RUN --mount=type=secret,id=extra_ca,required=false     if [ -f /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi;     npm ci --no-audit --no-fund
+#14 CACHED
+
+#15 [build 1/6] WORKDIR /app
+#15 CACHED
+
+#16 [stage-3 3/4] COPY --chown=root:root --chmod=755 deploy/eos deploy/git /usr/local/bin/
+#16 CACHED
+
+#17 [build 5/6] COPY . .
+#17 CACHED
+
+#18 [base 3/4] COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+#18 CACHED
+
+#19 [build 6/6] RUN npm run build:web
+#19 CACHED
+
+#20 [stage-3 1/4] RUN groupadd --gid 10010 eos-work  && useradd --create-home --uid 10001 --shell /bin/bash --groups eos-work eos  && useradd --create-home --uid 10002 --shell /usr/sbin/nologin --groups eos-work eos-check  && mkdir -p /data/repos && chown -R eos:eos /data
+#20 CACHED
+
+#21 [stage-3 4/4] WORKDIR /app
+#21 CACHED
+
+#22 exporting to image
+#22 exporting layers done
+#22 exporting manifest sha256:10a3f9491726bd00f176d71c5becb562675296a21990a119d0e61d0541f65e5c done
+#22 exporting config sha256:4056b0b03e4b679797e0abe47a8d3fd705ad12d24dbcfd7b8647939921d81c55 done
+#22 exporting attestation manifest sha256:191ae12877e81e9e394430a5796e8dbf2a617902d0fb84ae75fa598cf3a54607 done
+#22 exporting manifest list sha256:e33b969183f910ea9f625ea6bbab69f285ff2084741b49d8b460338837a4acee done
+#22 naming to docker.io/library/eos-workbench:e2e done
+#22 unpacking to docker.io/library/eos-workbench:e2e done
+#22 DONE 0.1s
+
+#23 resolving provenance for metadata file
+#23 DONE 0.0s
+
+2026-11-25T03:49:49.324Z $ docker compose down -v
+2026-11-25T03:49:49.404Z $ docker compose up -d
+2026-11-25T03:49:51.694Z $ docker compose exec -T -u root eos bash -c eos doctor
+Eos 环境检查（数据目录 /data）
+✓ Node：24.22.3（要求 >=24.9.0）
+✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）
+⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据
+  怎么修：生成一个主密钥：openssl rand -base64 32（或 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境
+✓ git：2.43.0
+✓ 数据目录：/data 可写
+✓ dsh：0.2.2-rc.5
+
+2026-11-25T03:49:52.480Z Eos 环境检查（数据目录 /data）
+✓ Node：24.22.3（要求 >=24.9.0）
+✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）
+⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据
+  怎么修：生成一个主密钥：openssl rand -base64 32（或 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境
+✓ git：2.43.0
+✓ 数据目录：/data 可写
+✓ dsh：0.2.2-rc.5
+
+2026-11-25T03:49:52.480Z $ docker compose exec -T -u eos eos bash -c id; node -v; npm -v; pnpm -v; git --version; python3 --version; gcc --version | head -1; bwrap --version; echo "EOS_HOME=$EOS_HOME"
+uid=10001(eos) gid=10001(eos) groups=10001(eos),10010(eos-work)
+v24.22.3
+11.19.1
+12.23.0
+git version 2.43.0
+Python 3.12.3
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+bubblewrap 0.9.0
+EOS_HOME=/data
+
+2026-11-25T03:49:56.362Z $ docker compose exec -T -u eos eos bash -c rm -rf /data/repos/demo && mkdir -p /data/repos/demo && cd /data/repos/demo && git init -q -b main && printf '%s\n' '{ "name": "demo", "type": "module", "scripts": { "pretest": "touch /tmp/eos-e2e-npm-test-by-$(id -un)", "test": "node --test" } }' > package.json && git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init
+2026-11-25T03:49:56.565Z POST /api/tasks → 201 {"ok":true,"id":"t261125034956gf6"}
+2026-11-25T03:49:56.581Z $ docker compose exec -T -u eos eos bash -c pgrep -u eos -f '@deepseek-ai/[d]sh/'
+128
+
+2026-11-25T03:49:56.740Z $ docker compose exec -T -u eos-check eos bash -c cd /tmp && node /app/scripts/check-user-scan.mjs
+{"uid":10002,"gid":10002,"groups":[10002,10010],"home":"/home/eos-check","caps":{"inheritable":"0000000000000000","permitted":"0000000000000000","effective":"0000000000000000","ambient":"0000000000000000"},"noNewPrivs":"1","envHasSecrets":["EOS_MASTER_KEY","DEEPSEEK_API_KEY"],"secretsFoundIn":[],"processes":[{"pid":1,"ppid":0,"uid":0,"comm":"docker-init","cmdline":"/sbin/docker-init --","capEff":"00000000000000c0","capAmb":"0000000000000000","environ":"EACCES"},{"pid":128,"ppid":8,"uid":10001,"comm":"MainThread","cmdline":"/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js","capEff":"0000000000000000","capAmb":"0000000000000000","environ":"EACCES"},{"pid":28,"ppid":8,"uid":10001,"comm":"esbuild","cmdline":"/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2","capEff":"00000000000000c0","capAmb":"00000000000000c0","environ":"EACCES"},{"pid":8,"ppid":1,"uid":10001,"comm":"MainThread","cmdline":"node --import","capEff":"00000000000000c0","capAmb":"00000000000000c0","environ":"EACCES"}],"switchToRoot":"setpriv: setresuid failed: Operation not permitted","switchToEos":"setpriv: setresuid failed: Operation not permitted","writeTrackedFileInWorktree":"skipped","writeOutsideWorktree":{},"readOutsideWorktree":{}}
+
+2026-11-25T03:50:21.056Z 回答「数组元素为 NaN 或 ±Infinity 时，sum 应如何处理？」：NaN 抛 TypeError，±Infinity 参与运算（推荐） → 200
+2026-11-25T03:52:13.468Z 任务 t261125034956gf6：done
+2026-11-25T03:52:13.468Z $ docker compose exec -T -u eos eos bash -c ls /tmp | sed -n "s/^eos-e2e-npm-test-by-//p"
+eos
+eos-check
+
+2026-11-25T03:52:13.619Z $ docker compose exec -T -u eos eos bash -c set -o pipefail; cd /data/worktrees/t261125034956gf6 && npm test 2>&1 | tail -8
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 145.934519
+
+2026-11-25T03:52:14.115Z $ docker compose exec -T -u eos eos bash -c git -C /data/worktrees/t261125034956gf6 log --oneline e19f062ce75354fb413b14662958165b0bf310a1..HEAD
+98cc0a6 eos: build produce (c3)
+89958a7 eos: spec produce (c1)
+
+2026-11-25T03:52:14.258Z $ docker compose down
+2026-11-25T03:52:14.450Z $ docker compose up -d
+2026-11-25T03:52:16.736Z $ docker compose exec -T -u eos eos bash -c git -C /data/worktrees/t261125034956gf6 log --oneline -1 && ls /data
+98cc0a6 eos: build produce (c3)
+dsh
+eos.db
+eos.db-shm
+eos.db-wal
+locks
+logs
+repos
+worktrees
+
+2026-11-25T03:52:16.903Z ✓ 容器里 eos doctor 没有 ✗
+2026-11-25T03:52:16.903Z ✓ 检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key
+2026-11-25T03:52:16.903Z ✓ dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）
+2026-11-25T03:52:16.903Z ✓ 任务完成
+2026-11-25T03:52:16.903Z ✓ 平台的检查命令（npm test）以 eos-check 运行
+2026-11-25T03:52:16.903Z ✓ worktree 里 npm test 通过
+2026-11-25T03:52:16.903Z ✓ agent 的改动提交到了任务分支
+2026-11-25T03:52:16.903Z ✓ down 再 up 之后任务还在、状态不变
+2026-11-25T03:52:16.903Z ✓ down 再 up 之后 worktree 还在，最新提交不变
+2026-11-25T03:52:16.903Z $ docker compose down -v
