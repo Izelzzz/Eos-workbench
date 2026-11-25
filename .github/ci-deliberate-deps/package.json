@@ -1,6 +1,0 @@
-{
-  "name": "ci-deliberate-deps",
-  "private": true,
-  "description": "CI 故意失败的验证用：开发依赖里有已知高危漏洞的旧版本，验证 fail-on-scopes 包含 development。下一个提交撤掉",
-  "devDependencies": { "lodash": "4.17.20" }
-}
