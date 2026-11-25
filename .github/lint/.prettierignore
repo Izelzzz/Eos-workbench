@@ -1,0 +1,5 @@
+# 任意深度的依赖和构建产物不查。
+# 仓库根目录下的 docs/、poc/、vendor/ 在 check-format.sh 的 git diff 里用 pathspec 排除：
+# 这个文件里的路径按它所在的 .github/lint/ 解析，写不了「只排除根目录」，不带 / 又会连 src/docs/ 一起排除
+**/node_modules/
+**/dist/
