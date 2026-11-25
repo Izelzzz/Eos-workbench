@@ -6,7 +6,7 @@
 // 5. 从存储里核对结果，写 report.json，截图在同一目录。
 // 用法：NODE_PATH=<playwright 所在目录> node --import tsx scripts/web-e2e.ts [端口]
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { appendFileSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { Store } from '../src/store/store.ts'
@@ -154,7 +154,7 @@ const npmTest = (() => {
 })()
 const serverLog2 = (() => {
   try {
-    return execFileSync('cat', [join(OUT, 'server-2.log')], { encoding: 'utf8' })
+    return readFileSync(join(OUT, 'server-2.log'), 'utf8')
   } catch {
     return ''
   }

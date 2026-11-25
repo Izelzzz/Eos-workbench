@@ -45,12 +45,85 @@ export function needsE2E(path: string, rules: Rule[]): boolean {
   return rules.find((r) => r.regex.test(path))?.need ?? true
 }
 
+/**
+ * 去掉 HTML 注释，尽量和 GitHub 的渲染一致：
+ * - 代码块里和行内代码（反引号）里的 <!-- 是普通文字，不算注释；
+ * - 注释到它后面第一个 --> 为止，可以跨行；<!--> 和 <!---> 是空注释；
+ * - 没有 --> 时：<!-- 在行首（最多 3 个空格缩进）就把后面全部藏起来，在行中间就按普通文字显示。
+ * 逐个扫描而不是用一次正则替换：嵌套的注释不会留下藏起来的半截。
+ */
+export function stripHtmlComments(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  let fence: string | null = null
+  // 跨行注释：前面的行开始、还没遇到 -->
+  let inComment = false
+  for (let n = 0; n < lines.length; n++) {
+    let line = lines[n]!
+    const rest = lines.slice(n + 1).join('\n')
+    if (inComment) {
+      const end = line.indexOf('-->')
+      if (end === -1) continue
+      inComment = false
+      line = line.slice(end + 3)
+    } else {
+      const marker = /^\s*(```|~~~)/.exec(line)?.[1]
+      if (marker && (fence === null || fence === marker)) fence = fence === null ? marker : null
+      if (fence !== null || marker) {
+        out.push(line)
+        continue
+      }
+    }
+    const r = stripLineOrOpen(line, rest)
+    out.push(r.text)
+    if (r.open === 'rest') break
+    if (r.open === 'multiline') inComment = true
+  }
+  return out.join('\n')
+}
+
+/** 去掉一行里的注释。rest 是这一行后面的全文，用来判断没在本行闭合的注释会不会在后面闭合。 */
+function stripLineOrOpen(line: string, rest: string): { text: string; open: 'no' | 'multiline' | 'rest' } {
+  let out = ''
+  let i = 0
+  for (;;) {
+    const start = findOpen(line, i)
+    if (start === -1) return { text: out + line.slice(i), open: 'no' }
+    out += line.slice(i, start)
+    const after = line.slice(start + 4)
+    // <!--> 和 <!---> 是空注释
+    const quick = after.startsWith('>') ? 1 : after.startsWith('->') ? 2 : 0
+    if (quick) {
+      i = start + 4 + quick
+      continue
+    }
+    const end = line.indexOf('-->', start + 4)
+    if (end !== -1) {
+      i = end + 3
+      continue
+    }
+    if (rest.includes('-->')) return { text: out, open: 'multiline' }
+    // 没有闭合：行首的 <!-- 是 HTML 块，藏到全文末尾；行中间的按普通文字显示
+    if (/^ {0,3}$/.test(line.slice(0, start))) return { text: out, open: 'rest' }
+    return { text: out + line.slice(start), open: 'no' }
+  }
+}
+
+/** 从 from 开始找不在行内代码（反引号）里的 <!-- */
+function findOpen(line: string, from: number): number {
+  for (let at = line.indexOf('<!--', from); at !== -1; at = line.indexOf('<!--', at + 1)) {
+    const ticks = (line.slice(0, at).match(/`/g) ?? []).length
+    if (ticks % 2 === 0) return at
+  }
+  return -1
+}
+
 /** 按标题切分描述。代码块里的「#」不算标题，HTML 注释不算内容。 */
 export function sections(body: string): { title: string; content: string }[] {
   const out: { title: string; level: number; open: boolean; lines: string[] }[] = []
   // 代码块只由开始时的那种标记（``` 或 ~~~）结束
   let fence: string | null = null
-  for (const line of body.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/)) {
+  for (const line of stripHtmlComments(body).split(/\r?\n/)) {
     const marker = /^\s*(```|~~~)/.exec(line)?.[1]
     if (marker && (fence === null || fence === marker)) fence = fence === null ? marker : null
     const h = fence !== null || marker ? null : /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
