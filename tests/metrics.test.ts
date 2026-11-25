@@ -81,7 +81,13 @@ test('stages follow workflow order and skip stages that never ran', () => {
   const c = new Clock('review')
   c.reply(1000, 1000, '方案')
   const m = taskMetrics(c.task, 3000)
-  assert.deepEqual(m.stages.map(s => [s.node, s.open]), [['plan', false], ['build', true]])
+  assert.deepEqual(
+    m.stages.map(s => [s.node, s.open]),
+    [
+      ['plan', false],
+      ['build', true],
+    ],
+  )
   assert.equal(m.stages[1]!.wallMs, 2000, 'an open stage runs from the end of the previous one')
   assert.deepEqual([m.stages[1]!.runningMs, m.stages[1]!.overheadMs], [2000, 0], 'its call is running, not platform overhead')
   assert.equal(m.total.calls, 1)

@@ -29,6 +29,10 @@ export const formatTotals = (label: string, t: Totals): string =>
   `${label.padEnd(12)} ${String(t.calls).padStart(3)} 次  ${secs(t.ms).padStart(8)}  输入 ${n(t.usage.input).padStart(8)}  输出 ${n(t.usage.output).padStart(7)}  缓存读 ${n(t.usage.cacheRead).padStart(9)}  缓存写 ${n(t.usage.cacheWrite).padStart(6)}`
 
 export const formatReport = (r: Report): string =>
-  ['按节点：', ...Object.entries(r.byNode).map(([k, t]) => formatTotals(`  ${k}`, t)),
-    '按角色：', ...Object.entries(r.byRole).map(([k, t]) => formatTotals(`  ${k}`, t)),
-    formatTotals('合计', r.total)].join('\n')
+  [
+    '按节点：',
+    ...Object.entries(r.byNode).map(([k, t]) => formatTotals(`  ${k}`, t)),
+    '按角色：',
+    ...Object.entries(r.byRole).map(([k, t]) => formatTotals(`  ${k}`, t)),
+    formatTotals('合计', r.total),
+  ].join('\n')

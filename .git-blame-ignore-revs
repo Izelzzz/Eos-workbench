@@ -1,0 +1,5 @@
+# git blame 跳过这些只改格式的提交。本地启用：git config blame.ignoreRevsFile .git-blame-ignore-revs
+# （GitHub 网页上的 blame 会自动读这个文件）
+
+# 按 Prettier 一次性格式化全部代码文件（语法树逐文件比对一致，见 .github/lint/ast-equal.mjs）
+442029940e5998f05b773cec830cd394ff74fe95

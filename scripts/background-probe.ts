@@ -25,8 +25,10 @@ g(repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '--
 g(repo, 'worktree', 'add', '-q', '-b', 'eos/probe', wt)
 
 const ex = new DshExecutor({
-  dshHome: join(OUT, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  env: { ...process.env, NODE_USE_ENV_PROXY: '1' }, modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
+  dshHome: join(OUT, 'dsh'),
+  dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1' },
+  modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
 const profile: AgentProfile = { denyTools: [], skills: [], mcp: [], background: false }
 const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd: wt, profile }
@@ -69,13 +71,20 @@ try {
     '工具表里没有 job_* 工具': offered.length > 0 && !offered.some(t => t.startsWith('job_')),
     'bash 的 run_in_background 被拒绝': /run_in_background is disabled|JOB_BACKGROUND_DISABLED/.test(log),
     'nohup 放到后台的进程在本轮结束时还活着（证明它确实脱离了前台命令）': aliveBefore,
-    '清理之后这个进程不在了': bgPid !== undefined && !aliveAfter,
+    清理之后这个进程不在了: bgPid !== undefined && !aliveAfter,
     '清理后下一次调用正常（重启 dsh、续接会话）': again.text.length > 0,
   }
   const here = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim()
   report = {
     code: { commit: here('rev-parse', '--short', 'HEAD'), uncommitted: here('status', '--porcelain', '--', 'src', 'scripts', 'package.json').split('\n').filter(Boolean) },
-    allOk: Object.values(checks).every(Boolean), checks, bgPid, killed, cleanupMs, restartMs, toolsOffered: offered, reply: reply.text,
+    allOk: Object.values(checks).every(Boolean),
+    checks,
+    bgPid,
+    killed,
+    cleanupMs,
+    restartMs,
+    toolsOffered: offered,
+    reply: reply.text,
   }
 } finally {
   await ex.close()

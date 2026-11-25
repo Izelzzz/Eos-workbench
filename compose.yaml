@@ -23,10 +23,12 @@ services:
       - /tmp:exec,size=4g
     cap_drop:
       - ALL
-    # 只留切换用户的两个能力：平台以 eos 运行，检查命令切换到 eos-check（docs/deploy.md「用户和权限」）。
+    # 只留三个能力（docs/deploy.md「用户和权限」）：切换用户（检查命令切到 eos-check、dsh 切到 eos-agent），
+    # 以及给别的用户的进程发信号（关掉 dsh、结束超时的命令）。平台启动子进程时都先清掉它们。
     cap_add:
       - SETUID
       - SETGID
+      - KILL
     security_opt:
       - no-new-privileges:true
 

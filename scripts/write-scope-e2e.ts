@@ -26,7 +26,12 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
 writeFileSync(join(REPO, 'README.md'), '# demo\n')
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -53,7 +58,9 @@ const runOnce = async (args: string[]) => {
   child.stderr.on('data', b => appendFileSync(LOG, b))
   const exited = new Promise(r => child.on('exit', r))
   let done = false
-  void exited.then(() => { done = true })
+  void exited.then(() => {
+    done = true
+  })
   appendFileSync(LOG, `\n$ eos ${args.join(' ')}\n`)
   while (!done) {
     await sleep(3000)
@@ -81,7 +88,10 @@ const meta = store.meta(id)
 store.close()
 const calls = t.log.flatMap(e => (e.type === 'call' ? [e] : []))
 const firstBuild = calls.find(c => c.node === 'build')
-const files = execFileSync('git', ['diff', '--name-only', meta.baseSha, meta.branch], { cwd: REPO, encoding: 'utf8' }).trim().split('\n').filter(f => f !== '')
+const files = execFileSync('git', ['diff', '--name-only', meta.baseSha, meta.branch], { cwd: REPO, encoding: 'utf8' })
+  .trim()
+  .split('\n')
+  .filter(f => f !== '')
 const reverted = calls.flatMap(c => (c.reverted ?? []).map(p => `${c.node}: ${p}`))
 const pathQuestions = questions.filter(q => /lib|路径|目录|位置|范围/.test(q.text))
 const build = calls.filter(c => c.node === 'build')
@@ -89,18 +99,23 @@ const build = calls.filter(c => c.node === 'build')
 const devReplies = calls.filter(c => c.role === 'developer').map(c => c.reply)
 
 const report = {
-  commit, task: id, status: t.status, request: REQUEST,
+  commit,
+  task: id,
+  status: t.status,
+  request: REQUEST,
   checks: {
-    '开发第一次调用的提示词里有可写范围': firstBuild?.prompt.includes('# 你的可写范围') ?? false,
+    开发第一次调用的提示词里有可写范围: firstBuild?.prompt.includes('# 你的可写范围') ?? false,
     '开发第一次回复就没有越界（事先知道范围）': build.length > 0 && (build[0]!.reverted ?? []).length === 0,
-    '没有为路径向用户提问': pathQuestions.length === 0,
-    '没有越界改动被撤销': reverted.length === 0,
+    没有为路径向用户提问: pathQuestions.length === 0,
+    没有越界改动被撤销: reverted.length === 0,
     '任务分支里没有 lib/ 下的文件': !files.some(f => f.startsWith('lib/')),
     'clamp 实现放在了 src/ 下': files.some(f => /^src\/.*clamp/.test(f)),
     '开发的某条回复里同时提到 lib/ 和 src/ 下的 clamp（说明了改放的位置）': devReplies.some(r => r.includes('lib/') && /src\/clamp/.test(r)),
-    '任务完成': t.status === 'done',
+    任务完成: t.status === 'done',
   },
-  questions, reverted, files,
+  questions,
+  reverted,
+  files,
   buildReplies: calls.filter(c => c.node === 'build').map(c => c.reply),
   developerReplies: calls.filter(c => c.role === 'developer').map(c => ({ node: c.node, purpose: c.purpose, reply: c.reply })),
 }

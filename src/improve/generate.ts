@@ -25,14 +25,14 @@ export const IMPROVER = 'improver'
 
 export type GenerateResult =
   | {
-    ok: true
-    run: string
-    /** 没有证据时不调用模型。 */
-    skipped?: string
-    created: ProposalRow[]
-    refused: Refused[]
-    call?: { model?: string; usage: Usage; ms: number; reply: string }
-  }
+      ok: true
+      run: string
+      /** 没有证据时不调用模型。 */
+      skipped?: string
+      created: ProposalRow[]
+      refused: Refused[]
+      call?: { model?: string; usage: Usage; ms: number; reply: string }
+    }
   /**
    * cause：input 请求本身有问题（任务不存在、没结束……）；busy 已经有一次生成在进行；config 平台上没有可用的 improver 模板；
    * upstream 调用模型失败或回复不可用。run、call：调用过模型之后才失败时带上，用量和原始回复不丢。
@@ -58,7 +58,9 @@ export const generate = async (o: {
   const say = o.log ?? (() => {})
   const finished = (s: string) => s === 'done' || s === 'failed' || s === 'aborted'
   // 从早到晚：提示词里的任务按时间顺序，最后一个是最新的任务。
-  const rows = o.store.list().filter(t => t.workflow === o.workflow && (o.tasks === undefined ? finished(t.status) : o.tasks.includes(t.id)))
+  const rows = o.store
+    .list()
+    .filter(t => t.workflow === o.workflow && (o.tasks === undefined ? finished(t.status) : o.tasks.includes(t.id)))
     .sort((a, b) => a.createdAt - b.createdAt)
   const missing = (o.tasks ?? []).filter(id => !rows.some(r => r.id === id))
   if (missing.length > 0) return { ok: false, cause: 'input', error: `这些任务不存在或不是工作流「${o.workflow}」的：${missing.join('、')}` }
@@ -81,7 +83,15 @@ export const generate = async (o: {
   const roleTemplates = Object.fromEntries(Object.entries(latest.workflow.roles).flatMap(([id, r]) => (r.template === undefined ? [] : [[id, r.template.name]])))
   const b = insights(samples.map(s => ({ task: s.task, metrics: taskMetrics(s.task, sampleAt(s.task, o.now()), o.store.createdAt(s.task.id)) }))).bottlenecks[0]
   const bottleneck = b === undefined ? undefined : `「${b.node}」占所有阶段时长的 ${Math.round(b.share * 100)}%，其中 ${PART_NAMES[b.part]} 占比最大`
-  const prompt = improvePrompt({ workflow: o.workflow, tasks: rows.map(r => r.id), signals: scope.signals, omitted: scope.omitted, candidates, roleTemplates, ...(bottleneck === undefined ? {} : { bottleneck }) })
+  const prompt = improvePrompt({
+    workflow: o.workflow,
+    tasks: rows.map(r => r.id),
+    signals: scope.signals,
+    omitted: scope.omitted,
+    candidates,
+    roleTemplates,
+    ...(bottleneck === undefined ? {} : { bottleneck }),
+  })
 
   const t = o.conventions.lookup()(IMPROVER)
   if (t === undefined) return { ok: false, cause: 'config', error: `平台上没有可用的 Agent 模板「${IMPROVER}」` }
@@ -114,9 +124,14 @@ const callAndStore = async (
         if (e.kind === 'tool_start') tools.push(e.name)
         else if (e.kind === 'model') tools.push(...e.toolCalls.map(c => c.name))
       },
-      key: `improve/${run}`, nonce: `improve/${run}`, prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
+      key: `improve/${run}`,
+      nonce: `improve/${run}`,
+      prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
       spec: {
-        model: t.template.model, ...(t.template.effort === undefined ? {} : { effort: t.template.effort }), write: 'none', cwd,
+        model: t.template.model,
+        ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
+        write: 'none',
+        cwd,
         profile: { denyTools: [...TOOL_GROUPS], skills: [], mcp: [], background: false },
       },
       ask: async () => '不回答提问：请只根据消息里的证据和约定内容给出提案。',
@@ -136,7 +151,13 @@ const callAndStore = async (
   const call = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reply: reply.text }
 
   if (tools.length > 0) {
-    return { ok: false, cause: 'upstream', error: `${IMPROVER} 调用了工具（${[...new Set(tools)].join('、')}）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库`, run, call }
+    return {
+      ok: false,
+      cause: 'upstream',
+      error: `${IMPROVER} 调用了工具（${[...new Set(tools)].join('、')}）：需要的内容都在消息里，调用工具说明它可能被证据里的文字引导了，这次生成作废，没有提案入库`,
+      run,
+      call,
+    }
   }
   const parsed = parseProposals(reply.text, { targets: candidates, signals: new Set(scope.signals.map(s => s.id)) })
   if (!parsed.ok) return { ok: false, cause: 'upstream', error: `${IMPROVER} 的回复无法解析：${parsed.error}`, run, call }
@@ -158,11 +179,19 @@ const callAndStore = async (
       refused.push({ index: p.index, target: p.target, errors: perms })
       continue
     }
-    const r = proposals.add({
-      target: p.target, baseVersion: c.version, content: p.content, rationale: p.rationale, evidence: p.evidence,
-      scope: { workflow: o.workflow, tasks: rows.map(x => x.id) },
-      generator: { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, run }, actor: o.actor,
-    }, o.now())
+    const r = proposals.add(
+      {
+        target: p.target,
+        baseVersion: c.version,
+        content: p.content,
+        rationale: p.rationale,
+        evidence: p.evidence,
+        scope: { workflow: o.workflow, tasks: rows.map(x => x.id) },
+        generator: { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, run },
+        actor: o.actor,
+      },
+      o.now(),
+    )
     if (r.ok) created.push(r.row)
     else refused.push({ index: p.index, target: p.target, errors: r.errors })
   }

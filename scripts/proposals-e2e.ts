@@ -31,10 +31,17 @@ const RULE_DEV = '\n  - 团队规则：每个导出的函数都要写 JSDoc 注�
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
-  cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }, stdio: ['ignore', 'inherit', 'inherit'],
+  cwd: ROOT,
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  stdio: ['ignore', 'inherit', 'inherit'],
 })
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -63,9 +70,19 @@ const waitDone = async (id: string) => {
 const checks: Record<string, boolean> = {}
 const facts: Record<string, unknown> = {}
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+  for (let i = 0; i < 60; i++) {
+    try {
+      await fetch(base + '/api/tasks')
+      break
+    } catch {
+      await sleep(500)
+    }
+  }
   const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
-  const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE_REVIEW, note: 'E2E：团队规则只写在评审模板里' })).body as { ok: boolean; version?: number }
+  const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE_REVIEW, note: 'E2E：团队规则只写在评审模板里' })).body as {
+    ok: boolean
+    version?: number
+  }
   if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
 
   const a = await runTask('在 src/sum.js 里实现并导出 sum(numbers)：返回数组的和，空数组返回 0；为它写 node:test 测试放在 test/ 目录，`npm test` 必须通过。')
@@ -76,8 +93,13 @@ try {
   const dev1 = store.convention('template', 'developer')!
   const before = JSON.stringify(['workflow', 'doc', 'template', 'skill'].map(k => store.conventions(k as never)))
   const input = (rationale: string): ProposalInput => ({
-    target: { kind: 'template', name: 'developer' }, baseVersion: dev1.version, content: dev1.content.trimEnd() + RULE_DEV, rationale,
-    evidence: ['(E2E 手工写入)'], scope: { workflow: 'standard', tasks: [a] }, actor: 'e2e',
+    target: { kind: 'template', name: 'developer' },
+    baseVersion: dev1.version,
+    content: dev1.content.trimEnd() + RULE_DEV,
+    rationale,
+    evidence: ['(E2E 手工写入)'],
+    scope: { workflow: 'standard', tasks: [a] },
+    actor: 'e2e',
   })
   const ids = ['评审反复要求导出函数补 @example，开发模板里没有这条规则', '重复的提案（用来验证过期）', '要被拒绝的提案'].map(r => {
     const x = proposals.add(input(r), Date.now())
@@ -92,8 +114,11 @@ try {
   const stale = await post(`/api/improve/proposals/${ids[1]}/approve`, {})
   const rejected = await post(`/api/improve/proposals/${ids[2]}/reject`, { reason: '和 #1 重复' })
   facts.responses = { approved, stale, rejected }
-  checks['批准返回 200，developer 第 2 版的备注写明提案号'] = approved.status === 200 && (approved.body as DecideResponse).ok
-    && store.convention('template', 'developer')!.version === 2 && store.convention('template', 'developer')!.note === `改进提案 #${ids[0]}：评审反复要求导出函数补 @example，开发模板里没有这条规则；E2E`
+  checks['批准返回 200，developer 第 2 版的备注写明提案号'] =
+    approved.status === 200 &&
+    (approved.body as DecideResponse).ok &&
+    store.convention('template', 'developer')!.version === 2 &&
+    store.convention('template', 'developer')!.note === `改进提案 #${ids[0]}：评审反复要求导出函数补 @example，开发模板里没有这条规则；E2E`
   checks['基于旧版本的第二条提案批准时返回 409 并过期'] = stale.status === 409 && /已过期/.test((stale.body as { error: string }).error)
   checks['拒绝返回 200'] = rejected.status === 200
 
@@ -107,10 +132,14 @@ try {
   const taskA = store.get(a)!
   const taskB = store.get(b)!
   checks['A、B 都完成'] = doneA.status === 'done' && doneB.status === 'done'
-  checks['A 用 developer 第 1 版（创建时的快照，批准不影响进行中的任务），提示词里没有规则'] = taskA.workflow.roles.developer?.template?.version === 1
-    && !taskA.workflow.roles.developer!.prompt.includes('@example') && store.meta(a).conventions?.templates?.find(t => t.name === 'developer')?.version === 1
-  checks['B 用 developer 第 2 版，提示词里有规则'] = taskB.workflow.roles.developer?.template?.version === 2
-    && taskB.workflow.roles.developer!.prompt.includes('@example') && store.meta(b).conventions?.templates?.find(t => t.name === 'developer')?.version === 2
+  checks['A 用 developer 第 1 版（创建时的快照，批准不影响进行中的任务），提示词里没有规则'] =
+    taskA.workflow.roles.developer?.template?.version === 1 &&
+    !taskA.workflow.roles.developer!.prompt.includes('@example') &&
+    store.meta(a).conventions?.templates?.find(t => t.name === 'developer')?.version === 1
+  checks['B 用 developer 第 2 版，提示词里有规则'] =
+    taskB.workflow.roles.developer?.template?.version === 2 &&
+    taskB.workflow.roles.developer!.prompt.includes('@example') &&
+    store.meta(b).conventions?.templates?.find(t => t.name === 'developer')?.version === 2
   facts.reviewChanges = { [a]: signalsOf(taskA).filter(s => s.kind === 'review_changes').length, [b]: signalsOf(taskB).filter(s => s.kind === 'review_changes').length }
   facts.proposals = list.map(p => ({ id: p.id, status: p.status, events: p.events, latestVersion: p.latestVersion }))
   store.close()

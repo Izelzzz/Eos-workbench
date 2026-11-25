@@ -20,7 +20,8 @@ const REPO = join(OUT, 'repo')
 const DATA = join(OUT, 'data')
 const port = Number(process.argv[2] ?? 4320)
 const base = `http://127.0.0.1:${port}`
-const REQUEST = '在 src/slugify.js 实现并导出 slugify(text)：把标题转换成适合放进 URL 的短字符串，用 node:test 写测试，npm test 必须通过。中文、emoji 和长度上限怎么处理我还没想好，有不确定、而且会影响实现的地方先问我。'
+const REQUEST =
+  '在 src/slugify.js 实现并导出 slugify(text)：把标题转换成适合放进 URL 的短字符串，用 node:test 写测试，npm test 必须通过。中文、emoji 和长度上限怎么处理我还没想好，有不确定、而且会影响实现的地方先问我。'
 
 const note = (s: string) => {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
@@ -32,13 +33,22 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(join(REPO), { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 /** 启动 eos web，作为独立进程组，方便整个组一起杀掉（连同它启动的 dsh 子进程）。 */
 const startServer = async (n: number): Promise<ChildProcess> => {
   const out = openSync(join(OUT, `server-${n}.log`), 'a')
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)],
-    { cwd: ROOT, detached: true, stdio: ['ignore', out, out], env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' } })
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  })
   for (let i = 0; i < 60; i++) {
     try {
       if ((await fetch(`${base}/api/tasks`)).ok) return child
@@ -79,7 +89,7 @@ let answered = 0
 const until = Date.now() + 25 * 60_000
 while (Date.now() < until) {
   const form = page.getByRole('form', { name: '回答提问' })
-  if (await form.count() > 0 && await form.locator('.options button').count() > 0) {
+  if ((await form.count()) > 0 && (await form.locator('.options button').count()) > 0) {
     const q = await form.locator('.question-text').innerText()
     if (answered === 0) await snap('question')
     const choice = await form.locator('.options button').first().innerText()
@@ -107,7 +117,11 @@ while (Date.now() < until) {
     // SIGKILL 是异步生效的：每 0.5 秒看一次组里剩下的进程和状态（Z 是已经死掉、等待回收的僵尸），最多 10 秒。
     const inGroup = (): string[] => {
       try {
-        return execFileSync('ps', ['-o', 'pid=,stat=,comm=', '-g', String(pgid)], { encoding: 'utf8' }).trim().split('\n').map(l => l.trim()).filter(Boolean)
+        return execFileSync('ps', ['-o', 'pid=,stat=,comm=', '-g', String(pgid)], { encoding: 'utf8' })
+          .trim()
+          .split('\n')
+          .map(l => l.trim())
+          .filter(Boolean)
       } catch {
         return []
       }
@@ -163,11 +177,11 @@ const checks = {
   '任务在页面上创建（created 由 web 发出）': events[0]?.actor === 'web',
   '提问全部在页面上回答（answered 都由 web 发出）': answered > 0 && events.filter(e => e.event.kind === 'answered' && e.accepted).every(e => e.actor === 'web'),
   'Web 服务被杀时开发正在进行': killed,
-  '重启后自动续跑这个任务': serverLog2.includes(`接着运行上次没跑完的任务：${id}`),
-  '任务完成': task.status === 'done',
-  '已完成的调用没有重复': new Set(calls).size === calls.length,
+  重启后自动续跑这个任务: serverLog2.includes(`接着运行上次没跑完的任务：${id}`),
+  任务完成: task.status === 'done',
+  已完成的调用没有重复: new Set(calls).size === calls.length,
   'worktree 里 npm test 通过': npmTest,
-  '页面没有脚本错误': errors.length === 0,
+  页面没有脚本错误: errors.length === 0,
   'agent 收到的正是页面上点的那些选项': (() => {
     // 每个 ask_user_question 工具结果里的 selected 值，必须和页面上点的选项一一对应。
     const received = store.trace(id).flatMap(r => {

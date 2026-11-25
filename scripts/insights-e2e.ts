@@ -24,10 +24,17 @@ const base = `http://127.0.0.1:${port}`
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
-  cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }, stdio: ['ignore', 'inherit', 'inherit'],
+  cwd: ROOT,
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  stdio: ['ignore', 'inherit', 'inherit'],
 })
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -40,10 +47,17 @@ const REQUESTS: [string, string][] = [
 ]
 
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+  for (let i = 0; i < 60; i++) {
+    try {
+      await fetch(base + '/api/tasks')
+      break
+    } catch {
+      await sleep(500)
+    }
+  }
   const ids: string[] = []
   for (const [workflow, request] of REQUESTS) {
-    const r = await post('/api/tasks', { repo: REPO, workflow, request }) as { ok: boolean; id?: string; error?: string }
+    const r = (await post('/api/tasks', { repo: REPO, workflow, request })) as { ok: boolean; id?: string; error?: string }
     if (!r.ok) throw new Error(`发起任务失败：${r.error}`)
     ids.push(r.id!)
   }
@@ -67,7 +81,9 @@ try {
     details.filter(d => d.workflow === wf).reduce((s, d) => s + (d.metrics.stages.find(x => x.node === node)?.[k] ?? 0), 0)
   checks['所有任务都完成'] = details.every(d => d.status === 'done')
   checks['任务数一致'] = ins.tasks.total === ids.length && ins.tasks.done === ids.length
-  checks['每个阶段的时长、agent 时长、调用数等于各任务之和'] = ins.byStage.every(s => s.wallMs === sumStage(s.workflow, s.node, 'wallMs') && s.agentMs === sumStage(s.workflow, s.node, 'agentMs') && s.calls === sumStage(s.workflow, s.node, 'calls'))
+  checks['每个阶段的时长、agent 时长、调用数等于各任务之和'] = ins.byStage.every(
+    s => s.wallMs === sumStage(s.workflow, s.node, 'wallMs') && s.agentMs === sumStage(s.workflow, s.node, 'agentMs') && s.calls === sumStage(s.workflow, s.node, 'calls'),
+  )
   checks['每个工作流的 token 等于各任务之和'] = ins.byWorkflow.every(w => w.usage.output === details.filter(d => d.workflow === w.workflow).reduce((s, d) => s + d.metrics.total.usage.output, 0))
   checks['按模板：standard 的三个内置模板都在，调用数等于各任务里这个角色的调用之和'] = ['spec-writer', 'developer', 'reviewer'].every(name => {
     const t = ins.byTemplate.find(x => x.name === name && x.template)
@@ -83,7 +99,9 @@ try {
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
   const errors: string[] = []
-  page.on('console', (m: any) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()) })
+  page.on('console', (m: any) => {
+    if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text())
+  })
   page.on('pageerror', (e: Error) => errors.push(e.message))
   await page.goto(`${base}/#/insights`)
   await page.waitForSelector('.insights .bottlenecks')
@@ -96,7 +114,13 @@ try {
   checks['页面没有脚本错误'] = errors.length === 0
   checks['手机宽度页面不横向滚动'] = overflow === 0
 
-  const report = { tasks: details.map(d => ({ id: d.id, workflow: d.workflow, status: d.status, calls: d.metrics.total.calls, wallMs: d.metrics.total.wallMs })), checks, bottleneckText, errors, insights: ins }
+  const report = {
+    tasks: details.map(d => ({ id: d.id, workflow: d.workflow, status: d.status, calls: d.metrics.total.calls, wallMs: d.metrics.total.wallMs })),
+    checks,
+    bottleneckText,
+    errors,
+    insights: ins,
+  }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) console.log(`${v ? '✓' : '✗'} ${k}`)
   console.log(bottleneckText.join('\n'))

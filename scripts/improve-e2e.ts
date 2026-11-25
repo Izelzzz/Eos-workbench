@@ -36,7 +36,12 @@ const eos = (...args: string[]) => {
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const get = async <T>(path: string): Promise<T> => (await (await fetch(base + path)).json()) as T
@@ -45,12 +50,30 @@ const post = async (path: string, body: unknown) => (await fetch(base + path, { 
 const web = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], { cwd: ROOT, env, stdio: ['ignore', 'inherit', 'inherit'] })
 const ids: string[] = []
 try {
-  for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/tasks'); break } catch { await sleep(500) } }
+  for (let i = 0; i < 60; i++) {
+    try {
+      await fetch(base + '/api/tasks')
+      break
+    } catch {
+      await sleep(500)
+    }
+  }
   const reviewer = await get<{ versions: { content: string }[] }>('/api/conventions/template/reviewer')
-  const saved = await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' }) as { ok: boolean; version?: number }
+  const saved = (await post('/api/conventions/template/reviewer', { content: reviewer.versions[0]!.content.trimEnd() + RULE, note: 'E2E：团队规则只写在评审模板里' })) as {
+    ok: boolean
+    version?: number
+  }
   if (!saved.ok || saved.version !== 2) throw new Error(`保存 reviewer 模板失败：${JSON.stringify(saved)}`)
-  for (const [file, fn, spec] of [['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'], ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'], ['avg', 'avg(numbers)', '返回平均值，空数组返回 0']]) {
-    const r = await post('/api/tasks', { repo: REPO, workflow: 'standard', request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。` }) as { ok: boolean; id?: string; error?: string }
+  for (const [file, fn, spec] of [
+    ['sum', 'sum(numbers)', '返回数组的和，空数组返回 0'],
+    ['max', 'max(numbers)', '返回最大值，空数组抛出 RangeError'],
+    ['avg', 'avg(numbers)', '返回平均值，空数组返回 0'],
+  ]) {
+    const r = (await post('/api/tasks', {
+      repo: REPO,
+      workflow: 'standard',
+      request: `在 src/${file}.js 里实现并导出 ${fn}：${spec}；为它写 node:test 测试放在 test/ 目录，\`npm test\` 必须通过。`,
+    })) as { ok: boolean; id?: string; error?: string }
     if (!r.ok) throw new Error(`发起任务失败：${r.error}`)
     ids.push(r.id!)
   }
@@ -83,24 +106,36 @@ checks['生成提案没有改任何约定'] = snapshot() === before
 const ids_ = new Set(ev.signals.map(s => s.id))
 const targets = ev.targets.filter(t => t.affected > 0)
 checks['每条提案引用的证据都是程序归纳出的证据'] = proposals.every(p => p.evidence.length > 0 && p.evidence.every(id => ids_.has(id)))
-checks['每条提案的目标都是有证据的约定，基于当前版本'] = proposals.every(p => targets.some(t => t.kind === p.target.kind && t.name === p.target.name) && store.convention(p.target.kind, p.target.name)!.version === p.baseVersion)
-checks['每条提案的内容能通过保存校验，不改权限'] = proposals.every(p => conventions.validate(p.target.kind, p.target.name, p.content).length === 0
-  && permissionChanges(p.target.kind, store.convention(p.target.kind, p.target.name)!.content, p.content, conventions.lookup()).length === 0)
+checks['每条提案的目标都是有证据的约定，基于当前版本'] = proposals.every(
+  p => targets.some(t => t.kind === p.target.kind && t.name === p.target.name) && store.convention(p.target.kind, p.target.name)!.version === p.baseVersion,
+)
+checks['每条提案的内容能通过保存校验，不改权限'] = proposals.every(
+  p =>
+    conventions.validate(p.target.kind, p.target.name, p.content).length === 0 &&
+    permissionChanges(p.target.kind, store.convention(p.target.kind, p.target.name)!.content, p.content, conventions.lookup()).length === 0,
+)
 checks['每条提案记下了生成它的模型调用'] = proposals.every(p => p.generator !== undefined && p.generator.usage.output > 0 && p.generator.run !== undefined)
 const found = proposals.find(p => (p.target.kind === 'template' && p.target.name === 'developer') || p.target.kind === 'doc')
-checks['至少一条提案把 @example 规则写进 developer 模板或约定文档'] = found !== undefined && found.content.includes('@example') && !store.convention(found.target.kind, found.target.name)!.content.includes('@example')
+checks['至少一条提案把 @example 规则写进 developer 模板或约定文档'] =
+  found !== undefined && found.content.includes('@example') && !store.convention(found.target.kind, found.target.name)!.content.includes('@example')
 
 const pick = found ?? proposals.at(-1)
 const approve = pick === undefined ? { code: -1, out: '' } : eos('approve', String(pick.id), 'E2E 批准')
 const after = pick === undefined ? undefined : store.convention(pick.target.kind, pick.target.name)
-checks['eos approve 生成了新版本，备注写明提案号'] = approve.code === 0 && pick !== undefined && after!.version === pick.baseVersion + 1 && after!.content === pick.content && after!.note.startsWith(`改进提案 #${pick.id}：`)
+checks['eos approve 生成了新版本，备注写明提案号'] =
+  approve.code === 0 && pick !== undefined && after!.version === pick.baseVersion + 1 && after!.content === pick.content && after!.note.startsWith(`改进提案 #${pick.id}：`)
 const list = eos('proposals')
 checks['eos proposals 显示已批准'] = list.code === 0 && pick !== undefined && list.out.includes(`#${pick.id}  已批准`)
 
 const report = {
-  tasks: ids, signals: ev.signals.map(s => ({ id: s.id, kind: s.kind, role: s.role, text: s.text.slice(0, 300) })),
-  improve: improve.out, approve: approve.out, proposalsList: list.out,
-  proposals: store.proposals().map(p => ({ id: p.id, target: p.target, baseVersion: p.baseVersion, status: p.status, rationale: p.rationale, evidence: p.evidence, generator: p.generator, content: p.content })),
+  tasks: ids,
+  signals: ev.signals.map(s => ({ id: s.id, kind: s.kind, role: s.role, text: s.text.slice(0, 300) })),
+  improve: improve.out,
+  approve: approve.out,
+  proposalsList: list.out,
+  proposals: store
+    .proposals()
+    .map(p => ({ id: p.id, target: p.target, baseVersion: p.baseVersion, status: p.status, rationale: p.rationale, evidence: p.evidence, generator: p.generator, content: p.content })),
   checks,
 }
 store.close()

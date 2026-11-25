@@ -12,7 +12,12 @@ const wf = (v: number): Workflow => {
 }
 
 /** bumpy：一次补齐、评审要求修改一次；retry：评审第一次回复格式不对；clean：一次通过；open：停在第一个调用；failed：第一个调用失败。 */
-const sample = (id: string, v: number, kind: 'bumpy' | 'clean' | 'retry' | 'open' | 'failed', used: CompareSample['used'] = { workflow: { version: v }, skills: [{ name: 'write-changes', version: v }] }): CompareSample => {
+const sample = (
+  id: string,
+  v: number,
+  kind: 'bumpy' | 'clean' | 'retry' | 'open' | 'failed',
+  used: CompareSample['used'] = { workflow: { version: v }, skills: [{ name: 'write-changes', version: v }] },
+): CompareSample => {
   const d = new Driver(wf(v), [{ name: '研发约定', version: v, content: '' }])
   d.task = { ...d.task, id }
   if (kind === 'failed') d.send({ kind: 'call_failed', call: d.pending.id, error: '网络断了' })
@@ -39,13 +44,27 @@ const sample = (id: string, v: number, kind: 'bumpy' | 'clean' | 'retry' | 'open
 
 test('only the version right before and the approved version are compared; failed and running tasks stay out; format retries are not review rounds', () => {
   const samples = [
-    sample('a1', 1, 'bumpy'), sample('a2', 1, 'bumpy'), sample('a3', 1, 'retry'),
-    sample('b1', 2, 'clean'), sample('b2', 2, 'clean'), sample('b3', 2, 'bumpy'),
-    sample('old', 0, 'bumpy'), sample('later', 3, 'clean'), sample('run', 2, 'open'), sample('f', 2, 'failed'),
+    sample('a1', 1, 'bumpy'),
+    sample('a2', 1, 'bumpy'),
+    sample('a3', 1, 'retry'),
+    sample('b1', 2, 'clean'),
+    sample('b2', 2, 'clean'),
+    sample('b3', 2, 'bumpy'),
+    sample('old', 0, 'bumpy'),
+    sample('later', 3, 'clean'),
+    sample('run', 2, 'open'),
+    sample('f', 2, 'failed'),
   ]
   const c = compare(samples, { kind: 'template', name: 'developer' }, 2)
-  assert.deepEqual(c.before.outcomes.map(o => o.task), ['a1', 'a2', 'a3'])
-  assert.deepEqual(c.after.outcomes.map(o => o.task), ['b1', 'b2', 'b3'], 'versions other than 1 and 2 are not part of this change')
+  assert.deepEqual(
+    c.before.outcomes.map(o => o.task),
+    ['a1', 'a2', 'a3'],
+  )
+  assert.deepEqual(
+    c.after.outcomes.map(o => o.task),
+    ['b1', 'b2', 'b3'],
+    'versions other than 1 and 2 are not part of this change',
+  )
   assert.deepEqual([c.failed, c.enough, c.min], [['f'], true, MIN_SAMPLES])
   const [a1, , a3] = c.before.outcomes
   assert.deepEqual([a1!.reviews, a1!.checkFailures, a1!.fixes, a1!.signals], [2, 1, 1, 2])
@@ -72,7 +91,12 @@ test('fewer than the minimum is not enough; doc, skill and workflow targets read
 
 test('a task whose snapshot has no template info falls back to the versions recorded in its metadata', () => {
   const s = sample('old', 1, 'clean', { templates: [{ name: 'developer', version: 1 }] })
-  const roles = Object.fromEntries(Object.entries(s.task.workflow.roles).map(([k, r]) => { const { template: _t, ...rest } = r; return [k, rest] }))
+  const roles = Object.fromEntries(
+    Object.entries(s.task.workflow.roles).map(([k, r]) => {
+      const { template: _t, ...rest } = r
+      return [k, rest]
+    }),
+  )
   const old = { ...s, task: { ...s.task, workflow: { ...s.task.workflow, roles } as Workflow } }
   assert.equal(versionUsed(old, 'template', 'developer'), 1)
   assert.equal(versionUsed({ ...old, used: {} }, 'template', 'developer'), null)

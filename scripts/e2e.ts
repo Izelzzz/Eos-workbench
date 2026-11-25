@@ -67,47 +67,47 @@ const setupRepo = () => {
 
 const cli = (args: string[]) => spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env })
 
-const answer = (id: string, text: string) =>
-  execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'answer', id, text, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
+const answer = (id: string, text: string) => execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'answer', id, text, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
 
 /** 运行一个 CLI 进程，遇到提问就回答；killAfter 匹配到某一行时 SIGKILL。返回任务 id 与是否被杀。 */
-const drive = (args: string[], opts: { killAfter?: RegExp } = {}) => new Promise<{ id: string; killed: boolean }>((resolve, reject) => {
-  const child = cli(args)
-  let id = args[0] === 'resume' ? args[1]! : ''
-  let buffer = ''
-  let killed = false
-  const onLine = (line: string) => {
-    const created = /^任务 (t\w+)：工作流/.exec(line)
-    if (created) id = created[1]!
-    if (line.startsWith('？ agent 提问')) {
-      // 有选项就选第一个（原文照抄，执行器才会按"选中选项"回传），没有选项才回答 sum。
-      const options = /（选项：(.+)）$/.exec(line)?.[1]?.split(' / ')
-      const reply = options?.[0] ?? 'sum'
-      const out = answer(id, reply)
-      record(`[e2e] 用户回答「${reply}」：${out}`)
+const drive = (args: string[], opts: { killAfter?: RegExp } = {}) =>
+  new Promise<{ id: string; killed: boolean }>((resolve, reject) => {
+    const child = cli(args)
+    let id = args[0] === 'resume' ? args[1]! : ''
+    let buffer = ''
+    let killed = false
+    const onLine = (line: string) => {
+      const created = /^任务 (t\w+)：工作流/.exec(line)
+      if (created) id = created[1]!
+      if (line.startsWith('？ agent 提问')) {
+        // 有选项就选第一个（原文照抄，执行器才会按"选中选项"回传），没有选项才回答 sum。
+        const options = /（选项：(.+)）$/.exec(line)?.[1]?.split(' / ')
+        const reply = options?.[0] ?? 'sum'
+        const out = answer(id, reply)
+        record(`[e2e] 用户回答「${reply}」：${out}`)
+      }
+      if (line.startsWith('待回答')) {
+        const out = answer(id, '按评审意见改，保留 sum 这个名字')
+        record(`[e2e] 用户回答对话尽头的问题：${out}`)
+      }
+      if (!killed && opts.killAfter?.test(line)) {
+        killed = true
+        record(`\n[e2e] 匹配到「${line}」，SIGKILL runner（pid ${child.pid}）\n\n`)
+        child.kill('SIGKILL')
+      }
     }
-    if (line.startsWith('待回答')) {
-      const out = answer(id, '按评审意见改，保留 sum 这个名字')
-      record(`[e2e] 用户回答对话尽头的问题：${out}`)
+    const take = (chunk: Buffer) => {
+      record(chunk.toString())
+      buffer += chunk.toString()
+      const lines = buffer.split('\n')
+      buffer = lines.pop()!
+      lines.forEach(onLine)
     }
-    if (!killed && opts.killAfter?.test(line)) {
-      killed = true
-      record(`\n[e2e] 匹配到「${line}」，SIGKILL runner（pid ${child.pid}）\n\n`)
-      child.kill('SIGKILL')
-    }
-  }
-  const take = (chunk: Buffer) => {
-    record(chunk.toString())
-    buffer += chunk.toString()
-    const lines = buffer.split('\n')
-    buffer = lines.pop()!
-    lines.forEach(onLine)
-  }
-  child.stdout.on('data', take)
-  child.stderr.on('data', take)
-  child.on('error', reject)
-  child.on('exit', () => resolve({ id, killed }))
-})
+    child.stdout.on('data', take)
+    child.stderr.on('data', take)
+    child.on('error', reject)
+    child.on('exit', () => resolve({ id, killed }))
+  })
 
 const remote = REMOTE === undefined ? undefined : parseRemote(defaultForges(), REMOTE)
 if (REMOTE !== undefined && remote === undefined) throw new Error(`认不出 EOS_E2E_REPO：${REMOTE}`)
@@ -155,10 +155,18 @@ function remoteChecks(): Record<string, boolean> {
   const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? files(join(d, e.name)) : e.isFile() ? [join(d, e.name)] : []))
   // 原始令牌，和它在认证头里的 base64 形式。
   const forms = GIT_TOKEN === undefined ? [] : [GIT_TOKEN, Buffer.from(`x-access-token:${GIT_TOKEN}`).toString('base64')]
-  const leaked = files(DATA).filter(f => { const b = readFileSync(f); return forms.some(x => b.includes(x)) })
+  const leaked = files(DATA).filter(f => {
+    const b = readFileSync(f)
+    return forms.some(x => b.includes(x))
+  })
   const localHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim()
-  const remoteHead = execFileSync('git', ['ls-remote', remote!.repo.cloneUrl, `refs/heads/${meta.branch}`], { encoding: 'utf8' }).split('\t')[0]!.trim()
-  const pushResult = task.log.flatMap(e => (e.type === 'check' ? e.results : [])).filter(r => r.check.kind === 'platform').at(-1)
+  const remoteHead = execFileSync('git', ['ls-remote', remote!.repo.cloneUrl, `refs/heads/${meta.branch}`], { encoding: 'utf8' })
+    .split('\t')[0]!
+    .trim()
+  const pushResult = task.log
+    .flatMap(e => (e.type === 'check' ? e.results : []))
+    .filter(r => r.check.kind === 'platform')
+    .at(-1)
   record(`\n[e2e] 本地任务分支 ${localHead}，远程 ${remoteHead}；推送检查：${pushResult?.detail ?? '（没有）'}\n`)
   const prLink = (pushResult?.links ?? []).find(l => l.kind === 'pull-request')
   // 再开一次（模拟重跑交付）和查这个分支打开的 PR：在走代理的子进程里调平台的同一个函数和 GitHub 的接口。
@@ -170,7 +178,13 @@ process.stdout.write(JSON.stringify({ again, openCount: Array.isArray(list) ? li
   let again: { reused: boolean; url: string } | undefined
   let openCount = -1
   try {
-    const out = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', probe], { cwd: ROOT, env: { ...process.env, NODE_USE_ENV_PROXY: '1', EOS_PROBE_TOKEN: GIT_TOKEN ?? '' }, encoding: 'utf8' })) as { again: { reused: boolean; url: string }; openCount: number }
+    const out = JSON.parse(
+      execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', probe], {
+        cwd: ROOT,
+        env: { ...process.env, NODE_USE_ENV_PROXY: '1', EOS_PROBE_TOKEN: GIT_TOKEN ?? '' },
+        encoding: 'utf8',
+      }),
+    ) as { again: { reused: boolean; url: string }; openCount: number }
     again = out.again
     openCount = out.openCount
   } catch (e) {
@@ -180,11 +194,11 @@ process.stdout.write(JSON.stringify({ again, openCount: Array.isArray(list) ? li
   record(`[e2e] PR：${prLink?.url ?? '（没有）'}；再开一次：${JSON.stringify(again)}；这个分支打开的 PR：${openCount} 个\n`)
   if (leaked.length > 0) record(`\n[e2e] 令牌出现在：${leaked.join('、')}\n`)
   return {
-    '任务记下了远程仓库': JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
+    任务记下了远程仓库: JSON.stringify(meta.remote) === JSON.stringify(remote!.repo),
     'worktree 建在平台数据目录里的镜像上': meta.repo.startsWith(join(DATA, 'repos')),
     '数据目录里找不到令牌和认证头（数据库、镜像、worktree、dsh 会话、日志）': GIT_TOKEN !== undefined && leaked.length === 0,
-    '远程的任务分支和本地任务分支是同一个提交': remoteHead === localHead && localHead !== '',
-    '推送检查通过并带着分支链接': pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === remote!.forge.branchUrl(remote!.repo, meta.branch)),
+    远程的任务分支和本地任务分支是同一个提交: remoteHead === localHead && localHead !== '',
+    推送检查通过并带着分支链接: pushResult?.passed === true && (pushResult.links ?? []).some(l => l.url === remote!.forge.branchUrl(remote!.repo, meta.branch)),
     '开了 PR，检查结果带着 PR 链接': prLink !== undefined && /\/pull\/\d+$/.test(prLink.url),
     '同一个分支再开一次：复用同一个 PR，GitHub 上这个分支打开的 PR 只有一个': again?.reused === true && again.url === prLink?.url && openCount === 1,
   }
@@ -196,7 +210,10 @@ const sessionLog = (session: string) => {
   const root = join(DATA, 'dsh', 'sessions')
   const dir = readdirSync(root).find(d => existsSync(join(root, d, sid)))!
   const events = parseSessionLog(readFileSync(join(root, dir, sid, 'session.v4.jsonl.zstd'))) ?? []
-  const calls = events.filter(e => e.type === 'user/message').map(e => /eos:[^/]+\/(c\d+) -->/.exec(JSON.stringify(e.data))?.[1]).filter(Boolean)
+  const calls = events
+    .filter(e => e.type === 'user/message')
+    .map(e => /eos:[^/]+\/(c\d+) -->/.exec(JSON.stringify(e.data))?.[1])
+    .filter(Boolean)
   const presets = events.filter(e => e.type === 'permission/preset').map(e => e.data?.preset ?? e.data?.name)
   const asks = events.filter(e => e.type === 'tool/call' && e.data?.name === 'ask_user_question').length
   return { sid, calls, presets, asks }
@@ -204,10 +221,11 @@ const sessionLog = (session: string) => {
 const sessions = Object.fromEntries(['plan', 'build', 'review'].map(s => [s, sessionLog(s)]))
 const devCalls = calls.filter(c => c.role === 'developer').map(c => c.call)
 const checks = {
-  '任务完成': task.status === 'done',
+  任务完成: task.status === 'done',
   '评审至少打回一次，开发回应': calls.some(c => c.purpose === 'respond'),
   '开发的每次调用都在同一个 dsh 会话里': devCalls.length >= 2 && devCalls.every(c => sessions.build!.calls.includes(c)),
-  '规划和评审是只读档位，开发是 workspace-write': sessions.plan!.presets.at(-1) === 'read-only' && sessions.review!.presets.at(-1) === 'read-only' && sessions.build!.presets.at(-1) === 'workspace-write',
+  '规划和评审是只读档位，开发是 workspace-write':
+    sessions.plan!.presets.at(-1) === 'read-only' && sessions.review!.presets.at(-1) === 'read-only' && sessions.build!.presets.at(-1) === 'workspace-write',
   'agent 主动提问并收到回答': task.log.some(e => e.type === 'question' && e.question.source === 'agent') && task.log.some(e => e.type === 'answer'),
   '杀进程后续跑：没有重复记录同一个调用': new Set(ids).size === ids.length,
   '耗时和 token 都有记录': calls.every(c => c.ms > 0 && c.usage.input + c.usage.cacheRead > 0),
@@ -215,7 +233,16 @@ const checks = {
   ...(remote === undefined ? {} : remoteChecks()),
 }
 const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
-const result = { task: first.id, killed: first.killed, checks, sessions, rejectedReplies: resent, calls: calls.map(c => `${c.call} ${c.purpose}@${c.node}${c.round ? `#${c.round}` : ''} ${c.ms}ms`), commits: execFileSync('git', ['log', '--oneline', `${meta.baseSha}..HEAD`], { cwd: meta.worktree, encoding: 'utf8' }), npmTest: testRun.out }
+const result = {
+  task: first.id,
+  killed: first.killed,
+  checks,
+  sessions,
+  rejectedReplies: resent,
+  calls: calls.map(c => `${c.call} ${c.purpose}@${c.node}${c.round ? `#${c.round}` : ''} ${c.ms}ms`),
+  commits: execFileSync('git', ['log', '--oneline', `${meta.baseSha}..HEAD`], { cwd: meta.worktree, encoding: 'utf8' }),
+  npmTest: testRun.out,
+}
 writeFileSync(join(E2E, 'report.json'), JSON.stringify(result, null, 2))
 record(`\n[e2e] 结果：\n${JSON.stringify(result, null, 2)}\n`)
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1)

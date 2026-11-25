@@ -20,12 +20,17 @@ export const relPath = text.refine(p => !p.startsWith('/') && !/^[A-Za-z]:/.test
   error: '必须是 worktree 内的相对路径，用 / 分隔，不能以 / 开头，也不能包含 .. 或反斜杠',
 })
 
-const mcpServer = z.object({
-  name: z.string({ error: '必须是文字' }).regex(MCP_NAME, { error: '只能用字母、数字、下划线和连字符，最长 32 个字符' }),
-  command: text,
-  args: z.array(text, { error: '必须是列表' }).default([]),
-  env: z.record(z.string(), z.string({ error: '必须是文字' }), { error: '必须是对象' }).default({}),
-}, { error: '必须是对象，例如 { name: docs, command: node, args: [server.mjs] }' }).strict()
+const mcpServer = z
+  .object(
+    {
+      name: z.string({ error: '必须是文字' }).regex(MCP_NAME, { error: '只能用字母、数字、下划线和连字符，最长 32 个字符' }),
+      command: text,
+      args: z.array(text, { error: '必须是列表' }).default([]),
+      env: z.record(z.string(), z.string({ error: '必须是文字' }), { error: '必须是对象' }).default({}),
+    },
+    { error: '必须是对象，例如 { name: docs, command: node, args: [server.mjs] }' },
+  )
+  .strict()
 
 /** 模板和直接写的角色共用的字段。 */
 export const agentFields = {
@@ -34,9 +39,15 @@ export const agentFields = {
   prompt: text,
   write: z.enum(['none', 'worktree'], { error: '只能是 none 或 worktree' }).default('none'),
   writePaths: z.array(relPath, { error: '必须是路径列表，例如 [src/**, tests/**]' }).min(1, { error: '至少要有一个路径' }).optional(),
-  tools: z.object({
-    deny: z.array(z.enum(TOOL_GROUPS, { error: `只能是 ${TOOL_GROUPS.join('、')} 之一` }), { error: '必须是列表' }).default([]),
-  }, { error: '必须是对象，例如 { deny: [web, subagent] }' }).strict().default({ deny: [] }),
+  tools: z
+    .object(
+      {
+        deny: z.array(z.enum(TOOL_GROUPS, { error: `只能是 ${TOOL_GROUPS.join('、')} 之一` }), { error: '必须是列表' }).default([]),
+      },
+      { error: '必须是对象，例如 { deny: [web, subagent] }' },
+    )
+    .strict()
+    .default({ deny: [] }),
   skills: z.array(id, { error: '必须是技能名组成的列表' }).default([]),
   mcp: z.array(mcpServer, { error: '必须是列表' }).default([]),
 }
@@ -65,14 +76,13 @@ export const toAgentConfig = (a: AgentFieldsOut): AgentConfig => ({
   ...(a.effort === undefined ? {} : { effort: a.effort }),
   prompt: a.prompt,
   write: a.write,
-  writePaths: a.write === 'worktree' ? a.writePaths ?? ['**'] : [],
+  writePaths: a.write === 'worktree' ? (a.writePaths ?? ['**']) : [],
   denyTools: a.tools.deny,
   skills: a.skills,
   mcp: a.mcp.map((m): McpServer => ({ name: m.name, command: m.command, args: m.args, env: m.env })),
 })
 
-export const pathOf = (path: readonly PropertyKey[]): string =>
-  path.reduce<string>((acc, p) => (typeof p === 'number' ? `${acc}[${p}]` : acc === '' ? String(p) : `${acc}.${String(p)}`), '') || '(根)'
+export const pathOf = (path: readonly PropertyKey[]): string => path.reduce<string>((acc, p) => (typeof p === 'number' ? `${acc}[${p}]` : acc === '' ? String(p) : `${acc}.${String(p)}`), '') || '(根)'
 
 /** 解析时要带 { reportInput: true }：否则 issue.input 总是空的，类型写错也会被报成"缺少这个字段"。 */
 export const zodMessage = (issue: z.core.$ZodIssue): string => {
@@ -114,7 +124,8 @@ const skillHead = z.object({ name: id, description: text }, { error: '开头的 
 /** 技能：Markdown，开头是 --- 包住的 name 和 description（dsh 的 SKILL.md 格式），正文是技能内容。 */
 export const parseSkill = (source: string): SkillResult => {
   const m = FRONTMATTER.exec(source)
-  if (m === null) return { ok: false, errors: [{ path: '(开头)', message: '技能要以 --- 开头，写上 name 和 description，再用 --- 结束，例如：\n---\nname: write-changes\ndescription: 写改动说明时使用\n---' }] }
+  if (m === null)
+    return { ok: false, errors: [{ path: '(开头)', message: '技能要以 --- 开头，写上 name 和 description，再用 --- 结束，例如：\n---\nname: write-changes\ndescription: 写改动说明时使用\n---' }] }
   const y = yamlOf(m[1]!)
   if (!y.ok) return y
   const head = skillHead.safeParse(y.value, { reportInput: true })

@@ -24,11 +24,21 @@ const links = await p1.locator('dl.where a').evaluateAll(as => as.map(a => [a.te
 await p1.locator('dl.where').screenshot({ path: join(dir, 'task-links.png') })
 
 const p2 = await page()
-await p2.route(`**/api/tasks/${id}/changes`, r => r.fulfill({ json: { base: '86149f886082aaaa', head: 'f'.repeat(40), omitted: 0, files: Array.from({ length: 25 }, (_, i) => ({ path: `src/f${i}.js`, status: 'added', add: 10, del: 0, binary: false })) } }))
+await p2.route(`**/api/tasks/${id}/changes`, r =>
+  r.fulfill({
+    json: { base: '86149f886082aaaa', head: 'f'.repeat(40), omitted: 0, files: Array.from({ length: 25 }, (_, i) => ({ path: `src/f${i}.js`, status: 'added', add: 10, del: 0, binary: false })) },
+  }),
+)
 await p2.goto(`${base}/#/tasks/${id}`)
 await p2.waitForSelector('section.changes .change-files')
-const notice = await p2.locator('section.changes .notice').innerText().catch(() => '')
-const href = await p2.locator('section.changes .notice a').getAttribute('href').catch(() => null)
+const notice = await p2
+  .locator('section.changes .notice')
+  .innerText()
+  .catch(() => '')
+const href = await p2
+  .locator('section.changes .notice a')
+  .getAttribute('href')
+  .catch(() => null)
 await p2.locator('section.changes').screenshot({ path: join(dir, 'large-changes.png') })
 
 const p3 = await page()

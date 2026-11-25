@@ -62,7 +62,13 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     try {
       res = await fetch(`${api}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}${path}`, {
         method: init.method ?? 'GET',
-        headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'eos-workbench', ...(token === undefined ? {} : { authorization: `Bearer ${token}` }), ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
+        headers: {
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': 'eos-workbench',
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+          ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       })
@@ -76,7 +82,8 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     } catch {
       body = undefined
     }
-    if (!res.ok && !(res.status === 422 && init.method === 'POST')) throw new ForgeError(explainApi(repo, init.method === 'POST' ? 'create' : 'list', res.status, body, credential, token !== undefined))
+    if (!res.ok && !(res.status === 422 && init.method === 'POST'))
+      throw new ForgeError(explainApi(repo, init.method === 'POST' ? 'create' : 'list', res.status, body, credential, token !== undefined))
     return { status: res.status, body }
   }
   const h = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -107,7 +114,10 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
       if (found !== undefined) return found
       // 这次推的提交已经通过某个 PR 合并了（例如之前开的 PR 合并后又重跑交付）：如实报告，不当成"没有差别"。
       const closed = await call(repo, token, credential, `/pulls?state=closed&head=${encodeURIComponent(`${repo.owner}:${p.head}`)}`)
-      const merged = z.array(closedPull).safeParse(closed.body).data?.find(x => x.merged_at != null && x.head.sha === p.sha)
+      const merged = z
+        .array(closedPull)
+        .safeParse(closed.body)
+        .data?.find(x => x.merged_at != null && x.head.sha === p.sha)
       if (merged !== undefined) return { merged: { number: merged.number, url: merged.html_url } }
       const created = await call(repo, token, credential, '/pulls', { method: 'POST', body: { title: p.title, head: p.head, base: p.base, body: p.body } })
       if (created.status === 422) {

@@ -49,12 +49,21 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
 writeFileSync(join(REPO, 'README.md'), README)
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
 
 const startServer = async (): Promise<ChildProcess> => {
   const out = openSync(join(OUT, 'server.log'), 'a')
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)],
-    { cwd: ROOT, detached: true, stdio: ['ignore', out, out], env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' } })
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  })
   for (let i = 0; i < 60; i++) {
     try {
       if ((await fetch(`${base}/api/tasks`)).ok) return child
@@ -112,10 +121,10 @@ let lastPosition = ''
 const until = Date.now() + 40 * 60_000
 while (Date.now() < until) {
   const form = page.getByRole('form', { name: '回答提问' })
-  if (await form.count() > 0) {
+  if ((await form.count()) > 0) {
     const q = await form.locator('.question-text').innerText()
     const option = form.locator('.options button').first()
-    if (await option.count() > 0) {
+    if ((await option.count()) > 0) {
       const choice = await option.innerText()
       await option.click()
       answers.push(choice)
@@ -153,14 +162,17 @@ const store = new Store(join(DATA, 'eos.db'))
 const task = store.get(id)!
 const revertEntry = task.log.find(e => e.type === 'call' && (e.reverted?.length ?? 0) > 0)
 if (revertEntry?.type === 'call') {
-  const row = page.locator(`.trace-row`).filter({ hasText: /developer · / }).nth(0)
+  const row = page
+    .locator(`.trace-row`)
+    .filter({ hasText: /developer · / })
+    .nth(0)
   await row.scrollIntoViewIfNeeded()
   await row.click()
   await snap('call-with-reverted-paths')
 }
 for (const name of [/skill/, /mcp__team-info__probe_code|mcp__/]) {
   const tool = page.locator('.trace-row.kind-tool').filter({ hasText: name }).first()
-  if (await tool.count() > 0) {
+  if ((await tool.count()) > 0) {
     await tool.scrollIntoViewIfNeeded()
     await tool.click()
     await snap(`tool-${String(name).replace(/\W+/g, '-').replace(/^-|-$/g, '')}`)
@@ -215,36 +227,57 @@ const SUBAGENT = ['subagent', 'subagent_fork', 'list_agents', 'send_message', 'w
 const SCHEDULE = ['schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view']
 const used = meta.conventions
 const checks = {
-  '模板在页面上改过并保存为第 2 版，历史里有第 1 版（内置）': store.conventionHistory('template', 'developer').map(r => r.version).join(',') === '2,1',
+  '模板在页面上改过并保存为第 2 版，历史里有第 1 版（内置）':
+    store
+      .conventionHistory('template', 'developer')
+      .map(r => r.version)
+      .join(',') === '2,1',
   '任务记录了用到的模板和技能版本（developer 第 2 版，spec-writer、reviewer 第 1 版，write-changes 第 1 版）':
-    JSON.stringify(used?.templates) === JSON.stringify([{ name: 'developer', version: 2 }, { name: 'reviewer', version: 1 }, { name: 'spec-writer', version: 1 }])
-    && JSON.stringify(used?.skills) === JSON.stringify([{ name: 'write-changes', version: 1 }]),
+    JSON.stringify(used?.templates) ===
+      JSON.stringify([
+        { name: 'developer', version: 2 },
+        { name: 'reviewer', version: 1 },
+        { name: 'spec-writer', version: 1 },
+      ]) && JSON.stringify(used?.skills) === JSON.stringify([{ name: 'write-changes', version: 1 }]),
   'MCP：开发调用了模板里的 MCP 工具，返回值来自这个服务': mcpCall !== undefined && (toolOutput(mcpCall.id)?.output ?? '').includes(MCP_CODE),
   'MCP：返回的编号写进了 docs/changes.md': changes.includes(MCP_CODE),
   '技能：开发用了模板给的 write-changes 技能': skillCall !== undefined,
   '技能隔离：开发只看到 write-changes，评审看不到任何技能': JSON.stringify(skillsSeen('build')) === JSON.stringify(['write-changes']) && skillsSeen('review').length === 0,
   '工具组：评审的 dsh 工具表里没有 web、subagent、schedule 组的任何工具': offered('review').length > 0 && !offered('review').some(t => [...WEB, ...SUBAGENT, ...SCHEDULE].includes(t)),
-  '工具组：开发的 dsh 工具表里没有 subagent、schedule 组的任何工具，但有 bash 和读写文件': offered('build').length > 0
-    && !offered('build').some(t => [...SUBAGENT, ...SCHEDULE].includes(t)) && ['bash', 'write', 'read', 'edit'].every(t => offered('build').includes(t)),
+  '工具组：开发的 dsh 工具表里没有 subagent、schedule 组的任何工具，但有 bash 和读写文件':
+    offered('build').length > 0 && !offered('build').some(t => [...SUBAGENT, ...SCHEDULE].includes(t)) && ['bash', 'write', 'read', 'edit'].every(t => offered('build').includes(t)),
   'MCP 只给开发：评审的工具表里没有 MCP 工具': offered('review').length > 0 && !offered('review').some(t => t.startsWith('mcp__')),
   '写入范围：越界改动（README.md）被撤销，记在调用上': reverted.some(c => c.reverted!.includes('README.md')),
   '写入范围：任务分支里 README.md 没被改，提交里没有它': readmeInBranch === README.trimEnd() && !branchFiles.includes('README.md'),
   '写入范围：撤销发生的那个会话的下一次调用，提示词以撤销说明开头并列出 README.md': noticeDelivered,
-  '任务完成': task.status === 'done',
+  任务完成: task.status === 'done',
   'worktree 里 npm test 通过': npmTest,
-  '页面没有脚本错误': errors.length === 0,
+  页面没有脚本错误: errors.length === 0,
 }
 const here = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim()
 const report = {
-  task: id, code: { commit: here('rev-parse', '--short', 'HEAD'), uncommitted: here('status', '--porcelain', '--', 'src', 'web/src', 'scripts', 'package.json').split('\n').filter(Boolean) },
-  status: task.status, failure: task.failure, answers,
+  task: id,
+  code: { commit: here('rev-parse', '--short', 'HEAD'), uncommitted: here('status', '--porcelain', '--', 'src', 'web/src', 'scripts', 'package.json').split('\n').filter(Boolean) },
+  status: task.status,
+  failure: task.failure,
+  answers,
   induced: ['需求要求开发先调用 MCP 工具 probe_code 并把编号写进 docs/changes.md', '需求要求写改动说明前先用 write-changes 技能', '需求要求改 README.md 第一行（在开发模板的写入范围之外）'],
-  conventions: used, reverted: reverted.map(c => ({ call: c.call, node: c.node, role: c.role, paths: c.reverted })), revertedSession,
+  conventions: used,
+  reverted: reverted.map(c => ({ call: c.call, node: c.node, role: c.role, paths: c.reverted })),
+  revertedSession,
   toolsOffered: { build: offered('build'), review: offered('review'), spec: offered('spec') },
   skillsOffered: { build: skillsSeen('build'), review: skillsSeen('review'), spec: skillsSeen('spec') },
-  developerTools: devTools.map(t => t.name), branchFiles,
-  timeline: task.log.flatMap(e => (e.type === 'call' ? [`${e.purpose}@${e.node}${e.reverted?.length ? `（撤销 ${e.reverted.join('、')}）` : ''}`] : e.type === 'check' ? [`check@${e.node}:${e.results.every(r => r.passed) ? '通过' : '没通过'}`] : [])),
-  checks, errors,
+  developerTools: devTools.map(t => t.name),
+  branchFiles,
+  timeline: task.log.flatMap(e =>
+    e.type === 'call'
+      ? [`${e.purpose}@${e.node}${e.reverted?.length ? `（撤销 ${e.reverted.join('、')}）` : ''}`]
+      : e.type === 'check'
+        ? [`check@${e.node}:${e.results.every(r => r.passed) ? '通过' : '没通过'}`]
+        : [],
+  ),
+  checks,
+  errors,
 }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 console.log(JSON.stringify(report, null, 2))

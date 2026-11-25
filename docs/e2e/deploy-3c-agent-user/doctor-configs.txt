@@ -1,0 +1,28 @@
+# 镜像 eos-workbench:agent-user-probe
+
+## compose 的配置（去掉全部能力，加回 SETUID、SETGID、KILL；Docker 默认 seccomp）
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境
+✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境
+✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到
+
+## 放开 seccomp 和 /proc 屏蔽（bwrap 能用）
+✓ 沙箱：bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp
+✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境
+✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境
+✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到
+
+## 同上，以平台的身份带着能力直接跑 bwrap（修之前 doctor 的做法），和清掉能力后跑
+带着能力：
+退出码 1
+清掉能力：
+bwrap: Unexpected capabilities but not setuid, old file caps config?
+退出码 0
+
+## 去掉 cap_add（切换不了用户）
+eos：切换不到平台用户 eos。容器要有 SETUID、SETGID、KILL 三个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」
+退出码 1
+
+## 只加回 SETUID、SETGID（没有 KILL）
+eos：切换不到平台用户 eos。容器要有 SETUID、SETGID、KILL 三个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」
+退出码 1

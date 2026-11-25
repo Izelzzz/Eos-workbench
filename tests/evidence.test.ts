@@ -65,13 +65,16 @@ const clean = (id: string, version = 1): Task => {
 test('signals come from the engine log in order, each judged against the right role and traceable to its log entry', () => {
   const task = bumpy()
   const s = signalsOf(task)
-  assert.deepEqual(s.map(x => [x.kind, x.node, x.role]), [
-    ['check_failed', 'build', 'dev'],
-    ['review_changes', 'review', 'dev'],
-    ['check_failed', 'review', 'dev'],
-    ['escalated', 'review', 'dev'],
-    ['format_retry', 'review', 'planner'],
-  ])
+  assert.deepEqual(
+    s.map(x => [x.kind, x.node, x.role]),
+    [
+      ['check_failed', 'build', 'dev'],
+      ['review_changes', 'review', 'dev'],
+      ['check_failed', 'review', 'dev'],
+      ['escalated', 'review', 'dev'],
+      ['format_retry', 'review', 'planner'],
+    ],
+  )
   assertPointsAtLog(task, s)
   assert.equal(new Set(s.map(x => x.id)).size, s.length, 'ids are unique')
   assert.match(s[0]!.text, /NOTES\.md.*没有通过\n缺少章节：改动/s)
@@ -88,11 +91,21 @@ test('each failing result of one check run is its own signal; passing results ar
   const run = d.checking
   const two = { ...run, checks: [run.checks[0]!, { kind: 'run' as const, run: ['npm', 'run', 'lint'], timeoutSec: 60 }, { kind: 'run' as const, run: ['true'], timeoutSec: 5 }] }
   d.task = { ...d.task, pending: two }
-  d.send({ kind: 'checked', call: run.id, ms: 1, results: [
-    { check: two.checks[0]!, passed: false, detail: '缺文件' }, { check: two.checks[1]!, passed: false, detail: 'lint 报错' }, { check: two.checks[2]!, passed: true, detail: '' },
-  ] })
+  d.send({
+    kind: 'checked',
+    call: run.id,
+    ms: 1,
+    results: [
+      { check: two.checks[0]!, passed: false, detail: '缺文件' },
+      { check: two.checks[1]!, passed: false, detail: 'lint 报错' },
+      { check: two.checks[2]!, passed: true, detail: '' },
+    ],
+  })
   const s = signalsOf(d.task).filter(x => x.kind === 'check_failed')
-  assert.deepEqual(s.map(x => x.id), ['m:2:0', 'm:2:1'])
+  assert.deepEqual(
+    s.map(x => x.id),
+    ['m:2:0', 'm:2:1'],
+  )
 })
 
 test('questions at the end of the loop, reverted writes, unparsable reviews and failed calls are signals', () => {
@@ -106,13 +119,16 @@ test('questions at the end of the loop, reverted writes, unparsable reviews and 
   d.reply(CHANGES) // 只有 1 轮、没有上游 → 问用户
   assert.equal(d.task.status, 'waiting_user')
   const s = signalsOf(d.task)
-  assert.deepEqual(s.map(x => [x.kind, x.node, x.role]), [
-    ['scope_reverted', 'build', 'dev'],
-    ['format_retry', 'review', 'rev'],
-    ['call_failed', 'review', undefined],
-    ['review_changes', 'review', 'dev'],
-    ['stuck', 'review', 'dev'],
-  ])
+  assert.deepEqual(
+    s.map(x => [x.kind, x.node, x.role]),
+    [
+      ['scope_reverted', 'build', 'dev'],
+      ['format_retry', 'review', 'rev'],
+      ['call_failed', 'review', undefined],
+      ['review_changes', 'review', 'dev'],
+      ['stuck', 'review', 'dev'],
+    ],
+  )
   assertPointsAtLog(d.task, s)
   assert.equal(s[0]!.text, '越界改动被撤销：package.json')
   assert.equal(s[2]!.text, '调用失败：网络断了')
@@ -135,7 +151,13 @@ test('a review that asks for changes and also had writes reverted gives two sign
   const c = d.pending
   d.send({ kind: 'replied', call: c.id, sessionId: 's-review', text: CHANGES, usage: zeroUsage(), ms: 1, reverted: ['x.md'] })
   const s = signalsOf(d.task)
-  assert.deepEqual(s.map(x => [x.id, x.kind, x.role]), [['r:2', 'review_changes', 'dev'], ['r:2:r', 'scope_reverted', 'rev']])
+  assert.deepEqual(
+    s.map(x => [x.id, x.kind, x.role]),
+    [
+      ['r:2', 'review_changes', 'dev'],
+      ['r:2:r', 'scope_reverted', 'rev'],
+    ],
+  )
 })
 
 test('when the upstream decides to ask the user after reconfirming, the question is judged against the upstream role', () => {
@@ -145,7 +167,14 @@ test('when the upstream decides to ask the user after reconfirming, the question
   d.reply(CHANGES) // 1 轮用完 → 请 plan 重新确认
   d.reply(ASK)
   assert.equal(d.task.status, 'waiting_user')
-  assert.deepEqual(signalsOf(d.task).map(x => [x.kind, x.role]), [['review_changes', 'dev'], ['escalated', 'dev'], ['stuck', 'planner']])
+  assert.deepEqual(
+    signalsOf(d.task).map(x => [x.kind, x.role]),
+    [
+      ['review_changes', 'dev'],
+      ['escalated', 'dev'],
+      ['stuck', 'planner'],
+    ],
+  )
   assertPointsAtLog(d.task, signalsOf(d.task))
 })
 
@@ -157,7 +186,14 @@ test('when an agent node runs out of fixes, the question is judged against that 
   d.reply('补了')
   d.check(false)
   assert.equal(d.task.status, 'waiting_user')
-  assert.deepEqual(signalsOf(d.task).map(x => [x.kind, x.node, x.role]), [['check_failed', 'build', 'dev'], ['check_failed', 'build', 'dev'], ['stuck', 'build', 'dev']])
+  assert.deepEqual(
+    signalsOf(d.task).map(x => [x.kind, x.node, x.role]),
+    [
+      ['check_failed', 'build', 'dev'],
+      ['check_failed', 'build', 'dev'],
+      ['stuck', 'build', 'dev'],
+    ],
+  )
 })
 
 test('signals about another role go to that role’s own template, not the developer’s; a task given twice is rejected', () => {
@@ -191,7 +227,15 @@ test('signals are attributed to the judged role’s template and skills, and to 
   assert.deepEqual([flow.versions, flow.tasks, flow.affected, flow.signals.length], [[4, 5], 3, 1, 5])
   assert.deepEqual(by('doc', '研发约定').signals, flow.signals)
   assert.deepEqual(flow.counts, { review_changes: 1, check_failed: 2, format_retry: 1, escalated: 1 })
-  assert.deepEqual(r.targets.map(t => [t.kind, t.name]), [['doc', '研发约定'], ['workflow', 't'], ['template', 'developer'], ['skill', 'write-changes']])
+  assert.deepEqual(
+    r.targets.map(t => [t.kind, t.name]),
+    [
+      ['doc', '研发约定'],
+      ['workflow', 't'],
+      ['template', 'developer'],
+      ['skill', 'write-changes'],
+    ],
+  )
 })
 
 test('a role written directly in the workflow attributes only to the workflow and docs; no samples, no targets', () => {
@@ -200,7 +244,16 @@ test('a role written directly in the workflow attributes only to the workflow an
   d.reply('实现')
   d.reply(GARBAGE) // 评审方 rev 直接写在工作流里
   const r = evidence([{ task: d.task }])
-  assert.deepEqual(r.signals.map(s => [s.kind, s.role]), [['format_retry', 'rev']])
-  assert.deepEqual(r.targets.filter(t => t.signals.length > 0).map(t => [t.kind, t.name]), [['doc', '研发约定'], ['workflow', 't']])
+  assert.deepEqual(
+    r.signals.map(s => [s.kind, s.role]),
+    [['format_retry', 'rev']],
+  )
+  assert.deepEqual(
+    r.targets.filter(t => t.signals.length > 0).map(t => [t.kind, t.name]),
+    [
+      ['doc', '研发约定'],
+      ['workflow', 't'],
+    ],
+  )
   assert.deepEqual(evidence([]), { signals: [], targets: [] })
 })

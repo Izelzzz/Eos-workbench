@@ -26,11 +26,18 @@ const reviewOnce: Script = async ({ key }) => {
 }
 
 test('runs the workflow to done, committing after every developer turn', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
   const ex = new FakeExecutor(reviewOnce)
   const writes: string[] = []
-  const task = await runTask('t', { store, executor: ex, pollMs: 1, afterWrite: (_t, c) => { writes.push(`${c.purpose}@${c.session}`) } })
+  const task = await runTask('t', {
+    store,
+    executor: ex,
+    pollMs: 1,
+    afterWrite: (_t, c) => {
+      writes.push(`${c.purpose}@${c.session}`)
+    },
+  })
   assert.equal(task.status, 'done')
   assert.deepEqual(writes, ['produce@build', 'respond@build'])
   assert.deepEqual(ex.sent, ['t/c1', 't/c2', 't/c3', 't/c4', 't/c5'])
@@ -38,7 +45,7 @@ test('runs the workflow to done, committing after every developer turn', async (
 })
 
 test('afterWrite 报回的越界路径记进日志，并出现在同一会话下一次调用的提示词里', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
   const prompts: string[] = []
   const ex = new FakeExecutor(async p => {
@@ -54,7 +61,7 @@ test('afterWrite 报回的越界路径记进日志，并出现在同一会话下
 })
 
 test('a reply already in the session log is used instead of sending the call again', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
   const ex = new FakeExecutor(reviewOnce)
   const first = store.get('t')!.pending as Call
@@ -84,7 +91,10 @@ test('an agent question pauses the call until another process answers it', async
   await answering
   assert.equal(task.status, 'done')
   assert.equal(task.outputs.plan, '方案：绿色')
-  assert.deepEqual(task.log.filter(e => e.type === 'question' || e.type === 'answer').map(e => e.type), ['question', 'answer'])
+  assert.deepEqual(
+    task.log.filter(e => e.type === 'question' || e.type === 'answer').map(e => e.type),
+    ['question', 'answer'],
+  )
 })
 
 test('after a crash while waiting for an answer, the resent call reuses the open question', async () => {
@@ -104,17 +114,22 @@ test('after a crash while waiting for an answer, the resent call reuses the open
 
 test('a failing call leaves the task failed and retryable', async () => {
   const { store } = setup()
-  const ex = new FakeExecutor(async () => { throw new Error('连接被重置\n    at socket (net.js:1)') })
+  const ex = new FakeExecutor(async () => {
+    throw new Error('连接被重置\n    at socket (net.js:1)')
+  })
   const details: string[] = []
   const lines: string[] = []
   const task: Task = await runTask('t', { store, executor: ex, pollMs: 1, detail: d => details.push(d), log: l => lines.push(l) })
   assert.equal(task.status, 'failed')
-  assert.equal(task.failure, [
-    '哪一步：[plan] planner · produce（调用 c1）',
-    '原因：连接被重置',
-    '怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t',
-  ].join('\n'))
-  assert.deepEqual(lines.filter(l => l.startsWith('✗')), ['✗ [plan] planner · produce（调用 c1）：连接被重置'], '终端只打一行')
+  assert.equal(
+    task.failure,
+    ['哪一步：[plan] planner · produce（调用 c1）', '原因：连接被重置', '怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t'].join('\n'),
+  )
+  assert.deepEqual(
+    lines.filter(l => l.startsWith('✗')),
+    ['✗ [plan] planner · produce（调用 c1）：连接被重置'],
+    '终端只打一行',
+  )
   assert.match(details.join('\n'), /完整错误：\n[\s\S]*at socket \(net\.js:1\)/, '完整错误只进日志文件')
   assert.equal(store.dispatch('t', { kind: 'retry' }, 9, 'cli').accepted, true)
 })
@@ -128,19 +143,27 @@ test('without wait, the runner returns when the loop needs the user', async () =
 })
 
 test('every call gets a trace: streamed while it runs, replayed from the session log when recovered', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
   const ex = new FakeExecutor(reviewOnce)
   const first = store.get('t')!.pending as Call
   ex.completed.set(nonceOf('t', first), { sessionId: 's:t/plan', text: '找回的方案', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1 })
   await runTask('t', { store, executor: ex, pollMs: 1 })
   const trace = store.trace('t')
-  assert.deepEqual(trace.filter(r => r.call === 'c1').map(r => r.event.kind), ['call_start', 'step_start'], 'recovered call replayed from the log')
-  assert.deepEqual(trace.filter(r => r.call === 'c2').map(r => r.event.kind), ['call_start', 'step_start', 'step_end'], 'live call streamed')
+  assert.deepEqual(
+    trace.filter(r => r.call === 'c1').map(r => r.event.kind),
+    ['call_start', 'step_start'],
+    'recovered call replayed from the log',
+  )
+  assert.deepEqual(
+    trace.filter(r => r.call === 'c2').map(r => r.event.kind),
+    ['call_start', 'step_start', 'step_end'],
+    'live call streamed',
+  )
 })
 
 test('a trace write that fails does not break the agent call', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
   const original = store.appendTrace.bind(store)
   store.appendTrace = (id, call, events) => {
@@ -154,9 +177,16 @@ test('a trace write that fails does not break the agent call', async () => {
 })
 
 test('a commit that fails after a developer turn fails the call visibly instead of stopping the runner silently', async () => {
-  (reviewOnce as any).n = 0
+  ;(reviewOnce as any).n = 0
   const { store } = setup()
-  const task = await runTask('t', { store, executor: new FakeExecutor(reviewOnce), pollMs: 1, afterWrite: () => { throw Object.assign(new Error('git failed'), { stderr: 'hint: something\nfatal: not a git repository' }) } })
+  const task = await runTask('t', {
+    store,
+    executor: new FakeExecutor(reviewOnce),
+    pollMs: 1,
+    afterWrite: () => {
+      throw Object.assign(new Error('git failed'), { stderr: 'hint: something\nfatal: not a git repository' })
+    },
+  })
   assert.equal(task.status, 'failed')
   assert.match(task.failure ?? '', /^哪一步：\[build\] dev · produce（调用 c2）\n原因：提交改动失败：fatal: not a git repository\n怎么修：任务的 worktree 被删除或损坏/)
   assert.doesNotMatch(task.failure ?? '', /日志：/)
@@ -208,7 +238,10 @@ test('two questions asked at once in the same call are put to the user one after
   const task = await runTask('t', { store, executor: ex, pollMs: 2 })
   await answering
   assert.equal(task.outputs.plan, '绿色/方形')
-  assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['红色还是绿色？', '圆形还是方形？'])
+  assert.deepEqual(
+    task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')),
+    ['红色还是绿色？', '圆形还是方形？'],
+  )
 })
 
 test('a queued question that was cancelled before its turn is never put to the user', { timeout: 20_000 }, async () => {
@@ -219,7 +252,10 @@ test('a queued question that was cancelled before its turn is never put to the u
   const ex = new FakeExecutor(async ({ key, ask }) => {
     if (!key.endsWith('/plan')) return key.endsWith('/review') ? PASS : '实现'
     const a = ask({ id: 'a', text: 'A？' }, new AbortController().signal).then(x => (outcome.a = x))
-    const b = ask({ id: 'b', text: 'B？' }, cancelB.signal).then(x => (outcome.b = x), e => (outcome.b = `失败：${(e as Error).message}`))
+    const b = ask({ id: 'b', text: 'B？' }, cancelB.signal).then(
+      x => (outcome.b = x),
+      e => (outcome.b = `失败：${(e as Error).message}`),
+    )
     cancelB.abort() // B 还在排队时被取消
     await Promise.all([a, b])
     return '方案'
@@ -235,7 +271,11 @@ test('a queued question that was cancelled before its turn is never put to the u
   const task = await runTask('t', { store, executor: ex, pollMs: 2 })
   await answering
   assert.deepEqual(outcome, { a: '是', b: '失败：提问被取消' })
-  assert.deepEqual(task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')), ['A？'], 'B was never asked')
+  assert.deepEqual(
+    task.log.filter(e => e.type === 'question').map(e => (e.type === 'question' ? e.question.text : '')),
+    ['A？'],
+    'B was never asked',
+  )
   assert.equal(task.status, 'done')
 })
 
@@ -244,14 +284,17 @@ test('aborting the task while a check runs signals the checker, and the runner s
   store.create({ id: 't', request: '需求', workflow: workflow({ maxRounds: 2, escalate: true, checks: 'review' }), workflowSource: 'yaml', meta }, 0)
   let aborted = false
   const done = runTask('t', {
-    store, executor: new FakeExecutor(async () => '回复'), pollMs: 5,
-    checker: (_t, run, signal) => new Promise(resolve => {
-      store.dispatch('t', { kind: 'abort' }, 1, 'cli')
-      signal.addEventListener('abort', () => {
-        aborted = true
-        resolve(run.checks.map(check => ({ check, passed: false, detail: '任务已中止' })))
-      })
-    }),
+    store,
+    executor: new FakeExecutor(async () => '回复'),
+    pollMs: 5,
+    checker: (_t, run, signal) =>
+      new Promise(resolve => {
+        store.dispatch('t', { kind: 'abort' }, 1, 'cli')
+        signal.addEventListener('abort', () => {
+          aborted = true
+          resolve(run.checks.map(check => ({ check, passed: false, detail: '任务已中止' })))
+        })
+      }),
   })
   const task = await done
   assert.equal(task.status, 'aborted')
@@ -262,9 +305,15 @@ test('before reverting a writer’s changes the runner first ends the agent’s 
   const { store } = setup()
   const order: string[] = []
   await runTask('t', {
-    store, executor: new FakeExecutor(reviewOnce), pollMs: 5,
-    beforeRevert: async (_t, call) => { order.push(`end processes ${call.role}`) },
-    afterWrite: (_t, call) => { order.push(`revert ${call.role}`) },
+    store,
+    executor: new FakeExecutor(reviewOnce),
+    pollMs: 5,
+    beforeRevert: async (_t, call) => {
+      order.push(`end processes ${call.role}`)
+    },
+    afterWrite: (_t, call) => {
+      order.push(`revert ${call.role}`)
+    },
   })
   // 开发的每次调用（包括在评审对话里回应）都是先结束进程、再撤销。
   assert.ok(order.length >= 4, order.join(' / '))
@@ -280,7 +329,15 @@ test('检查起不来：原因只取关键的一行并保留前缀，修法对�
     const path = dbPath()
     const store = new Store(path)
     store.create({ id: 't', request: '需求', workflow: workflow({ maxRounds: 2, escalate: true, checks: 'only' }), workflowSource: 'yaml', meta }, 0)
-    const task = await runTask('t', { store, executor: new FakeExecutor(async () => '回复'), pollMs: 1, afterWrite: () => [], checker: async () => { throw new Error(message) } })
+    const task = await runTask('t', {
+      store,
+      executor: new FakeExecutor(async () => '回复'),
+      pollMs: 1,
+      afterWrite: () => [],
+      checker: async () => {
+        throw new Error(message)
+      },
+    })
     assert.equal(task.status, 'failed')
     const lines = (task.failure ?? '').split('\n')
     assert.equal(lines[1], `原因：${reason}`)

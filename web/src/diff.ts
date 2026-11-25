@@ -26,8 +26,7 @@ export const diffLines = (before: string, after: string): DiffLine[] => {
 }
 
 /** 改动统计：加了几行、删了几行。 */
-export const diffStat = (lines: DiffLine[]): { add: number; del: number } =>
-  ({ add: lines.filter(l => l.kind === 'add').length, del: lines.filter(l => l.kind === 'del').length })
+export const diffStat = (lines: DiffLine[]): { add: number; del: number } => ({ add: lines.filter(l => l.kind === 'add').length, del: lines.filter(l => l.kind === 'del').length })
 
 export type FoldedLine = DiffLine | { kind: 'skip'; count: number }
 

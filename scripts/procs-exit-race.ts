@@ -54,7 +54,12 @@ try {
 } finally {
   for (const w of workers) void w.terminate()
   // 中途出错时不留下进程（已经被杀掉的再发一次信号也没关系）。
-  for (const pid of spawned) try { process.kill(pid, 'SIGKILL') } catch { /* 已经退出 */ }
+  for (const pid of spawned)
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      /* 已经退出 */
+    }
   rmSync(base, { recursive: true, force: true })
 }
 process.stdout.write(`${JSON.stringify({ rounds, perRound, load, kind, killed: total, notExitedWhenReturned: stillAlive, states: Object.fromEntries(states) })}\n`)

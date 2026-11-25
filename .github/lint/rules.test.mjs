@@ -11,7 +11,7 @@ const eslint = new ESLint({ cwd: root, overrideConfigFile: fileURLToPath(new URL
 /** 返回 code 放在 path 时报出的规则 id（去重、排序）。 */
 async function rules(path, code) {
   const [result] = await eslint.lintText(code, { filePath: `${root}${path}` })
-  return [...new Set(result.messages.map((m) => m.ruleId ?? `fatal: ${m.message}`))].sort()
+  return [...new Set(result.messages.map(m => m.ruleId ?? `fatal: ${m.message}`))].sort()
 }
 const restricted = ['no-restricted-imports']
 
@@ -98,7 +98,7 @@ test('.cts 和 .cjs 文件也检查', async () => {
 test('行内注释关不掉规则：eslint-disable 本身就报错', async () => {
   const r = await rules('src/engine/x.ts', "// eslint-disable-next-line no-restricted-imports\nimport * as fs from 'node:fs'\nexport const a = fs\n")
   assert.ok(r.includes('no-restricted-imports'), r.join())
-  const all = await rules('src/engine/x.ts', "/* eslint-disable */\nexport const a = () => Date.now()\n")
+  const all = await rules('src/engine/x.ts', '/* eslint-disable */\nexport const a = () => Date.now()\n')
   assert.ok(all.includes('no-restricted-globals'), all.join())
 })
 

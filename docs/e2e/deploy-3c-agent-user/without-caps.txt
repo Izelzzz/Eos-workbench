@@ -1,0 +1,7 @@
+# 平台（eos，带 SETUID、SETGID、KILL）经 withoutCaps 运行的命令（git.ts 撤销越界改动时的 sh、rm、find 走这条路），镜像 eos-workbench:agent-user-probe（提交 56ea601）
+平台自己：
+CapEff:	00000000000000e0
+CapAmb:	00000000000000e0
+经 withoutCaps：
+CapEff:	0000000000000000
+CapAmb:	0000000000000000

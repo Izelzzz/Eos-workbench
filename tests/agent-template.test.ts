@@ -22,12 +22,23 @@ test('a template parses into an agent config with defaults filled in', () => {
   const r = parseTemplate(template)
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   assert.deepEqual(r.template, {
-    name: 'developer', description: '开发', model: 'deepseek-flash', prompt: '写代码', write: 'worktree', writePaths: ['src/**', 'tests/**'],
-    denyTools: ['web', 'subagent'], skills: ['write-changes'], mcp: [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { LOG_LEVEL: 'info' } }],
+    name: 'developer',
+    description: '开发',
+    model: 'deepseek-flash',
+    prompt: '写代码',
+    write: 'worktree',
+    writePaths: ['src/**', 'tests/**'],
+    denyTools: ['web', 'subagent'],
+    skills: ['write-changes'],
+    mcp: [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { LOG_LEVEL: 'info' } }],
   })
   const minimal = parseTemplate('name: dev\nprompt: 写代码\nwrite: worktree\n')
   assert.ok(minimal.ok)
-  assert.deepEqual([minimal.template.writePaths, minimal.template.denyTools, minimal.template.skills, minimal.template.mcp], [['**'], [], [], []], 'a writer without writePaths may write the whole worktree')
+  assert.deepEqual(
+    [minimal.template.writePaths, minimal.template.denyTools, minimal.template.skills, minimal.template.mcp],
+    [['**'], [], [], []],
+    'a writer without writePaths may write the whole worktree',
+  )
   const reader = parseTemplate('name: rev\nprompt: 评审\n')
   assert.ok(reader.ok)
   assert.deepEqual(reader.template.writePaths, [], 'a read-only template writes nothing')
@@ -76,8 +87,15 @@ test('a workflow role can reference a template; the resolved role records which 
   const r = parseWorkflow(workflowWith('{ template: developer }'), lookup)
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   assert.deepEqual(r.workflow.roles.dev, {
-    id: 'dev', model: 'deepseek-flash', prompt: '写代码', write: 'worktree', writePaths: ['src/**', 'tests/**'], denyTools: ['web', 'subagent'],
-    skills: ['write-changes'], mcp: [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { LOG_LEVEL: 'info' } }], template: { name: 'developer', version: 3 },
+    id: 'dev',
+    model: 'deepseek-flash',
+    prompt: '写代码',
+    write: 'worktree',
+    writePaths: ['src/**', 'tests/**'],
+    denyTools: ['web', 'subagent'],
+    skills: ['write-changes'],
+    mcp: [{ name: 'docs', command: 'node', args: ['server.mjs'], env: { LOG_LEVEL: 'info' } }],
+    template: { name: 'developer', version: 3 },
   })
   const missing = parseWorkflow(workflowWith('{ template: ghost }'), lookup)
   assert.deepEqual(!missing.ok && missing.errors, [{ path: 'roles.dev.template', message: '平台上没有名为「ghost」的 Agent 模板' }])

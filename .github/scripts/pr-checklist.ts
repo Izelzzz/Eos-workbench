@@ -33,7 +33,13 @@ function globToRegex(glob: string): RegExp {
     const c = glob[i]!
     if (c === '*' && glob[i + 1] === '*') {
       // 「**/」匹配零个或多个目录，末尾的「**」匹配剩下的一切
-      if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2 } else { re += '.*'; i += 1 }
+      if (glob[i + 2] === '/') {
+        re += '(?:.*/)?'
+        i += 2
+      } else {
+        re += '.*'
+        i += 1
+      }
     } else if (c === '*') re += '[^/]*'
     else re += c.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
   }
@@ -42,7 +48,7 @@ function globToRegex(glob: string): RegExp {
 
 /** 第一条匹配到的规则算数；都不匹配时默认需要。 */
 export function needsE2E(path: string, rules: Rule[]): boolean {
-  return rules.find((r) => r.regex.test(path))?.need ?? true
+  return rules.find(r => r.regex.test(path))?.need ?? true
 }
 
 /**
@@ -112,12 +118,12 @@ function stripLine(line: string, block: boolean, following: () => string[]): { t
     const atLineStart = /^ {0,3}$/.test(line.slice(0, start))
     if (block || atLineStart) {
       // HTML 块：到 --> 所在的行为止，没有就到全文末尾
-      return { text: out, open: following().some((l) => l.includes('-->')) ? 'block' : 'rest' }
+      return { text: out, open: following().some(l => l.includes('-->')) ? 'block' : 'rest' }
     }
     // 行内注释不能跨过空行
     const rest = following()
-    const blank = rest.findIndex((l) => l.trim() === '')
-    if ((blank === -1 ? rest : rest.slice(0, blank)).some((l) => l.includes('-->'))) return { text: out, open: 'inline' }
+    const blank = rest.findIndex(l => l.trim() === '')
+    if ((blank === -1 ? rest : rest.slice(0, blank)).some(l => l.includes('-->'))) return { text: out, open: 'inline' }
     return { text: out + line.slice(start), open: 'no' }
   }
 }
@@ -154,13 +160,20 @@ export function sections(body: string): { title: string; content: string }[] {
     }
     for (const s of out) if (s.open) s.lines.push(line)
   }
-  return out.map((s) => ({ title: s.title, content: s.lines.join('\n').trim() }))
+  return out.map(s => ({ title: s.title, content: s.lines.join('\n').trim() }))
 }
 
 /** 决定 CI 查什么、放行什么的文件。PR 改它们就能放宽自己的检查，所以要醒目地提示。 */
 export function isGuardFile(path: string): boolean {
-  return path === '.gitleaksignore' || path === '.gitleaks.toml' || path === '.github/e2e-paths.txt' ||
-    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/') || path.startsWith('.github/lint/') || path.startsWith('.github/codeql/')
+  return (
+    path === '.gitleaksignore' ||
+    path === '.gitleaks.toml' ||
+    path === '.github/e2e-paths.txt' ||
+    path.startsWith('.github/workflows/') ||
+    path.startsWith('.github/scripts/') ||
+    path.startsWith('.github/lint/') ||
+    path.startsWith('.github/codeql/')
+  )
 }
 
 export type Result = { errors: string[]; warnings: string[]; notes: string[] }
@@ -171,11 +184,11 @@ export type Change = { path: string; deleted: boolean }
 export function check(input: { body: string; changed: Change[]; rules: Rule[] }): Result {
   const r: Result = { errors: [], warnings: [], notes: [] }
   const all = sections(input.body)
-  const find = (pred: (t: string) => boolean) => all.find((s) => pred(s.title))
+  const find = (pred: (t: string) => boolean) => all.find(s => pred(s.title))
 
   const required: [string, (t: string) => boolean][] = [
-    ['能用证据证明的', (t) => /^(能用证据证明的|能证明的)/.test(t)],
-    ['证明不了的', (t) => t.startsWith('证明不了的')],
+    ['能用证据证明的', t => /^(能用证据证明的|能证明的)/.test(t)],
+    ['证明不了的', t => t.startsWith('证明不了的')],
   ]
   for (const [name, pred] of required) {
     const s = find(pred)
@@ -183,21 +196,21 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
     else if (s.content === '') r.errors.push(`「${s.title}」一节是空的`)
   }
 
-  const paths = input.changed.map((c) => c.path)
-  const present = input.changed.filter((c) => !c.deleted).map((c) => c.path)
+  const paths = input.changed.map(c => c.path)
+  const present = input.changed.filter(c => !c.deleted).map(c => c.path)
   const guards = paths.filter(isGuardFile)
   if (guards.length > 0) {
     r.warnings.push(`这个 PR 改了检查规则或允许清单（${guards.join('、')}）。放宽规则要人批：独立审查核实，合并卡片上单独列出`)
   }
 
-  const needed = paths.filter((p) => needsE2E(p, input.rules))
+  const needed = paths.filter(p => needsE2E(p, input.rules))
   if (needed.length === 0) {
     r.notes.push('改动没有碰到需要 E2E 的路径（.github/e2e-paths.txt），不要求「端到端验证」一节')
     return r
   }
   r.notes.push(`需要 E2E 的改动：${needed.slice(0, 10).join('、')}${needed.length > 10 ? ` 等 ${needed.length} 个文件` : ''}`)
 
-  const e2e = find((t) => t.startsWith('端到端验证'))
+  const e2e = find(t => t.startsWith('端到端验证'))
   if (!e2e || e2e.content === '') {
     r.errors.push('改动碰到了需要 E2E 的路径，描述里要有非空的「端到端验证」一节：写 docs/e2e/ 下的证据路径，或写「不需要，理由是……」（CLAUDE.md 自检第 3 条）')
     return r
@@ -205,11 +218,11 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
   // 路径到空白或标点为止；* 不当通配，截到它前面的目录，按目录匹配。
   // 证据文件名可能是中文，所以路径后面紧跟的中文字会被当成路径的一部分：路径后面要留空格或标点。
   // 只写目录时，这个目录下有任何新增或修改的文件就算数。
-  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map((m) => m[0].replace(/[.)]+$/, ''))
+  const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map(m => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
-      if (!present.some((c) => c === p || c.startsWith(dir))) {
+      if (!present.some(c => c === p || c.startsWith(dir))) {
         r.errors.push(`「端到端验证」写的证据 ${p} 不在这个 PR 新增或修改的文件里`)
       }
     }
@@ -226,7 +239,7 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
 
 /** 解析 `git diff --name-status -z` 的输出：状态和路径用 NUL 分隔，路径不加引号、不转义（中文文件名原样）。 */
 export function parseNameStatusZ(out: string): Change[] {
-  const parts = out.split('\0').filter((p) => p !== '')
+  const parts = out.split('\0').filter(p => p !== '')
   const changes: Change[] = []
   for (let i = 0; i + 1 < parts.length; i += 2) changes.push({ path: parts[i + 1]!, deleted: parts[i] === 'D' })
   return changes

@@ -18,9 +18,7 @@ export type ParsedProposal = z.infer<typeof item>
 /** 一条没被接受的提案：index 是它在回复里的下标，errors 是原因（中文）。 */
 export type Refused = { index: number; target?: { kind: TargetKind; name: string }; errors: string[] }
 
-export type ParseResult =
-  | { ok: true; proposals: (ParsedProposal & { index: number })[]; refused: Refused[] }
-  | { ok: false; error: string }
+export type ParseResult = { ok: true; proposals: (ParsedProposal & { index: number })[]; refused: Refused[] } | { ok: false; error: string }
 
 const FIELD: Record<string, string> = { target: '目标', 'target.kind': '目标种类', 'target.name': '目标名字', content: '新内容', rationale: '理由', evidence: '证据' }
 /** zod 的出错位置 → 中文字段名：evidence.0 算作「证据」，空路径（整条不是对象）算作「提案」。 */

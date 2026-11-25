@@ -35,8 +35,10 @@ const probeMcp: McpServer = {
 }
 
 const ex = new DshExecutor({
-  dshHome: join(OUT, 'dsh'), dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-  env: { ...process.env, NODE_USE_ENV_PROXY: '1' }, modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
+  dshHome: join(OUT, 'dsh'),
+  dshBin: join(ROOT, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+  env: { ...process.env, NODE_USE_ENV_PROXY: '1' },
+  modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
 
 /** 跑一次真实调用，返回这次会话实际拿到的工具表、技能目录、工具调用和回复。 */
@@ -46,8 +48,11 @@ const run = async (key: string, profile: AgentProfile, prompt: string) => {
     const reply = await ex.send({ key, nonce, prompt, spec: { model: 'deepseek-flash', write: 'none', cwd: wt, profile }, ask: async () => '不需要，继续' })
     const trace = await ex.traceOf(key, nonce)
     return {
-      started: true, error: undefined as string | undefined, reply: reply.text,
-      tools: ex.toolsOffered(key), skills: ex.skillsOffered(key),
+      started: true,
+      error: undefined as string | undefined,
+      reply: reply.text,
+      tools: ex.toolsOffered(key),
+      skills: ex.skillsOffered(key),
       calls: trace.filter(e => e.kind === 'tool_start').map(e => ({ name: e.name, args: e.args })),
       results: trace.filter(e => e.kind === 'tool_end').map(e => ({ output: e.output.slice(0, 200), isError: e.isError })),
     }
@@ -72,11 +77,18 @@ for (const g of TOOL_GROUPS) {
   const r = await run(`probe/group-${g}`, bare([g]), TRIVIAL)
   // 这组该消失的工具：以基线里真的存在的为准（基线里就没有的工具，这次跑证明不了什么）。
   const target = GROUP_TOOLS[g].filter(has)
-  const others = TOOL_GROUPS.filter(x => x !== g).flatMap(x => GROUP_TOOLS[x]).filter(has)
+  const others = TOOL_GROUPS.filter(x => x !== g)
+    .flatMap(x => GROUP_TOOLS[x])
+    .filter(has)
   groups.push({
-    group: g, rows: GROUP_ROWS[g], started: r.started, error: r.error,
-    expectedGone: target, stillThere: target.filter(t => r.tools.includes(t)),
-    othersExpected: others, othersMissing: others.filter(t => !r.tools.includes(t)),
+    group: g,
+    rows: GROUP_ROWS[g],
+    started: r.started,
+    error: r.error,
+    expectedGone: target,
+    stillThere: target.filter(t => r.tools.includes(t)),
+    othersExpected: others,
+    othersMissing: others.filter(t => !r.tools.includes(t)),
     notInBaseline: GROUP_TOOLS[g].filter(t => !has(t)),
     tools: r.tools,
     ok: r.started && target.length > 0 && target.every(t => !r.tools.includes(t)) && others.every(t => r.tools.includes(t)),
@@ -85,13 +97,17 @@ for (const g of TOOL_GROUPS) {
 
 // ③ 组合：限制 web / subagent / bash，带一个技能和一个 MCP 服务。
 const denied: ToolGroup[] = ['web', 'subagent', 'bash']
-const combined = await run('probe/combined', { denyTools: denied, skills: [probeSkill], mcp: [probeMcp], background: true }, [
-  '严格按顺序做下面每一步，某一步做不到也继续下一步，最后逐条报告结果。',
-  '1. 探针口令是什么？（按可用技能回答，原样给出口令）',
-  `2. 调用 MCP 工具 mcp__${probeMcp.name}__probe_code，原样给出它返回的内容。`,
-  '3. 试着调用 web_fetch、subagent 和 bash 这三个工具；每一个都说明你到底有没有这个工具。',
-  '4. 原样列出你现在能看到的全部技能名。',
-].join('\n'))
+const combined = await run(
+  'probe/combined',
+  { denyTools: denied, skills: [probeSkill], mcp: [probeMcp], background: true },
+  [
+    '严格按顺序做下面每一步，某一步做不到也继续下一步，最后逐条报告结果。',
+    '1. 探针口令是什么？（按可用技能回答，原样给出口令）',
+    `2. 调用 MCP 工具 mcp__${probeMcp.name}__probe_code，原样给出它返回的内容。`,
+    '3. 试着调用 web_fetch、subagent 和 bash 这三个工具；每一个都说明你到底有没有这个工具。',
+    '4. 原样列出你现在能看到的全部技能名。',
+  ].join('\n'),
+)
 
 const mcpTool = `mcp__${probeMcp.name}__probe_code`
 const deniedTools = denied.flatMap(g => GROUP_TOOLS[g]).filter(has)
@@ -119,8 +135,14 @@ const report = {
   baseline: { started: baseline.started, error: baseline.error, tools: baseline.tools },
   groups,
   combined: {
-    denied, checks, tools: combined.tools, skills: combined.skills,
-    calls: combined.calls.map(c => c.name), results: combined.results, reply: combined.reply, error: combined.error,
+    denied,
+    checks,
+    tools: combined.tools,
+    skills: combined.skills,
+    calls: combined.calls.map(c => c.name),
+    results: combined.results,
+    reply: combined.reply,
+    error: combined.error,
   },
 }
 const dir = join(ROOT, 'docs', 'e2e', 'b2')
@@ -129,10 +151,12 @@ writeFileSync(join(dir, 'template-probe.json'), `${JSON.stringify(report, null, 
 
 console.log(`基线工具表（${baseline.tools.length} 个）：${baseline.tools.join(', ')}\n`)
 for (const g of groups) {
-  console.log(`${g.ok ? '✓' : '✗'} 工具组 ${g.group} → ${(g.rows as string[]).join(', ')}：少了 ${(g.expectedGone as string[]).join('、')}；` +
-    `${(g.stillThere as string[]).length > 0 ? `还在的：${(g.stillThere as string[]).join('、')}；` : ''}` +
-    `${(g.othersMissing as string[]).length > 0 ? `被牵连的：${(g.othersMissing as string[]).join('、')}；` : '别的组没被牵连；'}` +
-    `${g.started ? 'dsh 正常启动' : `dsh 没起来：${g.error}`}`)
+  console.log(
+    `${g.ok ? '✓' : '✗'} 工具组 ${g.group} → ${(g.rows as string[]).join(', ')}：少了 ${(g.expectedGone as string[]).join('、')}；` +
+      `${(g.stillThere as string[]).length > 0 ? `还在的：${(g.stillThere as string[]).join('、')}；` : ''}` +
+      `${(g.othersMissing as string[]).length > 0 ? `被牵连的：${(g.othersMissing as string[]).join('、')}；` : '别的组没被牵连；'}` +
+      `${g.started ? 'dsh 正常启动' : `dsh 没起来：${g.error}`}`,
+  )
 }
 console.log()
 for (const c of checks) console.log(`${c.ok ? '✓' : '✗'} ${c.name}`)

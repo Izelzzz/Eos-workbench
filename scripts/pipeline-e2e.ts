@@ -26,7 +26,8 @@ const DATA = join(OUT, 'data')
 const ACCEPTANCE = join(OUT, 'acceptance', 'duration.test.mjs')
 const port = Number(process.argv[2] ?? 4321)
 const base = `http://127.0.0.1:${port}`
-const REQUEST = '在 src/duration.js 实现并导出 parseDuration(text)：把 "1h30m" 这样的时长字符串转换成秒数（数字）。写法参考 Go 的 time.ParseDuration，只需要支持 h、m、s 三个单位，单位可以组合；非法输入抛 RangeError。用 node:test 写测试，npm test 必须通过。'
+const REQUEST =
+  '在 src/duration.js 实现并导出 parseDuration(text)：把 "1h30m" 这样的时长字符串转换成秒数（数字）。写法参考 Go 的 time.ParseDuration，只需要支持 h、m、s 三个单位，单位可以组合；非法输入抛 RangeError。用 node:test 写测试，npm test 必须通过。'
 
 const note = (s: string) => {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${s}`
@@ -39,8 +40,15 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(REPO, { recursive: true })
 mkdirSync(join(OUT, 'acceptance'))
 writeFileSync(join(REPO, 'package.json'), JSON.stringify({ name: 'demo', type: 'module', scripts: { test: 'node --test' } }, null, 2))
-for (const a of [['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init']]) execFileSync('git', a, { cwd: REPO })
-writeFileSync(ACCEPTANCE, `// 平台持有的验收测试：在任务的 worktree 里运行（cwd），开发看不到这个文件。
+for (const a of [
+  ['init', '-q', '-b', 'main'],
+  ['add', '-A'],
+  ['-c', 'user.name=e2e', '-c', 'user.email=e2e@localhost', 'commit', '-q', '-m', 'init'],
+])
+  execFileSync('git', a, { cwd: REPO })
+writeFileSync(
+  ACCEPTANCE,
+  `// 平台持有的验收测试：在任务的 worktree 里运行（cwd），开发看不到这个文件。
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -52,12 +60,17 @@ test('三个单位', () => assert.equal(parseDuration('1h2m3s'), 3723))
 test('小数（Go 的写法支持）', () => assert.equal(parseDuration('1.5h'), 5400))
 test('单位大小写都可以（需求里没写，验收测试才有）', () => assert.equal(parseDuration('1H30M'), 5400))
 test('非法输入抛 RangeError', () => { for (const s of ['', '10x', 'h', '1h30']) assert.throws(() => parseDuration(s), RangeError, JSON.stringify(s)) })
-`)
+`,
+)
 
 const startServer = async (): Promise<ChildProcess> => {
   const out = openSync(join(OUT, 'server.log'), 'a')
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)],
-    { cwd: ROOT, detached: true, stdio: ['ignore', out, out], env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' } })
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'web', '--data', DATA, '--port', String(port)], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env: { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' },
+  })
   for (let i = 0; i < 60; i++) {
     try {
       if ((await fetch(`${base}/api/tasks`)).ok) return child
@@ -125,11 +138,11 @@ let lastPosition = ''
 const until = Date.now() + 40 * 60_000
 while (Date.now() < until) {
   const form = page.getByRole('form', { name: '回答提问' })
-  if (await form.count() > 0) {
+  if ((await form.count()) > 0) {
     const q = await form.locator('.question-text').innerText()
     if (answers.length === 0) await snap('question')
     const option = form.locator('.options button').first()
-    if (await option.count() > 0) {
+    if ((await option.count()) > 0) {
       const choice = await option.innerText()
       await option.click()
       answers.push(choice)
@@ -167,8 +180,11 @@ for (let i = 0; i < nFailed; i++) {
   const row = failed.nth(i)
   await row.scrollIntoViewIfNeeded()
   // 点开这次检查下面第一项没通过的检查，详情里显示原因。
-  const item = page.locator('.trace-row.kind-check').filter({ has: page.locator('.dot.error') }).nth(i * 2 + 1)
-  await (await item.count() > 0 ? item : row).click()
+  const item = page
+    .locator('.trace-row.kind-check')
+    .filter({ has: page.locator('.dot.error') })
+    .nth(i * 2 + 1)
+  await ((await item.count()) > 0 ? item : row).click()
   await snap(`check-failed-${i + 1}`)
 }
 await page.getByRole('button', { name: '收起到调用' }).click()
@@ -181,8 +197,13 @@ const store = new Store(join(DATA, 'eos.db'))
 const task = store.get(id)!
 const meta = store.meta(id)
 type Item = { kind: 'call' | 'check'; node: string; purpose?: string; session?: string; passed?: boolean; prompt?: string }
-const items: Item[] = task.log.flatMap<Item>(e => e.type === 'call' ? [{ kind: 'call' as const, node: e.node, purpose: e.purpose, prompt: e.prompt }]
-  : e.type === 'check' ? [{ kind: 'check' as const, node: e.node, passed: e.results.every(r => r.passed) }] : [])
+const items: Item[] = task.log.flatMap<Item>(e =>
+  e.type === 'call'
+    ? [{ kind: 'call' as const, node: e.node, purpose: e.purpose, prompt: e.prompt }]
+    : e.type === 'check'
+      ? [{ kind: 'check' as const, node: e.node, passed: e.results.every(r => r.passed) }]
+      : [],
+)
 /** 在 items 里依次找到这些条件（中间可以隔着别的）。 */
 const inOrder = (...steps: ((x: Item) => boolean)[]): boolean => {
   let k = 0
@@ -190,10 +211,11 @@ const inOrder = (...steps: ((x: Item) => boolean)[]): boolean => {
   return k === steps.length
 }
 const firstPromptOfSession = new Map<string, string>()
-for (const e of task.log) if (e.type === 'call') {
-  const session = e.purpose === 'produce' || e.purpose === 'fix' || e.purpose === 'critique' ? e.node : e.purpose === 'reconfirm' ? 'spec' : 'build'
-  if (!firstPromptOfSession.has(session)) firstPromptOfSession.set(session, e.prompt)
-}
+for (const e of task.log)
+  if (e.type === 'call') {
+    const session = e.purpose === 'produce' || e.purpose === 'fix' || e.purpose === 'critique' ? e.node : e.purpose === 'reconfirm' ? 'spec' : 'build'
+    if (!firstPromptOfSession.has(session)) firstPromptOfSession.set(session, e.prompt)
+  }
 const testFailures = items.filter(x => x.kind === 'check' && x.node === 'test' && x.passed === false).length
 const npmTest = (() => {
   try {
@@ -204,22 +226,47 @@ const npmTest = (() => {
   }
 })()
 const checks = {
-  '工作流在页面上改过并保存为第 2 版，历史里有第 1 版（内置）': store.conventionHistory('workflow', 'standard').map(r => r.version).join(',') === '2,1',
+  '工作流在页面上改过并保存为第 2 版，历史里有第 1 版（内置）':
+    store
+      .conventionHistory('workflow', 'standard')
+      .map(r => r.version)
+      .join(',') === '2,1',
   '页面对写错的 YAML 给出中文错误和位置': /nodes\[\d+\]\.kind/.test(yamlError) && /agent 或 dialog/.test(yamlError),
-  '任务记录了用到的约定版本（standard 第 2 版、研发约定第 1 版）': JSON.stringify({ workflow: meta.conventions?.workflow, docs: meta.conventions?.docs }) === JSON.stringify({ workflow: { name: 'standard', version: 2 }, docs: [{ name: '研发约定', version: 1 }] }),
-  '约定文档注入到每个会话的第一条提示词': firstPromptOfSession.size > 0 && [...firstPromptOfSession.values()].every(p => p.includes('团队约定：研发约定（第 1 版）')),
-  '开发的交付物检查没通过 → 同一个 agent 补齐 → 检查通过': inOrder(x => x.kind === 'check' && x.node === 'build' && x.passed === false, x => x.purpose === 'fix' && x.node === 'build', x => x.kind === 'check' && x.node === 'build' && x.passed === true),
-  '测试失败 → 交回开发修改 → 重跑通过': inOrder(x => x.kind === 'check' && x.node === 'test' && x.passed === false, x => x.purpose === 'respond' && x.node === 'test', x => x.kind === 'check' && x.node === 'test' && x.passed === true),
-  '评审这一轮先跑测试，通过后才请评审方': inOrder(x => x.kind === 'check' && x.node === 'review' && x.passed === true, x => x.purpose === 'critique'),
-  '任务完成': task.status === 'done',
+  '任务记录了用到的约定版本（standard 第 2 版、研发约定第 1 版）':
+    JSON.stringify({ workflow: meta.conventions?.workflow, docs: meta.conventions?.docs }) === JSON.stringify({ workflow: { name: 'standard', version: 2 }, docs: [{ name: '研发约定', version: 1 }] }),
+  约定文档注入到每个会话的第一条提示词: firstPromptOfSession.size > 0 && [...firstPromptOfSession.values()].every(p => p.includes('团队约定：研发约定（第 1 版）')),
+  '开发的交付物检查没通过 → 同一个 agent 补齐 → 检查通过': inOrder(
+    x => x.kind === 'check' && x.node === 'build' && x.passed === false,
+    x => x.purpose === 'fix' && x.node === 'build',
+    x => x.kind === 'check' && x.node === 'build' && x.passed === true,
+  ),
+  '测试失败 → 交回开发修改 → 重跑通过': inOrder(
+    x => x.kind === 'check' && x.node === 'test' && x.passed === false,
+    x => x.purpose === 'respond' && x.node === 'test',
+    x => x.kind === 'check' && x.node === 'test' && x.passed === true,
+  ),
+  '评审这一轮先跑测试，通过后才请评审方': inOrder(
+    x => x.kind === 'check' && x.node === 'review' && x.passed === true,
+    x => x.purpose === 'critique',
+  ),
+  任务完成: task.status === 'done',
   'worktree 里 npm test 通过': npmTest,
-  '页面没有脚本错误': errors.length === 0,
+  页面没有脚本错误: errors.length === 0,
 }
 const git = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim()
 const code = { commit: git('rev-parse', '--short', 'HEAD'), uncommitted: git('status', '--porcelain', '--', 'src', 'web/src', 'scripts', 'package.json').split('\n').filter(Boolean) }
 const report = {
-  task: id, code, status: task.status, failure: task.failure, answers, testFailures,
-  induced: ['开发节点的任务说明要求先不写 docs/changes.md（让交付物检查先失败一次）', '测试节点改用 worktree 外的验收测试（含 1.5h 小数用例）', '验收测试里加了需求没写的大写单位用例（1H30M），确定触发测试失败退回开发'],
+  task: id,
+  code,
+  status: task.status,
+  failure: task.failure,
+  answers,
+  testFailures,
+  induced: [
+    '开发节点的任务说明要求先不写 docs/changes.md（让交付物检查先失败一次）',
+    '测试节点改用 worktree 外的验收测试（含 1.5h 小数用例）',
+    '验收测试里加了需求没写的大写单位用例（1H30M），确定触发测试失败退回开发',
+  ],
   timeline: items.map(x => (x.kind === 'call' ? `${x.purpose}@${x.node}` : `check@${x.node}:${x.passed ? '通过' : '没通过'}`)),
   checks,
   errors,
