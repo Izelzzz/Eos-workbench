@@ -14,9 +14,9 @@
 
 ## 同上，以平台的身份带着能力直接跑 bwrap（修之前 doctor 的做法），和清掉能力后跑
 带着能力：
-bwrap: Unexpected capabilities but not setuid, old file caps config?
 退出码 1
 清掉能力：
+bwrap: Unexpected capabilities but not setuid, old file caps config?
 退出码 0
 
 ## 去掉 cap_add（切换不了用户）
