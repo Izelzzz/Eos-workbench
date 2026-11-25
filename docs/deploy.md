@@ -2,7 +2,7 @@
 
 适合一个小团队共用一台服务器。设计和取舍见 [ADR-006](adr/006-docker-deployment.md)。
 
-> **现在检查命令能读到主密钥和模型 key。** 工作流里的检查命令（`npm test` 等）跑的是 agent 改过的代码，由平台在沙箱外、以平台用户运行。实测它能读到平台进程初始环境里的 `EOS_MASTER_KEY`，以及 dsh 进程环境里的模型 key（`docs/e2e/deploy-2-image/sandbox/checks-env-probe.json`）。也就是说，agent 写进测试里的代码可以把这两个值带出去。在路线图第 3 项「agent 和检查命令用独立用户运行」完成之前，只在可信的仓库和需求上使用，模型 key 用额度受限的。
+> **agent 和平台还是同一个用户，只靠沙箱隔开。** 检查命令（`npm test` 等）已经换成独立的用户 `eos-check` 运行，读不到平台和 dsh 进程环境里的主密钥和模型 key（`docs/e2e/deploy-3b-check-user/`）。agent 还和平台同一个用户：它读不到这两个值，靠的只是 Landlock（见「沙箱」）；它还继承了平台切换用户的能力。agent 换成独立的用户是路线图第 3 项接下来的 PR，在那之前只在可信的仓库和需求上使用，模型 key 用额度受限的。
 >
 > **没有登录。** 能打开 Eos 地址的人都能建任务、看所有 trace、在服务器的仓库上跑 agent。默认只监听服务器的 `127.0.0.1`，请保持这个默认，或者放在带认证的反向代理后面。登录是路线图第 7 项。
 
@@ -31,13 +31,16 @@ docker compose up -d --build
 检查运行环境：
 
 ```bash
-docker compose exec eos node --import tsx src/cli.ts doctor
+docker compose exec eos eos doctor
 ```
 
-- 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos node --import tsx src/cli.ts doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
+镜像里的 `eos` 命令就是平台的命令行（`eos web`、`eos doctor`……）。容器以 root 启动，`eos` 先降到平台用户再运行，见下面的「用户和权限」。在容器里运行别的命令时加 `-u eos`，以平台用户运行，例如 `docker compose exec -u eos eos git ...`。
+
+- 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos eos doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
 - `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
 - 「沙箱」一项报告 dsh 实际会用的沙箱：在这份 compose 下是 Landlock（镜像里装了 bwrap，但 Docker 默认权限下用不了）。两个都用不了时是 ✗，平台不启动。
-- 「凭据隔离」一项现在是 ⚠：agent 在沙箱里读不到平台和 dsh 进程的环境，检查命令读得到（见顶部的警告）。用独立用户运行检查命令和 agent 是路线图第 3 项接下来的 PR。
+- 「检查命令的用户」一项真正切换一次到 `eos-check`。切换不过去（例如 compose 里去掉了 `cap_add`）时是 ✗，平台不启动：不会退回到用平台的用户运行检查命令。
+- 「凭据隔离」一项现在是 ⚠：检查命令读不到平台和 dsh 进程的环境，agent 只靠沙箱挡住（见顶部的警告）。
 
 ## 访问
 
@@ -78,10 +81,10 @@ location / {
 - **容器里的路径**：自己先克隆进去。为了不和平台的镜像混在一起，建议放在 `/data/repos/local/` 下：
 
   ```bash
-  docker compose exec eos git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>
+  docker compose exec -u eos eos sh -c 'umask 022 && git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>'
   ```
 
-  不要把令牌写进这种仓库的 remote URL：agent 能读整个 `/data`（见下面的「沙箱」）。
+  `-u eos`：以 root 克隆的话，平台写不了这个仓库。`umask 022`：`docker compose exec` 起的进程 umask 是 0，不设的话克隆出来的文件人人可写，检查命令也能改。不要把令牌写进这种仓库的 remote URL：agent 能读整个 `/data`（见下面的「沙箱」）。
 
 ## 执行器环境
 
@@ -105,10 +108,10 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 
   ```dockerfile
   FROM eos-workbench:local
-  USER root
   RUN apt-get update && apt-get install -y --no-install-recommends golang-go libpq-dev && rm -rf /var/lib/apt/lists/*
-  USER eos
   ```
+
+  不要加 `USER eos`：容器要以 root 启动，`eos` 命令才能降到平台用户、并带上切换到 `eos-check` 的能力（见「用户和权限」）。
 
   再写一个 `compose.override.yaml`（compose 会自动读它），给派生镜像一个**不同的标签**：
 
@@ -122,7 +125,22 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
   第一次部署和每次升级都要先建基础镜像，再建派生镜像，见下面的「升级」。派生镜像沿用 `eos-workbench:local` 这个标签的话，它会盖掉基础镜像，以后升级拿不到新的 Eos 代码。
 
 - agent 访问网络不受限制（拉依赖要用到）。需要限制出网时，在宿主机或 Docker 网络这一层做。
-- **检查命令**（工作流里的 `npm test` 等，由平台在沙箱外运行）只拿到最少的环境变量，不包括代理和证书变量（`HTTPS_PROXY`、`NODE_EXTRA_CA_CERTS` 等）。服务器要经代理上网时，检查命令里需要联网的步骤（例如 `npm install`）会失败。实测记录：`docs/e2e/deploy-2-image/sandbox/checks-probe.json`。这一点和「agent 和检查命令用独立用户运行」一起处理（路线图第 3 项）。
+- **检查命令**（工作流里的 `npm test` 等，由平台在沙箱外运行）以 `eos-check` 运行，只拿到最少的环境变量：`PATH`、语言和时区、`CI=1`，`HOME` 是 `/home/eos-check`（npm 等的缓存在这里，各任务的检查命令共用）。另外传证书和代理设置（`NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`、`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY` 及小写形式、`NODE_USE_ENV_PROXY`），服务器经代理上网时联网的检查（`npm install` 等）也能跑。**代理地址带账号密码（`http://user:pass@...`）时不传**：检查命令跑的是 agent 改过的代码，会把账号密码带出去。这时 `eos doctor` 有一条 ⚠，联网的检查会失败。agent 那一边（dsh 的环境）现在还拿得到完整的代理地址，下一个 PR 按同样的规则收紧。
+
+## 用户和权限
+
+容器里有三个用户（ADR-006）：
+
+| 用户 | 运行什么 | 能读 | 能写 |
+|---|---|---|---|
+| root | 只有 1 号进程（`docker-init`），以及 `docker compose exec` 不加 `-u` 时的命令 | 只有 `SETUID`、`SETGID` 两个能力，读写不了别的用户的文件 | 同左 |
+| `eos` | 平台、git、dsh 和 agent | `/data` 全部、自己进程的环境（主密钥、模型 key）；agent 在 Landlock 里读不到别的进程的环境 | `/data` 全部；agent 只能写自己的 worktree 和 `/tmp` |
+| `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到 `eos` 和 root 进程的环境 | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
+
+- compose 去掉了全部能力，只加回 `SETUID`、`SETGID`。`eos` 命令以 root 启动，降到 `eos` 时把这两个能力带过去（ambient），平台用它们把检查命令切换到 `eos-check`；切换时清掉全部能力，检查命令切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
+- worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
+- 平台给 `eos-check` 的进程发不了信号，超时或中止时以 `eos-check` 的身份结束检查命令的进程组。
+- **还没做到的**：agent 和平台同一个用户，而且继承了平台的 `SETUID`、`SETGID`，能切换到任何用户（包括 root）。Landlock 仍然限制它的写入，挡住它读别的进程的环境，所以现在挡住 agent 的只有沙箱。下一个 PR 让 dsh 以独立的用户 `eos-agent` 运行，并清掉这两个能力。
 
 ## 沙箱
 
@@ -135,7 +153,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
   - 同一个容器里的任务共用 `/tmp`（tmpfs），而且都能写：能读到别的任务的临时文件和 dsh 的输出暂存文件（`/tmp/dsh-spill-*`）；也能改共享的依赖缓存，一个任务的 agent 往缓存里放的东西，会被下一个任务用到。npm 按 lockfile 里的 hash 校验包，pip 的缓存和 corepack 下载的 pnpm、yarn 没有这种校验。
 - **MCP 服务不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类「现下载现运行」的命令启动。** MCP 服务跑在沙箱外，并继承 dsh 的环境，包括上面这几个缓存目录；用这类命令启动时，它可能运行 agent 放进缓存里的代码。把 MCP 服务装进派生镜像（见「执行器环境」），在模板里写它的绝对路径。
   - agent 能看到进程列表。
-- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。检查命令是例外：它的环境里没有关字节码缓存的开关，npm 会在 `/tmp/node-compile-cache` 留下缓存，之后的检查命令会加载它。检查命令本来就在沙箱外运行 agent 改过的代码，所以这不会让 agent 多拿到权限；和检查命令的环境变量一起在路线图第 3 项处理。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
+- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。检查命令是例外：它的环境里没有关字节码缓存的开关，npm 会在 `/tmp/node-compile-cache` 留下缓存（属于 `eos-check`），之后的检查命令会加载它。检查命令本来就在沙箱外运行 agent 改过的代码，所以这不会让 agent 多拿到权限。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
 
 ## 数据和升级
 

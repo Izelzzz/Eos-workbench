@@ -1,21 +1,32 @@
 // 平台执行的验收检查：在任务的 worktree 里看交付物文件、跑命令。结果交给引擎（checked 事件）。
 // 命令退出后整个进程组都会被结束：检查命令留下的后台进程（例如没收尾的测试服务）不会一直留着。
 //
-// 命令检查用平台进程的权限在 worktree 里执行仓库代码（例如 npm test 会跑 agent 改过的 package.json），
-// 和 CI runner 一样不在 agent 的沙箱里。所以只给它最小的环境变量，不传模型密钥等其它变量。
-import { spawn } from 'node:child_process'
+// 命令检查在 worktree 里执行仓库代码（例如 npm test 会跑 agent 改过的 package.json），和 CI runner 一样不在 agent 的沙箱里。
+// 所以只给它最小的环境变量，不传模型密钥等其它变量；部署镜像里还换成独立的用户运行（check-user.ts），
+// 读不到平台和 dsh 进程环境里的主密钥和模型 key。
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import type { CheckResult } from '../engine/types.ts'
 import type { Check } from '../workflow/types.ts'
+import { asUser, type CheckUser } from './check-user.ts'
 
 /** 命令输出只保留最后这么多字符，交给 agent 和页面。 */
 export const OUTPUT_TAIL = 4000
 
-const KEEP_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TZ']
+const KEEP_ENV = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TZ',
+  // 服务器在会解开 TLS 的代理后面时，联网的检查（npm install、pip install）要用到的证书和代理设置。
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NO_PROXY', 'no_proxy', 'NODE_USE_ENV_PROXY']
+/** 代理地址。带账号密码（有 @）的不传：检查命令跑的是 agent 改过的代码。 */
+export const PROXY_ENV = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy']
 
-export const checkEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
-  ...Object.fromEntries(KEEP_ENV.flatMap(k => (env[k] === undefined ? [] : [[k, env[k]]]))),
+/** 设置了、但因为带账号密码没有传给检查命令的代理变量。 */
+export const droppedProxies = (env: NodeJS.ProcessEnv): string[] => PROXY_ENV.filter(k => env[k]?.includes('@') === true)
+
+/** 检查命令的环境。user 给定时 HOME 换成它的家目录（平台的家目录它写不了）。 */
+export const checkEnv = (env: NodeJS.ProcessEnv, user?: CheckUser): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries([...KEEP_ENV, ...PROXY_ENV].flatMap(k => (env[k] === undefined || droppedProxies(env).includes(k) ? [] : [[k, env[k]]]))),
+  ...(user === undefined ? {} : { HOME: user.home }),
   CI: '1',
 })
 
@@ -63,14 +74,15 @@ const checkFile = (worktree: string, c: Extract<Check, { kind: 'file' }>): Check
 /** 命令退出（或超时被杀）之后，最多再等这么久让输出管道关闭；逃出进程组又占着管道的孙进程不会让检查卡住。 */
 export const PIPE_GRACE_MS = 2000
 
-const checkRun = (worktree: string, c: Extract<Check, { kind: 'run' }>, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<CheckResult> =>
+const checkRun = (worktree: string, c: Extract<Check, { kind: 'run' }>, env: NodeJS.ProcessEnv, signal?: AbortSignal, user?: CheckUser): Promise<CheckResult> =>
   new Promise(done => {
     let out = ''
     let ended: 'exit' | 'timeout' | 'aborted' | undefined
     let code: number | null = null
     let settled = false
-    // 单独的进程组：结束时连同它启动的子进程一起结束。
-    const p = spawn(c.run[0]!, c.run.slice(1), { cwd: worktree, env: checkEnv(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    // 单独的进程组：结束时连同它启动的子进程一起结束。setpriv 切换用户后 exec 命令本身，进程号不变。
+    const [cmd, ...args] = user === undefined ? c.run : asUser(user, c.run)
+    const p = spawn(cmd!, args, { cwd: worktree, env: checkEnv(env, user), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     // 按 UTF-8 解码，多字节字符跨块时不会乱码。
     p.stdout.setEncoding('utf8')
     p.stderr.setEncoding('utf8')
@@ -80,8 +92,15 @@ const checkRun = (worktree: string, c: Extract<Check, { kind: 'run' }>, env: Nod
     p.stdout.on('data', keep)
     p.stderr.on('data', keep)
     const killGroup = () => {
+      if (p.pid === undefined) return
+      // 别的用户的进程平台发不了信号（EPERM），以同一个用户去杀。进程组已经没有进程时 kill 报错，不用管。
+      if (user !== undefined) {
+        const [k, ...kargs] = asUser(user, ['kill', '-KILL', '--', `-${p.pid}`])
+        spawnSync(k!, kargs, { env: checkEnv(env, user), stdio: 'ignore', timeout: 5000 })
+        return
+      }
       try {
-        process.kill(-p.pid!, 'SIGKILL')
+        process.kill(-p.pid, 'SIGKILL')
       } catch {
         // 进程组已经没有进程了
       }
@@ -131,12 +150,12 @@ export type PlatformRunner = (c: Extract<Check, { kind: 'platform' }>) => Promis
  * 按顺序执行，结果顺序与 checks 一致。一项失败不影响后面的检查：一次把所有问题都告诉 agent。
  * 平台动作只在前面的检查都通过时才做（例如测试不过就不推送）。
  */
-export const runChecks = async (worktree: string, checks: Check[], env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal, platform?: PlatformRunner): Promise<CheckResult[]> => {
+export const runChecks = async (worktree: string, checks: Check[], env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal, platform?: PlatformRunner, user?: CheckUser): Promise<CheckResult[]> => {
   if (!existsSync(worktree)) throw new Error(`worktree 不存在：${worktree}`)
   const results: CheckResult[] = []
   for (const c of checks) {
     if (c.kind === 'file') results.push(checkFile(worktree, c))
-    else if (c.kind === 'run') results.push(await checkRun(worktree, c, env, signal))
+    else if (c.kind === 'run') results.push(await checkRun(worktree, c, env, signal, user))
     else if (signal?.aborted === true) results.push({ check: c, passed: false, detail: '任务已中止，这一步没有做' })
     else if (results.some(r => !r.passed)) results.push({ check: c, passed: false, detail: '前面的检查没有通过，这一步没有做' })
     else if (platform === undefined) results.push({ check: c, passed: false, detail: '这里不能执行平台动作' })

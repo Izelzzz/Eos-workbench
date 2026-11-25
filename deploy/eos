@@ -1,0 +1,29 @@
+#!/bin/sh
+# 容器里运行 Eos 命令的入口：eos web、eos doctor……（镜像里装在 /usr/local/bin/eos）。
+# 容器以 root 启动，这里降到平台用户 eos，只带着切换用户用的 SETUID、SETGID 两个能力：
+# 检查命令要切换到 eos-check 运行，读不到平台和 dsh 进程环境里的主密钥和模型 key（docs/adr/006-docker-deployment.md）。
+set -eu
+
+if [ "$(id -u)" = 0 ]; then
+  # setpriv 不改这几个变量；不改的话平台的 HOME 还是 /root。
+  export HOME=/home/eos USER=eos LOGNAME=eos
+  exec setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid --ambient-caps=+setuid,+setgid -- "$0" "$@"
+fi
+
+# 检查命令（eos-check）要能写 agent 改过的 worktree：worktree 目录属于共用组 eos-work 并带 setgid，
+# 平台、agent 新建的文件都归这个组；umask 002 让它们组内可写。
+umask 002
+data="${EOS_HOME:-/data}"
+# 在 || 左边调用时 set -e 不起作用，每一步自己判断失败。
+prepare() {
+  mkdir -p "$data/worktrees" && chgrp eos-work "$data/worktrees" && chmod 2775 "$data/worktrees" || return 1
+  # 升级前（检查命令还和平台同一个用户时）建的 worktree 一次性改成这个组。
+  [ -e "$data/.worktrees-group" ] && return 0
+  chgrp -hR eos-work "$data/worktrees" && chmod -R g+w "$data/worktrees" \
+    && find "$data/worktrees" -type d -exec chmod g+s {} + && touch "$data/.worktrees-group"
+}
+# 数据目录有问题时不在这里退出：让 eos doctor、启动检查说明原因。
+prepare || echo "eos：没能把 $data/worktrees 设成共用组 eos-work，检查命令可能写不了 worktree" >&2
+
+cd /app
+exec node --import tsx src/cli.ts "$@"

@@ -8,6 +8,8 @@ import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
 import { dshInstall, dshSandbox, type DshSandbox } from '../executor/dsh.ts'
+import { CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
+import { droppedProxies } from './checks.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
 export type Status = 'ok' | 'warn' | 'fail'
@@ -32,6 +34,10 @@ export type Facts = {
   sandbox: DshSandbox
   /** dsh 的版本；没装时是 undefined。 */
   dsh?: string
+  /** 检查命令用的系统用户：没有设置、能切换过去、设置错了或切换不过去（原因）。 */
+  checkUser: { kind: 'none' } | { kind: 'ok'; name: string } | { kind: 'fail'; error: string }
+  /** 带账号密码、所以没有传给检查命令的代理变量。 */
+  droppedProxies: string[]
 }
 
 const parts = (v: string): number[] => v.replace(/^v/, '').split('.').map(x => Number.parseInt(x, 10) || 0)
@@ -78,17 +84,40 @@ const sandboxItem = (f: Facts): Item => {
 }
 
 /**
+ * 检查命令用哪个用户运行。设置了却切换不过去时 ✗：检查命令一定跑不起来，也不能退回到用平台的用户运行。
+ * 没有设置时不列出，由「凭据隔离」说明检查命令和平台是同一个用户。
+ */
+const checkUserItem = (f: Facts): Item[] => {
+  const name = '检查命令的用户'
+  switch (f.checkUser.kind) {
+    case 'none': return []
+    case 'ok': return [{ name, status: 'ok', detail: `检查命令以 ${f.checkUser.name} 运行，没有任何特权，读不到平台和 dsh 进程的环境` }]
+    case 'fail': return [{ name, status: 'fail', detail: f.checkUser.error, fix: `${CHECK_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这两项，见 docs/deploy.md）；不在容器里时去掉 ${CHECK_USER_ENV}` }]
+  }
+}
+
+/** 代理地址带账号密码时不传给检查命令：联网的检查（npm install 等）在必须走代理的服务器上会失败。 */
+const proxyItem = (f: Facts): Item[] =>
+  f.droppedProxies.length === 0 ? [] : [{
+    name: '检查命令的代理', status: 'warn', detail: `${f.droppedProxies.join('、')} 带账号密码，没有传给检查命令：检查命令跑的是 agent 改过的代码`,
+    fix: '换成不需要账号密码的代理（例如按来源地址放行），或让检查命令不需要联网（依赖由 agent 装好）',
+  }]
+
+/**
  * 设置了主密钥时提示还没隔离的地方：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；dsh 进程的环境里有模型 key。
- * 沙箱挡住了 agent；检查命令（npm test 等）不在沙箱里、和平台是同一个用户，总能读到。
- * 要用独立的用户运行检查命令和 agent 才能隔离（路线图第 3 项，还没有做完）。
+ * agent 靠沙箱挡住；检查命令不在沙箱里，只有换成独立的用户才读不到。agent 和平台还是同一个用户（路线图第 3 项，还没有做完）。
  */
 const isolationItem = (f: Facts): Item[] => {
   if (f.masterKey.kind !== 'ok') return []
-  const checks = '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
-  const detail = f.sandbox.backend === 'none'
-    ? `没有可用的沙箱：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key`
-    : f.sandbox.backend === 'platform' ? checks : `agent 在沙箱里读不到它们；${checks}`
-  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: '用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）；在那之前只在可信的仓库和需求上使用' }]
+  const what = '平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
+  const checks = f.checkUser.kind === 'ok'
+    ? `检查命令以 ${f.checkUser.name} 运行，读不到${what}`
+    : `检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到${what}`
+  const agent = f.sandbox.backend === 'none'
+    ? `没有可用的沙箱：agent 能读到${what}`
+    : f.sandbox.backend === 'platform' ? undefined : 'agent 在沙箱里读不到它们，但和平台是同一个用户，只靠沙箱挡住'
+  const detail = agent === undefined ? checks : `${agent}；${checks}`
+  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: f.checkUser.kind === 'ok' ? '用独立的用户运行 agent（路线图第 3 项，还没有做完）' : '用独立的用户运行检查命令和 agent（Docker 部署已经用独立的用户运行检查命令，agent 还没有）；在那之前只在可信的仓库和需求上使用' }]
 }
 
 const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
@@ -109,6 +138,8 @@ export const evaluate = (f: Facts): Item[] => [
   modelKeyItem(f),
   masterKeyItem(f),
   sandboxItem(f),
+  ...checkUserItem(f),
+  ...proxyItem(f),
   ...isolationItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
@@ -161,14 +192,20 @@ const nodeRequired = (root: string): string | undefined => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState }): Facts => {
+export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState }): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
+  const cu = o.checkUser
+  const switchError = cu.kind === 'ok' ? probeSwitch(cu.user) : undefined
+  const checkUser: Facts['checkUser'] = cu.kind === 'none' ? cu
+    : cu.kind === 'invalid' ? { kind: 'fail', error: cu.error }
+      : switchError === undefined ? { kind: 'ok', name: cu.user.name } : { kind: 'fail', error: `切换不到 ${cu.user.name}：${switchError}` }
   return {
     node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
     git: gitState(), sandbox: dshSandbox(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
+    checkUser, droppedProxies: droppedProxies(process.env),
   }
 }
 

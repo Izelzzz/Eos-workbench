@@ -13,7 +13,7 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, sandbox: { backend: 'bwrap' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5' }
+const good: Facts = { node: '24.10.0', nodeRequired: '>=24.9.0', modelKey: { source: 'credentials' }, masterKey: { kind: 'ok', id: '0123456789abcdef' }, git: { version: '2.43.0' }, sandbox: { backend: 'bwrap' }, dataDir: '/srv/eos', dsh: '0.2.2-rc.5', checkUser: { kind: 'none' }, droppedProxies: [] }
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -29,9 +29,9 @@ test('环境都满足时每项都通过', () => {
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, sandbox: { backend: 'none' }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）' }
+  const bad: Facts = { node: '22.23.5', nodeRequired: '>=24.9.0', modelKey: { source: 'missing' }, masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' }, git: { missing: true }, sandbox: { backend: 'none' }, dataDir: '/srv/eos', dataDirError: '没有写权限（EACCES）', checkUser: { kind: 'fail', error: 'EOS_CHECK_USER=eos-check，但系统里没有这个用户' }, droppedProxies: [] }
   const items = evaluate(bad)
-  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail'])
+  assert.deepEqual(items.map(i => i.status), ['warn', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail', 'fail'])
   assert.ok(items.every(i => i.fix !== undefined && i.fix !== ''), JSON.stringify(items))
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
@@ -70,11 +70,39 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
 test('设置了主密钥时如实说明谁能读到：有沙箱时 agent 读不到、检查命令读得到；没有沙箱时两者都读得到；没设置主密钥时不提示', () => {
   const isolation = (s: Facts['sandbox']) => formatItems(evaluate({ ...good, sandbox: s }).filter(i => i.name === '凭据隔离'))
   for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
-    assert.match(isolation(s), /^⚠ 凭据隔离：agent 在沙箱里读不到它们；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）/)
+    assert.match(isolation(s), /^⚠ 凭据隔离：agent 在沙箱里读不到它们，但和平台是同一个用户，只靠沙箱挡住；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：用独立的用户运行检查命令和 agent（Docker 部署已经用独立的用户运行检查命令，agent 还没有）/)
   }
-  assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱：agent 和检查命令都能读到/)
+  assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱：agent 能读到.*；检查命令（npm test 等）和平台是同一个用户/)
   assert.doesNotMatch(isolation({ backend: 'landlock', enforcement: 'full' }), /Docker 部署会这样做/, 'the fix must not claim the deployment already isolates users')
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
+})
+
+test('检查命令换了用户时：切换得过去是 ✓，凭据隔离只剩 agent；设置错了或切换不过去是 ✗，拦下启动', () => {
+  const withUser: Facts = { ...good, sandbox: { backend: 'landlock', enforcement: 'full' }, checkUser: { kind: 'ok', name: 'eos-check' } }
+  const text = formatItems(evaluate(withUser))
+  assert.match(text, /✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境/)
+  assert.match(text, /⚠ 凭据隔离：agent 在沙箱里读不到它们，但和平台是同一个用户，只靠沙箱挡住；检查命令以 eos-check 运行，读不到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key\n  怎么修：用独立的用户运行 agent/)
+  const failed = evaluate({ ...withUser, checkUser: { kind: 'fail', error: '切换不到 eos-check：setpriv: setresuid failed: Operation not permitted' } }).find(i => i.name === '检查命令的用户')
+  assert.equal(failed?.status, 'fail')
+  assert.match(failed?.fix ?? '', /SETUID、SETGID/)
+  assert.ok(!evaluate(good).some(i => i.name === '检查命令的用户'), '没有设置时不列出')
+})
+
+test('代理地址带账号密码、没有传给检查命令时提示', () => {
+  const item = evaluate({ ...good, droppedProxies: ['HTTPS_PROXY'] }).find(i => i.name === '检查命令的代理')
+  assert.equal(item?.status, 'warn')
+  assert.match(item?.detail ?? '', /HTTPS_PROXY 带账号密码，没有传给检查命令/)
+  assert.ok(!evaluate(good).some(i => i.name === '检查命令的代理'))
+})
+
+test('gather：设置了检查命令的用户时真的切换一次；系统里没有这个用户时记成失败', () => {
+  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'invalid', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' } })
+  assert.deepEqual(f.checkUser, { kind: 'fail', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' })
+  // 测试进程没有切换用户的能力（CI 和本机都不是带 SETUID 的平台进程）：探测要报失败，而不是当成能切换。
+  if (process.getuid?.() !== 0) {
+    const g = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'ok', user: { name: 'nobody', home: '/nonexistent' } } })
+    assert.equal(g.checkUser.kind, 'fail')
+  }
 })
 
 test('模型 key 显示来源：凭据存储、环境变量；读不出来时是 ✗，不悄悄改用环境变量', () => {
@@ -84,7 +112,7 @@ test('模型 key 显示来源：凭据存储、环境变量；读不出来时是
 })
 
 test('gather：读 package.json 的 engines 和 dsh 版本；只记 key 的来源，不带值；数据目录建不出来时记下原因', () => {
-  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'credentials', value: 'sk-secret-value' }, masterKey: { kind: 'missing' } })
+  const f = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'credentials', value: 'sk-secret-value' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' } })
   assert.equal(f.nodeRequired, '>=24.9.0')
   assert.equal(f.node, process.versions.node)
   assert.deepEqual(f.modelKey, { source: 'credentials' })
@@ -95,7 +123,7 @@ test('gather：读 package.json 的 engines 和 dsh 版本；只记 key 的来�
   assert.ok(existsSync(f.dataDir), '和别的命令一样会建出数据目录')
   const file = join(tmp(), 'a-file')
   writeFileSync(file, '')
-  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' } })
+  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' } })
   assert.deepEqual(blocked.modelKey, { source: 'missing' })
   assert.equal(blocked.dataDirError, '路径里有一段不是目录（是普通文件）（ENOTDIR）')
 })

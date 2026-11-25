@@ -32,10 +32,10 @@ const compose = (...a: string[]) => {
   if (out.trim() !== '') appendFileSync(LOG, `${out}\n`)
   return out
 }
-/** 在容器里以平台用户执行，返回输出和退出码（不抛错：退出码本身是要核对的结果）。 */
-const inContainer = (script: string): { code: number; out: string } => {
+/** 在容器里以 user 执行（默认平台用户 eos），返回输出和退出码（不抛错：退出码本身是要核对的结果）。 */
+const inContainer = (script: string, user = 'eos'): { code: number; out: string } => {
   try {
-    return { code: 0, out: compose('exec', '-T', 'eos', 'bash', '-c', script) }
+    return { code: 0, out: compose('exec', '-T', '-u', user, 'eos', 'bash', '-c', script) }
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string }
     const out = `${err.stdout ?? ''}${err.stderr ?? ''}`
@@ -67,14 +67,16 @@ compose('down', '-v')
 try {
   compose('up', '-d')
   await until('Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
-  const doctor = inContainer('node --import tsx src/cli.ts doctor')
+  // eos 命令要从 root 起：它降到 eos 时带上切换用户的能力，doctor 才测得到检查命令能不能切换到 eos-check。
+  const doctor = inContainer('eos doctor', 'root')
   log(doctor.out)
   const env = inContainer('id; node -v; npm -v; pnpm -v; git --version; python3 --version; gcc --version | head -1; bwrap --version; echo "EOS_HOME=$EOS_HOME"')
 
   inContainer([
     `rm -rf ${REPO} && mkdir -p ${REPO} && cd ${REPO}`,
     'git init -q -b main',
-    `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "test": "node --test" } }' > package.json`,
+    // pretest 记下跑过 npm test 的用户（每个用户一个文件，不用写别人的文件）：agent 在沙箱里跑的是 eos，平台的检查命令应该是 eos-check。
+    `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "pretest": "touch /tmp/eos-e2e-npm-test-by-$(id -un)", "test": "node --test" } }' > package.json`,
     'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
   ].join(' && '))
 
@@ -84,8 +86,17 @@ try {
   const id = created.body.id as string
   const answered: string[] = []
   let task: any
+  // 任务运行、真实的 dsh 进程还在时，以检查命令的用户（eos-check，和检查命令一样没有特权）扫一遍别的进程的环境。
+  let scan: { code: number; out: string } | undefined
+  let dshPids: number[] = []
   await until('任务结束', async () => {
     task = (await api(`/api/tasks/${id}`)).body
+    // [d] 让 pgrep 不匹配到执行它的 bash 自己。
+    const found = scan === undefined ? inContainer("pgrep -u eos -f '@deepseek-ai/[d]sh/'") : undefined
+    if (found?.code === 0) {
+      dshPids = found.out.trim().split('\n').map(Number)
+      scan = inContainer('cd /tmp && node /app/scripts/check-user-scan.mjs', 'eos-check')
+    }
     if (task.status === 'waiting_user' && task.question !== undefined && !answered.includes(task.question.id)) {
       const text = task.question.options?.[0] ?? '按你的建议做'
       const a = await api(`/api/tasks/${id}/answer`, { questionId: task.question.id, text })
@@ -98,6 +109,7 @@ try {
   log(`任务 ${id}：${task.status}${task.failure === undefined ? '' : `（${JSON.stringify(task.failure)}）`}`)
 
   const worktree = task.worktree as string
+  const testUsers = inContainer('ls /tmp | sed -n "s/^eos-e2e-npm-test-by-//p"')
   const tests = inContainer(`set -o pipefail; cd ${worktree} && npm test 2>&1 | tail -8`)
   const commits = inContainer(`git -C ${worktree} log --oneline ${task.baseSha}..HEAD`)
 
@@ -107,16 +119,20 @@ try {
   const after = (await api(`/api/tasks/${id}`)).body
   const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
   const head = commits.out.trim().split('\n')[0]?.split(' ')[0] ?? ''
+  const scanned = scan?.code === 0 ? JSON.parse(scan.out.trim().split('\n').at(-1)!) : undefined
 
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
+    '检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key': scanned !== undefined && scanned.uid !== 10001 && scanned.secretsFoundIn.length === 0
+      && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10001 && p.environ !== 'readable')),
     '任务完成': task.status === 'done',
+    '平台的检查命令（npm test）以 eos-check 运行': testUsers.out.split('\n').includes('eos-check'),
     'worktree 里 npm test 通过': tests.code === 0 && /ℹ fail 0/.test(tests.out),
     'agent 的改动提交到了任务分支': commits.code === 0 && commits.out.trim() !== '',
     'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
     'down 再 up 之后 worktree 还在，最新提交不变': afterWorktree.code === 0 && head !== '' && afterWorktree.out.startsWith(head),
   }
-  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'src', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
+  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, checkUserScan: { dshPids, scan: scanned ?? scan }, testUsers: testUsers.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
   process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1

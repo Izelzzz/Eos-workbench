@@ -27,11 +27,16 @@
 - 要让 bwrap 可用，除了放开 seccomp，还必须去掉 Docker 对 `/proc` 的屏蔽（`systempaths=unconfined`）。这样容器里的 root 能写 `/proc/sysrq-trigger` 等文件。而下一条要求平台以 root 启动，两者不能同时成立。
 - 镜像里照样装 bubblewrap：dsh 先试 bwrap，失败只多一次探测。这样不同宿主机上的行为一致：宿主机或编排器放开了 user namespace 时，dsh 会自己用上 bwrap。
 
-### agent 和检查命令用独立用户运行（路线图第 3 项第 3 个 PR）
+### agent 和检查命令用独立用户运行（路线图第 3 项第 3 个 PR，分 ③b、③c 两步）
 
-- 平台以 root 启动，只保留切换用户需要的能力。dsh 以 `eos-agent` 运行，检查命令以 `eos-check` 运行。
-- 实测：以别的 uid 运行的普通进程读不到 root 平台进程的环境。
-- 检查命令单独用一个用户：它和 dsh 同一个 uid 时，能读到 dsh 进程环境里的模型 key。
+- 容器以 root 启动，镜像里的 `eos` 命令（`deploy/eos`）用 `setpriv` 降到平台用户 `eos`，只带着 `SETUID`、`SETGID` 两个能力（ambient）。compose 去掉全部能力，只加回这两个。
+  - 平台仍然是 `eos`、不是 root：数据卷里已有的文件都属于 `eos`，root 没有 `CHOWN`、`DAC_OVERRIDE` 就写不了它们，升级要么多给能力、要么迁移属主。平台留在 `eos` 不需要两者。
+- **③b（本次）**：检查命令以 `eos-check` 运行，切换时清掉全部能力。实测（`docs/e2e/deploy-3b-check-user/`）：它读不到 `eos` 和 root 进程的环境，切换不回 `eos` 或 root，写不了 `eos.db` 和仓库；同一个扫描以 `eos` 运行时都能做到（正对照）。
+  - worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。升级前的 worktree 在第一次启动时改成这个组。
+  - 平台给别的用户的进程发不了信号，超时和中止时以 `eos-check` 运行 `kill` 结束检查命令的进程组。
+  - 检查命令单独用一个用户，不和 agent 共用：同一个 uid 时，检查命令能读到 dsh 进程环境里的模型 key。
+  - 检查命令拿到证书和不带账号密码的代理设置（用户选的方案）。带账号密码的代理不传，doctor 提示。
+- **③c（下一步）**：dsh 以 `eos-agent` 运行，并清掉 `SETUID`、`SETGID`。在那之前，agent 和平台同一个用户，并继承这两个能力（见「已知限制」）。
 
 ### 访问：容器里监听 0.0.0.0，宿主机只绑 127.0.0.1
 
@@ -67,9 +72,15 @@
 ## 影响范围
 
 - 新增：`Dockerfile`、`.dockerignore`、`compose.yaml`、`docs/deploy.md`、`scripts/deploy-e2e.ts`。
-- 第 3 个 PR 会改：`compose.yaml`（加上切换用户需要的能力）、`Dockerfile`（建 `eos-agent`、`eos-check`）、`src/executor/dsh.ts` 和 `src/runner/checks.ts`（以独立用户启动）。
+- ③b：`Dockerfile`（建 `eos-check` 和共用组 `eos-work`，以 root 启动，`EOS_CHECK_USER`）、`compose.yaml`（`cap_add: SETUID, SETGID`）、`deploy/eos`（降权入口）、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`（「检查命令的用户」「检查命令的代理」两项）。不在容器里、没有设置 `EOS_CHECK_USER` 时行为不变。
+- ③c 会改：`Dockerfile`（建 `eos-agent`）、`src/executor/dsh.ts`（以独立用户启动 dsh）。
 
 ## 已知限制
+
+- **③b 之后、③c 之前，agent 继承平台切换用户的能力**：dsh 和 agent 是平台的子进程，ambient 的 `SETUID`、`SETGID` 会传下去，agent 能切换到任何用户，包括 root（探针的正对照里，平台用户切换到 root 成功）。Landlock 仍然限制它的写入，也挡住它读别的进程的环境，所以现在挡住 agent 的只有沙箱。③c 让 dsh 先清掉这两个能力、换成 `eos-agent` 再启动。
+- **检查命令能读世界可读的文件**：`eos.db`（trace、加密的凭据）、所有仓库和 worktree。它写不了它们，也读不到主密钥，所以解不开凭据。
+- **各任务的 worktree 都归 `eos-work`**：一个任务的检查命令能改别的任务的 worktree（以前和平台同一个用户时，它能改整个 `/data`）。
+- **检查命令自己建的、不给组写权限的文件**（例如显式 `chmod 755` 的目录），平台撤销越界改动或提交时可能处理不了。
 
 - **Landlock 比 bwrap 弱的地方**：
   - `/tmp` 是同一个 tmpfs，所有任务都能读写：能看到彼此的临时文件和 dsh 的输出暂存文件，也能改共享的依赖缓存（任务之间可以互相投毒）。npm 的缓存按 hash 校验，pip 缓存和 corepack 下载的 pnpm、yarn 不校验。
