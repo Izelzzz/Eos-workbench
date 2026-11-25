@@ -15,6 +15,6 @@ $run sh -c "$as_eos sh -c 'mkdir -p /data/dsh.agent-new/sessions /data/dsh.befor
   ls -d /data/dsh 2>&1; cat /data/dsh.agent-new/sessions/marker" 2>&1
 
 echo; echo "## 2. 删了标记重做迁移"
-$run sh -c "timeout 15 eos web >/dev/null 2>&1; rm -f /data/.dsh-agent
-  timeout 15 eos web 2>&1 | grep 'eos：'; stat -c '%A %U:%G %n' /data/dsh /data/dsh/eos-profiles /data/dsh/eos-process-cwd /data/dsh/mcp-cwd
+$run sh -c "timeout 15 eos web >/dev/null 2>&1; $as_eos rm -f /data/.dsh-agent
+  timeout 15 eos web 2>&1 | grep 'eos：'; $as_eos stat -c '%A %U:%G %n' /data/dsh /data/dsh/eos-profiles /data/dsh/eos-process-cwd /data/dsh/mcp-cwd
   eos doctor 2>&1 | grep -E '用户|隔离'" 2>&1

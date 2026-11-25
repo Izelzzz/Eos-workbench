@@ -68,6 +68,11 @@ prepare_dsh() {
     echo "eos：上次迁移 $dsh 停在了中间：复制好的在 $data/dsh.agent-new，旧的在 $data/dsh.before-agent*。确认后运行 mv $data/dsh.agent-new $dsh 再启动" >&2
     return 2
   fi
+  # 已经是新布局（顶层有 eos-agent 的东西，例如删了标记后重启）：不用迁移，只整理权限、补上标记。
+  if [ -d "$dsh" ] && [ -n "$(find "$dsh" -mindepth 1 -maxdepth 1 -user "$EOS_AGENT_USER" -print -quit)" ]; then
+    own_dsh "$dsh" && touch "$data/.dsh-agent"
+    return
+  fi
   if [ -d "$dsh" ] && [ -n "$(ls -A "$dsh")" ]; then
     # 有旧数据、还没迁移：只在启动平台时做，别的命令（eos doctor）不写标记，留给下一次启动平台。
     [ "${1:-}" = web ] || return 0
