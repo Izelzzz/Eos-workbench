@@ -84,8 +84,8 @@ jobs:
           cache: npm
           cache-dependency-path: .github/lint/package-lock.json
       - run: npm ci --prefix .github/lint --ignore-scripts
-      - name: 规则自己的测试
-        run: node --test .github/lint/rules.test.mjs
+      - name: 规则和工具自己的测试
+        run: node --test .github/lint/*.test.mjs
       - name: lint
         run: .github/lint/node_modules/.bin/eslint -c .github/lint/eslint.config.mjs --max-warnings 0 .
 
