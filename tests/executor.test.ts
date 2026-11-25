@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { after, test } from 'node:test'
@@ -267,7 +267,7 @@ test('each worktree gets its own dsh process whose workspace is that worktree; r
   await send('t1/build', '/data/worktrees/t1')
   await send('t1/review', '/data/worktrees/t1', 'none')
   await send('t2/build', '/data/worktrees/t2')
-  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', join(home, 'process-cwd')], ['/data/worktrees/t2', join(home, 'process-cwd')]],
+  assert.deepEqual(created.map(c => [c.cwd, c.processCwd]), [['/data/worktrees/t1', join(home, 'eos-process-cwd')], ['/data/worktrees/t2', join(home, 'eos-process-cwd')]],
     'the session workspace (write root) is the task worktree; the dsh process itself runs in a platform directory, not in the worktree (no .env from the repo)')
   await ex.release('/data/worktrees/t1')
   assert.deepEqual(created.map(c => c.closed), [true, false])
@@ -368,6 +368,29 @@ test('a role with no skills still gets an empty skills dir, not dsh’s defaults
   assert.deepEqual(rowById(patch, 'skill-filesystem')!.config, { includeDefaultRoots: false, customSkillDirs: [skillsDir] })
   assert.deepEqual(readdirSync(skillsDir), [])
   assert.deepEqual(insertedIn(patch), [], '没有 MCP 服务时不插入 mcp-client 行')
+})
+
+test('the platform will not write its capability files through a link someone else put in the dsh home, and writes them without group write', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const home = tmpHome()
+  const outside = tmpHome()
+  // dsh home 对 dsh 的用户组内可写：别人先放一个同名的链接，指向平台能写的别处。
+  symlinkSync(outside, join(home, 'eos-profiles'))
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', modelKey: () => 'k', createHarness })
+  await assert.rejects(launch(ex, created, 't1/plan', bare), /eos-profiles 不是平台自己的目录/)
+  assert.deepEqual(readdirSync(outside), [], 'nothing was written through the link')
+  rmSync(join(home, 'eos-profiles'))
+  const ok = new DshExecutor({ dshHome: home, dshBin: 'dsh', modelKey: () => 'k', createHarness })
+  // 部署里平台的 umask 是 002（deploy/eos）：不显式给权限的话，建出来的就是组内可写。
+  const umask = process.umask(0o002)
+  try {
+    await launch(ok, created, 't2/plan', bare)
+  } finally {
+    process.umask(umask)
+  }
+  const patch = join(ok.profileDir(bare), 'cordis.patch.yml')
+  assert.equal(statSync(patch).mode & 0o022, 0, 'not group or world writable')
+  assert.equal(statSync(ok.profileDir(bare)).mode & 0o022, 0)
 })
 
 test('each MCP server becomes an inserted mcp-client row whose child runs in a platform dir, not in the worktree', async () => {

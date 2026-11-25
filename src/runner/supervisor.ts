@@ -9,7 +9,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
-import { killUserProcessesIn, type CheckUser } from './check-user.ts'
+import { killUserProcessesIn, shareWithGroup, type CheckUser } from './check-user.ts'
 import { KILL_WAIT_MS, killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
@@ -62,12 +62,20 @@ export class Supervisor {
     forges?: Forge[]
     /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
     checkUser?: CheckUser
+    /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
+    agentUser?: CheckUser
   }) {
     this.locksDir = join(o.dataDir, 'locks')
     // 托管平台只建一次：GitHub App 的安装令牌缓存在它里面。
     this.forges = o.forges ?? defaultForges()
     this.conventions = new Conventions(o.store)
     this.conventions.seed(Date.now())
+  }
+
+  /** 把 user 在 worktree 里建的私有文件开放给组；失败时只记一条警告，之后的提交、撤销可能因此读不了这些文件。 */
+  private async share(user: CheckUser, worktree: string, log: (line: string) => void): Promise<void> {
+    const error = await shareWithGroup(user, worktree)
+    if (error !== undefined) log(`  （警告：没能把 ${user.name} 在 worktree 里建的文件开放给平台：${error}。之后的提交、撤销可能读不了它们）`)
   }
 
   /**
@@ -267,13 +275,21 @@ export class Supervisor {
         await this.o.executor.release(worktree)
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
-        // 检查命令（另一个用户）留下的进程平台杀不了，以那个用户去杀。
-        const byCheck = this.o.checkUser === undefined ? [] : await killUserProcessesIn(this.o.checkUser, worktree)
-        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令留在 worktree 里的进程：${byCheck.join('、')}`)
+        // 检查命令和 agent（别的用户）留下的进程，平台读不到它们的工作目录，以那个用户去找、去杀。
+        const byCheck = (await Promise.all([this.o.checkUser, this.o.agentUser].map(u => (u === undefined ? [] : killUserProcessesIn(u, worktree))))).flat()
+        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令或 agent 留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
+        // 接下来提交、撤销越界改动由平台做：agent 和检查命令建的、只有它们自己能读写的文件和目录，先开放给组（平台在组里）。
+        for (const u of [this.o.agentUser, this.o.checkUser]) if (u !== undefined) await this.share(u, worktree, log)
       },
-      checker: async (t, run, signal) => redactDeep(await runChecks(this.o.store.meta(t.id).worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser), redact),
+      checker: async (t, run, signal) => {
+        const worktree = this.o.store.meta(t.id).worktree
+        const results = await runChecks(worktree, run.checks, process.env, signal, c => this.platform(t.id, c), this.o.checkUser)
+        // 检查命令建的文件（构建产物等）之后由平台提交、清理：同样先开放给组。
+        if (this.o.checkUser !== undefined) await this.share(this.o.checkUser, worktree, log)
+        return redactDeep(results, redact)
+      },
       afterWrite: (t, call) => {
         // 可写范围是角色的 writePaths；越界的改动在提交前撤销，不进历史。
         const { writePaths } = roleOf(t.workflow, call.role)

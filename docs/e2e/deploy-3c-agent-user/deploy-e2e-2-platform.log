@@ -1,0 +1,2 @@
+eos-1  | 注意：监听 0.0.0.0，能连到这台机器 4317 端口的人都能用 Eos（没有登录）。浏览器只能通过 localhost:4317 访问；用别的地址或端口访问时要设 EOS_PUBLIC_URL
+eos-1  | Eos Web：http://localhost:4317（监听 0.0.0.0:4317，数据目录 /data，日志 /data/logs/eos.log，Ctrl+C 退出）

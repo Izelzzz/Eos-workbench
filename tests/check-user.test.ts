@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { chmodSync, chownSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { asUser, killUserProcessesIn, parseCheckUser, resolveCheckUser } from '../src/runner/check-user.ts'
+import { asUser, killUserProcessesIn, parseCheckUser, readSessionLogAs, resolveCheckUser, shareWithGroup } from '../src/runner/check-user.ts'
 import { checkEnv, droppedProxies, runChecks } from '../src/runner/checks.ts'
 
 const PASSWD = 'root:x:0:0:root:/root:/bin/bash\neos:x:10001:10001::/home/eos:/bin/bash\neos-check:x:10002:10002::/home/eos-check:/bin/sh\n'
@@ -110,3 +110,110 @@ test('leftover processes of the check user inside the worktree are killed as tha
   }
   assert.ok(calls().some(l => l.startsWith('--reuid=eos-check sh -c ')))
 })
+
+test('reading a dsh session log as the agent user finds the same file the default reader does, and nothing for other ids', async () => {
+  const { env, calls } = fakeSetpriv()
+  const root = dir()
+  mkdirSync(join(root, '--wt--', 'session-abc'), { recursive: true })
+  writeFileSync(join(root, '--wt--', 'session-abc', 'session.v4.jsonl.zstd'), Buffer.from([1, 2, 3]))
+  const path = process.env.PATH
+  process.env.PATH = env.PATH
+  try {
+    const read = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.deepEqual(read(root, 'session-abc'), Buffer.from([1, 2, 3]))
+    assert.equal(read(root, 'session-missing'), undefined)
+    assert.equal(read(root, '../escape'), undefined, 'ids are checked before they reach the shell')
+    // 日志的位置是个目录（不是文件）：和默认实现一样不认，当作没有。读失败时抛错见下一个测试。
+    mkdirSync(join(root, '--wt--', 'session-dir', 'session.v4.jsonl.zstd'), { recursive: true })
+    const bad = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.equal(bad(root, 'session-dir'), undefined, 'a directory is not a log file: the -f test skips it')
+  } finally {
+    process.env.PATH = path
+  }
+  assert.ok(calls().every(l => l.startsWith('--reuid=eos-agent sh -c ')))
+})
+
+test('a read that fails (not a missing session) throws, so the platform never opens a fresh session over an existing id', () => {
+  const bin = dir()
+  // 假的 setpriv：切换失败（退出码 1），和平台没有 SETUID 时一样。
+  writeFileSync(join(bin, 'setpriv'), '#!/bin/sh\necho "setpriv: setresuid failed: Operation not permitted" >&2\nexit 1\n')
+  chmodSync(join(bin, 'setpriv'), 0o755)
+  const path = process.env.PATH
+  process.env.PATH = `${bin}:${path}`
+  try {
+    const read = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.throws(() => read(dir(), 'session-abc'), /以 eos-agent 读会话日志 session-abc 失败：setpriv: setresuid failed/)
+  } finally {
+    process.env.PATH = path
+  }
+})
+
+test('files and directories the agent or check user made private are opened to the group; symlinks and other owners are left alone', async () => {
+  const { env } = fakeSetpriv()
+  const w = dir()
+  writeFileSync(join(w, 'secret'), 'x')
+  chmodSync(join(w, 'secret'), 0o600)
+  mkdirSync(join(w, 'build'))
+  chmodSync(join(w, 'build'), 0o755)
+  const outside = join(dir(), 'outside')
+  writeFileSync(outside, 'x')
+  chmodSync(outside, 0o600)
+  symlinkSync(outside, join(w, 'link'))
+  const path = process.env.PATH
+  process.env.PATH = env.PATH
+  try {
+    // 测试进程自己就是「那个用户」：find -user 按名字找，用测试进程的用户名。
+    const me = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim()
+    assert.equal(await shareWithGroup({ name: me, gid: process.getgid!(), home: '/tmp' }, w), undefined)
+  } finally {
+    process.env.PATH = path
+  }
+  assert.equal(statSync(join(w, 'secret')).mode & 0o777, 0o660)
+  assert.equal(statSync(join(w, 'build')).mode & 0o777, 0o775)
+  assert.equal(statSync(outside).mode & 0o777, 0o600, 'a symlink out of the worktree is not followed')
+})
+
+test(
+  "files that landed in the user's own group (dsh writes through a chmod-0700 staging dir, which drops setgid) are moved to the worktree's group",
+  { skip: process.getuid?.() !== 0 ? 'needs root to create a file in another group' : false },
+  async () => {
+    const { env } = fakeSetpriv()
+    const w = dir()
+    chownSync(w, 0, 0)
+    writeFileSync(join(w, 'spec.md'), 'x')
+    chmodSync(join(w, 'spec.md'), 0o600)
+    chownSync(join(w, 'spec.md'), 0, 1)
+    const path = process.env.PATH
+    process.env.PATH = env.PATH
+    try {
+      await shareWithGroup({ name: 'root', gid: 0, home: '/root' }, w)
+    } finally {
+      process.env.PATH = path
+    }
+    assert.equal(statSync(join(w, 'spec.md')).gid, 0, 'moved to the worktree group')
+    assert.equal(statSync(join(w, 'spec.md')).mode & 0o777, 0o660)
+  },
+)
+
+test(
+  "when the user is not in the worktree's group it only opens permissions (a chgrp would fail on every file) and reports success",
+  { skip: process.getuid?.() !== 0 ? 'needs root to give the worktree a group the user is not in' : false },
+  async () => {
+    const { env } = fakeSetpriv()
+    const w = dir()
+    // root 的组列表里没有 gid 12345：和「用户不在 worktree 的组里」一样。
+    chownSync(w, 0, 12345)
+    writeFileSync(join(w, 'out.txt'), 'x')
+    chmodSync(join(w, 'out.txt'), 0o600)
+    chownSync(join(w, 'out.txt'), 0, 0)
+    const path = process.env.PATH
+    process.env.PATH = env.PATH
+    try {
+      assert.equal(await shareWithGroup({ name: 'root', gid: 0, home: '/root' }, w), undefined)
+    } finally {
+      process.env.PATH = path
+    }
+    assert.equal(statSync(join(w, 'out.txt')).gid, 0, 'group unchanged')
+    assert.equal(statSync(join(w, 'out.txt')).mode & 0o777, 0o660)
+  },
+)

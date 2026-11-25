@@ -1,4 +1,4 @@
-// Docker Compose 部署的端到端验证：用真实模型在容器里跑完一个 standard 任务，再重建容器核对数据还在。
+// Docker Compose 部署的端到端验证：用真实模型在容器里跑完一个任务（默认最小的工作流），再重建容器核对数据还在。
 // 全程只经过部署出来的接口：docker compose（构建、启动、exec）和 Web 服务的 HTTP 接口，不读写宿主机上的数据目录。
 // 1. docker compose 构建并启动；容器里跑 eos doctor；
 // 2. 在容器的 /data/repos 里建一个示例仓库，通过 POST /api/tasks 发起任务，agent 提问时用接口回答；
@@ -9,6 +9,7 @@
 // 环境变量：EOS_E2E_COMPOSE_FILES 用冒号分隔的额外 compose 文件（例如构建机需要的网络设置）；EOS_E2E_URL 默认 http://127.0.0.1:4317。
 // 会占用宿主机的 4317 端口，不要在已经跑着 Eos 的服务器上运行。compose 项目名是 eos-deploy-e2e、镜像标签是 eos-workbench:e2e，结束时连数据卷一起删掉。
 import { execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -17,6 +18,8 @@ const OUT = join(ROOT, '.eos', 'deploy-e2e')
 const LOG = join(OUT, 'run.log')
 const BASE = process.env.EOS_E2E_URL ?? 'http://127.0.0.1:4317'
 const PROJECT = 'eos-deploy-e2e'
+// 主密钥用这次生成的值（没有凭据要解密）：让「检查命令和 agent 都读不到主密钥」在真实任务里也核对得到。
+const MASTER_KEY = process.env.EOS_MASTER_KEY || randomBytes(32).toString('base64')
 const files = ['compose.yaml', ...(process.env.EOS_E2E_COMPOSE_FILES ?? '').split(':').filter(Boolean)].flatMap(f => ['-f', f])
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
@@ -28,7 +31,7 @@ const log = (line: string) => {
 const compose = (...a: string[]) => {
   log(`$ docker compose ${a.join(' ')}`)
   // 用自己的镜像标签，不覆盖服务器上正在用的 eos-workbench:local。
-  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e' } })
+  const out = execFileSync('docker', ['compose', '-p', PROJECT, ...files, ...a], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e', EOS_MASTER_KEY: MASTER_KEY } })
   if (out.trim() !== '') appendFileSync(LOG, `${out}\n`)
   return out
 }
@@ -64,6 +67,8 @@ const REQUEST = [
   '为它写 node:test 测试（放在 test/ 目录），`npm test` 必须通过。',
 ].join('\n')
 const REPO = '/data/repos/demo'
+// 默认用最小的工作流（scripts/e2e/mini.yaml：开发一次，平台跑 npm test），模型调用最少；EOS_E2E_WORKFLOW=standard 跑完整流程。
+const WORKFLOW = process.env.EOS_E2E_WORKFLOW || '/app/scripts/e2e/mini.yaml'
 
 compose('build')
 compose('down', '-v')
@@ -78,12 +83,12 @@ try {
   inContainer([
     `rm -rf ${REPO} && mkdir -p ${REPO} && cd ${REPO}`,
     'git init -q -b main',
-    // pretest 记下跑过 npm test 的用户（每个用户一个文件，不用写别人的文件）：agent 在沙箱里跑的是 eos，平台的检查命令应该是 eos-check。
+    // pretest 记下跑过 npm test 的用户（每个用户一个文件，不用写别人的文件）：agent 在沙箱里跑的是 eos-agent，平台的检查命令应该是 eos-check。
     `printf '%s\\n' '{ "name": "demo", "type": "module", "scripts": { "pretest": "touch /tmp/eos-e2e-npm-test-by-$(id -un)", "test": "node --test" } }' > package.json`,
     'git add . && git -c user.name=e2e -c user.email=e2e@localhost commit -q -m init',
   ].join(' && '))
 
-  const created = await api('/api/tasks', { repo: REPO, workflow: 'standard', request: REQUEST })
+  const created = await api('/api/tasks', { repo: REPO, workflow: WORKFLOW, request: REQUEST })
   log(`POST /api/tasks → ${created.status} ${JSON.stringify(created.body)}`)
   if (created.status !== 201) throw new Error('任务没有建起来')
   const id = created.body.id as string
@@ -95,7 +100,7 @@ try {
   await until('任务结束', async () => {
     task = (await api(`/api/tasks/${id}`)).body
     // [d] 让 pgrep 不匹配到执行它的 bash 自己。
-    const found = scan === undefined ? inContainer("pgrep -u eos -f '@deepseek-ai/[d]sh/'") : undefined
+    const found = scan === undefined ? inContainer("pgrep -u eos-agent -f '@deepseek-ai/[d]sh/'") : undefined
     if (found?.code === 0) {
       dshPids = found.out.trim().split('\n').map(Number)
       scan = inContainer('cd /tmp && node /app/scripts/check-user-scan.mjs', 'eos-check')
@@ -136,8 +141,11 @@ try {
 
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,
+    '设置了主密钥（扫描时平台进程的环境里有它）': /✓ 凭据主密钥：已设置/.test(doctor.out),
     '检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key': scanned !== undefined && scanned.uid !== 10001 && scanned.secretsFoundIn.length === 0
-      && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10001 && p.environ !== 'readable')),
+      && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.environ !== 'readable'))
+      && scanned.processes.some((p: any) => p.uid === 10001 && p.environ !== 'readable'),
+    'dsh 以 eos-agent 运行（读不到平台进程的环境）': scanned !== undefined && dshPids.length > 0 && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && p.uid === 10003)),
     'dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）': scanned !== undefined && dshPids.length > 0
       && dshPids.every(pid => scanned.processes.some((p: any) => p.pid === pid && /^0+$/.test(p.capEff ?? '') && /^0+$/.test(p.capAmb ?? ''))),
     '任务完成': task.status === 'done',
@@ -147,7 +155,7 @@ try {
     'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
     'down 再 up 之后 worktree 还在，最新提交不变': afterWorktree.code === 0 && head !== '' && afterWorktree.out.startsWith(head),
   }
-  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, checkUserScan: { dshPids, scan: scanned ?? scan }, testUsers: testUsers.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
+  const report = { workflow: WORKFLOW, commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'deploy', 'src', 'scripts', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, checkUserScan: { dshPids, scan: scanned ?? scan }, testUsers: testUsers.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
   process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1
@@ -158,6 +166,14 @@ try {
   } catch {}
   throw e
 } finally {
+  // 删数据卷之前留下平台自己的日志（任务失败时看原因要用）。
+  try {
+    const big = { cwd: ROOT, encoding: 'utf8' as const, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, EOS_IMAGE: 'eos-workbench:e2e', EOS_MASTER_KEY: MASTER_KEY } }
+    writeFileSync(join(OUT, 'platform.log'), execFileSync('docker', ['compose', '-p', PROJECT, ...files, 'logs', '--no-color', 'eos'], big))
+    writeFileSync(join(OUT, 'task-logs.txt'), execFileSync('docker', ['compose', '-p', PROJECT, ...files, 'exec', '-T', '-u', 'eos', 'eos', 'sh', '-c', 'for f in /data/logs/*; do echo "== $f"; cat "$f"; done'], big))
+  } catch (e) {
+    log(`没能留下平台日志：${(e as Error).message}`)
+  }
   // 不管成败都删掉容器和数据卷：下一次从空的数据卷开始，也不占着端口。清理本身失败时不盖掉原来的错误。
   try {
     compose('down', '-v')

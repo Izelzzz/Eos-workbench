@@ -45,10 +45,10 @@ const until = async (what: string, ok: () => Promise<boolean>, ms = 15 * 60_000)
   throw new Error(`等不到：${what}`)
 }
 
-/** 这个数据目录的 dsh 进程：工作目录是 <数据目录>/dsh/process-cwd（见 executor/dsh.ts 的 processCwd）。 */
+/** 这个数据目录的 dsh 进程：工作目录是 <数据目录>/dsh/eos-process-cwd（见 executor/dsh.ts 的 processCwd）。 */
 const dshPids = (): number[] => readdirSync('/proc').filter(p => /^\d+$/.test(p)).flatMap(p => {
   try {
-    return readlinkSync(`/proc/${p}/cwd`) === join(DATA, 'dsh', 'process-cwd') ? [Number(p)] : []
+    return readlinkSync(`/proc/${p}/cwd`) === join(DATA, 'dsh', 'eos-process-cwd') ? [Number(p)] : []
   } catch {
     return []
   }

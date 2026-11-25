@@ -1,17 +1,18 @@
 #!/bin/sh
 # 容器里运行 Eos 命令的入口：eos web、eos doctor……（镜像里装在 /usr/local/bin/eos）。
-# 容器以 root 启动，这里降到平台用户 eos，只带着切换用户用的 SETUID、SETGID 两个能力：
-# 检查命令要切换到 eos-check 运行，读不到平台和 dsh 进程环境里的主密钥和模型 key（docs/adr/006-docker-deployment.md）。
+# 容器以 root 启动，这里降到平台用户 eos，只带着三个能力（docs/adr/006-docker-deployment.md）：
+# SETUID、SETGID 用来把检查命令切换到 eos-check、把 dsh 切换到 eos-agent，它们读不到平台进程环境里的主密钥；
+# KILL 用来给它们的进程发信号（关掉 dsh、结束超时的检查命令）。
 set -eu
 
 if [ "$(id -u)" = 0 ]; then
   # setpriv 不改这几个变量；不改的话平台的 HOME 还是 /root。
   export HOME=/home/eos USER=eos LOGNAME=eos
-  if ! setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid --ambient-caps=+setuid,+setgid -- true 2>/dev/null; then
-    echo "eos：切换不到平台用户 eos。容器要有 SETUID、SETGID 两个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」" >&2
+  if ! setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid,+kill --ambient-caps=+setuid,+setgid,+kill -- true 2>/dev/null; then
+    echo "eos：切换不到平台用户 eos。容器要有 SETUID、SETGID、KILL 三个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」" >&2
     exit 1
   fi
-  exec setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid --ambient-caps=+setuid,+setgid -- "$0" "$@"
+  exec setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid,+kill --ambient-caps=+setuid,+setgid,+kill -- "$0" "$@"
 fi
 
 # 检查命令（eos-check）要能写 agent 改过的 worktree：worktree 目录属于共用组 eos-work 并带 setgid，
@@ -36,8 +37,76 @@ prepare() {
   # 放在迁移之后：上面的 chmod -R g+w 也会改到它。每次启动都设一遍，已有部署升级后也会改过来。
   chmod 2755 "$data/worktrees"
 }
+# dsh 的数据目录：dsh 以 eos-agent 运行，平台往 eos-profiles/ 写能力面，并以 eos-agent 的身份读会话日志（见 src/cli.ts）。
+# 目录本身属于 eos、组 eos-dsh、3770：检查命令进不去。dsh 在里面建的目录是 0700，属于 eos-agent。
+as_agent() {
+  # 主组按 passwd 里的 gid（和 deploy/dsh-launch.mjs 一样），不假定有同名的组。
+  setpriv --reuid="$EOS_AGENT_USER" --regid="$(id -g "$EOS_AGENT_USER")" --init-groups --inh-caps=-all --ambient-caps=-all -- "$@"
+}
+# dsh home 的权限：组内可写（dsh 在里面建自己的目录）加 sticky 位（eos-agent 改不了名、删不掉平台的目录），
+# 平台自己的目录（eos-*）先建好、组内不可写：eos-agent 不能在里面放链接，让平台顺着链接写到别处（src/executor/dsh.ts 的 platformDir）。
+own_dsh() {
+  mkdir -p "$1" && chgrp eos-dsh "$1" && chmod 3770 "$1" || return 1
+  for d in eos-profiles eos-process-cwd; do
+    if [ -L "$1/$d" ] || { [ -e "$1/$d" ] && [ "$(stat -c %U "$1/$d")" != eos ]; }; then
+      echo "eos：$1/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写。删掉它后重启：docker compose run --rm -u eos-agent eos rm -rf $1/$d" >&2
+      continue
+    fi
+    mkdir -p "$1/$d" && chmod 2755 "$1/$d" || return 1
+  done
+  # MCP 服务的工作目录：MCP 服务以 eos-agent 运行，要能在里面写缓存、日志。平台只把它当 cwd 传给 dsh，不往里写，
+  # 所以交给 eos-agent（src/executor/dsh.ts 的 mcpCwd）。
+  if [ -L "$1/mcp-cwd" ]; then
+    echo "eos：$1/mcp-cwd 是符号链接，MCP 服务会在链接指向的地方运行；删掉它后重启：docker compose run --rm -u eos-agent eos rm $1/mcp-cwd" >&2
+  else
+    # 迁移过来的可能还是旧的权限（例如 0777）：收紧到组内（只有 eos、eos-agent）。
+    as_agent mkdir -p "$1/mcp-cwd" && as_agent chmod 2770 "$1/mcp-cwd" || return 1
+  fi
+}
+prepare_dsh() {
+  dsh="$data/dsh"
+  # 升级前的 dsh 以 eos 运行，留下的文件属于 eos、多是 0700、0600，eos-agent 用不了，也改不了属主（没有 CHOWN 能力）。
+  # 以 eos-agent 复制一份（复制出来的属于它，权限照旧），旧的改名留着。只在启动平台时做：别的命令可能和正在运行的 dsh 同时跑。
+  # .credentials.yaml 不复制：dsh 要求它只有属主能读，新的 dsh 会重新生成（里面是 dsh 自己的浏览器会话授权，没有模型 key）。
+  [ ! -e "$data/.dsh-agent" ] || { own_dsh "$dsh"; return; }
+  if [ ! -e "$dsh" ] && [ -d "$data/dsh.agent-new" ]; then
+    echo "eos：上次迁移 $dsh 停在了中间：复制好的在 $data/dsh.agent-new，旧的在 $data/dsh.before-agent*。确认后运行 mv $data/dsh.agent-new $dsh 再启动" >&2
+    return 2
+  fi
+  # 已经是新布局（顶层有 eos-agent 的东西，例如删了标记后重启）：不用迁移，只整理权限、补上标记。
+  if [ -d "$dsh" ] && [ -n "$(find "$dsh" -mindepth 1 -maxdepth 1 -user "$EOS_AGENT_USER" -print -quit)" ]; then
+    own_dsh "$dsh" && touch "$data/.dsh-agent"
+    return
+  fi
+  if [ -d "$dsh" ] && [ -n "$(ls -A "$dsh")" ]; then
+    # 有旧数据、还没迁移：只在启动平台时做，别的命令（eos doctor）不写标记，留给下一次启动平台。
+    [ "${1:-}" = web ] || return 0
+    new="$data/dsh.agent-new"
+    # 上次没做完留下的：里面的东西属于 eos-agent，由它删；目录本身属于 eos，由 eos 删。
+    if [ -e "$new" ]; then as_agent find "$new" -mindepth 1 -delete && rmdir "$new" || return 1; fi
+    mkdir "$new" && chgrp eos-dsh "$new" && chmod 2770 "$new" || return 1
+    # 让 eos-agent 读得到旧文件。.credentials.yaml 不改：组内可读时 dsh 拒绝启动，迁移失败、还用旧目录时也不能坏掉它。
+    chgrp -R eos-dsh "$dsh" && find "$dsh" ! -name .credentials.yaml -exec chmod g+rX {} + || return 1
+    # --no-overwrite-dir：目标目录本身属于 eos，eos-agent 改不了它的权限和时间。
+    # 平台自己的 eos-* 不复制：复制出来的属于 eos-agent，平台会拒绝往里写；复制完由 own_dsh 重新建。
+    as_agent sh -c 'cd "$1" && tar --exclude=./.credentials.yaml --exclude="./eos-*" -cf - . | tar -xpf - --no-overwrite-dir -C "$2"' sh "$dsh" "$new" || return 1
+    # 备份名已被占用（例如删了标记重做）时换一个名字，不把目录挪进旧备份里。第二步失败时挪回去。
+    backup="$data/dsh.before-agent"
+    [ ! -e "$backup" ] || backup="$data/dsh.before-agent-$(date +%Y%m%d%H%M%S)"
+    mv "$dsh" "$backup" || return 1
+    # 两次 mv 之间被打断时：/data/dsh 不在、$backup 是旧数据、$new 是复制好的。手工 mv "$new" "$dsh" 即可（见 docs/deploy.md）。
+    mv "$new" "$dsh" || { mv "$backup" "$dsh"; return 1; }
+    echo "eos：dsh 的数据目录已复制成 $EOS_AGENT_USER 的，旧的留在 $backup（确认任务都正常后可以删掉）" >&2
+  fi
+  own_dsh "$dsh" && touch "$data/.dsh-agent"
+}
 # 数据目录有问题时不在这里退出：让 eos doctor、启动检查说明原因。
 prepare || echo "eos：没能把 $data/worktrees 设成共用组 eos-work，检查命令可能写不了 worktree" >&2
+if [ -n "${EOS_AGENT_USER:-}" ]; then
+  # 迁移停在中间（返回 2）时，除了 doctor 都不运行：会启动 dsh 的命令（web、run、resume……）会建出 dsh 目录，
+  # 下一次启动平台就会把它当成旧数据再迁移，删掉复制好的数据。
+  prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" != doctor ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
+fi
 
 cd /app
 exec node --import tsx src/cli.ts "$@"
