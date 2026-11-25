@@ -1,0 +1,4 @@
+#!/bin/sh
+# 镜像里的 git 入口（/usr/local/bin/git，排在 /usr/bin/git 前面）。平台进程带着切换用户用的 SETUID、SETGID（deploy/eos），
+# 平台调用的 git 不需要它们：清掉全部能力再运行真正的 git。对没有能力的进程（agent、检查命令）没有影响。
+exec setpriv --inh-caps=-all --ambient-caps=-all -- /usr/bin/git "$@"

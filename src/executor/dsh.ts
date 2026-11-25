@@ -51,11 +51,35 @@ export type DshSandbox =
   | { backend: 'none' }
   | { backend: 'platform'; platform: string }
 
+/** 本进程带着 ambient 能力：部署镜像里平台进程带着切换用户用的 SETUID、SETGID（deploy/eos）。 */
+const hasAmbientCaps = (): boolean => {
+  try {
+    return !/^CapAmb:\s*0+$/m.test(readFileSync('/proc/self/status', 'utf8'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 部署镜像里 dsh 是清掉全部能力启动的（deploy/dsh-launch.mjs），探测要在同样的条件下做：
+ * bwrap 发现自己带着能力、又不是 setuid 时直接退出，带着平台的能力探测会误判成用不了。
+ */
+const likeDsh = (argv: string[]): string[] => (hasAmbientCaps() ? ['setpriv', '--inh-caps=-all', '--ambient-caps=-all', '--', ...argv] : argv)
+
+/** dsh 的入口：部署镜像里设置 EOS_DSH_LAUNCHER（经包装启动，先清掉平台的能力），否则是装好的 dsh。 */
+export const dshEntry = (env: NodeJS.ProcessEnv, root: string): string | undefined => {
+  const launcher = env.EOS_DSH_LAUNCHER
+  if (launcher === undefined || launcher === '') return dshInstall(root)?.bin
+  if (!existsSync(launcher)) throw new Error(`EOS_DSH_LAUNCHER=${launcher}，但这个文件不存在`)
+  return launcher
+}
+
 export const dshSandbox = (platform: string = process.platform): DshSandbox => {
   // macOS、Windows：dsh 只有一个候选（Seatbelt、受限令牌），不探测就选它。别的平台 dsh 没有可用的沙箱，会拒绝执行命令。
   if (platform === 'darwin' || platform === 'win32') return { backend: 'platform', platform }
   if (platform !== 'linux') return { backend: 'none' }
-  const bwrap = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'true'], { stdio: 'ignore', timeout: 5000 })
+  const [cmd, ...args] = likeDsh(['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '--', 'true'])
+  const bwrap = spawnSync(cmd!, args, { stdio: 'ignore', timeout: 5000 })
   if (bwrap.status === 0) return { backend: 'bwrap' }
   const landlock = probeLandlock(undefined, { timeoutMs: 5000 }) // 和 dsh 自己探测的超时一致（probeTimeoutMs 默认 5000），机器忙时不会误判成不可用
   return landlock === 'unusable' ? { backend: 'none' } : { backend: 'landlock', enforcement: landlock }
