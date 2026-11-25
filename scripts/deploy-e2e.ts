@@ -95,7 +95,7 @@ try {
     }
     return ['done', 'failed', 'aborted'].includes(task.status)
   }, 40 * 60_000)
-  log(`任务 ${id}：${task.status}`)
+  log(`任务 ${id}：${task.status}${task.failure === undefined ? '' : `（${JSON.stringify(task.failure)}）`}`)
 
   const worktree = task.worktree as string
   const tests = inContainer(`set -o pipefail; cd ${worktree} && npm test 2>&1 | tail -8`)
@@ -116,7 +116,7 @@ try {
     'down 再 up 之后任务还在、状态不变': after.status === task.status && after.id === id,
     'down 再 up 之后 worktree 还在，最新提交不变': afterWorktree.code === 0 && head !== '' && afterWorktree.out.startsWith(head),
   }
-  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'src', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
+  const report = { commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(), uncommitted: execFileSync('git', ['status', '--porcelain', '--', 'Dockerfile', 'compose.yaml', 'src', 'package.json', 'vendor', 'web'], { cwd: ROOT, encoding: 'utf8' }).trim(), task: id, status: task.status, ...(task.failure === undefined ? {} : { failure: task.failure }), answered: answered.length, checks, environment: env.out, doctor: doctor.out, npmTest: tests.out, commits: commits.out, afterRecreate: afterWorktree.out }
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
   for (const [k, v] of Object.entries(checks)) log(`${v ? '✓' : '✗'} ${k}`)
   process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1

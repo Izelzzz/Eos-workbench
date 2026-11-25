@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
-import { agentEnv, ALWAYS_DISABLED, DshExecutor, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
+import { agentEnv, ALWAYS_DISABLED, DshExecutor, dshSandbox, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 import type { AgentProfile } from '../src/executor/types.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
@@ -54,6 +55,22 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
     DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-store',
     NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
   })
+})
+
+test('the sandbox probe leaves macOS and Windows to dsh, and reports none on platforms dsh has no sandbox for', () => {
+  assert.deepEqual(dshSandbox('darwin'), { backend: 'platform', platform: 'darwin' })
+  assert.deepEqual(dshSandbox('win32'), { backend: 'platform', platform: 'win32' })
+  assert.deepEqual(dshSandbox('freebsd'), { backend: 'none' })
+})
+
+test('on this host the sandbox probe agrees with the backend dsh itself selects (its chainVerdict), so a dsh upgrade that changes the choice fails here', { skip: process.platform !== 'linux' }, () => {
+  // dsh 的 LocalSandboxProvider 选后端的那一步；不经过构造函数，只要它读的两个字段。
+  const provider = Object.create(LocalSandboxProvider.prototype) as { internals: object; probeTimeoutMs: number; chainVerdict(): 'unavailable' | { runner: string; enforcement: string } }
+  provider.internals = {}
+  provider.probeTimeoutMs = 5000
+  const verdict = provider.chainVerdict()
+  const dsh = verdict === 'unavailable' ? { backend: 'none' } : verdict.runner === 'landlock' ? { backend: 'landlock', enforcement: verdict.enforcement } : { backend: verdict.runner }
+  assert.deepEqual(dshSandbox(), dsh)
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {

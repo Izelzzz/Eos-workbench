@@ -77,6 +77,6 @@
   - 不放在 `/tmp` 的缓存是按已知的几种列出来的（tsx、Node 字节码、dsh 的 native 模块）。以后的依赖再往 `os.tmpdir()` 放会被加载的文件时，需要重新检查。
   - agent 能看到进程列表（只是读不到别的进程的环境）。
 - **Landlock 只限制写，不限制读**：agent 能读整个 `/data`，包括别的任务的 worktree、所有仓库、`eos.db` 里所有任务的 trace、dsh 的会话日志。bwrap 的默认配置也是只读挂载整个根目录，在这一点上没有区别。按仓库或按人隔离读权限，要等登录和多人（路线图第 7 项）之后一起设计。
-- **宿主机内核要支持 Landlock**：Linux 5.13 以上，并且 LSM 列表里启用了 landlock。较旧的 ABI 会报告 `partial`；完全没有时 dsh 拒绝执行命令（fail closed），任务会失败而不是不受限制地运行。`eos doctor` 还不检查这一项。
+- **宿主机内核要支持 Landlock**：Linux 5.13 以上，并且 LSM 列表里启用了 landlock。较旧的 ABI 会报告 `partial`；完全没有时 dsh 拒绝执行命令（fail closed），任务会失败而不是不受限制地运行。`eos doctor` 的「沙箱」一项按 dsh 的顺序真正探测一次，报告实际会用的后端，都用不了时报 ✗（`docs/e2e/deploy-3a-doctor/`）。
 - **没有登录**：非浏览器客户端可以伪造 Host，网络上能连到端口的人都能用。默认只绑 127.0.0.1 就是因为这个。
 - **镜像约 2.6GB**：其中 dsh 的依赖约 930MB，编译工具链和 Python 约几百 MB。

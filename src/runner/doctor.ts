@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
-import { dshInstall } from '../executor/dsh.ts'
+import { dshInstall, dshSandbox, type DshSandbox } from '../executor/dsh.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
 export type Status = 'ok' | 'warn' | 'fail'
@@ -28,8 +28,8 @@ export type Facts = {
   dataDir: string
   /** 数据目录建不出来或不可写时的错误。 */
   dataDirError?: string
-  /** 有没有 bwrap：dsh 用它把 agent 放进单独的进程空间（看不到平台进程）。 */
-  bwrap: boolean
+  /** dsh 实际会用的沙箱（探测得出，不是只看装没装）。 */
+  sandbox: DshSandbox
   /** dsh 的版本；没装时是 undefined。 */
   dsh?: string
 }
@@ -61,18 +61,35 @@ const masterKeyItem = (f: Facts): Item =>
       : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
 
 /**
- * 设置了主密钥时提示还没隔离的地方：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉。
- * 有 bwrap 时 agent 看不到平台进程；检查命令（npm test 等）不在沙箱里，和平台是同一个用户，总能读到。
- * 要用独立的用户运行 agent 和检查命令才能隔离（路线图第 3 项 Docker 部署）。
+ * dsh 会用哪个沙箱。都不能用时 dsh 拒绝执行命令，任务一定失败，所以是 ✗。
+ * Landlock 和 bwrap 都限制 agent 只能写自己的 worktree，也都挡住 agent 读别的进程的环境（/proc/<pid>/environ）；
+ * Landlock 不隔离进程号空间和 /tmp（agent 看得到进程列表，各任务共用 /tmp）。
  */
-const isolationItem = (f: Facts): Item[] =>
-  f.masterKey.kind !== 'ok' ? [] : [{
-    name: '凭据隔离', status: 'warn', doctorOnly: true,
-    detail: f.bwrap
-      ? '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
-      : '没有 bwrap：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key',
-    fix: `${f.bwrap ? '' : '安装 bubblewrap（bwrap）；'}团队共用的服务器上，用独立的用户运行 agent 和检查命令（Docker 部署会这样做）`,
-  }]
+const sandboxItem = (f: Facts): Item => {
+  const name = '沙箱'
+  switch (f.sandbox.backend) {
+    case 'bwrap': return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
+    case 'landlock': return f.sandbox.enforcement === 'full'
+      ? { name, status: 'ok', detail: 'Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp' }
+      : { name, status: 'warn', detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）', fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）' }
+    case 'none': return { name, status: 'fail', detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来', fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）' }
+    case 'platform': return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
+  }
+}
+
+/**
+ * 设置了主密钥时提示还没隔离的地方：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；dsh 进程的环境里有模型 key。
+ * 沙箱挡住了 agent；检查命令（npm test 等）不在沙箱里、和平台是同一个用户，总能读到。
+ * 要用独立的用户运行检查命令和 agent 才能隔离（路线图第 3 项，还没有做完）。
+ */
+const isolationItem = (f: Facts): Item[] => {
+  if (f.masterKey.kind !== 'ok') return []
+  const checks = '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
+  const detail = f.sandbox.backend === 'none'
+    ? `没有可用的沙箱：agent 和检查命令都能读到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key`
+    : f.sandbox.backend === 'platform' ? checks : `agent 在沙箱里读不到它们；${checks}`
+  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: '用独立的用户运行检查命令和 agent（路线图第 3 项，还没有做完）；在那之前只在可信的仓库和需求上使用' }]
+}
 
 const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
 
@@ -91,6 +108,7 @@ export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
   modelKeyItem(f),
   masterKeyItem(f),
+  sandboxItem(f),
   ...isolationItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
@@ -131,15 +149,6 @@ const gitState = (): Facts['git'] => {
   }
 }
 
-const hasBwrap = (): boolean => {
-  try {
-    execFileSync('bwrap', ['--version'], { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
-}
-
 const pkgSchema = z.object({ engines: z.object({ node: z.string() }).partial().optional() })
 
 /** Eos 的 package.json 里 engines.node。文件坏了或没有这一项时是 undefined，由检查项报出来。 */
@@ -159,7 +168,7 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
   return {
     node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
-    git: gitState(), bwrap: hasBwrap(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
+    git: gitState(), sandbox: dshSandbox(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
   }
 }
 

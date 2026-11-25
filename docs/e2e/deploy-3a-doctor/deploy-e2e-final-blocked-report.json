@@ -1,0 +1,21 @@
+{
+  "commit": "82b229e",
+  "uncommitted": "",
+  "task": "t261124185723oba",
+  "status": "failed",
+  "failure": "哪一步：[spec] spec-writer · produce（调用 c1）\n原因：这一轮没有正常完成（出错）\n怎么修：没有认出这个错误：看日志里这一步前后的详细输出。处理后在任务页点「重试」，或运行 npm run eos -- retry t261124185723oba",
+  "answered": 0,
+  "checks": {
+    "容器里 eos doctor 没有 ✗": true,
+    "任务完成": false,
+    "worktree 里 npm test 通过": true,
+    "agent 的改动提交到了任务分支": false,
+    "down 再 up 之后任务还在、状态不变": true,
+    "down 再 up 之后 worktree 还在，最新提交不变": false
+  },
+  "environment": "uid=10001(eos) gid=10001(eos) groups=10001(eos)\nv24.22.3\n11.19.1\n12.23.0\ngit version 2.43.0\nPython 3.12.3\ngcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nbubblewrap 0.9.0\nEOS_HOME=/data\n",
+  "doctor": "Eos 环境检查（数据目录 /data）\n✓ Node：24.22.3（要求 >=24.9.0）\n✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）\n⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据\n  怎么修：生成一个主密钥：openssl rand -base64 32（或 node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"），在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入\n✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp\n✓ git：2.43.0\n✓ 数据目录：/data 可写\n✓ dsh：0.2.2-rc.5\n",
+  "npmTest": "ℹ tests 0\nℹ suites 0\nℹ pass 0\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 7.738259\n",
+  "commits": "",
+  "afterRecreate": "aa920f6 init\ndsh\neos.db\neos.db-shm\neos.db-wal\nlocks\nlogs\nrepos\nworktrees\n"
+}
