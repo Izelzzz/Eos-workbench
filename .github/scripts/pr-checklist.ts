@@ -49,22 +49,25 @@ export function needsE2E(path: string, rules: Rule[]): boolean {
  * 去掉 HTML 注释，尽量和 GitHub 的渲染一致：
  * - 代码块里和行内代码（反引号）里的 <!-- 是普通文字，不算注释；
  * - 注释到它后面第一个 --> 为止，可以跨行；<!--> 和 <!---> 是空注释；
- * - 没有 --> 时：<!-- 在行首（最多 3 个空格缩进）就把后面全部藏起来，在行中间就按普通文字显示。
+ * - <!-- 在行首（最多 3 个空格缩进）是 HTML 块：块里不认行内代码，没有 --> 就把后面全部藏起来；
+ * - <!-- 在行中间是行内注释：不能跨过空行，后面没有 --> 就按普通文字显示。
  * 逐个扫描而不是用一次正则替换：嵌套的注释不会留下藏起来的半截。
  */
 export function stripHtmlComments(text: string): string {
   const lines = text.split('\n')
   const out: string[] = []
   let fence: string | null = null
-  // 跨行注释：前面的行开始、还没遇到 -->
-  let inComment = false
+  // 跨行注释：前面的行开始、还没遇到 -->；block 表示它在 HTML 块里
+  let open: { block: boolean } | null = null
   for (let n = 0; n < lines.length; n++) {
     let line = lines[n]!
-    const rest = lines.slice(n + 1).join('\n')
-    if (inComment) {
+    let block = false
+    if (open) {
       const end = line.indexOf('-->')
       if (end === -1) continue
-      inComment = false
+      // HTML 块到 --> 所在的行结束，这一行剩下的部分还在块里
+      block = open.block
+      open = null
       line = line.slice(end + 3)
     } else {
       const marker = /^\s*(```|~~~)/.exec(line)?.[1]
@@ -73,21 +76,25 @@ export function stripHtmlComments(text: string): string {
         out.push(line)
         continue
       }
+      block = /^ {0,3}<!--/.test(line)
     }
-    const r = stripLineOrOpen(line, rest)
+    const r = stripLine(line, block, () => lines.slice(n + 1))
     out.push(r.text)
     if (r.open === 'rest') break
-    if (r.open === 'multiline') inComment = true
+    if (r.open !== 'no') open = { block: r.open === 'block' }
   }
   return out.join('\n')
 }
 
-/** 去掉一行里的注释。rest 是这一行后面的全文，用来判断没在本行闭合的注释会不会在后面闭合。 */
-function stripLineOrOpen(line: string, rest: string): { text: string; open: 'no' | 'multiline' | 'rest' } {
+/**
+ * 去掉一行里的注释。block：这一行在 HTML 块里（不认行内代码）。following：后面的行，
+ * 只在注释没在本行闭合时才取，用来判断它会不会在后面闭合。
+ */
+function stripLine(line: string, block: boolean, following: () => string[]): { text: string; open: 'no' | 'block' | 'inline' | 'rest' } {
   let out = ''
   let i = 0
   for (;;) {
-    const start = findOpen(line, i)
+    const start = findOpen(line, i, block ? null : out)
     if (start === -1) return { text: out + line.slice(i), open: 'no' }
     out += line.slice(i, start)
     const after = line.slice(start + 4)
@@ -102,17 +109,27 @@ function stripLineOrOpen(line: string, rest: string): { text: string; open: 'no'
       i = end + 3
       continue
     }
-    if (rest.includes('-->')) return { text: out, open: 'multiline' }
-    // 没有闭合：行首的 <!-- 是 HTML 块，藏到全文末尾；行中间的按普通文字显示
-    if (/^ {0,3}$/.test(line.slice(0, start))) return { text: out, open: 'rest' }
+    const atLineStart = /^ {0,3}$/.test(line.slice(0, start))
+    if (block || atLineStart) {
+      // HTML 块：到 --> 所在的行为止，没有就到全文末尾
+      return { text: out, open: following().some((l) => l.includes('-->')) ? 'block' : 'rest' }
+    }
+    // 行内注释不能跨过空行
+    const rest = following()
+    const blank = rest.findIndex((l) => l.trim() === '')
+    if ((blank === -1 ? rest : rest.slice(0, blank)).some((l) => l.includes('-->'))) return { text: out, open: 'inline' }
     return { text: out + line.slice(start), open: 'no' }
   }
 }
 
-/** 从 from 开始找不在行内代码（反引号）里的 <!-- */
-function findOpen(line: string, from: number): number {
+/**
+ * 从 from 开始找注释的开头。kept 是这一行里已经保留下来的文字（不含去掉的注释），用来判断 <!-- 是不是在
+ * 行内代码（反引号）里；为 null 时（HTML 块里）不认行内代码。
+ */
+function findOpen(line: string, from: number, kept: string | null): number {
   for (let at = line.indexOf('<!--', from); at !== -1; at = line.indexOf('<!--', at + 1)) {
-    const ticks = (line.slice(0, at).match(/`/g) ?? []).length
+    if (kept === null) return at
+    const ticks = ((kept + line.slice(from, at)).match(/`/g) ?? []).length
     if (ticks % 2 === 0) return at
   }
   return -1

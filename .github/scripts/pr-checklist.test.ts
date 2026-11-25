@@ -160,6 +160,13 @@ test('HTML 注释和 GitHub 渲染一致：嵌套、没闭合、空注释、代�
   // 代码块和行内代码里的不算
   assert.equal(stripHtmlComments('```html\n<!-- 示例\n```\nb'), '```html\n<!-- 示例\n```\nb')
   assert.equal(stripHtmlComments('用 `<!--` 开头\nb'), '用 `<!--` 开头\nb')
+  // 去掉的注释里的反引号不影响后面：行首的是 HTML 块，块里不认行内代码；行中间的只数保留下来的反引号
+  assert.equal(stripHtmlComments('<!-- ` --> <!-- 待填 -->'), ' ')
+  assert.equal(stripHtmlComments('x<!-- ` -->y <!-- z -->'), 'xy ')
+  // 行内注释不能跨过空行
+  assert.equal(stripHtmlComments('见 a <!-- 这里\n\n## 标题\n- A --> B'), '见 a <!-- 这里\n\n## 标题\n- A --> B')
+  // HTML 块可以跨过空行
+  assert.equal(stripHtmlComments('<!-- a\n\nb -->c\nd'), '\nc\nd')
 })
 
 test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响后面的节', () => {
@@ -167,4 +174,8 @@ test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响�
   assert.ok(hidden.errors.some((e) => e.includes('能用证据证明的')), hidden.errors.join())
   const fenced = check({ body: '## 能用证据证明的\n\n```html\n<!-- 示例\n```\n- ok\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
   assert.deepEqual(fenced.errors, [])
+  const tick = check({ body: '## 能用证据证明的\n\n<!-- ` --> <!-- 待填 -->\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(tick.errors, ['「能用证据证明的」一节是空的'])
+  const para = check({ body: '## 能用证据证明的\n\n- 见 a <!-- 这里\n\n## 证明不了的\n- A --> B\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(para.errors, [])
 })
