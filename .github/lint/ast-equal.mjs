@@ -124,7 +124,8 @@ function directives(f, src) {
   const walk = n => {
     take(ts.getLeadingCommentRanges(src, n.pos))
     take(ts.getTrailingCommentRanges(src, n.end))
-    n.forEachChild(walk)
+    // getChildren 连标点和关键字 token 也给（= ( , { 等），forEachChild 只给节点：跟在 token 后面的注释会漏
+    for (const c of n.getChildren(sf)) walk(c)
   }
   walk(sf)
   take(ts.getLeadingCommentRanges(src, sf.endOfFileToken.pos))

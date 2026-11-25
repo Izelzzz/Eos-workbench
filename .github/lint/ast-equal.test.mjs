@@ -77,6 +77,23 @@ test('模板字符串和 JSX 文本不打乱指令注释的识别；三斜线指
   for (const f of ['m.ts', 'x.tsx', 'r.ts']) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)
 })
 
+test('跟在标点、关键字后面或在闭合符号前的指令注释也能识别', () => {
+  const cases = [
+    // JSX 里写指令的标准写法；拆行后 @ts-expect-error 作用的行变了
+    [
+      'j.tsx',
+      "declare const F: (p: { a: number }) => null\nexport const P = () => (\n  <div>\n    {/* @ts-expect-error */}\n    <F a={'x'} />\n  </div>\n)\n",
+      "declare const F: (p: { a: number }) => null\nexport const P = () => (\n  <div>\n    {/* @ts-expect-error */}\n    <F\n      a={'x'}\n    />\n  </div>\n)\n",
+    ],
+    ['p.ts', 'declare const f: () => number\nexport const v = /* @__PURE__ */ f()\n', 'declare const f: () => number\nexport const v =\n  /* @__PURE__ */ f()\n'],
+    ['g.ts', "declare const g: (a: number, b: number) => void\ng(1, // @ts-expect-error\n  'a')\n", "declare const g: (a: number, b: number) => void\ng(\n  1, // @ts-expect-error\n  'a',\n)\n"],
+    ['e.ts', 'export function f() { /* @ts-ignore */ }\n', 'export function f() {\n  /* @ts-ignore */\n}\n'],
+  ]
+  const r = run(cases)
+  assert.equal(r.code, 1, r.out)
+  for (const [f] of cases) assert.match(r.out, new RegExp(`需要人工核对.*${f.replace('.', '\\.')}`), `${f} 没被报出来\n${r.out}`)
+})
+
 test('JS 里 JSDoc 类型转换的括号不当成多余括号', () => {
   const r = run([['c.js', 'const y = 1\nexport const v = /** @type {number} */ (y)\n', 'const y = 1\nexport const v = /** @type {number} */ y\n']])
   assert.equal(r.code, 1, r.out)
