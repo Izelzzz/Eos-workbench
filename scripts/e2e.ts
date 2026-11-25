@@ -219,3 +219,6 @@ const result = { task: first.id, killed: first.killed, checks, sessions, rejecte
 writeFileSync(join(E2E, 'report.json'), JSON.stringify(result, null, 2))
 record(`\n[e2e] 结果：\n${JSON.stringify(result, null, 2)}\n`)
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1)
+
+// CI 验证用：已有文件里加一行没格式化的代码，format 不应该查它。下一个提交撤掉
+export const ciDeliberateExisting  =  { a:1 };
