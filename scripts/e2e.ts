@@ -233,7 +233,15 @@ const checks = {
   ...(remote === undefined ? {} : remoteChecks()),
 }
 const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
+// 跑的是哪份代码：Eos 仓库的提交，以及跑的时候没提交的改动（pr-checklist 用它们核对证据对得上 PR 的最终代码）
+const eosGit = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' })
+const uncommitted = eosGit('status', '--porcelain', '-z', '--no-renames', '--untracked-files=all')
+  .split('\0')
+  .filter(Boolean)
+  .map(l => l.slice(3))
 const result = {
+  commit: eosGit('rev-parse', 'HEAD').trim(),
+  uncommitted,
   task: first.id,
   killed: first.killed,
   checks,

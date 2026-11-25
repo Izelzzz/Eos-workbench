@@ -2,8 +2,11 @@
 //   - 描述里有「能用证据证明的」「证明不了的」两节，且不是空的（自检第 7 条）
 //   - 改动碰到 .github/e2e-paths.txt 里「需要」的路径时，描述里有「端到端验证」一节（自检第 3 条）：
 //     写了 docs/e2e/ 下的证据路径的，路径必须在这个 PR 里新增或修改过；
-//     写了「不需要，理由……」的，通过但给出醒目的提示
-// 只能证明「有这几节、证据文件存在」，证明不了 E2E 真的覆盖了这次改动。
+//     写了「不需要，理由……」的，通过但给出醒目的提示；
+//     证据里有 E2E 报告（report.json，scripts/e2e.ts 写的）时，核对证据对得上 PR 的最终代码：
+//     报告记的提交在 PR 的历史里，这个 PR 改过的「需要」的文件在那个提交和 PR 最新提交上一样，跑的时候也没有没提交的改动。
+//     不一样时报错；描述里有非空的「证据之后的改动」一节写了理由时，改成要人确认的提示
+// 只能证明「有这几节、证据文件存在、证据的提交对得上」，证明不了 E2E 真的覆盖了这次改动。
 //
 // 用法（在 PR 的合并提交上）：PR_BODY="..." node <脚本>
 // 改动列表取 HEAD^1..HEAD，即 actions/checkout 检出的合并提交相对 base 的改动。
@@ -12,6 +15,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type Rule = { need: boolean; pattern: string; regex: RegExp }
 
@@ -181,7 +185,59 @@ export type Result = { errors: string[]; warnings: string[]; notes: string[] }
 /** 这个 PR 改动的一个文件。删掉的文件算「改动」（要不要 E2E），但不能当证据。 */
 export type Change = { path: string; deleted: boolean }
 
-export function check(input: { body: string; changed: Change[]; rules: Rule[] }): Result {
+/** E2E 报告里核对证据用的两项（scripts/e2e.ts 写的 report.json）。 */
+export type Report = { commit?: string; uncommitted?: string[] }
+
+/** 核对证据要用的仓库操作；check() 本身不碰 git，测试里换成桩。 */
+export type Repo = {
+  /** 读出 PR 里的一份报告；不是合法的 JSON 时返回 undefined */
+  report: (path: string) => Report | undefined
+  /** 提交在 PR 的历史里（是 PR 最新提交的祖先或它本身） */
+  inHistory: (commit: string) => boolean
+  /** 这个文件在那个提交和 PR 最新提交上内容一样（都不存在也算一样） */
+  same: (commit: string, path: string) => boolean
+}
+
+/** 证据对得上最终代码：报告的提交在历史里，PR 改过的「需要」的文件此后没再变，跑的时候也没有未提交的改动。 */
+function freshness(r: Result, reportPaths: string[], needed: string[], repo: Repo, reason: string | undefined): void {
+  if (reportPaths.length === 0) {
+    r.warnings.push('证据里没有 E2E 报告（report.json），核对不了证据对应哪个提交：请独立审查人工核对证据对得上最终代码')
+    return
+  }
+  for (const path of reportPaths) {
+    const report = repo.report(path)
+    if (report === undefined) {
+      r.errors.push(`证据 ${path} 不是合法的 JSON`)
+      continue
+    }
+    if (typeof report.commit !== 'string' || report.commit === '') {
+      r.warnings.push(`证据 ${path} 没有记下跑的是哪个提交（旧版 e2e.ts 写的？），核对不了证据对得上最终代码：请独立审查人工核对`)
+      continue
+    }
+    const commit = report.commit
+    if (!repo.inHistory(commit)) {
+      r.errors.push(`证据 ${path} 跑的是提交 ${commit.slice(0, 12)}，它不在这个 PR 的历史里`)
+      continue
+    }
+    const changedAfter = needed.filter(p => !repo.same(commit, p))
+    const dirty = (report.uncommitted ?? []).filter(p => needed.includes(p))
+    const problems = [
+      ...(changedAfter.length === 0 ? [] : [`这些文件在 ${commit.slice(0, 12)} 之后又改过：${changedAfter.join('、')}`]),
+      ...(dirty.length === 0 ? [] : [`跑的时候这些文件有没提交的改动：${dirty.join('、')}`]),
+    ]
+    if (problems.length === 0) {
+      r.notes.push(`证据 ${path} 对得上最终代码（${commit.slice(0, 12)}）`)
+      continue
+    }
+    if (reason === undefined) {
+      r.errors.push(`证据 ${path} 对不上最终代码：${problems.join('；')}。重跑 E2E，或者在描述里加「证据之后的改动」一节写明为什么不用重跑（由用户批准）`)
+    } else {
+      r.warnings.push(`证据 ${path} 对不上最终代码：${problems.join('；')}。描述里写的理由由独立审查核实、在合并卡片上由用户批准：${reason}`)
+    }
+  }
+}
+
+export function check(input: { body: string; changed: Change[]; rules: Rule[]; repo?: Repo }): Result {
   const r: Result = { errors: [], warnings: [], notes: [] }
   const all = sections(input.body)
   const find = (pred: (t: string) => boolean) => all.find(s => pred(s.title))
@@ -220,11 +276,16 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
   // 只写目录时，这个目录下有任何新增或修改的文件就算数。
   const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map(m => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
+    const reports = new Set<string>()
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
-      if (!present.some(c => c === p || c.startsWith(dir))) {
-        r.errors.push(`「端到端验证」写的证据 ${p} 不在这个 PR 新增或修改的文件里`)
-      }
+      const files = present.filter(c => c === p || c.startsWith(dir))
+      if (files.length === 0) r.errors.push(`「端到端验证」写的证据 ${p} 不在这个 PR 新增或修改的文件里`)
+      for (const f of files) if (f === 'report.json' || f.endsWith('/report.json')) reports.add(f)
+    }
+    if (input.repo !== undefined) {
+      const after = find(t => t.startsWith('证据之后的改动'))
+      freshness(r, [...reports], needed, input.repo, after === undefined || after.content === '' ? undefined : after.content.replace(/\s+/g, ' '))
     }
     return r
   }
@@ -245,11 +306,45 @@ export function parseNameStatusZ(out: string): Change[] {
   return changes
 }
 
+/**
+ * 用 git 实现 Repo。cwd 是检出的合并提交：HEAD^1 是 base，HEAD^2 是 PR 的最新提交。
+ * 核对证据要完整的历史（工作流用 fetch-depth: 0），否则证据的提交找不到，会当成不在历史里而报错。
+ */
+export function gitRepo(cwd: string): Repo {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  const blob = (rev: string, path: string) => {
+    try {
+      return git('rev-parse', '--verify', '-q', `${rev}:${path}`).trim()
+    } catch {
+      return undefined
+    }
+  }
+  return {
+    report: path => {
+      try {
+        return JSON.parse(readFileSync(join(cwd, path), 'utf8')) as Report
+      } catch {
+        return undefined
+      }
+    },
+    inHistory: commit => {
+      if (!/^[0-9a-f]{7,40}$/.test(commit)) return false
+      try {
+        git('merge-base', '--is-ancestor', commit, 'HEAD^2')
+        return true
+      } catch {
+        return false
+      }
+    },
+    same: (commit, path) => blob(commit, path) === blob('HEAD^2', path),
+  }
+}
+
 function main(): void {
   const body = process.env.PR_BODY ?? ''
   const changed = parseNameStatusZ(execFileSync('git', ['diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD'], { encoding: 'utf8' }))
   const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
-  const r = check({ body, changed, rules })
+  const r = check({ body, changed, rules, repo: gitRepo(process.cwd()) })
   for (const n of r.notes) console.log(n)
   for (const w of r.warnings) console.log(`::warning title=需要人确认::${w}`)
   for (const e of r.errors) console.log(`::error title=PR 流程检查::${e}`)
