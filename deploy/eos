@@ -7,6 +7,10 @@ set -eu
 if [ "$(id -u)" = 0 ]; then
   # setpriv 不改这几个变量；不改的话平台的 HOME 还是 /root。
   export HOME=/home/eos USER=eos LOGNAME=eos
+  if ! setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid --ambient-caps=+setuid,+setgid -- true 2>/dev/null; then
+    echo "eos：切换不到平台用户 eos。容器要有 SETUID、SETGID 两个能力（compose.yaml 里的 cap_add），见 docs/deploy.md「用户和权限」" >&2
+    exit 1
+  fi
   exec setpriv --reuid=eos --regid=eos --init-groups --inh-caps=+setuid,+setgid --ambient-caps=+setuid,+setgid -- "$0" "$@"
 fi
 

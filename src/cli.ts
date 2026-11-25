@@ -8,7 +8,7 @@ import { describePosition } from './engine/machine.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { DshExecutor, dshInstall } from './executor/dsh.ts'
+import { DshExecutor, dshEntry } from './executor/dsh.ts'
 import { takeMasterKey } from './credentials/key.ts'
 import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
 import { knownSecrets, redacting, redactText } from './credentials/redact.ts'
@@ -111,8 +111,13 @@ const redact = (() => {
   return (text: string) => redactText(text, secrets())
 })()
 
-/** dsh 的入口。部署镜像里设置 EOS_DSH_LAUNCHER，经包装启动（deploy/dsh-launch.mjs：先清掉平台切换用户用的能力）。 */
-const dshBin = (): string => process.env.EOS_DSH_LAUNCHER || (dshInstall(ROOT)?.bin ?? fail('找不到 dsh，先在仓库目录运行 npm install'))
+const dshBin = (): string => {
+  try {
+    return dshEntry(process.env, ROOT) ?? fail('找不到 dsh，先在仓库目录运行 npm install')
+  } catch (e) {
+    return fail((e as Error).message)
+  }
+}
 
 const taskOf = (id: string | undefined): Task => {
   if (id === undefined) return fail('需要任务 id')

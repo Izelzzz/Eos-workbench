@@ -139,7 +139,7 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 
 - compose 去掉了全部能力，只加回 `SETUID`、`SETGID`。`eos` 命令以 root 启动，降到 `eos` 时把这两个能力带过去（ambient），平台用它们把检查命令切换到 `eos-check`；切换时清掉全部能力，检查命令切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
 - worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
-- 平台的子进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs` 启动，git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。
+- 平台启动的、会运行仓库代码或第三方程序的进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs` 启动，git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。平台撤销越界改动时用的固定脚本（`sh`、`rm`、`find`）还带着。
 - 平台给 `eos-check` 的进程发不了信号：超时或中止时以 `eos-check` 的身份结束检查命令的进程组，撤销越界改动前以它的身份结束它留在 worktree 里的进程。
 - **还没做到的**：agent 和平台同一个用户，挡住它读平台进程环境的只有 Landlock。下一个 PR 让 dsh 以独立的用户 `eos-agent` 运行。
 

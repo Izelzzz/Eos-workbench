@@ -27,13 +27,14 @@ const mode = (p: string) => { const s = statSync(p); return { gid: s.gid, mode: 
 const fakeDsh = spawn('sleep', ['600'], { env: { ...process.env, DEEPSEEK_API_KEY: 'sk-probe-not-a-real-key' }, detached: true, stdio: 'ignore' })
 
 // 真的 dsh：经 EOS_DSH_LAUNCHER 启动（和平台一样），stdin 开着，它等着 JSON-RPC，不会调用模型。
+// 包装用 process.execve 换成 setpriv 再换成 dsh，进程号不变：等这个进程的命令行变成 dsh。
 const capsOf = (pid: number) => Object.fromEntries([...readFileSync(`/proc/${pid}/status`, 'utf8').matchAll(/^(Uid|CapEff|CapAmb|NoNewPrivs):\s*(\S+)/gm)].map(m => [m[1], m[2]]))
-const launcher = spawn(process.execPath, [process.env.EOS_DSH_LAUNCHER!, '--profile', 'sdk'], {
+const launched = spawn(process.execPath, [process.env.EOS_DSH_LAUNCHER!, '--profile', 'sdk'], {
   env: { ...process.env, DEEPSEEK_API_KEY: 'sk-probe-not-a-real-key', DSH_HOME: join(data, 'dsh-probe') }, stdio: ['pipe', 'ignore', 'ignore'],
 })
-await new Promise(r => setTimeout(r, 3000))
-const dshPid = Number(spawnSync('pgrep', ['-P', String(launcher.pid)], { encoding: 'utf8' }).stdout.trim().split('\n')[0])
-const realDsh = { launcherPid: launcher.pid, launcher: capsOf(launcher.pid!), dshPid, dsh: Number.isFinite(dshPid) && dshPid > 0 ? capsOf(dshPid) : 'not found', cmdline: Number.isFinite(dshPid) && dshPid > 0 ? readFileSync(`/proc/${dshPid}/cmdline`, 'utf8').split('\0').slice(0, 2).join(' ') : '' }
+const cmdlineOf = (pid: number) => { try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').slice(0, 2).join(' ') } catch { return '' } }
+for (let i = 0; i < 100 && !cmdlineOf(launched.pid!).includes('@deepseek-ai/dsh/'); i++) await new Promise(r => setTimeout(r, 100))
+const realDsh = { pid: launched.pid, cmdline: cmdlineOf(launched.pid!), caps: cmdlineOf(launched.pid!).includes('@deepseek-ai/dsh/') ? capsOf(launched.pid!) : 'dsh 没有起来' }
 
 // 平台调用的 git（镜像里 /usr/local/bin/git 包装）：git 起的子进程不带能力。
 const gitCaps = execFileSync('git', ['-c', 'alias.caps=!grep -E "^Cap(Eff|Amb)" /proc/self/status', 'caps'], { cwd: repo, encoding: 'utf8' }).trim().split('\n')
@@ -48,6 +49,10 @@ const viaCheckOut = join(worktree, 'scan-check.json')
 const [viaCheck] = await runChecks(worktree, [{ kind: 'run', run: scanArgs(viaCheckOut), timeoutSec: 30 }], process.env, undefined, undefined, user.user)
 const control = spawnSync('sh', scanArgs(join(data, 'scan-control.json')).slice(1), { encoding: 'utf8' })
 
+// 扫描时真的 dsh 一直在跑；扫完再结束它。
+launched.kill('SIGTERM')
+const dshExit = await new Promise<{ code: number | null; signal: string | null }>(r => launched.once('exit', (code, signal) => r({ code, signal })))
+
 // 检查命令里跑 git：worktree 和它的 git 目录属于平台用户。
 const [gitCheck] = await runChecks(worktree, [{ kind: 'run', run: ['sh', '-c', 'git status --porcelain && git diff --check && git log --oneline -1'], timeoutSec: 30 }], process.env, undefined, undefined, user.user)
 
@@ -59,14 +64,12 @@ await new Promise(r => setTimeout(r, 500))
 const leftover = spawnSync('ps', ['-u', user.user.name, '-o', 'pid=,comm='], { encoding: 'utf8' }).stdout.trim()
 
 process.kill(-fakeDsh.pid!, 'SIGKILL')
-// 包装被杀（SIGKILL，来不及转发信号）时 dsh 也要结束（--pdeathsig）。
-launcher.kill('SIGKILL')
-await new Promise(r => setTimeout(r, 1000))
-const dshAfterLauncherKilled = spawnSync('ps', ['-p', String(dshPid), '-o', 'pid='], { encoding: 'utf8' }).stdout.trim()
+
 console.log(JSON.stringify({
   platform: { uid: process.getuid?.(), groups: process.getgroups?.(), caps: /^CapEff:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8'))?.[1] },
   checkUser: user.user,
-  realDsh: { ...realDsh, aliveAfterLauncherKilled: dshAfterLauncherKilled !== '' },
+  // 平台给的 SIGTERM 直接到 dsh，退出时报的就是这个信号。
+  realDsh: { ...realDsh, exitAfterSigterm: dshExit },
   gitCaps,
   worktreeDir: mode(join(data, 'worktrees')), worktreeFile: mode(join(worktree, 'a.txt')),
   viaCheck: { result: viaCheck, scan: JSON.parse(readFileSync(viaCheckOut, 'utf8')), outputFile: mode(viaCheckOut) },

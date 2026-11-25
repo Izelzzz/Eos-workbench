@@ -6,7 +6,7 @@ import { after, test } from 'node:test'
 import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
-import { agentEnv, ALWAYS_DISABLED, DshExecutor, dshSandbox, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
+import { agentEnv, ALWAYS_DISABLED, DshExecutor, dshEntry, dshInstall, dshSandbox, GROUP_ROWS, parseSessionLog, patchRows, profileHash, replyAfter, replyFromRun, sessionIdFor, traceAfter, turnOutcome } from '../src/executor/dsh.ts'
 import type { AgentProfile } from '../src/executor/types.ts'
 
 const user = (text: string, time: number) => ({ type: 'user/message', time, data: { content: [{ type: 'text', text }] } })
@@ -81,6 +81,15 @@ test('the Landlock probe doctor uses is the same installed copy of node-addon-sy
     const theirs = createRequire(createRequire(join(import.meta.dirname, '..', 'package.json')).resolve(`@deepseek-ai/${pkg}/package.json`)).resolve('@deepseek-ai/node-addon-system/package.json')
     assert.equal(theirs, ours, pkg)
   }
+})
+
+test('the dsh entry is the installed dsh, or the launcher the image names (which must exist)', () => {
+  const root = join(import.meta.dirname, '..')
+  assert.equal(dshEntry({}, root), dshInstall(root)?.bin)
+  assert.equal(dshEntry({ EOS_DSH_LAUNCHER: '' }, root), dshInstall(root)?.bin)
+  const launcher = join(root, 'deploy', 'dsh-launch.mjs')
+  assert.equal(dshEntry({ EOS_DSH_LAUNCHER: launcher }, root), launcher)
+  assert.throws(() => dshEntry({ EOS_DSH_LAUNCHER: '/nonexistent/dsh-launch.mjs' }, root), /EOS_DSH_LAUNCHER=\/nonexistent\/dsh-launch\.mjs，但这个文件不存在/)
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {
