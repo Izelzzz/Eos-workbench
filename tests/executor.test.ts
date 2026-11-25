@@ -44,7 +44,8 @@ test('dsh gets only whitelisted variables plus the model key: host secrets, git 
   const env = agentEnv({
     PATH: '/bin', HOME: '/home/eos', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', HTTPS_PROXY: 'http://proxy:3128', no_proxy: 'localhost', NODE_EXTRA_CA_CERTS: '/ca.pem',
     GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.x.insteadOf', GIT_CONFIG_VALUE_0: 'y', GIT_EDITOR: 'true',
-    DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'from-env', GITHUB_TOKEN: 'ghp_x', AWS_SECRET_ACCESS_KEY: 's', EOS_MASTER_KEY: 'm', NODE_OPTIONS: '--require /evil.js', EMPTY: undefined,
+    DSH_TELEMETRY_DISABLED: '1', DSH_AGENTS_HOME: '/srv/old-agents', DSH_SNAPSHOT_FILE: '/tmp/snap', DSH_SPEECH_TOKEN: 'st_x', DSH_HOME: '/elsewhere',
+    DEEPSEEK_API_KEY: 'from-env', GITHUB_TOKEN: 'ghp_x', AWS_SECRET_ACCESS_KEY: 's', EOS_MASTER_KEY: 'm', NODE_OPTIONS: '--require /evil.js', EMPTY: undefined,
     // 部署镜像设定的缓存位置和开关：按名字放行。长得像的其他变量（npm 的 registry 和认证、pip 的源）不放行。
     NARB_NATIVE_CACHE_DIR: '/home/eos/.cache/native-addons', NODE_DISABLE_COMPILE_CACHE: '1', npm_config_cache: '/tmp/cache/npm', PIP_CACHE_DIR: '/tmp/cache/pip', COREPACK_HOME: '/tmp/cache/corepack',
     npm_config_registry: 'https://evil.example', 'npm_config_//registry.npmjs.org/:_authToken': 'npm_x', PIP_INDEX_URL: 'https://u:p@pypi.example', NARB_DISABLE_NATIVE_CACHE: '1', COREPACK_NPM_TOKEN: 't', XDG_CACHE_HOME: '/tmp/cache/xdg',
@@ -141,15 +142,15 @@ test('a live call returns its reply only when the last turn completed, trusting 
 })
 
 /** 假的 dsh 进程：记下启动参数，会话的每轮都正常完成。 */
-const fakeHarnesses = (closeMs = 0) => {
-  const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; closed: boolean; resumed: string[] }[] = []
-  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[] }) => {
-    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, closed: false, resumed: [] as string[] }
+const fakeHarnesses = (closeMs = 0, block: (cwd: string | undefined) => Promise<void> | undefined = () => undefined) => {
+  const created: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; key?: string; closed: boolean; resumed: string[] }[] = []
+  const createHarness = (o: { cwd?: string; processCwd?: string; model?: string; patches?: string[]; env?: NodeJS.ProcessEnv }) => {
+    const rec = { cwd: o.cwd, processCwd: o.processCwd, model: o.model, patches: o.patches, key: o.env?.DEEPSEEK_API_KEY, closed: false, resumed: [] as string[] }
     created.push(rec)
     const session = (id: string) => ({
       id,
       setWorkingDirectory: async () => {},
-      run: async (input: string) => ({ finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
+      run: async (input: string) => (input.startsWith('/') ? undefined : await block(o.cwd), { finishReason: 'stop', finalResponse: input.startsWith('/') ? '' : `回复：${o.cwd}`,
         events: [{ type: 'turn/end', time: 1, data: { reason: { kind: 'completed' } } }] }),
     })
     const resumeSession = async (id: string) => {
@@ -164,6 +165,65 @@ const fakeHarnesses = (closeMs = 0) => {
   }
   return { created, createHarness }
 }
+
+test('after the model key changes, the next call closes every idle dsh process holding the old key and starts one with the new key', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  let key = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => key, createHarness })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  await send('/data/worktrees/t1', 'c1')
+  await send('/data/worktrees/t2', 'c1')
+  await send('/data/worktrees/t1', 'c2')
+  assert.equal(created.length, 2, '同一个 key：进程复用')
+  key = 'sk-new-key-111111'
+  await send('/data/worktrees/t1', 'c3')
+  await settle() // 别的工作目录的旧进程在后台关
+  assert.deepEqual(created.map(c => [c.cwd, c.key, c.closed]), [
+    ['/data/worktrees/t1', 'sk-old-key-000000', true],
+    ['/data/worktrees/t2', 'sk-old-key-000000', true],
+    ['/data/worktrees/t1', 'sk-new-key-111111', false],
+  ], '别的工作目录里空闲的旧 key 进程也关掉')
+  await send('/data/worktrees/t2', 'c2')
+  assert.equal(created[3]!.key, 'sk-new-key-111111')
+  await ex.close()
+})
+
+test('a key change does not close a process with a call still running; that worktree switches on its next call', async () => {
+  let open: () => void = () => {}
+  const gate = new Promise<void>(r => { open = r })
+  const { created, createHarness } = fakeHarnesses(0, cwd => (cwd === '/data/worktrees/t2' ? gate : undefined))
+  let key = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => key, createHarness })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  const waiting = send('/data/worktrees/t2', 'c1')
+  await new Promise(r => setTimeout(r, 10))
+  key = 'sk-new-key-111111'
+  await send('/data/worktrees/t1', 'c1')
+  assert.equal(created[0]!.closed, false, 't2 的调用还在跑，不打断')
+  open()
+  await waiting
+  await send('/data/worktrees/t2', 'c2')
+  assert.equal(created[0]!.closed, true)
+  assert.equal(created.at(-1)!.key, 'sk-new-key-111111')
+  await ex.close()
+})
+
+test('when the model key is deleted (no fallback), idle dsh processes are closed and the call fails', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  let key: string | undefined = 'sk-old-key-000000'
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', createHarness, modelKey: () => { if (key === undefined) throw new Error('没有可用的模型 API key'); return key } })
+  const send = (cwd: string, nonce: string) => ex.send({ key: `${cwd}/build`, nonce, prompt: '做事', spec: { model: 'deepseek-flash', write: 'worktree', cwd, profile: bare }, ask: async () => '' })
+  await send('/data/worktrees/t1', 'c1')
+  await send('/data/worktrees/t2', 'c1')
+  key = undefined
+  await assert.rejects(send('/data/worktrees/t1', 'c2'), /没有可用的模型 API key/)
+  await settle()
+  assert.deepEqual(created.map(c => c.closed), [true, true])
+  await ex.close()
+})
+
+/** 等后台的关闭做完（假进程的 close 是一个 setTimeout(0)）。 */
+const settle = () => new Promise(r => setTimeout(r, 20))
 
 /** 测试用的 dsh home：执行器会往里面写能力面的补丁和技能目录；跑完一起删掉。 */
 const homes: string[] = []
