@@ -43,7 +43,7 @@ const user = resolveCheckUser(process.env)
 if (user.kind !== 'ok') throw new Error(`EOS_CHECK_USER 没有设置好：${JSON.stringify(user)}`)
 const forbidden = [join(data, 'eos.db'), join(repo, 'a.txt'), '/home/eos/.bashrc']
 /** 扫描结果写到 out（检查命令通过时 runChecks 不带输出）。 */
-const scanArgs = (out: string) => ['sh', '-c', `node ${SCAN} "$@" > ${out}`, 'scan', join(worktree, 'a.txt'), ...forbidden]
+const scanArgs = (out: string) => ['sh', '-c', 'out="$1"; scan="$2"; shift 2; node "$scan" "$@" > "$out"', 'scan', out, SCAN, join(worktree, 'a.txt'), ...forbidden]
 
 const viaCheckOut = join(worktree, 'scan-check.json')
 const [viaCheck] = await runChecks(worktree, [{ kind: 'run', run: scanArgs(viaCheckOut), timeoutSec: 30 }], process.env, undefined, undefined, user.user)

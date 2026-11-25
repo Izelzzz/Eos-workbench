@@ -44,7 +44,7 @@ console.log(JSON.stringify({
   noNewPrivs: field('NoNewPrivs'),
   envHasSecrets: WATCH.filter(k => process.env[k] !== undefined),
   secretsFoundIn: procs.filter(p => p.found.length > 0).map(p => ({ pid: p.pid, uid: p.uid, comm: p.comm, found: p.found })),
-  processes: procs.map(({ found, ...p }) => p),
+  processes: procs.map(({ found: _found, ...p }) => p),
   switchToRoot: tryRun('setpriv', ['--reuid=0', '--regid=0', '--clear-groups', 'true']),
   switchToEos: tryRun('setpriv', ['--reuid=eos', '--regid=eos', '--clear-groups', 'true']),
   writeTrackedFileInWorktree: worktreeFile === undefined ? 'skipped' : tryWrite(worktreeFile, true),

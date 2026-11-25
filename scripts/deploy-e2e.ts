@@ -32,10 +32,13 @@ const compose = (...a: string[]) => {
   if (out.trim() !== '') appendFileSync(LOG, `${out}\n`)
   return out
 }
-/** 在容器里以 user 执行（默认平台用户 eos），返回输出和退出码（不抛错：退出码本身是要核对的结果）。 */
-const inContainer = (script: string, user = 'eos'): { code: number; out: string } => {
+/**
+ * 在容器里以 user 执行（默认平台用户 eos），返回输出和退出码（不抛错：退出码本身是要核对的结果）。
+ * 接口返回的值（worktree 路径、提交号）作为位置参数 $1、$2… 传进去，不拼进脚本。
+ */
+const inContainer = (script: string, user = 'eos', ...args: string[]): { code: number; out: string } => {
   try {
-    return { code: 0, out: compose('exec', '-T', '-u', user, 'eos', 'bash', '-c', script) }
+    return { code: 0, out: compose('exec', '-T', '-u', user, 'eos', 'bash', '-c', script, 'bash', ...args) }
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string }
     const out = `${err.stdout ?? ''}${err.stderr ?? ''}`
@@ -108,16 +111,19 @@ try {
   }, 40 * 60_000)
   log(`任务 ${id}：${task.status}${task.failure === undefined ? '' : `（${JSON.stringify(task.failure)}）`}`)
 
-  const worktree = task.worktree as string
+  // 接口返回的值先核对形状，再交给容器里的命令。
+  const worktree = String(task.worktree)
+  const baseSha = String(task.baseSha)
+  if (!/^\/data\/worktrees\/[A-Za-z0-9_-]+$/.test(worktree) || !/^[0-9a-f]{7,64}$/.test(baseSha)) throw new Error(`接口返回的 worktree 或 baseSha 不像预期：${worktree} ${baseSha}`)
   const testUsers = inContainer('ls /tmp | sed -n "s/^eos-e2e-npm-test-by-//p"')
-  const tests = inContainer(`set -o pipefail; cd ${worktree} && npm test 2>&1 | tail -8`)
-  const commits = inContainer(`git -C ${worktree} log --oneline ${task.baseSha}..HEAD`)
+  const tests = inContainer('set -o pipefail; cd "$1" && npm test 2>&1 | tail -8', 'eos', worktree)
+  const commits = inContainer('git -C "$1" log --oneline "$2..HEAD"', 'eos', worktree, baseSha)
 
   compose('down')
   compose('up', '-d')
   await until('重建后 Web 服务起来', async () => (await fetch(`${BASE}/api/tasks`)).status === 200, 120_000)
   const after = (await api(`/api/tasks/${id}`)).body
-  const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
+  const afterWorktree = inContainer('git -C "$1" log --oneline -1 && ls /data', 'eos', worktree)
   const head = commits.out.trim().split('\n')[0]?.split(' ')[0] ?? ''
   // 输出里混着别的行（例如 Node 的警告）时不让整个 E2E 在写报告之前崩掉：记成没有扫到，原始输出进报告。
   const scanned = (() => {
