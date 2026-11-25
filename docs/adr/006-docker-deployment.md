@@ -85,10 +85,14 @@
 ## 已知限制
 
 - **模型 key 对 agent 只靠沙箱**：agent 和 dsh 是同一个用户（见上）。dsh 在沙箱外启动的 MCP 服务读得到模型 key。
-- **平台进程自己能切换到任何用户，包括 root**（探针的正对照）：root 只有这三个能力，但拥有 `/app` 等 root 的文件。平台进程本来就可信。它启动的 dsh、git、检查命令和 bwrap 探测都清掉了能力；平台自己撤销越界改动时用的 `sh`、`rm`、`find`（`git.ts` 的固定脚本，不运行仓库里的代码）、Landlock 探测，以及 tsx 的 esbuild 服务进程（平台自己的依赖）还带着。新增直接启动子进程、而且会运行仓库代码的地方时，要同样清掉。
+- **平台进程自己能切换到任何用户，包括 root**（探针的正对照）：root 只有这三个能力，但拥有 `/app` 等 root 的文件。平台进程本来就可信。它启动的进程里，清掉了能力的有：dsh（和它启动的 agent、MCP 服务）、git、检查命令、bwrap 探测，以及撤销越界改动时的 `sh`、`rm`、`find`（`withoutCaps`，`docs/e2e/deploy-3c-agent-user/without-caps.txt`）。还带着的只有两个：
+  - Landlock 探测：doctor 起一次 node-addon-system 自带的 `landlock-run`，参数固定，不碰 worktree。它由那个包自己启动，平台加不了前缀。
+  - tsx 的 esbuild 服务进程：编译平台自己的源码，不读 worktree。它由 tsx 在平台进程里启动。
+  - 新增直接启动子进程的地方，要同样用 `withoutCaps`。
+  - 撤销越界改动时的符号链接：`git.ts` 先进入要删的路径的上一级目录，用 `pwd -P` 核对还在 worktree 里，再按相对路径 `rm -rf -- <名字>`，符号链接只删链接本身、不跟随（`tests/write-scope.test.ts`「撤销时不顺着上级目录的符号链接删到 worktree 外面」「撤销时上级目录已经被换成指向外面的链接：拒绝删除」等用例）。在那之前 agent 和检查命令留下的进程都已结束。
 - **检查命令能读世界可读的文件**：`eos.db`（trace、加密的凭据）、所有仓库和 worktree。它写不了它们，也读不到主密钥，所以解不开凭据。
-- **各任务的 worktree 都归 `eos-work`**：一个任务的检查命令能改别的任务的 worktree（以前和平台同一个用户时，它能改整个 `/data`）。
-- **检查命令自己建的、不给组写权限的文件**（例如显式 `chmod 755` 的目录），平台撤销越界改动或提交时可能处理不了。
+- **各任务的 worktree 都归 `eos-work`**：一个任务的检查命令能改别的任务的 worktree（以前和平台同一个用户时，它能改整个 `/data`）。这是完整性问题：任务 A 的仓库里的恶意依赖可以往任务 B 的 worktree 里写东西，随后被平台提交进 B 的分支。agent 在 Landlock 里写不了别的 worktree，但 dsh 在沙箱外启动的 MCP 服务可以。按任务分组或加 ACL 解决不了：所有任务用的是同一个 `eos-check`、`eos-agent`。可行的办法是检查命令也放进 Landlock（只能写自己的 worktree、家目录和 `/tmp`，node-addon-system 自带 `landlock-run`），或者按任务分配用户。建议作为路线图里单独的一项。
+- **agent 和检查命令建的私有文件**：平台在提交、撤销之前把它们改回 worktree 的组并开放组读写（`shareWithGroup`）。在那之后、下一次提交之前新建的文件（例如检查命令跑完后又起的后台进程写的）不在这一步里。
 
 - **Landlock 比 bwrap 弱的地方**：
   - `/tmp` 是同一个 tmpfs，所有任务都能读写：能看到彼此的临时文件和 dsh 的输出暂存文件，也能改共享的依赖缓存（任务之间可以互相投毒）。npm 的缓存按 hash 校验，pip 缓存和 corepack 下载的 pnpm、yarn 不校验。
