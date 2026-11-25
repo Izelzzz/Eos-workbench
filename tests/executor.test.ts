@@ -156,6 +156,27 @@ test('the dsh entry is the installed dsh, or the launcher the image names (which
   assert.throws(() => dshEntry({ EOS_DSH_LAUNCHER: '/nonexistent/dsh-launch.mjs' }, root), /EOS_DSH_LAUNCHER=\/nonexistent\/dsh-launch\.mjs，但这个文件不存在/)
 })
 
+test('the model endpoint comes only from the platform setting EOS_MODEL_BASE_URL (https, or http on this machine); a stray DEEPSEEK_BASE_URL is dropped', () => {
+  assert.deepEqual(agentEnv({ DEEPSEEK_BASE_URL: 'http://elsewhere/anthropic', DEEPSEEK_FILES_API_TIMEOUT: '1' }, 'k'), { DEEPSEEK_API_KEY: 'k' })
+  for (const ok of ['https://gateway.example/anthropic', 'http://127.0.0.1:8080/anthropic', 'http://localhost:1/anthropic', 'http://[::1]:1/anthropic']) {
+    assert.deepEqual(agentEnv({ EOS_MODEL_BASE_URL: ok }, 'k'), { DEEPSEEK_BASE_URL: ok, DEEPSEEK_API_KEY: 'k' }, ok)
+  }
+  assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'http://relay.internal/anthropic' }, 'k'), /只能是 https 地址，或者本机的 http 地址/)
+  assert.throws(() => agentEnv({ EOS_MODEL_BASE_URL: 'not a url' }, 'k'), /不是合法的地址/)
+  // 用户名和密码：拒绝，而且报错里不带它们
+  assert.throws(
+    () => agentEnv({ EOS_MODEL_BASE_URL: 'https://user:secret-pw@gateway.example/anthropic' }, 'k'),
+    (e: Error) => /不能带用户名和密码/.test(e.message) && !e.message.includes('secret-pw'),
+  )
+  assert.throws(
+    () => agentEnv({ EOS_MODEL_BASE_URL: 'http://user:secret-pw@relay.internal/anthropic' }, 'k'),
+    (e: Error) => !e.message.includes('secret-pw'),
+  )
+  // 交给 dsh 的是解析后的地址：主机名大小写等写法统一
+  assert.equal(agentEnv({ EOS_MODEL_BASE_URL: 'HTTP://LOCALHOST:1/anthropic' }, 'k').DEEPSEEK_BASE_URL, 'http://localhost:1/anthropic')
+  assert.deepEqual(agentEnv({ EOS_MODEL_BASE_URL: '' }, 'k'), { DEEPSEEK_API_KEY: 'k' })
+})
+
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {
   assert.deepEqual(agentEnv({ PATH: '/bin', npm_config_cache: undefined }, 'k'), { PATH: '/bin', DEEPSEEK_API_KEY: 'k' })
 })
