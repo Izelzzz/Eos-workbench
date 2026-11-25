@@ -49,8 +49,8 @@ docker compose exec eos eos doctor
 | 标签 | 什么时候更新 |
 |---|---|
 | `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时，例如 `v0.1.0` 发布 `0.1.0` |
-| `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-` 的）。给旧版本补发修订版时它也会指过去 |
-| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main。连续合并时只有 main 分支最新的那个提交会推它 |
+| `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-` 的）。给旧版本补发修订版时它也会指过去；一次推送多个正式版标签时，指向哪个不确定 |
+| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main。连续合并时只有 main 分支最新的那个提交会推它；它的构建失败时 `main` 不更新，停在上一个推成功的提交 |
 | `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main，不会被覆盖 |
 
 仍然需要克隆仓库：要用里面的 `compose.yaml`。在 `.env` 里加一行，指定镜像：
