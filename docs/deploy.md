@@ -40,7 +40,33 @@ docker compose exec eos eos doctor
 - `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
 - 「沙箱」一项报告 dsh 实际会用的沙箱：在这份 compose 下是 Landlock（镜像里装了 bwrap，但 Docker 默认权限下用不了）。两个都用不了时是 ✗，平台不启动。
 - 「检查命令的用户」一项真正切换一次到 `eos-check`。切换不过去（例如 compose 里去掉了 `cap_add`）时是 ✗，平台不启动：不会退回到用平台的用户运行检查命令。
-- 「凭据隔离」一项现在是 ⚠：检查命令读不到平台和 dsh 进程的环境，agent 只靠沙箱挡住（见顶部的警告）。
+- 「凭据隔离」一项在这份 compose 下是 ✓：检查命令读不到主密钥和模型 key；agent 读不到主密钥，读不到模型 key 只靠沙箱（见顶部的警告）。
+
+## 用发布的镜像
+
+不想在服务器上构建时，可以用 GitHub Actions 发布到 ghcr 的镜像（`.github/workflows/image.yml`），拉镜像不用登录：
+
+| 标签 | 什么时候更新 |
+|---|---|
+| `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时，例如 `v0.1.0` 发布 `0.1.0` |
+| `ghcr.io/izelzzz/eos-workbench:latest` | 最新的正式版（版本号里没有 `-` 的） |
+| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main |
+| `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main，不会被覆盖 |
+
+仍然需要克隆仓库：要用里面的 `compose.yaml`。在 `.env` 里加一行，指定镜像：
+
+```bash
+echo 'EOS_IMAGE=ghcr.io/izelzzz/eos-workbench:0.1.0' >> .env
+docker compose pull
+docker compose up -d --no-build
+```
+
+- 推荐写具体的版本号或 `sha-` 标签，不写 `latest`、`main`：升级是你自己决定的，回退时也知道退到哪个。
+- `--no-build`：不要在本地构建。不加时，`docker compose up --build` 会用本地的代码构建，并打上 ghcr 的标签，盖掉拉下来的镜像。
+- 仓库的代码和镜像的版本尽量一致（`git checkout v0.1.0`）：`compose.yaml` 里的能力、tmpfs 等设置是和镜像一起改的。
+- 派生镜像（见「执行器环境」）的 `FROM` 改成同一个标签，例如 `FROM ghcr.io/izelzzz/eos-workbench:0.1.0`。
+
+**升级**：先备份（见「数据和升级」），改 `.env` 里的 `EOS_IMAGE`，再执行 `docker compose pull && docker compose up -d --no-build`。**回退**：把 `EOS_IMAGE` 改回原来的标签，执行同样的命令。数据卷不动；升级后如果数据已经被新版本改过（例如 dsh 目录的迁移），回退前先恢复升级前的备份。
 
 ## 访问
 
