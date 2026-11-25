@@ -1,0 +1,101 @@
+{
+  "workflow": "/app/scripts/e2e/mini.yaml",
+  "commit": "6d3086e",
+  "uncommitted": "",
+  "task": "t261125163902b8o",
+  "status": "done",
+  "answered": 0,
+  "checks": {
+    "容器里 eos doctor 没有 ✗": true,
+    "设置了主密钥（扫描时平台进程的环境里有它）": true,
+    "检查命令的用户读不到平台和 dsh 进程环境里的主密钥、模型 key": true,
+    "dsh 以 eos-agent 运行（读不到平台进程的环境）": true,
+    "dsh 进程不带平台切换用户的能力（经 deploy/dsh-launch.mjs 清掉）": true,
+    "任务完成": true,
+    "平台的检查命令（npm test）以 eos-check 运行": true,
+    "worktree 里 npm test 通过": true,
+    "agent 的改动提交到了任务分支": true,
+    "down 再 up 之后任务还在、状态不变": true,
+    "down 再 up 之后 worktree 还在，最新提交不变": true
+  },
+  "environment": "uid=10001(eos) gid=10001(eos) groups=10001(eos),10010(eos-work),10011(eos-dsh)\nv24.22.3\n11.21.2\n12.23.0\ngit version 2.43.0\nPython 3.12.3\ngcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nbubblewrap 0.9.0\nEOS_HOME=/data\n",
+  "doctor": "Eos 环境检查（数据目录 /data）\n✓ Node：24.22.3（要求 >=24.9.0）\n✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）\n✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 a6a990c99319c82c）\n✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp\n✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境\n✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境\n✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到\n✓ git：2.43.0\n✓ 数据目录：/data 可写\n✓ dsh：0.2.2-rc.5\n",
+  "checkUserScan": {
+    "dshPids": [
+      156
+    ],
+    "scan": {
+      "uid": 10002,
+      "gid": 10002,
+      "groups": [
+        10002,
+        10010
+      ],
+      "home": "/home/eos-check",
+      "caps": {
+        "inheritable": "0000000000000000",
+        "permitted": "0000000000000000",
+        "effective": "0000000000000000",
+        "ambient": "0000000000000000"
+      },
+      "noNewPrivs": "1",
+      "envHasSecrets": [
+        "EOS_MASTER_KEY",
+        "DEEPSEEK_API_KEY"
+      ],
+      "secretsFoundIn": [],
+      "processes": [
+        {
+          "pid": 1,
+          "ppid": 0,
+          "uid": 0,
+          "comm": "docker-init",
+          "cmdline": "/sbin/docker-init --",
+          "capEff": "00000000000000e0",
+          "capAmb": "0000000000000000",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 156,
+          "ppid": 7,
+          "uid": 10003,
+          "comm": "MainThread",
+          "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+          "capEff": "0000000000000000",
+          "capAmb": "0000000000000000",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 39,
+          "ppid": 7,
+          "uid": 10001,
+          "comm": "esbuild",
+          "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+          "capEff": "00000000000000e0",
+          "capAmb": "00000000000000e0",
+          "environ": "EACCES"
+        },
+        {
+          "pid": 7,
+          "ppid": 1,
+          "uid": 10001,
+          "comm": "MainThread",
+          "cmdline": "node --import",
+          "capEff": "00000000000000e0",
+          "capAmb": "00000000000000e0",
+          "environ": "EACCES"
+        }
+      ],
+      "switchToRoot": "setpriv: setresuid failed: Operation not permitted",
+      "switchToEos": "setpriv: setresuid failed: Operation not permitted",
+      "renameWorktreeDir": "skipped",
+      "writeTrackedFileInWorktree": "skipped",
+      "writeOutsideWorktree": {},
+      "readOutsideWorktree": {}
+    }
+  },
+  "testUsers": "eos-agent\neos-check\n",
+  "npmTest": "ℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 122.115494\n",
+  "commits": "34889cd eos: build produce (c1)\n",
+  "afterRecreate": "34889cd eos: build produce (c1)\ndsh\neos.db\neos.db-shm\neos.db-wal\nlocks\nlogs\nrepos\nworktrees\n"
+}

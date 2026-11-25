@@ -1,0 +1,13 @@
+# 改动后的镜像里，以检查命令的用户 eos-check 跑 npm install、npm ci（不调用模型）
+# 环境：HOME=/home/eos-check、CI=1，加上这个云端环境的代理和代理根证书（同 e2e 用的 compose 覆盖文件）
+
+user=eos-check npm=11.21.2 node=v24.22.3
+$ npm install is-number@7.0.0
+
+added 1 package in 1s
+package-lock.json 已生成
+$ npm ci
+
+added 1 package in 239ms
+is-number(5) = true
+exit=0
