@@ -7,7 +7,7 @@
 // - 续接会话前核对会话头里记录的工作区：不是这个任务的 worktree（例如修复写入范围之前创建的会话）就拒绝续接。
 // - 会话 id 由 key 确定性地算出，进程崩溃后总能找回同一个会话。
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -196,12 +196,15 @@ const marker = (nonce: string) => `<!-- eos:${nonce} -->`
 /**
  * 交给 dsh 进程的环境变量：只有白名单里的，加上模型 key。平台进程环境里别的变量（其他服务的令牌、
  * 宿主机注入的 GIT_CONFIG_*、部署方加的各种配置）都不交给 dsh，也就到不了 agent 的工具子进程。
- * 代理和证书变量要留着：服务器经代理访问模型时，没有它们 dsh 连不上模型。LC_* 和 dsh 自己的配置（DSH_*，例如 DSH_TELEMETRY_DISABLED）也留着。
+ * 代理和证书变量要留着：服务器经代理访问模型时，没有它们 dsh 连不上模型。LC_*（只是区域设置）也留着。
+ * dsh 自己的配置按名字放行，不按 DSH_ 前缀：DSH_AGENTS_HOME、DSH_SNAPSHOT* 之类残留在部署环境里会改掉 dsh 读的目录，
+ * DSH_SPEECH_TOKEN 是令牌。DSH_HOME 由 SDK 按平台的 dshHome 覆盖，不用放行。
  */
 export const AGENT_ENV_KEEP: readonly string[] = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LANGUAGE', 'TMPDIR', 'TZ',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'DSH_TELEMETRY_DISABLED', // 部署方关掉 dsh 的遥测
   // 缓存的位置和开关，部署镜像设定（见 Dockerfile、ADR-006）。agent 在沙箱里能写 /tmp、写不了家目录：
   'NARB_NATIVE_CACHE_DIR', // dsh 的 native 模块缓存放到 agent 写不了的目录，不然在 /tmp 里能被 agent 换掉
   'NODE_DISABLE_COMPILE_CACHE', // 关掉 dsh 打开的 Node 字节码缓存：默认在 /tmp，没有完整性校验
@@ -210,7 +213,7 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'COREPACK_HOME', // 同上，corepack 下载的 pnpm、yarn
 ]
 
-export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_') || name.startsWith('DSH_')
+export const agentEnvAllowed = (name: string): boolean => AGENT_ENV_KEEP.includes(name) || name.startsWith('LC_')
 
 export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.ProcessEnv => ({
   ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
@@ -343,17 +346,21 @@ export const replyFromRun = (r: RunLike, sessionId: string, ms: number): Reply =
 
 export class DshExecutor implements Executor {
   /** 按「工作目录 + 模型路由」区分的 dsh 进程。 */
-  private readonly harnesses = new Map<string, { cwd: string; h: Harness }>()
+  private readonly harnesses = new Map<string, { cwd: string; h: Harness; keyId: string }>()
   /** 本进程里已经打开（新建或续接）的会话，以及它在哪个工作目录的进程里。 */
   private readonly open = new Map<string, { cwd: string; s: HarnessSession }>()
   private readonly asks = new Map<string, AskHandler>()
   /** 正在关闭的进程，按工作目录：同一个 worktree 的新进程要等旧进程退出（否则会话锁还被它占着）。 */
   private readonly closing = new Map<string, Promise<unknown>>()
+  /** 每个工作目录正在跑的调用数：换 key 时只关掉没有调用在跑的旧进程，不打断进行中的调用。 */
+  private readonly running = new Map<string, number>()
+  /** key 的指纹用 HMAC 加本进程的随机盐：不在内存里留一个能拿来比对猜测的、稳定的 key 哈希。 */
+  private readonly keySalt = randomBytes(32)
 
   constructor(private readonly opts: {
     dshHome: string
     dshBin: string
-    /** 模型 API key：每起一个 dsh 进程时取一次（在 Web 上换了 key，之后起的进程就用新的）。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
+    /** 模型 API key：每次调用前取一次；和这个工作目录的 dsh 进程启动时用的不一样（在 Web 上换了或删了），就关掉旧进程用新 key 重起。只交给 dsh 进程，dsh 不会把它传给 agent 的工具子进程。 */
     modelKey: () => string
     /** 从中按白名单挑出交给 dsh 的变量；默认是平台进程的环境。 */
     env?: NodeJS.ProcessEnv
@@ -361,7 +368,7 @@ export class DshExecutor implements Executor {
     createHarness?: (options: DeepSeekHarnessOptions) => Harness
   }) {}
 
-  private harness(spec: AgentSpec): Harness {
+  private harness(spec: AgentSpec, modelKey: string, keyId: string): Harness {
     const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
@@ -375,11 +382,11 @@ export class DshExecutor implements Executor {
         cwd: spec.cwd, processCwd: this.processCwd, patches: [patch],
         profile: 'sdk', dshHome: this.opts.dshHome, dshBin: this.opts.dshBin, provider: PROVIDER, model: spec.model,
         ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        env: agentEnv(this.opts.env ?? process.env, this.opts.modelKey()),
+        env: agentEnv(this.opts.env ?? process.env, modelKey),
         initializeTimeoutMs: 60_000,
         onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
       })
-      this.harnesses.set(route, { cwd: spec.cwd, h })
+      this.harnesses.set(route, { cwd: spec.cwd, h, keyId })
     }
     return h
   }
@@ -476,10 +483,22 @@ export class DshExecutor implements Executor {
 
   private async session(key: string, spec: AgentSpec): Promise<HarnessSession> {
     const id = sessionIdFor(key)
+    let modelKey: string
+    try {
+      modelKey = this.opts.modelKey()
+    } catch (e) {
+      // key 被删了（或读不出来）：没有调用在跑的进程都关掉，不让它们继续拿着旧 key，再报错。
+      await this.releaseIdle(() => true, spec.cwd)
+      throw e
+    }
+    const keyId = createHmac('sha256', this.keySalt).update(modelKey).digest('hex')
+    // 换了 key：没有调用在跑的旧 key 进程都关掉（包括别的工作目录的），之后的调用用新 key 重起，会话从日志续接。
+    // 有调用在跑的进程（例如 agent 在等用户回答）等它的调用结束后，下一次调用时再换；在那之前，同一个工作目录里并发进来的调用也还用这个旧 key 进程（不打断在跑的调用）。
+    if ([...this.harnesses.values()].some(v => v.keyId !== keyId)) await this.releaseIdle(v => v.keyId !== keyId, spec.cwd)
     const known = this.open.get(id)
     if (known !== undefined) return known.s
     await this.closing.get(spec.cwd)
-    const h = this.harness(spec)
+    const h = this.harness(spec, modelKey, keyId)
     let s: HarnessSession
     if (this.logFile(id) !== undefined) {
       const workspace = this.workspaceOf(id)
@@ -502,6 +521,26 @@ export class DshExecutor implements Executor {
   }
 
   async send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
+    const cwd = p.spec.cwd
+    this.running.set(cwd, (this.running.get(cwd) ?? 0) + 1)
+    try {
+      return await this.sendIn(p)
+    } finally {
+      const n = (this.running.get(cwd) ?? 1) - 1
+      if (n === 0) this.running.delete(cwd)
+      else this.running.set(cwd, n)
+    }
+  }
+
+  /** 关掉满足条件、而且所在工作目录没有调用在跑的进程（调用自己的工作目录计数里不算它自己）。 */
+  private async releaseIdle(match: (v: { cwd: string; keyId: string }) => boolean, self?: string): Promise<void> {
+    const cwds = new Set([...this.harnesses.values()].filter(v => match(v) && (this.running.get(v.cwd) ?? 0) <= (v.cwd === self ? 1 : 0)).map(v => v.cwd))
+    // release 同步地把进程从 harnesses 里拿掉、登记到 closing：别的工作目录不用等它们关完，那些目录之后的调用会先等 closing。
+    const releases = [...cwds].map(cwd => [cwd, this.release(cwd)] as const)
+    await Promise.all(releases.filter(([cwd]) => cwd === self).map(([, r]) => r))
+  }
+
+  private async sendIn(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     const s = await this.session(p.key, p.spec)
     this.asks.set(s.id, p.ask)
     const started = Date.now()

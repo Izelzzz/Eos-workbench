@@ -39,7 +39,13 @@ const scan = () => {
   }
 }
 
-const isPlatform = (p: Proc) => /src\/cli\.ts/.test(p.cmd)
+/** 平台进程：这次 E2E（下面起的 npm run e2e）起的 src/cli.ts。同时在跑的别的 Eos 进程（例如 npm test 里的 doctor 测试）不算。 */
+let e2ePid = -1
+const fromThisRun = (p: Proc): boolean => {
+  for (let q: Proc | undefined = p, n = 0; q !== undefined && n < 64; q = procs.get(q.ppid), n++) if (q.pid === e2ePid) return true
+  return false
+}
+const isPlatform = (p: Proc) => /src\/cli\.ts/.test(p.cmd) && fromThisRun(p)
 const ancestors = (p: Proc): Proc[] => {
   const out: Proc[] = []
   for (let q = procs.get(p.ppid); q !== undefined && out.length < 64; q = procs.get(q.ppid)) out.push(q)
@@ -47,7 +53,8 @@ const ancestors = (p: Proc): Proc[] => {
 }
 /** dsh 进程：父进程是平台进程、命令行里是 dsh 的启动文件。agent 的工具命令是 dsh 的子孙，不算。 */
 const isDsh = (p: Proc) => p.cmd.includes('@deepseek-ai/dsh/lib/bin.js') && procs.get(p.ppid) !== undefined && isPlatform(procs.get(p.ppid)!)
-const allowed = (n: string) => agentEnvAllowed(n) || n === 'DEEPSEEK_API_KEY'
+/** DSH_HOME 由 SDK 按平台的 dshHome 设置（vendor/dsh-sdk-client/launch.ts），不经过白名单。 */
+const allowed = (n: string) => agentEnvAllowed(n) || n === 'DEEPSEEK_API_KEY' || n === 'DSH_HOME'
 
 const finish = (code: number | null, error?: string) => {
   clearInterval(timer)
@@ -99,5 +106,6 @@ const timer = setInterval(scan, 50)
 const env: NodeJS.ProcessEnv = { ...process.env, EOS_MASTER_KEY: masterKey, EOS_E2E_STORE_KEY: storeKey }
 delete env.DEEPSEEK_API_KEY
 const child = spawn('npm', ['run', 'e2e'], { cwd: ROOT, env, stdio: 'inherit' })
+e2ePid = child.pid ?? -1
 child.on('exit', code => finish(code))
 child.on('error', e => finish(null, e.message))
