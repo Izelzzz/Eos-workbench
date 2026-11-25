@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  # 带上事件名：main 上同一个提交的 push 运行和每周的定时运行不互相取消
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -27,6 +28,8 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      # CodeQL 官方模板里有；仓库是私有时读工作流运行信息要用
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
