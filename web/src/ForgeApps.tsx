@@ -114,7 +114,7 @@ export function ForgeApps({ query }: { query: string }) {
                       <p className="muted">授权后，平台以授权人的身份推送、开 PR（PR 作者是这个人），只能访问装了 App、而且这个人有权限的仓库。令牌 8 小时过期，平台自动续期。没人授权时用 App 自己的身份。</p>
                       {a.user.authorized !== undefined && ('login' in a.user.authorized
                         ? <p>已授权：<b>@{a.user.authorized.login}</b>，更新于 {ago(a.user.authorized.updatedAt)}。 <button type="button" onClick={() => void revoke(a.name, (a.user!.authorized as { login: string }).login)}>撤销授权</button></p>
-                        : <p className="error">授权读不出来：{a.user.authorized.error}</p>)}
+                        : <p className="error">授权读不出来：{a.user.authorized.error} <button type="button" onClick={() => void revoke(a.name, '（读不出来的授权）')}>撤销授权</button></p>)}
                       {a.user.unavailable !== undefined
                         ? <p className="muted">现在不能授权：{a.user.unavailable}</p>
                         : <div><button type="button" className={a.user.authorized === undefined ? 'primary' : ''} disabled={busy || !data.usable} onClick={() => void authorize(a.name)}>{busy ? '正在跳转…' : a.user.authorized === undefined ? `用 ${a.host} 账号授权` : '换一个人重新授权'}</button></div>}

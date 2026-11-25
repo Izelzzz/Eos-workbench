@@ -16,6 +16,8 @@ export const userCredential = z.object({
   expiresAt: z.number().optional(),
   refreshToken: z.string().min(1).optional(),
   refreshExpiresAt: z.number().optional(),
+  /** 授权给的是哪个 App（client id）：删掉 App 重新注册后，旧 App 的授权不能再用。早先存的没有。 */
+  clientId: z.string().optional(),
 })
 export type UserCredential = z.infer<typeof userCredential>
 
@@ -124,17 +126,22 @@ export const githubUserAuthorization = (o: { host: string; web: string; api: str
       const me = await call(`${o.api}/user`, { headers: { authorization: `Bearer ${t.accessToken}` } })
       const login = user.safeParse(me.body).data?.login
       if (me.status !== 200 || login === undefined) throw new ForgeError(`查授权人的账号失败（HTTP ${me.status}）`)
-      return { value: JSON.stringify({ login, ...t } satisfies UserCredential), login }
+      return { value: JSON.stringify({ login, ...t, clientId: client(app).id } satisfies UserCredential), login }
     },
     read: (value, now) => {
       const c = read(value)
       return { login: c.login, token: c.accessToken, refresh: c.expiresAt !== undefined && c.expiresAt - REFRESH_BEFORE_MS <= now, ...(c.expiresAt === undefined ? {} : { expiresAt: c.expiresAt }) }
     },
+    matches: (app, value) => {
+      const c = read(value)
+      return c.clientId === undefined || c.clientId === client(app).id
+    },
     refresh: async (app, value, now) => {
       const c = read(value)
+      if (c.clientId !== undefined && c.clientId !== client(app).id) throw new ForgeError(`@${c.login} 的授权是给之前注册的那个 App 的：在代码托管页重新授权`)
       if (c.refreshToken === undefined || (c.refreshExpiresAt !== undefined && c.refreshExpiresAt <= now)) throw new ForgeError(`@${c.login} 的 GitHub 授权已过期：在代码托管页重新授权`)
       const t = await token(app, { grant_type: 'refresh_token', refresh_token: c.refreshToken }, now, `续期 @${c.login} 的 GitHub 授权`)
-      return JSON.stringify({ login: c.login, ...t } satisfies UserCredential)
+      return JSON.stringify({ login: c.login, ...t, ...(c.clientId === undefined ? {} : { clientId: c.clientId }) } satisfies UserCredential)
     },
     revoke: async (app, value) => {
       const c = client(app)
@@ -144,8 +151,10 @@ export const githubUserAuthorization = (o: { host: string; web: string; api: str
         headers: { authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString('base64')}` },
         body: { access_token: u.accessToken },
       })
-      // 404：令牌已经失效（过期、在 GitHub 上撤销过），授权也就没了。
-      if (got.status !== 204 && got.status !== 404) throw new ForgeError(`在 GitHub 上撤销授权失败（HTTP ${got.status}）`)
+      // 404：GitHub 不认这个令牌（过期了，或者已经撤销过）。授权本身（和刷新令牌）可能还在，不能当成撤销成功。
+      // 调用方要先把快过期的令牌续期再来撤销。
+      if (got.status === 404) throw new ForgeError(`GitHub 不认平台存的令牌（可能已经过期或撤销过），没能确认 @${u.login} 的授权已撤销`)
+      if (got.status !== 204) throw new ForgeError(`在 GitHub 上撤销授权失败（HTTP ${got.status}）`)
     },
   }
 }

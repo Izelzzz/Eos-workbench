@@ -157,9 +157,13 @@ export class Supervisor {
     const got = this.o.credentials.get(LOCAL_OWNER, ua.credentialName)
     if (got.kind === 'absent') return undefined
     if (got.kind === 'error') throw new ForgeError(got.error)
-    let value = got.value
+    let value: string | undefined = got.value
+    // 删掉 App 重新注册后，旧 App 的授权用不了：说清楚，不拿它去试。
+    if (!ua.matches(app, value)) throw new ForgeError(`凭据「${ua.credentialName}」里的授权是给之前注册的那个 App 的：在代码托管页重新授权`)
     const read = ua.read(value, Date.now())
     if (read.refresh || this.rejected.has(read.token)) value = await this.refreshUser(forge, ua, app, value)
+    // 续期期间授权被撤销了：没人授权，改用 App 的身份（和撤销后一样）。
+    if (value === undefined) return undefined
     return { name: ua.credentialName, token: ua.read(value, Date.now()).token }
   }
 
@@ -167,13 +171,13 @@ export class Supervisor {
   private readonly rejected = new Set<string>()
 
   /** 同一个授权的续期只跑一次：GitHub 每次续期都换一个新的刷新令牌、旧的作废，两边同时用旧的去续，后一个会失败。 */
-  private readonly refreshing = new Map<string, Promise<string>>()
+  private readonly refreshing = new Map<string, Promise<string | undefined>>()
 
   /**
    * 续期用户令牌，返回新的凭据值。进程内并发的共用一次；跨进程（命令行和 Web 同时在跑）用锁文件排队，
    * 拿到锁后重新读一遍凭据：和续期前读到的 seen 不一样，说明别的进程刚续过（或者有人重新授权了），直接用，不再续。
    */
-  private refreshUser(forge: Forge, ua: NonNullable<Forge['userAuthorization']>, app: string, seen: string): Promise<string> {
+  private refreshUser(forge: Forge, ua: NonNullable<Forge['userAuthorization']>, app: string, seen: string): Promise<string | undefined> {
     const running = this.refreshing.get(ua.credentialName)
     if (running !== undefined) return running
     const credentials = this.o.credentials!
@@ -189,13 +193,19 @@ export class Supervisor {
       try {
         const current = credentials.get(LOCAL_OWNER, ua.credentialName)
         if (current.kind === 'error') throw new ForgeError(current.error)
-        if (current.kind === 'absent') throw new ForgeError(`凭据「${ua.credentialName}」刚被删掉了（撤销了授权）：在代码托管页重新授权`)
+        if (current.kind === 'absent') return undefined
         const now = ua.read(current.value, Date.now())
         if (current.value !== seen || (!now.refresh && !this.rejected.has(now.token))) return current.value
-        this.rejected.delete(now.token)
         const next = await ua.refresh(app, current.value, Date.now())
+        // 续期要等 GitHub 回复：这期间有人换人重新授权或撤销了（回调和撤销不拿这把锁），以那边为准，不把旧授权人的令牌写回去。
+        const after = credentials.get(LOCAL_OWNER, ua.credentialName)
+        if (after.kind === 'absent') return undefined
+        if (after.kind === 'error') throw new ForgeError(after.error)
+        if (after.value !== current.value) return after.value
         const put = credentials.put(LOCAL_OWNER, ua.credentialName, 'github-user', next)
         if (!put.ok) throw new ForgeError(`续期后存不下新的授权：${put.error}`)
+        // 续期成功才去掉"被拒过"的记号：续期失败时，下次还要先续期，不拿被拒过的令牌再试。
+        this.rejected.delete(now.token)
         return next
       } finally {
         lock.release()
@@ -208,10 +218,11 @@ export class Supervisor {
   }
 
   /** 用 App 令牌访问失败：作废这个仓库缓存的令牌，人改了 App 的安装或权限之后重试，不用等旧令牌过期。 */
-  private forgetIfApp(repo: RemoteRepo, forge: Forge, auth: RemoteAuth): void {
+  private forgetIfApp(repo: RemoteRepo, forge: Forge, auth: RemoteAuth, message: string): void {
     if (auth.credential === forge.appCredentialName?.(repo)) forge.forgetAppToken?.(repo)
-    // 用授权人的令牌访问失败（可能在 GitHub 上撤销了）：下次用之前先续期，续不了就报"重新授权"，不一直拿着失效的令牌重试。
-    if (auth.credential === forge.userAuthorization?.credentialName && auth.secret !== undefined) this.rejected.add(auth.secret)
+    // 授权人的令牌被拒（可能在 GitHub 上撤销了）：下次用之前先续期，续不了就报"重新授权"，不一直拿着失效的令牌重试。
+    // 只看认证被拒的失败（报错文字来自 mirror.ts 的 explain 和 github.ts 的 explainApi），网络错误、分支冲突不算。
+    if (auth.credential === forge.userAuthorization?.credentialName && auth.secret !== undefined && /拒绝了/.test(message)) this.rejected.add(auth.secret)
   }
 
 
@@ -253,7 +264,7 @@ export class Supervisor {
       sha = (await pushBranch(this.o.dataDir, meta.remote, auth, meta.branch, scope.sha)).sha
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
-      this.forgetIfApp(meta.remote, forge, auth)
+      this.forgetIfApp(meta.remote, forge, auth, e.message)
       return fail(withCredential(e.message))
     }
     const branchUrl = forge.branchUrl(meta.remote, meta.branch)
@@ -282,7 +293,7 @@ export class Supervisor {
       }
     } catch (e) {
       if (!(e instanceof ForgeError)) throw e
-      this.forgetIfApp(meta.remote, forge, auth)
+      this.forgetIfApp(meta.remote, forge, auth, e.message)
       return { ...fail(withCredential(`${pushed}，但开 PR 失败：${scrub(e.message, secretsOf(auth))}`)), links: [branchLink] }
     }
   }
@@ -297,7 +308,7 @@ export class Supervisor {
       return { ok: true, gitDir: m.gitDir, baseSha: m.baseSha, branch: m.branch }
     } catch (e) {
       if (!(e instanceof MirrorError)) throw e
-      this.forgetIfApp(repo, forge, auth)
+      this.forgetIfApp(repo, forge, auth, e.message)
       return { ok: false, error: error === undefined ? e.message : `${e.message}（没用上的凭据：${error}）` }
     }
   }

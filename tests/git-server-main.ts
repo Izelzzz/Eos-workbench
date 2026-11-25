@@ -10,7 +10,8 @@
 // 再模拟 GitHub App 的用户授权（OAuth）：GET /login/oauth/authorize 直接 302 跳回 redirect_uri（带 code 和 state，不经确认页）；
 // POST /login/oauth/access_token 用 code 或刷新令牌换用户令牌（刷新令牌每次换新、旧的作废），GET /api/v3/user 返回授权人 octo，
 // DELETE /api/v3/applications/<client_id>/grant 撤销。用户令牌只能访问装了 App 的仓库，有效期是 EOS_TEST_USER_TTL_S 秒（默认 8 小时）。
-// 控制接口：/__control/expire-user 让现有的用户令牌立即过期；/__control/deny-next 让下一次授权被用户拒绝。
+// 控制接口：/__control/expire-user 让现有的用户令牌立即过期；/__control/deny-next 让下一次授权被用户拒绝；
+// /__control/slow-refresh?ms=N 让续期晚 N 毫秒才回复。撤销时令牌认不出来（过期、撤销过）返回 404，授权不撤销（和 GitHub 一样）。
 import { execFileSync, spawn } from 'node:child_process'
 import { createPublicKey, createVerify, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -25,12 +26,14 @@ let appKey: KeyObject | undefined = process.env.EOS_TEST_APP_KEY === undefined ?
 const conversions = new Map<string, { id: number; slug: string; pem: string; name: string; clientId: string; clientSecret: string }>()
 /** 当前 App 的 client id 和 secret（清单流程注册时生成）。 */
 let client: { id: string; secret: string } | undefined
+/** 已经注册过几个 App：每个 App 的 id 和 client id 都不一样。 */
+let appsCreated = 0
 /** 用户授权：发出去的授权码（→ 当时的 redirect_uri）、用户令牌（→ 到期时间）、刷新令牌（还能用的）。 */
 const userCodes = new Map<string, string>()
 const userTokens = new Map<string, number>()
 const refreshTokens = new Set<string>()
 const userTtl = Number(process.env.EOS_TEST_USER_TTL_S ?? 28800)
-const userControl = { denyNext: false }
+const userControl = { denyNext: false, slowRefreshMs: 0 }
 const issueUser = () => {
   const access = `ghu_${randomBytes(12).toString('hex')}`
   const refresh = `ghr_${randomBytes(12).toString('hex')}`
@@ -132,6 +135,7 @@ const server = createServer((req, res) => {
     else if (ctl[1] === 'install') installed.push(q.get('repo')!)
     else if (ctl[1] === 'expire-user') for (const k of userTokens.keys()) userTokens.set(k, 0)
     else if (ctl[1] === 'deny-next') userControl.denyNext = true
+    else if (ctl[1] === 'slow-refresh') userControl.slowRefreshMs = Number(q.get('ms'))
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)
     return void res.end()
@@ -145,7 +149,7 @@ const server = createServer((req, res) => {
       const manifest = JSON.parse(new URLSearchParams(Buffer.concat(chunks).toString('utf8')).get('manifest') ?? '{}') as { name: string; redirect_url: string }
       appendFileSync(record, `${JSON.stringify({ path: req.url, manifest })}\n`)
       const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
-      const id = 700 + conversions.size
+      const id = 700 + appsCreated++
       const code = randomBytes(10).toString('hex')
       conversions.set(code, { id, slug: manifest.name.toLowerCase(), pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(), name: manifest.name, clientId: `Iv1.app${id}`, clientSecret: `secret_${randomBytes(10).toString('hex')}` })
       appId = String(id)
@@ -200,7 +204,9 @@ const server = createServer((req, res) => {
       if (client === undefined || b.client_id !== client.id || b.client_secret !== client.secret) return reply({ error: 'incorrect_client_credentials' })
       if (b.grant_type === 'refresh_token') {
         if (!refreshTokens.delete(b.refresh_token!)) return reply({ error: 'bad_refresh_token' })
-        return reply(issueUser())
+        const issued = issueUser()
+        if (userControl.slowRefreshMs > 0) return void setTimeout(() => reply(issued), userControl.slowRefreshMs)
+        return reply(issued)
       }
       const redirect = userCodes.get(b.code!)
       userCodes.delete(b.code!)
@@ -218,11 +224,20 @@ const server = createServer((req, res) => {
   const grant = /^\/api\/v3\/applications\/([^/]+)\/grant$/.exec(req.url ?? '')
   if (grant !== null && req.method === 'DELETE') {
     const basic = Buffer.from((req.headers.authorization ?? '').replace(/^Basic /, ''), 'base64').toString('utf8')
-    const ok = client !== undefined && basic === `${client.id}:${client.secret}`
-    if (ok) { userTokens.clear(); refreshTokens.clear() }
-    appendFileSync(record, `${JSON.stringify({ path: req.url, method: 'DELETE', ok })}\n`)
-    res.writeHead(ok ? 204 : 401)
-    return void res.end()
+    const chunks: Buffer[] = []
+    req.on('data', (b: Buffer) => chunks.push(b))
+    req.on('end', () => {
+      // 真实 GitHub：client id 和 secret 不对是 401；令牌认不出来（过期、撤销过）是 404，授权还在。
+      const t = (JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { access_token?: string }).access_token
+      const authed = client !== undefined && basic === `${client.id}:${client.secret}`
+      const known = t !== undefined && (userTokens.get(t) ?? 0) > Date.now()
+      const ok = authed && known
+      if (ok) { userTokens.clear(); refreshTokens.clear() }
+      appendFileSync(record, `${JSON.stringify({ path: req.url, method: 'DELETE', ok })}\n`)
+      res.writeHead(!authed ? 401 : known ? 204 : 404)
+      res.end()
+    })
+    return
   }
   // GitHub App：查安装、换安装令牌。
   const inst = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(req.url ?? '')

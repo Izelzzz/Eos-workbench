@@ -910,7 +910,7 @@ test('用户授权（OAuth）：授权后存下授权人和令牌；克隆用的
   const saved = r.credentials.get(LOCAL_OWNER, r.user)
   assert.equal(saved.kind, 'ok')
   const value = JSON.parse((saved as { value: string }).value)
-  assert.deepEqual(Object.keys(value).sort(), ['accessToken', 'expiresAt', 'login', 'refreshExpiresAt', 'refreshToken'])
+  assert.deepEqual(Object.keys(value).sort(), ['accessToken', 'clientId', 'expiresAt', 'login', 'refreshExpiresAt', 'refreshToken'])
   assert.equal(value.login, 'octo')
   assert.equal(r.credentials.list(LOCAL_OWNER).find(i => i.name === r.user)?.kind, 'github-user')
   const after = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
@@ -953,16 +953,15 @@ test('用户令牌快过期时先续期：并发的只续一次，刷新令牌�
   assert.equal(refreshes(), 2, '两个实例一共只多续了一次')
 
   // 在 GitHub 上撤销了授权（刷新令牌也作废）：续期失败，报中文原因；不悄悄改用 App 的安装令牌。
-  await fetch(`http://${r.credential}/__control/expire-user`)
   const app = JSON.parse((r.credentials.get(LOCAL_OWNER, `github-app.${r.credential}`) as { value: string }).value)
-  await fetch(`http://${r.credential}/api/v3/applications/${app.clientId}/grant`, { method: 'DELETE', headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString('base64')}` } })
-  const minted = r.requests().filter(q => q.path.endsWith('/access_tokens')).length
+  const live = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value).accessToken
+  const del = await fetch(`http://${r.credential}/api/v3/applications/${app.clientId}/grant`, { method: 'DELETE', headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString('base64')}` }, body: JSON.stringify({ access_token: live }) })
+  assert.equal(del.status, 204)
   const gitBefore = r.gitTokens().length
   const failed = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'c' })
   assert.equal(failed.ok, false)
   assert.match((failed as { error: string }).error, /授权已失效或过期.*在代码托管页重新授权/)
   assert.equal(r.gitTokens().length, gitBefore, '没有用别的身份去访问仓库')
-  assert.ok(r.requests().filter(q => q.path.endsWith('/access_tokens')).length >= minted)
 })
 
 test('撤销授权：先在 GitHub 上撤销，再删掉平台存的令牌；之后改用 App 的安装令牌。拒绝授权、伪造的 state 都不存任何东西', async () => {
@@ -1036,4 +1035,66 @@ test('用户授权：App 记下了注册时的回调地址，换了访问地址�
   const second = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
   assert.notEqual(second.accessToken, first.accessToken, '续期换了新令牌')
   assert.ok(r.gitTokens().at(-1) === second.accessToken)
+})
+
+test('撤销时令牌已经过期：先续期再撤销，GitHub 上真的撤销了；GitHub 不认令牌时提醒手动撤销，不说成功', async () => {
+  const r = await registeredApp()
+  await r.authorize()
+  // 令牌 8 小时没用就过期了：直接拿它去撤销，GitHub 会回 404、授权还在。平台要先续期。
+  await fetch(`http://${r.credential}/__control/expire-user`)
+  const value = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
+  r.credentials.put(LOCAL_OWNER, r.user, 'github-user', JSON.stringify({ ...value, expiresAt: Date.now() - 1000 }))
+  const revoked = await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json() as { ok: boolean; warning?: string }
+  assert.deepEqual(revoked, { ok: true })
+  assert.ok(r.requests().some(q => q.path.endsWith('/grant') && (q as unknown as { ok: boolean }).ok), 'GitHub 上撤销了')
+
+  // 平台存的令牌 GitHub 不认（例如已经在 GitHub 上撤销过、存的到期时间不准）：照样删掉，但提醒去 GitHub 上确认。
+  await r.authorize()
+  const v2 = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
+  await fetch(`http://${r.credential}/__control/expire-user`)
+  const again = await (await r.web.post('/api/forge-apps/revoke', { name: r.name })).json() as { ok: boolean; warning?: string }
+  assert.equal(again.ok, true)
+  assert.match(again.warning!, /没能确认 @octo 的授权已撤销.*Authorized GitHub Apps/)
+  assert.equal(r.credentials.get(LOCAL_OWNER, r.user).kind, 'absent')
+  assert.ok(v2.accessToken)
+})
+
+test('续期等 GitHub 回复期间有人换人重新授权或撤销：以那边为准，不把旧授权人的令牌写回去', async () => {
+  const r = await registeredApp({ userTtlS: 60 })
+  await r.authorize()
+  await fetch(`http://${r.credential}/__control/slow-refresh?ms=800`)
+  // 换人重新授权：续期期间凭据被换成另一个人的（这里直接写入，模拟授权回调）。
+  const other = JSON.stringify({ login: 'someone-else', accessToken: 'ghu_other_not_valid_for_git_0001', clientId: JSON.parse((r.credentials.get(LOCAL_OWNER, r.name) as { value: string }).value).clientId })
+  const running = r.sup.create({ repo: r.url, workflow: 'feature', request: 'a' })
+  await new Promise(ok => setTimeout(ok, 300))
+  r.credentials.put(LOCAL_OWNER, r.user, 'github-user', other)
+  await running
+  assert.equal((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value, other, '续期的结果没有覆盖新授权')
+  assert.equal(r.gitTokens().at(-1), 'ghu_other_not_valid_for_git_0001', '这次用的是新授权人的令牌')
+
+  // 撤销：续期期间凭据被删掉，续期完不写回去，这次改用 App 的身份。
+  r.credentials.delete(LOCAL_OWNER, r.user)
+  await r.authorize()
+  const pending = r.sup.create({ repo: r.url, workflow: 'feature', request: 'b' })
+  await new Promise(ok => setTimeout(ok, 300))
+  r.credentials.delete(LOCAL_OWNER, r.user)
+  const done = await pending
+  assert.equal(done.ok, true, JSON.stringify(done))
+  assert.equal(r.credentials.get(LOCAL_OWNER, r.user).kind, 'absent', '撤销后没有被续期写回来')
+  assert.ok(r.gitTokens().at(-1)!.startsWith('ghs_'), '改用 App 的安装令牌')
+})
+
+test('删掉 App 重新注册后，旧 App 的授权用不了：说清楚要重新授权，不拿它去试', async () => {
+  const r = await registeredApp()
+  await r.authorize()
+  r.credentials.delete(LOCAL_OWNER, r.name)
+  const started = await (await r.web.post('/api/forge-apps/register', { name: r.name, appName: 'eos-new' })).json() as { action: string; fields: Record<string, string> }
+  await submitManifest(started.action, started.fields)
+  const gitBefore = r.gitTokens().length
+  const failed = await r.sup.create({ repo: r.url, workflow: 'feature', request: 'x' })
+  assert.equal(failed.ok, false)
+  assert.match((failed as { error: string }).error, /给之前注册的那个 App 的.*重新授权/)
+  assert.equal(r.gitTokens().length, gitBefore)
+  const list = await (await fetch(`${r.web.base}/api/forge-apps`)).json() as import('../src/web/types.ts').ForgeAppsResponse
+  assert.match((list.apps[0]!.user!.authorized as { error: string }).error, /之前注册的那个 App/)
 })

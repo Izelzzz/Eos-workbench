@@ -69,9 +69,11 @@ export interface UserAuthorization {
   complete(app: string, p: { code: string; callbackUrl: string }, now: number): Promise<{ value: string; login: string }>
   /** 读出令牌和授权的人；refresh 为 true 表示快过期了，用之前先换新的。值不对时抛 ForgeError。 */
   read(user: string, now: number): { login: string; token: string; refresh: boolean; expiresAt?: number }
+  /** 这条授权是不是给这个 App 的（删掉 App 重新注册后，旧 App 的授权不能再用）。 */
+  matches(app: string, user: string): boolean
   /** 用刷新令牌换新的令牌，返回新的 value（刷新令牌也会换新，旧的作废）。 */
   refresh(app: string, user: string, now: number): Promise<string>
-  /** 在托管平台上撤销这次授权。 */
+  /** 在托管平台上撤销这次授权。令牌过期了就确认不了（抛 ForgeError）：调用方先续期再撤销。 */
   revoke(app: string, user: string): Promise<void>
 }
 

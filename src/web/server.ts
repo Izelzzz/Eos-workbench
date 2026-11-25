@@ -408,7 +408,9 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     if (saved !== undefined) {
       const got = o.credentials.get(LOCAL_OWNER, u.ua.credentialName)
       try {
-        authorized = got.kind === 'ok' ? { login: u.ua.read(got.value, Date.now()).login, updatedAt: saved.updatedAt } : { error: got.kind === 'error' ? got.error : '读不到' }
+        authorized = got.kind !== 'ok' ? { error: got.kind === 'error' ? got.error : '读不到' }
+          : appValue !== undefined && !u.ua.matches(appValue, got.value) ? { error: '这条授权是给之前注册的那个 App 的，用不了：撤销后重新授权' }
+          : { login: u.ua.read(got.value, Date.now()).login, updatedAt: saved.updatedAt }
       } catch (e) {
         authorized = { error: (e as Error).message }
       }
@@ -540,7 +542,10 @@ export const createWebServer = (o: { store: Store; supervisor: Supervisor; repla
     let warning: string | undefined
     if (user.kind === 'ok' && app.kind === 'ok') {
       try {
-        await u.ua.revoke(app.value, user.value)
+        // 令牌过期了 GitHub 就不认它，撤销不掉：先续期，用新令牌撤销（续期得到的新令牌随授权一起作废，不用存）。
+        let value = user.value
+        if (u.ua.read(value, Date.now()).refresh) value = await u.ua.refresh(app.value, value, Date.now())
+        await u.ua.revoke(app.value, value)
       } catch (e) {
         warning = `${(e as Error).message}：平台已经不再使用这个授权；到 GitHub 的「Settings → Applications → Authorized GitHub Apps」里撤销它`
       }
