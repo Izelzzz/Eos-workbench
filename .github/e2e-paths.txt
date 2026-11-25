@@ -29,6 +29,8 @@
 # gitleaks 的配置和允许清单（CI 第一批 2/3 加的；改它们时 pr-checklist 会提示要人确认）
 不需要 .gitleaksignore
 不需要 .gitleaks.toml
+# Trivy 的豁免清单（CI 第三批 ④；改它属于重档）
+不需要 .trivyignore.yaml
 不需要 .claude/**
 # src/ 下的 .md 已经在上面按「需要」匹配
 不需要 **/*.md

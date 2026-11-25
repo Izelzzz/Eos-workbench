@@ -1,0 +1,11 @@
+2026-11-25T14:52:13Z	INFO	[vulndb] Need to update DB
+2026-11-25T14:52:13Z	INFO	[vulndb] Downloading vulnerability DB...
+2026-11-25T14:52:13Z	INFO	[vulndb] Downloading artifact...	repo="mirror.gcr.io/aquasec/trivy-db:2"
+2026-11-25T14:52:25Z	INFO	[vulndb] Artifact successfully downloaded	repo="mirror.gcr.io/aquasec/trivy-db:2"
+2026-11-25T14:52:25Z	INFO	[vuln] Vulnerability scanning is enabled
+Total: 6 (HIGH: 6, CRITICAL: 0)
+……（中间的表格省略）
+│                   │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-114466                  │
+└───────────────────┴─────────────────┴──────────┴────────┴───────────────────┴───────────────┴──────────────────────────────────────────────────────────────┘
+::error title=镜像漏洞扫描::镜像里有已有修复版本的 HIGH/CRITICAL 漏洞（见上表）。升级对应的包或基础镜像；确实暂时不能升级时，在 .trivyignore.yaml 里逐条加豁免（写理由和到期日，由人批准）
+exit=1
