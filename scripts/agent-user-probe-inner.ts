@@ -48,7 +48,18 @@ await open(`${worktree}/probe`)
 const first = dshPids()
 const firstStatus = Object.fromEntries(first.map(p => [p, status(p)]))
 const sessionDirs = execFileSync('sh', ['-c', 'ls -ld "$1"/dsh "$1"/dsh/sessions 2>&1; ls -l "$1"/dsh/sessions 2>&1 | head -5', 'sh', data], { encoding: 'utf8' }).trim().split('\n')
-const logReadable = raw(sessionIdFor(`${worktree}/probe`)) !== undefined
+// dsh 写会话日志是异步的：打开会话之后最多等 5 秒（平台实际读日志是在一轮结束之后，或下一次打开时）。
+const logWait = Date.now()
+let logReadable = false
+while (!logReadable && Date.now() - logWait < 5000) {
+  logReadable = raw(sessionIdFor(`${worktree}/probe`)) !== undefined
+  if (!logReadable) await new Promise(r => setTimeout(r, 100))
+}
+const logReadAfterMs = Date.now() - logWait
+const sessionsAsAgent = (() => {
+  const [c, ...a] = asUser(agent.user, ['sh', '-c', 'find "$1" -maxdepth 3 -printf "%M %u:%g %p\\n" | sort', 'sh', join(data, 'dsh', 'sessions')])
+  return spawnSync(c!, a, { encoding: 'utf8' }).stdout.trim().split('\n')
+})()
 const logReadableDirectly = (() => {
   try {
     execFileSync('sh', ['-c', 'cat "$1"/dsh/sessions/*/*/session.v4.jsonl.zstd > /dev/null', 'sh', data], { stdio: 'pipe' })
@@ -116,6 +127,8 @@ console.log(
     firstDsh: firstStatus,
     sessionDirs,
     platformReadsLogAsAgent: logReadable,
+    logReadAfterMs,
+    sessionsAsAgent,
     platformReadsLogDirectly: logReadableDirectly,
     restartAfterKeyChange: restart,
     scanAsAgentOutsideSandbox: asAgent,
