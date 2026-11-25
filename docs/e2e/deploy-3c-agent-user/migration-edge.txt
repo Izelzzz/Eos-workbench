@@ -1,0 +1,15 @@
+# 镜像 eos-workbench:agent-user-probe
+
+## 1. 迁移停在中间
+eos：上次迁移 /data/dsh 停在了中间：复制好的在 /data/dsh.agent-new，旧的在 /data/dsh.before-agent*。确认后运行 mv /data/dsh.agent-new /data/dsh 再启动
+eos web 退出码 1
+ls: cannot access '/data/dsh': No such file or directory
+keep
+
+## 2. 删了标记重做迁移
+drwxrws--T eos:eos-dsh /data/dsh
+drwxr-sr-x eos:eos-dsh /data/dsh/eos-profiles
+drwxr-sr-x eos:eos-dsh /data/dsh/eos-process-cwd
+drwxrwsr-x eos-agent:eos-dsh /data/dsh/mcp-cwd
+✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境
+✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境
