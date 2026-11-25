@@ -66,3 +66,30 @@ test('通用规则：src/ 里不许 any 和未使用的变量；测试和脚本�
   assert.deepEqual(await rules('src/runner/x.ts', 'export const a = (_x: number) => 1\n'), [])
   assert.deepEqual(await rules('tests/x.test.ts', 'export const a = (x: any) => x\n'), [])
 })
+
+test('纯逻辑目录：数据库、虚拟机、联网的 npm 包也不许；动态 import() 和 globalThis 绕不过去', async () => {
+  for (const mod of ['node:sqlite', 'node:vm', 'node:module', 'undici', 'ws']) {
+    assert.deepEqual(await rules('src/engine/x.ts', `import * as m from '${mod}'\nexport const a = m\n`), restricted, mod)
+  }
+  assert.deepEqual(await rules('src/engine/x.ts', "export const a = () => import('node:fs')\n"), ['no-restricted-syntax'])
+  for (const expr of ['globalThis.Date.now()', 'globalThis.process.env.X', "globalThis.fetch('x')"]) {
+    assert.deepEqual(await rules('src/engine/x.ts', `export const a = () => ${expr}\n`), ['no-restricted-properties'], expr)
+  }
+  // 纯逻辑目录以外照常
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('node:fs')\n"), [])
+})
+
+test('执行器规则：子目录和直接导入目录也拦；types 带 .js 扩展名也放行；名字里带 executor 的别的模块不受影响', async () => {
+  for (const spec of ['../executor/dsh/impl.ts', '../executor', '../executor/', '../executor/index.ts']) {
+    assert.deepEqual(await rules('src/runner/x.ts', `import * as e from '${spec}'\nexport const a = e\n`), restricted, spec)
+  }
+  for (const spec of ['../executor/types.ts', '../executor/types.js', '../executor/types']) {
+    assert.deepEqual(await rules('src/runner/x.ts', `import type { Executor } from '${spec}'\nexport type A = Executor\n`), [], spec)
+  }
+  assert.deepEqual(await rules('src/runner/x.ts', `import * as e from './executor-utils.ts'\nexport const a = e\n`), [])
+})
+
+test('.cts 和 .cjs 文件也检查', async () => {
+  assert.deepEqual(await rules('src/engine/x.cts', `import * as m from 'node:fs'\nexport const a = m\n`), restricted)
+  assert.deepEqual(await rules('src/runner/x.cjs', 'const unused = 1\nexport const a = 2\n'), ['@typescript-eslint/no-unused-vars'])
+})

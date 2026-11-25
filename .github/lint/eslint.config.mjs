@@ -12,7 +12,12 @@ import tseslint from 'typescript-eslint'
 const PURE_IO_MODULES = [
   'fs', 'fs/promises', 'os', 'child_process', 'net', 'http', 'https', 'http2', 'dgram', 'dns', 'tls',
   'worker_threads', 'cluster', 'readline', 'process', 'timers', 'timers/promises', 'perf_hooks',
+  'vm', 'inspector', 'module', 'v8',
 ].flatMap((m) => [m, `node:${m}`])
+  // node:sqlite 只有带 node: 前缀的写法；仓库的存储层用它，纯逻辑目录里最可能这样读写磁盘
+  .concat(['node:sqlite'])
+  // 常见的联网 npm 包（全局 fetch 另外在下面禁止）
+  .concat(['undici', 'ws', 'node-fetch', 'axios', 'got'])
 const pureImports = {
   paths: PURE_IO_MODULES.map((name) => ({ name, message: 'src/workflow、src/engine 是纯逻辑：不读写文件、不访问网络、不读时钟（CLAUDE.md 代码约定）' })),
 }
@@ -28,7 +33,8 @@ const executorImports = {
   patterns: [
     { group: ['@deepseek-ai/*'], message: 'dsh 的包只在 src/executor/dsh.ts 里接入（CLAUDE.md 代码约定）' },
     { group: ['**/vendor/dsh-sdk-client', '**/vendor/dsh-sdk-client/**'], message: 'dsh 的客户端只在 src/executor/dsh.ts 里接入（CLAUDE.md 代码约定）' },
-    { regex: '(^|/)executor/(?!types(\\.ts)?$)[^/]+$', message: '执行器的实现只在 src/executor/ 里，别的模块只认 src/executor/types.ts 的 Executor 接口（CLAUDE.md 代码约定）。组装执行器的入口是 src/cli.ts' },
+    // executor 目录下除了 types 以外的任何路径（包括子目录和直接导入目录本身）；types 可以带 .ts/.js 等扩展名
+    { regex: '(^|/)executor(/(?!types(\\.[cm]?[jt]s)?$).*)?$', message: '执行器的实现只在 src/executor/ 里，别的模块只认 src/executor/types.ts 的 Executor 接口（CLAUDE.md 代码约定）。组装执行器的入口是 src/cli.ts' },
   ],
 }
 
@@ -37,7 +43,7 @@ export default tseslint.config(
     ignores: ['**/node_modules/**', '**/dist/**', 'web/dist/**', 'poc/**', 'docs/**', 'vendor/**', '.github/lint/**'],
   },
   {
-    files: ['**/*.{ts,tsx,mts,mjs,js}'],
+    files: ['**/*.{ts,tsx,mts,cts,mjs,cjs,js}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2024,
@@ -90,6 +96,10 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', { ...pureImports, ...executorImports }],
       'no-restricted-globals': ['error', ...pureGlobals],
+      // 动态 import() 绕得过上面的导入限制；纯逻辑里也用不到它
+      'no-restricted-syntax': ['error', { selector: 'ImportExpression', message: 'src/workflow、src/engine 是纯逻辑：不用动态 import()（CLAUDE.md 代码约定）' }],
+      // 通过 globalThis 取全局，绕得过 no-restricted-globals
+      'no-restricted-properties': ['error', ...pureGlobals.map((g) => ({ object: 'globalThis', property: g.name, message: g.message }))],
     },
   },
 
