@@ -89,18 +89,14 @@ jobs:
       - name: lint
         run: .github/lint/node_modules/.bin/eslint -c .github/lint/eslint.config.mjs --max-warnings 0 .
 
-  # 格式化（Prettier）：只检查这个 PR 新增的代码文件，存量文件择机一次性格式化。见 .github/lint/check-format.sh
+  # 格式化（Prettier）：检查全部代码文件，范围和忽略规则见 .github/lint/check-format.sh
   format:
     name: format
-    # main 上的 push 没有「新增文件」的说法，只在 PR 上跑（跳过的 job 不会挡住必需检查）
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # 检出合并提交，取两层历史：脚本用 HEAD^1..HEAD 得到这个 PR 相对 base 的改动
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -108,5 +104,5 @@ jobs:
           cache: npm
           cache-dependency-path: .github/lint/package-lock.json
       - run: npm ci --prefix .github/lint --ignore-scripts
-      - name: 检查新增文件的格式
-        run: bash .github/lint/check-format.sh HEAD^1
+      - name: 检查格式
+        run: bash .github/lint/check-format.sh
