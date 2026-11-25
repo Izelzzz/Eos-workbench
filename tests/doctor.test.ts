@@ -299,3 +299,32 @@ test('凭据主密钥没设置、凭据隔离的 ⚠ 只在 doctor 里列出，�
     assert.match(d.stdout, 'EOS_MASTER_KEY' in env ? /⚠ 凭据隔离/ : /⚠ 凭据主密钥/)
   }
 })
+
+test('模型接口地址：没设置时不显示；官方接口通过；别的主机提示 key 会发过去；格式不对时拦下，报错里不带原始地址', () => {
+  const item = (f: Partial<Facts>) => evaluate({ ...good, ...f }).find(i => i.name === '模型接口地址')
+  assert.equal(item({}), undefined)
+  assert.equal(item({ modelBaseUrl: { kind: 'ok', host: 'api.deepseek.com' } })?.status, 'ok')
+  const other = item({ modelBaseUrl: { kind: 'ok', host: 'gateway.example:8443' } })!
+  assert.equal(other.status, 'warn')
+  assert.match(other.detail, /gateway\.example:8443.*模型 key/)
+  assert.equal(item({ modelBaseUrl: { kind: 'invalid', error: 'EOS_MODEL_BASE_URL 里不能带用户名和密码' } })?.status, 'fail')
+})
+
+test('gather 按 EOS_MODEL_BASE_URL 收集主机或错误，不收原始地址', () => {
+  const run = (value: string | undefined) => {
+    const old = process.env.EOS_MODEL_BASE_URL
+    if (value === undefined) delete process.env.EOS_MODEL_BASE_URL
+    else process.env.EOS_MODEL_BASE_URL = value
+    try {
+      return gather({ root: ROOT, dataDir: tmp(), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } }).modelBaseUrl
+    } finally {
+      if (old === undefined) delete process.env.EOS_MODEL_BASE_URL
+      else process.env.EOS_MODEL_BASE_URL = old
+    }
+  }
+  assert.equal(run(undefined), undefined)
+  assert.deepEqual(run('https://gateway.example:8443/anthropic'), { kind: 'ok', host: 'gateway.example:8443' })
+  const bad = run('https://user:secret-pw@gateway.example/anthropic')
+  assert.equal(bad?.kind, 'invalid')
+  assert.ok(!JSON.stringify(bad).includes('secret-pw'))
+})

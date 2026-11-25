@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
-import { dshInstall, dshSandbox, type DshSandbox } from '../executor/dsh.ts'
+import { dshInstall, dshSandbox, modelBaseUrl, type DshSandbox } from '../executor/dsh.ts'
 import { AGENT_USER_ENV, CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
 import { droppedProxies } from './checks.ts'
 
@@ -43,6 +43,8 @@ export type Facts = {
   agentUser: UserFact
   /** 带账号密码、所以没有传给检查命令的代理变量。 */
   droppedProxies: string[]
+  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是地址的主机（不含路径），或者校验失败的原因（不含原始地址）。 */
+  modelBaseUrl?: { kind: 'ok'; host: string } | { kind: 'invalid'; error: string }
 }
 
 const parts = (v: string): number[] =>
@@ -222,6 +224,28 @@ const modelKeyItem = (f: Facts): Item => {
   }
 }
 
+/** 官方的模型接口主机：EOS_MODEL_BASE_URL 指向它时不用提示 */
+const OFFICIAL_MODEL_HOST = 'api.deepseek.com'
+
+/** 模型接口地址：设成别的主机时，模型请求和模型 key 都会发到那里，部署时误设或被人改了要能马上看到。 */
+const modelBaseUrlItem = (f: Facts): Item[] => {
+  const name = '模型接口地址'
+  if (f.modelBaseUrl === undefined) return []
+  if (f.modelBaseUrl.kind === 'invalid') {
+    return [{ name, status: 'fail', detail: f.modelBaseUrl.error, fix: '改正环境变量 EOS_MODEL_BASE_URL（https 地址，或本机的 http 地址，不带用户名和密码）；用官方接口时删掉它' }]
+  }
+  return f.modelBaseUrl.host === OFFICIAL_MODEL_HOST
+    ? [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${OFFICIAL_MODEL_HOST}` }]
+    : [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向 ${f.modelBaseUrl.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
+          fix: '确认这是你信任的模型网关；不需要时删掉 EOS_MODEL_BASE_URL，改用官方接口',
+        },
+      ]
+}
+
 export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
   modelKeyItem(f),
@@ -231,6 +255,7 @@ export const evaluate = (f: Facts): Item[] => [
   ...agentUserItem(f),
   ...proxyItem(f),
   ...isolationItem(f),
+  ...modelBaseUrlItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
     : 'missing' in f.git
@@ -329,6 +354,16 @@ export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; m
     checkUser: userFact(o.checkUser),
     agentUser: agentFact(o.agentUser),
     droppedProxies: droppedProxies(process.env),
+    ...modelBaseUrlFact(process.env),
+  }
+}
+
+const modelBaseUrlFact = (env: NodeJS.ProcessEnv): Pick<Facts, 'modelBaseUrl'> => {
+  try {
+    const url = modelBaseUrl(env)
+    return url === undefined ? {} : { modelBaseUrl: { kind: 'ok', host: new URL(url).host } }
+  } catch (e) {
+    return { modelBaseUrl: { kind: 'invalid', error: (e as Error).message } }
   }
 }
 
