@@ -1,5 +1,5 @@
 {
-  "commit": "05ff66c",
+  "commit": "445e3ff",
   "uncommitted": "",
   "oldImage": "eos-workbench:local",
   "beforeUpgrade": {
@@ -34,18 +34,18 @@
   ],
   "afterUpgrade": [
     "total 132",
-    "drwxr-xr-x 7 eos  eos       4096 Nov 25 05:30 .",
-    "drwxr-xr-x 1 root root      4096 Nov 25 05:30 ..",
-    "-rw-rw-r-- 1 eos  eos          0 Nov 25 05:30 .dsh-agent",
-    "-rw-rw-r-- 1 eos  eos          0 Nov 25 05:30 .worktrees-group",
-    "drwxrws--- 7 eos  eos-dsh   4096 Nov 25 05:30 dsh",
-    "drwxrwxrwx 7 eos  eos-dsh   4096 Nov 25 05:30 dsh.before-agent",
-    "-rw-r--r-- 1 eos  eos      73728 Nov 25 05:30 eos.db",
-    "-rw-r--r-- 1 eos  eos      32768 Nov 25 05:30 eos.db-shm",
-    "-rw-r--r-- 1 eos  eos          0 Nov 25 05:30 eos.db-wal",
-    "drwxr-xr-x 2 eos  eos       4096 Nov 25 05:30 logs",
+    "drwxr-xr-x 7 eos  eos       4096 Nov 25 05:33 .",
+    "drwxr-xr-x 1 root root      4096 Nov 25 05:33 ..",
+    "-rw-rw-r-- 1 eos  eos          0 Nov 25 05:33 .dsh-agent",
+    "-rw-rw-r-- 1 eos  eos          0 Nov 25 05:33 .worktrees-group",
+    "drwxrws--- 7 eos  eos-dsh   4096 Nov 25 05:33 dsh",
+    "drwxrwxrwx 7 eos  eos-dsh   4096 Nov 25 05:33 dsh.before-agent",
+    "-rw-r--r-- 1 eos  eos      73728 Nov 25 05:33 eos.db",
+    "-rw-r--r-- 1 eos  eos      32768 Nov 25 05:33 eos.db-shm",
+    "-rw-r--r-- 1 eos  eos          0 Nov 25 05:33 eos.db-wal",
+    "drwxr-xr-x 2 eos  eos       4096 Nov 25 05:33 logs",
     "drwxr-xr-x 2 eos  eos       4096 Nov 24 13:31 repos",
-    "drwxr-sr-x 3 eos  eos-work  4096 Nov 25 05:30 worktrees",
+    "drwxr-sr-x 3 eos  eos-work  4096 Nov 25 05:33 worktrees",
     "-rw-r----- eos-agent:eos-dsh /data/dsh/storages/workspace.json",
     "-rw-rw-rw- eos-agent:eos-dsh /data/dsh/.anonymous-user-id",
     "-rw-rw-rw- eos-agent:eos-dsh /data/dsh/profiles/89c13ab90926b870/cordis.patch.yml",
@@ -73,7 +73,7 @@
       "Eos 环境检查（数据目录 /data）",
       "✓ Node：24.22.3（要求 >=24.9.0）",
       "✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）",
-      "✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 cb0c9d79ecaf1e56）",
+      "✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 d2ecc9b67f59fc32）",
       "✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp",
       "✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境",
       "✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境",
@@ -92,7 +92,7 @@
     },
     "agentUser": "eos-agent",
     "firstDsh": {
-      "149": {
+      "151": {
         "Uid": "10003",
         "CapEff": "0000000000000000",
         "CapAmb": "0000000000000000",
@@ -100,24 +100,36 @@
       }
     },
     "sessionDirs": [
-      "drwxrws--- 7 eos       eos-dsh 4096 Nov 25 05:30 /data/dsh",
-      "drwxr-x--- 4 eos-agent eos-dsh 4096 Nov 25 05:30 /data/dsh/sessions",
+      "drwxrws--- 7 eos       eos-dsh 4096 Nov 25 05:33 /data/dsh",
+      "drwxr-x--- 4 eos-agent eos-dsh 4096 Nov 25 05:33 /data/dsh/sessions",
       "total 8",
-      "drwx------ 3 eos-agent eos-agent 4096 Nov 25 05:30 --data-worktrees-agent-probe--",
-      "drwxr-x--- 3 eos-agent eos-dsh   4096 Nov 25 05:30 --data-worktrees-upgrade-task--"
+      "drwx------ 3 eos-agent eos-agent 4096 Nov 25 05:33 --data-worktrees-agent-probe--",
+      "drwxr-x--- 3 eos-agent eos-dsh   4096 Nov 25 05:33 --data-worktrees-upgrade-task--"
     ],
-    "platformReadsLogAsAgent": false,
+    "platformReadsLogAsAgent": true,
+    "logReadAfterMs": 5,
+    "sessionsAsAgent": [
+      "-rw------- eos-agent:eos-agent /data/dsh/sessions/--data-worktrees-agent-probe--/session-9a2daab2867e7e823ecb9f5cd0fefcd9/session.v4.jsonl.zstd",
+      "-rw-r----- eos-agent:eos-dsh /data/dsh/sessions/--data-worktrees-upgrade-task--/session-9d5993d99c413fd1dd0d6a916393c86f/session.v4.jsonl.zstd",
+      "-rw-rw-r-- eos-agent:eos-agent /data/dsh/sessions/--data-worktrees-agent-probe--/session-9a2daab2867e7e823ecb9f5cd0fefcd9/session.lock",
+      "-rw-rw-rw- eos-agent:eos-dsh /data/dsh/sessions/--data-worktrees-upgrade-task--/session-9d5993d99c413fd1dd0d6a916393c86f/session.lock",
+      "drwx------ eos-agent:eos-agent /data/dsh/sessions/--data-worktrees-agent-probe--",
+      "drwx------ eos-agent:eos-agent /data/dsh/sessions/--data-worktrees-agent-probe--/session-9a2daab2867e7e823ecb9f5cd0fefcd9",
+      "drwxr-x--- eos-agent:eos-dsh /data/dsh/sessions",
+      "drwxr-x--- eos-agent:eos-dsh /data/dsh/sessions/--data-worktrees-upgrade-task--",
+      "drwxr-x--- eos-agent:eos-dsh /data/dsh/sessions/--data-worktrees-upgrade-task--/session-9d5993d99c413fd1dd0d6a916393c86f"
+    ],
     "platformReadsLogDirectly": "ok",
     "restartAfterKeyChange": {
       "before": [
-        149
+        151
       ],
       "after": [
-        197
+        202
       ],
       "oldGone": true,
       "afterStatus": {
-        "197": {
+        "202": {
           "Uid": "10003",
           "CapEff": "0000000000000000",
           "CapAmb": "0000000000000000",
@@ -135,7 +147,7 @@
       },
       "secretsFoundIn": [
         {
-          "pid": 149,
+          "pid": 151,
           "uid": 10003,
           "comm": "MainThread",
           "found": [
@@ -151,37 +163,37 @@
           "environ": "EACCES"
         },
         {
-          "pid": 126,
+          "pid": 128,
           "uid": 10001,
           "cmdline": "sh -c",
           "environ": "EACCES"
         },
         {
-          "pid": 132,
+          "pid": 134,
           "uid": 10001,
           "cmdline": "node --import",
           "environ": "EACCES"
         },
         {
-          "pid": 141,
+          "pid": 143,
           "uid": 10001,
           "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
           "environ": "EACCES"
         },
         {
-          "pid": 149,
+          "pid": 151,
           "uid": 10003,
           "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
           "environ": "readable"
         },
         {
-          "pid": 54,
+          "pid": 56,
           "uid": 10001,
           "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
           "environ": "EACCES"
         },
         {
-          "pid": 6,
+          "pid": 7,
           "uid": 10001,
           "cmdline": "node --import",
           "environ": "EACCES"
@@ -205,37 +217,37 @@
           "environ": "EACCES"
         },
         {
-          "pid": 126,
+          "pid": 128,
           "uid": 10001,
           "cmdline": "sh -c",
           "environ": "EACCES"
         },
         {
-          "pid": 132,
+          "pid": 134,
           "uid": 10001,
           "cmdline": "node --import",
           "environ": "EACCES"
         },
         {
-          "pid": 141,
+          "pid": 143,
           "uid": 10001,
           "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
           "environ": "EACCES"
         },
         {
-          "pid": 149,
+          "pid": 151,
           "uid": 10003,
           "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
           "environ": "EACCES"
         },
         {
-          "pid": 54,
+          "pid": 56,
           "uid": 10001,
           "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
           "environ": "EACCES"
         },
         {
-          "pid": 6,
+          "pid": 7,
           "uid": 10001,
           "cmdline": "node --import",
           "environ": "EACCES"
@@ -243,9 +255,9 @@
       ]
     },
     "leftover": {
-      "pid": 217,
+      "pid": 222,
       "killed": [
-        218
+        223
       ],
       "gone": true
     },
