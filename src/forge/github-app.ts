@@ -13,6 +13,11 @@ export const appCredential = z.object({
   slug: z.string().optional(),
   /** App 在托管平台上的页面（清单流程注册时拿到），安装页在它下面。GitHub Enterprise 的路径和 github.com 不同，所以记下原样的地址。 */
   htmlUrl: z.string().url().optional(),
+  /** 用户授权（OAuth）用的 client id 和 secret（清单流程注册时拿到）。早先注册的 App 没有，要重新注册才能用用户授权。 */
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
+  /** 注册时写进 App 的用户授权回调地址：GitHub 只认这个地址，用别的地址打开平台发起授权会被 GitHub 拒绝。 */
+  userCallbackUrl: z.string().url().optional(),
 }).passthrough()
 export type AppCredential = z.infer<typeof appCredential>
 
@@ -137,12 +142,13 @@ const installUrlOf = (web: string, c: AppCredential): string | undefined =>
 
 /** App 名字的上限（GitHub 的限制）。 */
 export const APP_NAME_MAX = 34
-const conversion = z.object({ id: z.number().int().positive(), slug: z.string().min(1), pem: z.string(), html_url: z.string().url(), name: z.string().optional() })
+const conversion = z.object({ id: z.number().int().positive(), slug: z.string().min(1), pem: z.string(), html_url: z.string().url(), name: z.string().optional(), client_id: z.string().min(1), client_secret: z.string().min(1) })
 
 /**
  * 清单流程注册 GitHub App（https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest）。
  * web 是浏览器访问 GitHub 的根地址（https://github.com），api 是 API 的根地址。
  * App 的权限只要平台用到的：Contents 读写（推任务分支）、Pull requests 读写（开 PR）、Metadata 只读（GitHub 必带）。
+ * callback_urls 是用户授权（OAuth）完跳回的地址：平台以授权人的身份推送、开 PR 时用。
  * 不带 hook_attributes：平台不收 webhook；带上时 GitHub 会检查它的地址，本机地址注册不了。
  */
 export const githubAppRegistration = (o: { host: string; web: string; api: string; fetch?: typeof fetch }): AppRegistration => ({
@@ -154,6 +160,7 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
       name: p.appName,
       url: p.origin,
       redirect_url: p.callbackUrl,
+      callback_urls: [p.userCallbackUrl],
       public: false,
       default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
       default_events: [],
@@ -161,7 +168,7 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
     const where = p.org === undefined ? '/settings/apps/new' : `/organizations/${encodeURIComponent(p.org)}/settings/apps/new`
     return { action: `${o.web}${where}?state=${encodeURIComponent(p.state)}`, fields: { manifest: JSON.stringify(manifest) } }
   },
-  complete: async code => {
+  complete: async (code, p) => {
     let res: Response
     let text: string
     try {
@@ -186,8 +193,8 @@ export const githubAppRegistration = (o: { host: string; web: string; api: strin
     // 返回的内容里有私钥和 client secret：报错里不写响应内容。
     const got = conversion.safeParse(body).data
     if (res.status !== 201 || got === undefined) throw new ForgeError(`换 App 凭据失败（HTTP ${res.status}）`)
-    // 只留平台用得到的：App id、私钥、短名、页面地址。client secret、webhook secret 用不到，不存。
-    const parsed = appCredential.safeParse({ appId: got.id, privateKey: got.pem, slug: got.slug, htmlUrl: got.html_url })
+    // 只留平台用得到的：App id、私钥、短名、页面地址，以及用户授权要用的 client id 和 secret。webhook secret 用不到，不存。
+    const parsed = appCredential.safeParse({ appId: got.id, privateKey: got.pem, slug: got.slug, htmlUrl: got.html_url, clientId: got.client_id, clientSecret: got.client_secret, userCallbackUrl: p.userCallbackUrl })
     if (!parsed.success) throw new ForgeError(`${o.host} 返回的 App 凭据格式不对（${parsed.error.issues.map(i => i.path.join('.')).join('、')}）：在 ${got.html_url} 删掉这个 App 后重新注册`)
     // 私钥要能签名：读不出来或不是 RSA 时这里就报错，不存一条用不了的凭据。
     try {

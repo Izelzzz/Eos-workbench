@@ -7,6 +7,10 @@
 // 还模拟清单流程注册 App：POST /settings/apps/new?state=…（或 /organizations/<org>/settings/apps/new）收下清单，新生成一个 App（换掉上面的 App），
 // 不经确认页直接 302 跳回清单里的 redirect_url（带 code 和 state）；POST /api/v3/app-manifests/<code>/conversions 用 code 换 App 的 id 和私钥，code 只能用一次。
 // 收到的清单写进记录文件（path 是表单地址，manifest 是清单）。
+// 再模拟 GitHub App 的用户授权（OAuth）：GET /login/oauth/authorize 直接 302 跳回 redirect_uri（带 code 和 state，不经确认页）；
+// POST /login/oauth/access_token 用 code 或刷新令牌换用户令牌（刷新令牌每次换新、旧的作废），GET /api/v3/user 返回授权人 octo，
+// DELETE /api/v3/applications/<client_id>/grant 撤销。用户令牌只能访问装了 App 的仓库，有效期是 EOS_TEST_USER_TTL_S 秒（默认 8 小时）。
+// 控制接口：/__control/expire-user 让现有的用户令牌立即过期；/__control/deny-next 让下一次授权被用户拒绝。
 import { execFileSync, spawn } from 'node:child_process'
 import { createPublicKey, createVerify, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -18,7 +22,22 @@ const [root, token, record] = process.argv.slice(2) as [string, string, string]
 let appId = process.env.EOS_TEST_APP_ID
 let appKey: KeyObject | undefined = process.env.EOS_TEST_APP_KEY === undefined ? undefined : createPublicKey(readFileSync(process.env.EOS_TEST_APP_KEY))
 /** 清单流程里发出去、还没换过的 code。 */
-const conversions = new Map<string, { id: number; slug: string; pem: string; name: string }>()
+const conversions = new Map<string, { id: number; slug: string; pem: string; name: string; clientId: string; clientSecret: string }>()
+/** 当前 App 的 client id 和 secret（清单流程注册时生成）。 */
+let client: { id: string; secret: string } | undefined
+/** 用户授权：发出去的授权码（→ 当时的 redirect_uri）、用户令牌（→ 到期时间）、刷新令牌（还能用的）。 */
+const userCodes = new Map<string, string>()
+const userTokens = new Map<string, number>()
+const refreshTokens = new Set<string>()
+const userTtl = Number(process.env.EOS_TEST_USER_TTL_S ?? 28800)
+const userControl = { denyNext: false }
+const issueUser = () => {
+  const access = `ghu_${randomBytes(12).toString('hex')}`
+  const refresh = `ghr_${randomBytes(12).toString('hex')}`
+  userTokens.set(access, Date.now() + userTtl * 1000)
+  refreshTokens.add(refresh)
+  return { access_token: access, token_type: 'bearer', expires_in: userTtl, refresh_token: refresh, refresh_token_expires_in: 15897600 }
+}
 const installed = (process.env.EOS_TEST_APP_INSTALLED ?? '').split(',').filter(Boolean)
 const ttl = Number(process.env.EOS_TEST_APP_TTL_MS ?? 3600_000)
 /** 换出去的安装令牌：令牌 → 到期时间和授权的仓库。 */
@@ -27,6 +46,9 @@ const issued = new Map<string, { expires: number; repos: string[] }>()
 /** 认这个令牌吗：固定的令牌，或在有效期内、授权了这个仓库的安装令牌。 */
 const accepts = (t: string, repo: string): boolean => {
   if (token !== '-' && t === token) return true
+  // 用户令牌：没过期，而且 App 装到了这个仓库（GitHub App 的用户令牌只能访问这样的仓库）。
+  const u = userTokens.get(t)
+  if (u !== undefined) return u > Date.now() && installed.some(x => x.toLowerCase() === repo.toLowerCase())
   const i = issued.get(t)
   return i !== undefined && i.expires > Date.now() && i.repos.includes(repo)
 }
@@ -108,6 +130,8 @@ const server = createServer((req, res) => {
     else if (ctl[1] === 'close' && pr !== undefined) pr.state = 'closed'
     else if (ctl[1] === 'revoke') issued.clear()
     else if (ctl[1] === 'install') installed.push(q.get('repo')!)
+    else if (ctl[1] === 'expire-user') for (const k of userTokens.keys()) userTokens.set(k, 0)
+    else if (ctl[1] === 'deny-next') userControl.denyNext = true
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)
     return void res.end()
@@ -123,7 +147,7 @@ const server = createServer((req, res) => {
       const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
       const id = 700 + conversions.size
       const code = randomBytes(10).toString('hex')
-      conversions.set(code, { id, slug: manifest.name.toLowerCase(), pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(), name: manifest.name })
+      conversions.set(code, { id, slug: manifest.name.toLowerCase(), pem: privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(), name: manifest.name, clientId: `Iv1.app${id}`, clientSecret: `secret_${randomBytes(10).toString('hex')}` })
       appId = String(id)
       appKey = publicKey
       const back = new URL(manifest.redirect_url)
@@ -138,9 +162,67 @@ const server = createServer((req, res) => {
   if (conv !== null && req.method === 'POST') {
     const c = conversions.get(decodeURIComponent(conv[1]!))
     conversions.delete(decodeURIComponent(conv[1]!))
+    if (c !== undefined) client = { id: c.clientId, secret: c.clientSecret }
     res.writeHead(c === undefined ? 404 : 201, { 'content-type': 'application/json' })
     // 真实 GitHub 还返回 client_secret、webhook_secret：平台不该存它们。
-    return void res.end(JSON.stringify(c === undefined ? { message: 'Not Found' } : { id: c.id, slug: c.slug, name: c.name, pem: c.pem, html_url: `http://127.0.0.1:${port}/apps/${c.slug}`, client_id: 'Iv1.test', client_secret: 'client-secret-should-not-be-stored', webhook_secret: null }))
+    return void res.end(JSON.stringify(c === undefined ? { message: 'Not Found' } : { id: c.id, slug: c.slug, name: c.name, pem: c.pem, html_url: `http://127.0.0.1:${port}/apps/${c.slug}`, client_id: c.clientId, client_secret: c.clientSecret, webhook_secret: 'webhook-secret-should-not-be-stored' }))
+  }
+  // 用户授权：授权页直接跳回。
+  const authz = /^\/login\/oauth\/authorize\?(.*)$/.exec(req.url ?? '')
+  if (authz !== null && req.method === 'GET') {
+    const q = new URLSearchParams(authz[1])
+    appendFileSync(record, `${JSON.stringify({ path: '/login/oauth/authorize', query: Object.fromEntries(q) })}\n`)
+    if (client === undefined || q.get('client_id') !== client.id) {
+      res.writeHead(404)
+      return void res.end('unknown client_id')
+    }
+    const back = new URL(q.get('redirect_uri')!)
+    back.searchParams.set('state', q.get('state') ?? '')
+    if (userControl.denyNext) {
+      userControl.denyNext = false
+      back.searchParams.set('error', 'access_denied')
+    } else {
+      const code = randomBytes(10).toString('hex')
+      userCodes.set(code, q.get('redirect_uri')!)
+      back.searchParams.set('code', code)
+    }
+    res.writeHead(302, { location: back.toString() })
+    return void res.end()
+  }
+  if (req.url === '/login/oauth/access_token' && req.method === 'POST') {
+    const chunks: Buffer[] = []
+    req.on('data', (b: Buffer) => chunks.push(b))
+    req.on('end', () => {
+      const b = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, string>
+      appendFileSync(record, `${JSON.stringify({ path: req.url, grant: b.grant_type ?? 'code' })}\n`)
+      // 真实 GitHub：出错也回 200，带 error。
+      const reply = (v: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)) }
+      if (client === undefined || b.client_id !== client.id || b.client_secret !== client.secret) return reply({ error: 'incorrect_client_credentials' })
+      if (b.grant_type === 'refresh_token') {
+        if (!refreshTokens.delete(b.refresh_token!)) return reply({ error: 'bad_refresh_token' })
+        return reply(issueUser())
+      }
+      const redirect = userCodes.get(b.code!)
+      userCodes.delete(b.code!)
+      if (redirect === undefined || redirect !== b.redirect_uri) return reply({ error: 'bad_verification_code' })
+      return reply(issueUser())
+    })
+    return
+  }
+  if (req.url === '/api/v3/user' && req.method === 'GET') {
+    const t = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]
+    const ok = t !== undefined && (userTokens.get(t) ?? 0) > Date.now()
+    res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' })
+    return void res.end(JSON.stringify(ok ? { login: 'octo', id: 1 } : { message: 'Bad credentials' }))
+  }
+  const grant = /^\/api\/v3\/applications\/([^/]+)\/grant$/.exec(req.url ?? '')
+  if (grant !== null && req.method === 'DELETE') {
+    const basic = Buffer.from((req.headers.authorization ?? '').replace(/^Basic /, ''), 'base64').toString('utf8')
+    const ok = client !== undefined && basic === `${client.id}:${client.secret}`
+    if (ok) { userTokens.clear(); refreshTokens.clear() }
+    appendFileSync(record, `${JSON.stringify({ path: req.url, method: 'DELETE', ok })}\n`)
+    res.writeHead(ok ? 204 : 401)
+    return void res.end()
   }
   // GitHub App：查安装、换安装令牌。
   const inst = /^\/api\/v3\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(req.url ?? '')

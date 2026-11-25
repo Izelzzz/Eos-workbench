@@ -2,6 +2,7 @@
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { appCredential, appCredentialName, GitHubApp, githubAppRegistration } from './github-app.ts'
+import { githubUserAuthorization } from './github-oauth.ts'
 import { ForgeError, type Forge, type PullRequest, type RemoteRepo } from './types.ts'
 
 /** 一次 API 请求最多等这么久。 */
@@ -21,12 +22,14 @@ const explainApi = (repo: RemoteRepo, op: 'list' | 'create', status: number, bod
   const where = `${repo.host} 上的 ${repo.owner}/${repo.name}`
   const doing = op === 'list' ? '查已有的 PR' : '开 PR'
   const app = credential.startsWith('github-app.')
+  const user = credential.startsWith('github-user.')
   if (status === 401) {
     if (app) return `${repo.host} 拒绝了${doing} 的请求：凭据「${credential}」的 GitHub App 换来的令牌无效（App 可能被卸载或撤销了）`
+    if (user) return `${repo.host} 拒绝了${doing} 的请求：凭据「${credential}」里的 GitHub 授权已失效（可能在 GitHub 上撤销了）。在代码托管页重新授权`
     return `${repo.host} 拒绝了${doing} 的请求：${hasToken ? `凭据「${credential}」里的令牌无效或已过期。在凭据页替换这条凭据` : `没有带令牌，开 PR 需要令牌。在凭据页添加名字为「${credential}」、类型为 Git 令牌的凭据`}`
   }
   if (status === 403) {
-    const who = app ? `凭据「${credential}」的 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限（在 App 的设置里加上，并在安装里接受新权限），` : `令牌没有 Pull requests 的${op === 'list' ? '读权限、组织要求 SSO 授权' : '写权限'}，`
+    const who = user ? `授权人在这个仓库没有开 PR 的权限，或者 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限，` : app ? `凭据「${credential}」的 GitHub App 没有 Pull requests 的${op === 'list' ? '读' : '写'}权限（在 App 的设置里加上，并在安装里接受新权限），` : `令牌没有 Pull requests 的${op === 'list' ? '读权限、组织要求 SSO 授权' : '写权限'}，`
     return `${repo.host} 不允许在 ${where} ${doing}：${who}或者被限流了（${said || status}）`
   }
   if (status === 404) return `找不到仓库 ${where}，或者凭据「${credential}」里的令牌看不到它`
@@ -123,6 +126,7 @@ export const githubForge = (o: { host?: string; scheme?: 'https' | 'http' } = {}
     },
     appCredentialName: repo => appCredentialName(repo.host),
     appRegistration: githubAppRegistration({ host, web: `${scheme}://${host}`, api }),
+    userAuthorization: githubUserAuthorization({ host, web: `${scheme}://${host}`, api }),
     forgetAppToken: repo => {
       for (const app of apps.values()) app.forget(repo)
     },

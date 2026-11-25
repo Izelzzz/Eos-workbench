@@ -2,7 +2,7 @@
 // 注册时浏览器把清单提交到托管平台，用户在那里确认后跳回平台；平台用带回的 code 换 App 的 id 和私钥，存进凭据存储。
 import { useEffect, useState } from 'react'
 import type { ForgeAppsResponse } from './api.ts'
-import { listForgeApps, registerForgeApp } from './api.ts'
+import { authorizeForgeUser, listForgeApps, registerForgeApp, revokeForgeUser } from './api.ts'
 import { ago } from './format.ts'
 
 /** 把字段作为表单 POST 到托管平台：清单要以表单提交，浏览器整页跳过去。 */
@@ -35,6 +35,7 @@ export function ForgeApps({ query }: { query: string }) {
   const [appName, setAppName] = useState(() => `eos-${Math.random().toString(36).slice(2, 8)}`)
   const [org, setOrg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string>()
 
   useEffect(() => { listForgeApps().then(setData, e => setError(`加载失败：${(e as Error).message}`)) }, [query])
   // 在托管平台的页面上点了后退：浏览器可能原样恢复这个页面，按钮要能再点。
@@ -47,6 +48,7 @@ export function ForgeApps({ query }: { query: string }) {
   const register = async (name: string) => {
     setBusy(true)
     setError(undefined)
+    setNotice(undefined)
     setResult(new URLSearchParams())
     const r = await registerForgeApp({ name, appName, ...(org.trim() === '' ? {} : { org: org.trim() }) })
     if (!r.ok) {
@@ -54,6 +56,30 @@ export function ForgeApps({ query }: { query: string }) {
       return setError(r.error)
     }
     submitForm(r.action, r.fields)
+  }
+
+  /** 用 GitHub 账号授权：浏览器整页跳到托管平台的授权页，授权完跳回本页。 */
+  const authorize = async (name: string) => {
+    setBusy(true)
+    setError(undefined)
+    setNotice(undefined)
+    setResult(new URLSearchParams())
+    const r = await authorizeForgeUser(name)
+    if (!r.ok) {
+      setBusy(false)
+      return setError(r.error)
+    }
+    location.assign(r.url)
+  }
+
+  const revoke = async (name: string, login: string) => {
+    if (!confirm(`撤销 @${login} 的授权？之后平台改用 App 自己的身份（或凭据页的 Git 令牌）访问仓库。`)) return
+    setError(undefined)
+    setResult(new URLSearchParams())
+    const r = await revokeForgeUser(name)
+    if (!r.ok) return setError(r.error)
+    setNotice(r.warning === undefined ? `已撤销 @${login} 的授权` : `已在平台上删掉 @${login} 的授权。${r.warning}`)
+    setData(await listForgeApps())
   }
 
   const registered = result.get('registered')
@@ -69,6 +95,8 @@ export function ForgeApps({ query }: { query: string }) {
           {justDone?.registered?.installUrl !== undefined && <>（<a href={justDone.registered.installUrl} target="_blank" rel="noreferrer">去安装</a>）</>}。
         </p>
       )}
+      {result.get('authorized') !== null && <p className="notice" role="status">已用 @{result.get('authorized')} 的 GitHub 账号授权：之后推送和开 PR 都以 @{result.get('authorized')} 的身份进行（仓库要装了 App）。</p>}
+      {notice && <p className="notice" role="status">{notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
       {data === undefined ? (error ? null : <p className="muted">加载中…</p>) : (
         <>
@@ -80,6 +108,18 @@ export function ForgeApps({ query }: { query: string }) {
                 <>
                   <p>已注册，凭据 <span className="mono">{a.name}</span>，更新于 {ago(a.registered.updatedAt)}。</p>
                   {a.registered.installUrl !== undefined && <p><a href={a.registered.installUrl} target="_blank" rel="noreferrer">把 App 安装到仓库</a>：只勾选要让平台访问的仓库。</p>}
+                  {a.user !== undefined && (
+                    <div className="forge-user">
+                      <h3>用 GitHub 账号授权</h3>
+                      <p className="muted">授权后，平台以授权人的身份推送、开 PR（PR 作者是这个人），只能访问装了 App、而且这个人有权限的仓库。令牌 8 小时过期，平台自动续期。没人授权时用 App 自己的身份。</p>
+                      {a.user.authorized !== undefined && ('login' in a.user.authorized
+                        ? <p>已授权：<b>@{a.user.authorized.login}</b>，更新于 {ago(a.user.authorized.updatedAt)}。 <button type="button" onClick={() => void revoke(a.name, (a.user!.authorized as { login: string }).login)}>撤销授权</button></p>
+                        : <p className="error">授权读不出来：{a.user.authorized.error}</p>)}
+                      {a.user.unavailable !== undefined
+                        ? <p className="muted">现在不能授权：{a.user.unavailable}</p>
+                        : <div><button type="button" className={a.user.authorized === undefined ? 'primary' : ''} disabled={busy || !data.usable} onClick={() => void authorize(a.name)}>{busy ? '正在跳转…' : a.user.authorized === undefined ? `用 ${a.host} 账号授权` : '换一个人重新授权'}</button></div>}
+                    </div>
+                  )}
                   <p className="muted">要换一个 App：先在凭据页删掉 <span className="mono">{a.name}</span>，再回来注册。</p>
                 </>
               ) : (
