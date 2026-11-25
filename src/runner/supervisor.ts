@@ -62,6 +62,8 @@ export class Supervisor {
     forges?: Forge[]
     /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
     checkUser?: CheckUser
+    /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
+    agentUser?: CheckUser
   }) {
     this.locksDir = join(o.dataDir, 'locks')
     // 托管平台只建一次：GitHub App 的安装令牌缓存在它里面。
@@ -267,9 +269,9 @@ export class Supervisor {
         await this.o.executor.release(worktree)
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
-        // 检查命令（另一个用户）留下的进程平台杀不了，以那个用户去杀。
-        const byCheck = this.o.checkUser === undefined ? [] : await killUserProcessesIn(this.o.checkUser, worktree)
-        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令留在 worktree 里的进程：${byCheck.join('、')}`)
+        // 检查命令和 agent（别的用户）留下的进程，平台读不到它们的工作目录，以那个用户去找、去杀。
+        const byCheck = (await Promise.all([this.o.checkUser, this.o.agentUser].map(u => (u === undefined ? [] : killUserProcessesIn(u, worktree))))).flat()
+        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令或 agent 留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
       },

@@ -1,10 +1,12 @@
-// 检查命令用哪个系统用户运行（路线图第 3 项，ADR-006）。部署镜像里是 eos-check：
-// 它和平台、dsh 不是同一个用户，读不到它们进程环境（/proc/<pid>/environ）里的主密钥和模型 key。
-// 没有设置时检查命令和平台是同一个用户（本机开发时就是这样）。
+// 检查命令和 agent 用哪个系统用户运行（路线图第 3 项，ADR-006）。部署镜像里检查命令是 eos-check、dsh 和 agent 是 eos-agent：
+// 它们和平台不是同一个用户，读不到平台进程环境（/proc/<pid>/environ）里的主密钥；检查命令也读不到 dsh 进程环境里的模型 key。
+// 没有设置时它们和平台是同一个用户（本机开发时就是这样）。
 import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 
 export const CHECK_USER_ENV = 'EOS_CHECK_USER'
+/** dsh 和 agent 的用户。平台用它结束 agent 留下的进程、读 dsh 的会话日志；切换由 dsh 的入口（deploy/dsh-launch.mjs）做。 */
+export const AGENT_USER_ENV = 'EOS_AGENT_USER'
 
 /** 检查命令用的系统用户：名字、主组的 gid 和家目录（检查命令的 HOME，npm 等的缓存放在这里）。 */
 export type CheckUser = { name: string; gid: number; home: string }
@@ -18,22 +20,22 @@ export const parseCheckUser = (name: string, passwd: string): CheckUser | undefi
   return undefined
 }
 
-/** 启动时读一次。设置了但系统里没有这个用户时抛错：不能退回到用平台的用户运行检查命令。 */
-export const checkUserFrom = (env: NodeJS.ProcessEnv, passwd: () => string = () => readFileSync('/etc/passwd', 'utf8')): CheckUser | undefined => {
-  const name = env[CHECK_USER_ENV]
+/** 启动时读一次。设置了但系统里没有这个用户时抛错：不能退回到用平台的用户运行。 */
+export const checkUserFrom = (env: NodeJS.ProcessEnv, passwd: () => string = () => readFileSync('/etc/passwd', 'utf8'), variable: string = CHECK_USER_ENV): CheckUser | undefined => {
+  const name = env[variable]
   if (name === undefined || name === '') return undefined
-  if (!/^[a-z_][a-z0-9_-]*$/.test(name)) throw new Error(`${CHECK_USER_ENV}=${name} 不是合法的用户名`)
+  if (!/^[a-z_][a-z0-9_-]*$/.test(name)) throw new Error(`${variable}=${name} 不是合法的用户名`)
   const user = parseCheckUser(name, passwd())
-  if (user === undefined) throw new Error(`${CHECK_USER_ENV}=${name}，但系统里没有这个用户`)
+  if (user === undefined) throw new Error(`${variable}=${name}，但系统里没有这个用户`)
   return user
 }
 
 /** 启动时的状态：没有设置、设置好了、设置错了（由 doctor 报出，任务不启动）。 */
 export type CheckUserState = { kind: 'none' } | { kind: 'ok'; user: CheckUser } | { kind: 'invalid'; error: string }
 
-export const resolveCheckUser = (env: NodeJS.ProcessEnv, passwd?: () => string): CheckUserState => {
+export const resolveCheckUser = (env: NodeJS.ProcessEnv, passwd?: () => string, variable: string = CHECK_USER_ENV): CheckUserState => {
   try {
-    const user = checkUserFrom(env, passwd)
+    const user = checkUserFrom(env, passwd, variable)
     return user === undefined ? { kind: 'none' } : { kind: 'ok', user }
   } catch (e) {
     return { kind: 'invalid', error: (e as Error).message }
@@ -95,3 +97,19 @@ export const killUserProcessesIn = async (user: CheckUser, dir: string): Promise
     .filter(l => /^\d+$/.test(l))
     .map(Number)
 }
+
+/** 在 $1 下找 $2 这个会话的日志，找到就原样输出（以 dsh 的用户运行：会话目录是 0700，只有它能读）。 */
+const CAT_SESSION_LOG = 'for f in "$1"/*/"$2"/"$3"; do if [ -f "$f" ]; then exec cat "$f"; fi; done; exit 3'
+
+/**
+ * 以 user 读一个 dsh 会话的日志：找到时返回原始字节，没有时 undefined。和直接读文件（dsh.ts 的默认实现）找的是同一个位置。
+ * 同步：dsh.ts 读日志的地方本来就是同步的。
+ */
+export const readSessionLogAs =
+  (user: CheckUser, file: string) =>
+  (sessionsRoot: string, sessionId: string): Buffer | undefined => {
+    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return undefined
+    const [cmd, ...args] = asUser(user, ['sh', '-c', CAT_SESSION_LOG, 'sh', sessionsRoot, sessionId, file])
+    const r = spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
+    return r.status === 0 ? r.stdout : undefined
+  }

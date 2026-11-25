@@ -29,16 +29,20 @@ RUN npm run build:web
 
 FROM base
 # 三个用户（docs/adr/006-docker-deployment.md）：平台 eos；检查命令 eos-check，读不到平台和 dsh 进程的环境；
-# 共用组 eos-work 让检查命令能写 worktree。数据目录 /data 是卷，第一次启动时由 Docker 按镜像里的属主创建。
+# dsh 和 agent 用 eos-agent，读不到平台进程的环境（主密钥）。
+# 共用组 eos-work 让检查命令和 agent 能写 worktree；eos-dsh 让平台和 dsh 共用 dsh 的数据目录（检查命令不在里面）。
+# 数据目录 /data 是卷，第一次启动时由 Docker 按镜像里的属主创建。
 RUN groupadd --gid 10010 eos-work \
- && useradd --create-home --uid 10001 --shell /bin/bash --groups eos-work eos \
+ && groupadd --gid 10011 eos-dsh \
+ && useradd --create-home --uid 10001 --shell /bin/bash --groups eos-work,eos-dsh eos \
  && useradd --create-home --uid 10002 --shell /usr/sbin/nologin --groups eos-work eos-check \
+ && useradd --create-home --uid 10003 --shell /bin/bash --groups eos-work,eos-dsh eos-agent \
  && mkdir -p /data/repos && chown -R eos:eos /data
 COPY --from=build --chown=root:root /app /app
 COPY --chown=root:root --chmod=755 deploy/eos deploy/git /usr/local/bin/
 WORKDIR /app
 # 不设 NODE_ENV：dsh 把平台的环境传给 agent，NODE_ENV=production 会让 agent 的 npm install 不装 devDependencies。
-ENV EOS_HOME=/data EOS_CHECK_USER=eos-check
+ENV EOS_HOME=/data EOS_CHECK_USER=eos-check EOS_AGENT_USER=eos-agent
 # dsh 经 deploy/dsh-launch.mjs 启动：先清掉平台切换用户用的能力。
 ENV EOS_DSH_LAUNCHER=/app/deploy/dsh-launch.mjs
 # agent 在 Landlock 下能写 /tmp。平台和 dsh 会加载的缓存不能放在那里，否则 agent 能往里放代码、在沙箱外运行：

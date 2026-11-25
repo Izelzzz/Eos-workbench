@@ -85,6 +85,18 @@ export const dshSandbox = (platform: string = process.platform): DshSandbox => {
   return landlock === 'unusable' ? { backend: 'none' } : { backend: 'landlock', enforcement: landlock }
 }
 
+/** 会话日志放在 <sessions>/<按工作目录命名的目录>/<会话 id>/ 下。 */
+export const SESSION_LOG_FILE = 'session.v4.jsonl.zstd'
+
+const readSessionLogFile = (root: string, sessionId: string): Buffer | undefined => {
+  if (!existsSync(root)) return undefined
+  for (const dir of readdirSync(root)) {
+    const file = join(root, dir, sessionId, SESSION_LOG_FILE)
+    if (existsSync(file)) return readFileSync(file)
+  }
+  return undefined
+}
+
 const PRESET: Record<AgentSpec['write'], string> = { none: 'read-only', worktree: 'workspace-write' }
 
 /**
@@ -253,6 +265,7 @@ export const AGENT_ENV_KEEP: readonly string[] = [
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
   'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
   'DSH_TELEMETRY_DISABLED', // 部署方关掉 dsh 的遥测
+  'EOS_AGENT_USER', // 部署镜像里 dsh 的入口（deploy/dsh-launch.mjs）按它切换到 agent 的用户
   // 缓存的位置和开关，部署镜像设定（见 Dockerfile、ADR-006）。agent 在沙箱里能写 /tmp、写不了家目录：
   'NARB_NATIVE_CACHE_DIR', // dsh 的 native 模块缓存放到 agent 写不了的目录，不然在 /tmp 里能被 agent 换掉
   'NODE_DISABLE_COMPILE_CACHE', // 关掉 dsh 打开的 Node 字节码缓存：默认在 /tmp，没有完整性校验
@@ -414,6 +427,11 @@ export class DshExecutor implements Executor {
     env?: NodeJS.ProcessEnv
     /** 测试用：替换真正启动 dsh 进程的构造。 */
     createHarness?: (options: DeepSeekHarnessOptions) => Harness
+    /**
+     * 读一个会话的日志（压缩的原始字节），没有时 undefined。默认直接读文件。
+     * 部署镜像里 dsh 以别的用户运行，会话目录只有它能读（0700），由平台换成以那个用户读的实现（src/cli.ts）。
+     */
+    readSessionLog?: (sessionsRoot: string, sessionId: string) => Buffer | undefined
   }) {}
 
   private harness(spec: AgentSpec, modelKey: string, keyId: string): Harness {
@@ -508,21 +526,14 @@ export class DshExecutor implements Executor {
     return { answers }
   }
 
-  private logFile(sessionId: string): string | undefined {
-    const root = join(this.opts.dshHome, 'sessions')
-    if (!existsSync(root)) return undefined
-    for (const dir of readdirSync(root)) {
-      const file = join(root, dir, sessionId, 'session.v4.jsonl.zstd')
-      if (existsSync(file)) return file
-    }
-    return undefined
+  private rawLog(sessionId: string): Buffer | undefined {
+    return (this.opts.readSessionLog ?? readSessionLogFile)(join(this.opts.dshHome, 'sessions'), sessionId)
   }
 
   private readLog(sessionId: string): LogEvent[] | undefined {
-    const file = this.logFile(sessionId)
-    if (file === undefined) return undefined
     try {
-      return parseSessionLog(readFileSync(file))
+      const raw = this.rawLog(sessionId)
+      return raw === undefined ? undefined : parseSessionLog(raw)
     } catch {
       // 读不了（例如文件大到超出字符串上限）：按"没有回复"处理，重发这一轮。
       return undefined
@@ -548,7 +559,7 @@ export class DshExecutor implements Executor {
     await this.closing.get(spec.cwd)
     const h = this.harness(spec, modelKey, keyId)
     let s: HarnessSession
-    if (this.logFile(id) !== undefined) {
+    if (this.rawLog(id) !== undefined) {
       const workspace = this.workspaceOf(id)
       if (workspace === undefined || resolve(workspace) !== resolve(spec.cwd)) {
         throw new Error(`这个 agent 会话的可写范围是 ${workspace ?? '（读不到）'}，不是任务的 worktree ${spec.cwd}（会话创建于写入范围修复之前）。为了安全不再续接：请中止这个任务后重新发起。`)

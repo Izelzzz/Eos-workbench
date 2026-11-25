@@ -8,13 +8,16 @@ import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
 import { dshInstall, dshSandbox, type DshSandbox } from '../executor/dsh.ts'
-import { CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
+import { AGENT_USER_ENV, CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
 import { droppedProxies } from './checks.ts'
 
 /** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
 export type Status = 'ok' | 'warn' | 'fail'
 /** doctorOnly：只在 eos doctor 里列出，启动前检查不提示（总会出现的 ⚠ 会让人习惯性忽略真正的提示）。 */
 export type Item = { name: string; status: Status; detail: string; fix?: string; doctorOnly?: true }
+
+/** 一个独立用户：没有设置、能切换过去、设置错了或切换不过去（原因）。 */
+export type UserFact = { kind: 'none' } | { kind: 'ok'; name: string } | { kind: 'fail'; error: string }
 
 /** 收集到的事实。evaluate 只看它，不做 IO，可单测。 */
 export type Facts = {
@@ -35,7 +38,9 @@ export type Facts = {
   /** dsh 的版本；没装时是 undefined。 */
   dsh?: string
   /** 检查命令用的系统用户：没有设置、能切换过去、设置错了或切换不过去（原因）。 */
-  checkUser: { kind: 'none' } | { kind: 'ok'; name: string } | { kind: 'fail'; error: string }
+  checkUser: UserFact
+  /** dsh 和 agent 用的系统用户，同上。 */
+  agentUser: UserFact
   /** 带账号密码、所以没有传给检查命令的代理变量。 */
   droppedProxies: string[]
 }
@@ -104,20 +109,37 @@ const proxyItem = (f: Facts): Item[] =>
   }]
 
 /**
- * 设置了主密钥时提示还没隔离的地方：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；dsh 进程的环境里有模型 key。
- * agent 靠沙箱挡住；检查命令不在沙箱里，只有换成独立的用户才读不到。agent 和平台还是同一个用户（路线图第 3 项，还没有做完）。
+ * dsh 和 agent 用哪个用户运行（切换由 dsh 的入口 deploy/dsh-launch.mjs 做，这里真的切换一次确认平台有这个能力）。
+ * 设置了却切换不过去时 ✗：dsh 起不来，任务一定失败。没有设置时不列出，由「凭据隔离」说明。
+ */
+const agentUserItem = (f: Facts): Item[] => {
+  const name = 'agent 的用户'
+  switch (f.agentUser.kind) {
+    case 'none': return []
+    case 'ok': return [{ name, status: 'ok', detail: `dsh 和 agent 以 ${f.agentUser.name} 运行，没有任何特权，读不到平台进程的环境` }]
+    case 'fail': return [{ name, status: 'fail', detail: f.agentUser.error, fix: `${AGENT_USER_ENV} 要是系统里已有的用户，平台进程要有 SETUID、SETGID、KILL 能力（容器里用镜像带的 eos 命令启动，compose 里 cap_add 这三项，见 docs/deploy.md）；不在容器里时去掉 ${AGENT_USER_ENV}` }]
+  }
+}
+
+/**
+ * 设置了主密钥时说明谁能读到两样凭据：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；dsh 进程的环境里有模型 key。
+ * 别的用户的进程读不到；同一个用户的进程只靠沙箱挡住。agent 是 dsh 启动的，和 dsh 总是同一个用户，所以模型 key 对 agent 总是只靠沙箱。
+ * 检查命令和 agent 都换成独立的用户、沙箱也在时是 ✓。
  */
 const isolationItem = (f: Facts): Item[] => {
   if (f.masterKey.kind !== 'ok') return []
-  const what = '平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key'
+  const sandboxed = f.sandbox.backend !== 'none'
   const checks = f.checkUser.kind === 'ok'
-    ? `检查命令以 ${f.checkUser.name} 运行，读不到${what}`
-    : `检查命令（npm test 等）和平台是同一个用户、不在沙箱里，能读到${what}`
-  const agent = f.sandbox.backend === 'none'
-    ? `没有可用的沙箱：agent 能读到${what}`
-    : f.sandbox.backend === 'platform' ? undefined : 'agent 在沙箱里读不到它们，但和平台是同一个用户，只靠沙箱挡住'
-  const detail = agent === undefined ? checks : `${agent}；${checks}`
-  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: f.checkUser.kind === 'ok' ? '用独立的用户运行 agent（路线图第 3 项，还没有做完）' : '用独立的用户运行检查命令和 agent（Docker 部署已经用独立的用户运行检查命令，agent 还没有）；在那之前只在可信的仓库和需求上使用' }]
+    ? `检查命令以 ${f.checkUser.name} 运行，主密钥和模型 key 都读不到`
+    : '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到'
+  const agentMaster = f.agentUser.kind === 'ok'
+    ? `agent 以 ${f.agentUser.name} 运行，读不到平台进程环境里的主密钥`
+    : sandboxed ? 'agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住' : '没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥'
+  const agentModel = sandboxed ? 'agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住' : '没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key'
+  const detail = `${agentMaster}；${agentModel}；${checks}`
+  const ok = f.checkUser.kind === 'ok' && f.agentUser.kind === 'ok' && sandboxed
+  if (ok) return [{ name: '凭据隔离', status: 'ok', detail }]
+  return [{ name: '凭据隔离', status: 'warn', doctorOnly: true, detail, fix: '用独立的用户运行检查命令和 agent（Docker 部署就是这样，见 docs/deploy.md「用户和权限」），并让沙箱可用；在那之前只在可信的仓库和需求上使用' }]
 }
 
 const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
@@ -139,6 +161,7 @@ export const evaluate = (f: Facts): Item[] => [
   masterKeyItem(f),
   sandboxItem(f),
   ...checkUserItem(f),
+  ...agentUserItem(f),
   ...proxyItem(f),
   ...isolationItem(f),
   'version' in f.git
@@ -192,20 +215,20 @@ const nodeRequired = (root: string): string | undefined => {
 }
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
-export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState }): Facts => {
+export const gather = (o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState }): Facts => {
   const required = nodeRequired(o.root)
   const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
-  const cu = o.checkUser
-  const switchError = cu.kind === 'ok' ? probeSwitch(cu.user) : undefined
-  const checkUser: Facts['checkUser'] = cu.kind === 'none' ? cu
-    : cu.kind === 'invalid' ? { kind: 'fail', error: cu.error }
-      : switchError === undefined ? { kind: 'ok', name: cu.user.name } : { kind: 'fail', error: `切换不到 ${cu.user.name}：${switchError}` }
+  const userFact = (u: CheckUserState): UserFact => {
+    if (u.kind !== 'ok') return u.kind === 'none' ? u : { kind: 'fail', error: u.error }
+    const e = probeSwitch(u.user)
+    return e === undefined ? { kind: 'ok', name: u.user.name } : { kind: 'fail', error: `切换不到 ${u.user.name}：${e}` }
+  }
   return {
     node: process.versions.node, ...(required === undefined ? {} : { nodeRequired: required }), modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
     git: gitState(), sandbox: dshSandbox(), dataDir: o.dataDir, ...(error === undefined ? {} : { dataDirError: error }), ...(dsh === undefined ? {} : { dsh }),
-    checkUser, droppedProxies: droppedProxies(process.env),
+    checkUser: userFact(o.checkUser), agentUser: userFact(o.agentUser), droppedProxies: droppedProxies(process.env),
   }
 }
 

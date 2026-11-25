@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { asUser, killUserProcessesIn, parseCheckUser, resolveCheckUser } from '../src/runner/check-user.ts'
+import { asUser, killUserProcessesIn, parseCheckUser, readSessionLogAs, resolveCheckUser } from '../src/runner/check-user.ts'
 import { checkEnv, droppedProxies, runChecks } from '../src/runner/checks.ts'
 
 const PASSWD = 'root:x:0:0:root:/root:/bin/bash\neos:x:10001:10001::/home/eos:/bin/bash\neos-check:x:10002:10002::/home/eos-check:/bin/sh\n'
@@ -109,4 +109,22 @@ test('leftover processes of the check user inside the worktree are killed as tha
     outside.kill('SIGKILL')
   }
   assert.ok(calls().some(l => l.startsWith('--reuid=eos-check sh -c ')))
+})
+
+test('reading a dsh session log as the agent user finds the same file the default reader does, and nothing for other ids', async () => {
+  const { env, calls } = fakeSetpriv()
+  const root = dir()
+  mkdirSync(join(root, '--wt--', 'session-abc'), { recursive: true })
+  writeFileSync(join(root, '--wt--', 'session-abc', 'session.v4.jsonl.zstd'), Buffer.from([1, 2, 3]))
+  const path = process.env.PATH
+  process.env.PATH = env.PATH
+  try {
+    const read = readSessionLogAs({ name: 'eos-agent', gid: 10003, home: '/home/eos-agent' }, 'session.v4.jsonl.zstd')
+    assert.deepEqual(read(root, 'session-abc'), Buffer.from([1, 2, 3]))
+    assert.equal(read(root, 'session-missing'), undefined)
+    assert.equal(read(root, '../escape'), undefined, 'ids are checked before they reach the shell')
+  } finally {
+    process.env.PATH = path
+  }
+  assert.ok(calls().every(l => l.startsWith('--reuid=eos-agent sh -c ')))
 })

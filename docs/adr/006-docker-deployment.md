@@ -29,15 +29,21 @@
 
 ### agent 和检查命令用独立用户运行（路线图第 3 项第 3 个 PR，分 ③b、③c 两步）
 
-- 容器以 root 启动，镜像里的 `eos` 命令（`deploy/eos`）用 `setpriv` 降到平台用户 `eos`，只带着 `SETUID`、`SETGID` 两个能力（ambient）。compose 去掉全部能力，只加回这两个。
+- 容器以 root 启动，镜像里的 `eos` 命令（`deploy/eos`）用 `setpriv` 降到平台用户 `eos`，只带着 `SETUID`、`SETGID`、`KILL` 三个能力（ambient；`KILL` 是 ③c 加的）。compose 去掉全部能力，只加回这三个。
   - 平台仍然是 `eos`、不是 root：数据卷里已有的文件都属于 `eos`，root 没有 `CHOWN`、`DAC_OVERRIDE` 就写不了它们，升级要么多给能力、要么迁移属主。平台留在 `eos` 不需要两者。
-- **③b（本次）**：检查命令以 `eos-check` 运行，切换时清掉全部能力。实测（`docs/e2e/deploy-3b-check-user/`）：它读不到 `eos` 和 root 进程的环境，切换不回 `eos` 或 root，写不了 `eos.db` 和仓库；同一个扫描以 `eos` 运行时都能做到（正对照）。
+- **③b（#74）**：检查命令以 `eos-check` 运行，切换时清掉全部能力。实测（`docs/e2e/deploy-3b-check-user/`）：它读不到 `eos` 和 root 进程的环境，切换不回 `eos` 或 root，写不了 `eos.db` 和仓库；同一个扫描以 `eos` 运行时都能做到（正对照）。
   - worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。`/data/worktrees` 目录本身是 2755，组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接（独立审查发现的，`probe-report.json` 的 `renameWorktreeDir`）。升级前的 worktree 在第一次启动时改成这个组。
   - 平台给别的用户的进程发不了信号，超时和中止时以 `eos-check` 运行 `kill` 结束检查命令的进程组。
   - 检查命令单独用一个用户，不和 agent 共用：同一个 uid 时，检查命令能读到 dsh 进程环境里的模型 key。
   - 检查命令拿到证书和不带账号密码的代理设置（用户选的方案）。带账号密码的代理不传，doctor 提示。
   - 平台的子进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs`、git 经镜像里的 `/usr/local/bin/git` 启动，先用 `setpriv` 清掉全部能力（代码评审发现：不清的话 dsh 在沙箱外启动的 MCP 服务和 git 能切换到 root、改写 `/app`）。实测真实 dsh 进程的能力是 0。dsh 由 SDK 以 `node <入口>` 启动，加不了命令前缀，所以包装是一个 Node 脚本，用 `process.execve` 把自己换成 setpriv 再换成 dsh：进程号不变，不多一层进程，平台的信号和看到的退出码都直接是 dsh 的。doctor 的 bwrap 探测在平台带着能力时也先清掉能力（bwrap 发现自己带着能力又不是 setuid 时会直接退出），和 dsh 在同样的条件下探测。
-- **③c（下一步）**：在同一个包装里把 dsh 换成 `eos-agent`。在那之前，agent 和平台同一个用户，挡住它读平台进程环境的只有 Landlock。
+- **③c**：dsh 的入口（`deploy/dsh-launch.mjs`）在清掉能力的同时切换到 `eos-agent`，agent 和 dsh 启动的 MCP 服务也是这个用户。实测（`docs/e2e/deploy-3c-agent-user/`）：eos-agent 读不到平台（eos）和 1 号进程的环境，平台的主密钥对 agent 不再只靠沙箱。
+  - agent 是 dsh 启动的，和 dsh 总是同一个用户：dsh 进程环境里的模型 key 对 agent 仍然只靠 Landlock，dsh 在沙箱外启动的 MCP 服务读得到它。要隔开得让 dsh 不从环境拿 key，这一版 dsh 做不到。
+  - 平台加回 `KILL`：平台要给 dsh 发信号（SDK 关掉 dsh、换 key 后重起，#65 的路径），dsh 现在是别的用户。另一个办法是像检查命令那样以 `eos-agent` 的身份去杀，但要改 vendor 里 SDK 关闭进程的写法，用户选了加能力。平台的子进程照样清掉它。
+  - dsh 的数据目录 `/data/dsh`：属于 `eos`、组 `eos-dsh`（只有 `eos` 和 `eos-agent`），2770。平台往里写能力面，dsh 写会话日志。dsh 建的会话目录是 0700、文件是 0600，平台以 `eos-agent` 的身份读（`readSessionLogAs`）。不给平台加 `DAC_READ_SEARCH`：那样平台什么文件都能读，范围比需要的大。
+  - 平台读不到别的用户进程的工作目录（要 `SYS_PTRACE`），`procs.ts` 找不到 agent 留下的进程：撤销越界改动前以 `eos-agent` 的身份找、杀（和检查命令一样）。
+  - 升级：旧的 `/data/dsh` 属于 `eos`，dsh 的文件多是 0700、0600，`eos-agent` 用不了，平台又没有 `CHOWN` 改不了属主。第一次启动平台时以 `eos-agent` 的身份复制一份，旧的改名留作备份。`.credentials.yaml` 不复制：dsh 要求它只有属主可读，新的 dsh 会重新生成（里面是 dsh 的浏览器会话授权，没有模型 key）。实测迁移后能续接升级前的会话。
+  - dsh 的 native 模块缓存放到 `eos-agent` 的家目录：平台（eos）有自己的一份，不加载 `eos-agent` 能写的那份。
 
 ### 访问：容器里监听 0.0.0.0，宿主机只绑 127.0.0.1
 
@@ -74,11 +80,12 @@
 
 - 新增：`Dockerfile`、`.dockerignore`、`compose.yaml`、`docs/deploy.md`、`scripts/deploy-e2e.ts`。
 - ③b：`Dockerfile`（建 `eos-check` 和共用组 `eos-work`，以 root 启动，`EOS_CHECK_USER`、`EOS_DSH_LAUNCHER`）、`compose.yaml`（`cap_add: SETUID, SETGID`）、`deploy/eos`（降权入口）、`deploy/dsh-launch.mjs` 和 `deploy/git`（清掉能力）、`src/cli.ts`（dsh 入口可换）、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`（「检查命令的用户」「检查命令的代理」两项）。不在容器里、没有设置 `EOS_CHECK_USER` 时，检查命令只多拿到证书和代理变量，其余不变。
-- ③c 会改：`Dockerfile`（建 `eos-agent`）、`deploy/dsh-launch.mjs`（换用户）。
+- ③c：`Dockerfile`（建 `eos-agent` 和组 `eos-dsh`，`EOS_AGENT_USER`）、`compose.yaml`（`cap_add` 加 `KILL`）、`deploy/eos`（带上 `KILL`，准备和迁移 `/data/dsh`）、`deploy/dsh-launch.mjs`（切换到 `eos-agent`）、`src/executor/dsh.ts`（会话日志的读法可替换；白名单加 `EOS_AGENT_USER`）、`src/runner/check-user.ts`（以别的用户读会话日志）、`src/runner/supervisor.ts`（结束 agent 留下的进程）、`src/runner/doctor.ts`（「agent 的用户」一项，「凭据隔离」都满足时是 ✓）、`src/cli.ts`。不在容器里、没有设置 `EOS_AGENT_USER` 时行为不变。
 
 ## 已知限制
 
-- **平台进程自己能切换到任何用户，包括 root**（探针的正对照）：root 只有这两个能力，但拥有 `/app` 等 root 的文件。平台进程本来就可信。它启动的 dsh、git、检查命令和 bwrap 探测都清掉了能力；平台自己撤销越界改动时用的 `sh`、`rm`、`find`（`git.ts` 的固定脚本，不运行仓库里的代码）、Landlock 探测，以及 tsx 的 esbuild 服务进程（平台自己的依赖）还带着。新增直接启动子进程、而且会运行仓库代码的地方时，要同样清掉。
+- **模型 key 对 agent 只靠沙箱**：agent 和 dsh 是同一个用户（见上）。dsh 在沙箱外启动的 MCP 服务读得到模型 key。
+- **平台进程自己能切换到任何用户，包括 root**（探针的正对照）：root 只有这三个能力，但拥有 `/app` 等 root 的文件。平台进程本来就可信。它启动的 dsh、git、检查命令和 bwrap 探测都清掉了能力；平台自己撤销越界改动时用的 `sh`、`rm`、`find`（`git.ts` 的固定脚本，不运行仓库里的代码）、Landlock 探测，以及 tsx 的 esbuild 服务进程（平台自己的依赖）还带着。新增直接启动子进程、而且会运行仓库代码的地方时，要同样清掉。
 - **检查命令能读世界可读的文件**：`eos.db`（trace、加密的凭据）、所有仓库和 worktree。它写不了它们，也读不到主密钥，所以解不开凭据。
 - **各任务的 worktree 都归 `eos-work`**：一个任务的检查命令能改别的任务的 worktree（以前和平台同一个用户时，它能改整个 `/data`）。
 - **检查命令自己建的、不给组写权限的文件**（例如显式 `chmod 755` 的目录），平台撤销越界改动或提交时可能处理不了。

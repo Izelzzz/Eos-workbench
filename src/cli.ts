@@ -8,12 +8,12 @@ import { describePosition } from './engine/machine.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { DshExecutor, dshEntry } from './executor/dsh.ts'
+import { DshExecutor, dshEntry, SESSION_LOG_FILE } from './executor/dsh.ts'
 import { takeMasterKey } from './credentials/key.ts'
 import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
 import { knownSecrets, redacting, redactText } from './credentials/redact.ts'
 import { Credentials } from './credentials/store.ts'
-import { resolveCheckUser } from './runner/check-user.ts'
+import { AGENT_USER_ENV, readSessionLogAs, resolveCheckUser } from './runner/check-user.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { diffStat } from './runner/git.ts'
@@ -86,14 +86,16 @@ const ROOT = join(import.meta.dirname, '..')
 const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
 /** 检查命令用的系统用户（部署镜像里设置 EOS_CHECK_USER）。设置错了由启动检查拦下。 */
 const checkUser = resolveCheckUser(process.env)
+/** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */
+const agentUser = resolveCheckUser(process.env, undefined, AGENT_USER_ENV)
 if (positionals[0] === 'doctor' && !values.help) {
-  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser }))
+  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
 if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
-  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser }))
+  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
   const warned = items.filter(i => i.status === 'warn' && i.doctorOnly !== true)
@@ -150,7 +152,15 @@ const currentModelKey = (): string => {
   throw new Error(k.source === 'error' ? `模型 API key 读不出来：${k.error}` : '没有可用的模型 API key：凭据存储里没有 deepseek，也没有设置 DEEPSEEK_API_KEY')
 }
 
-const executor = () => redacting(new DshExecutor({ dshHome: join(dataDir, 'dsh'), dshBin: dshBin(), modelKey: currentModelKey }), redact)
+const executor = () =>
+  redacting(
+    new DshExecutor({
+      dshHome: join(dataDir, 'dsh'), dshBin: dshBin(), modelKey: currentModelKey,
+      // dsh 以 agent 的用户运行时，会话目录只有它能读。
+      ...(agentUser.kind === 'ok' ? { readSessionLog: readSessionLogAs(agentUser.user, SESSION_LOG_FILE) } : {}),
+    }),
+    redact,
+  )
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
 const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
@@ -161,7 +171,7 @@ const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
   try {
-    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'cli', log: (_id, line) => say(line), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}) })
+    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'cli', log: (_id, line) => say(line), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}), ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}) })
     const started = sup.start(typeof id === 'string' ? id : await id(sup), { wait: !values['no-wait'] })
     if (!started.ok) return fail(started.error)
     summary(await started.done)
@@ -270,7 +280,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       appendLog(processLog, line)
       say(line)
     }
-    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}) })
+    const sup = new Supervisor({ store, executor: ex, dataDir, credentials, actor: 'web', log: (id, line) => note(`[${id}] ${line}`), redact, ...(checkUser.kind === 'ok' ? { checkUser: checkUser.user } : {}), ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}) })
     const server = createWebServer({ store, supervisor: sup, replay: ex, staticDir: join(import.meta.dirname, '..', 'web', 'dist'), credentials, improve: { executor: ex, dataDir }, ...(publicUrl === undefined ? {} : { publicUrl }) })
     const plan = listenPlan(values.host, port, publicUrl)
     if (typeof plan === 'string') return fail(plan)
