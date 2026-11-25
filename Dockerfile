@@ -15,6 +15,12 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
       ca-certificates git bubblewrap \
       python3 python3-venv python3-pip build-essential pkg-config \
  && rm -rf /var/lib/apt/lists/*
+# Node 镜像自带的 npm 11.19.1 打包的 undici、brace-expansion 有已修复的高危漏洞（CI 的 Trivy 扫描会拦），换成修好的版本。
+# agent 跑任务时也用这个 npm。extra_ca 的用法见下面 build 阶段。
+RUN --mount=type=secret,id=extra_ca,required=false \
+    if [ -f /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
+    npm install -g --no-audit --no-fund npm@11.21.2 \
+ && npm cache clean --force
 
 FROM base AS build
 WORKDIR /app
@@ -26,6 +32,9 @@ RUN --mount=type=secret,id=extra_ca,required=false \
     npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build:web
+# typescript 只用来做类型检查（开发依赖），平台运行时用不到（tsx 不依赖它）；它带的 Go 编译器二进制有已修复的高危漏洞
+# （CI 的 Trivy 扫描会拦），不放进运行镜像
+RUN rm -rf node_modules/typescript node_modules/@typescript node_modules/.bin/tsc
 
 FROM base
 # 平台、检查命令、agent 各一个用户（docs/adr/006-docker-deployment.md）：平台 eos；检查命令 eos-check，读不到平台和 dsh 进程的环境；
