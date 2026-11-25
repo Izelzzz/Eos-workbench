@@ -1,0 +1,457 @@
+{
+  "commit": "6b78760",
+  "uncommitted": "",
+  "oldImage": "eos-workbench:local",
+  "oldUser": [
+    "eos",
+    "eos:eos 666"
+  ],
+  "upgraded": [
+    "eos:eos-work 2775",
+    "eos:eos-work 2777",
+    "eos:eos-work 666"
+  ],
+  "oldWorktreeWritableByCheckUser": "ok",
+  "doctor": {
+    "code": 0,
+    "out": [
+      "Eos 环境检查（数据目录 /data）",
+      "✓ Node：24.22.3（要求 >=24.9.0）",
+      "✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）",
+      "✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 0e72fff785fd90a5）",
+      "✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp",
+      "✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境",
+      "⚠ 凭据隔离：agent 在沙箱里读不到它们，但和平台是同一个用户，只靠沙箱挡住；检查命令以 eos-check 运行，读不到平台进程环境里的主密钥，以及 dsh 进程环境里的模型 key",
+      "  怎么修：用独立的用户运行 agent（路线图第 3 项，还没有做完）",
+      "✓ git：2.43.0",
+      "✓ 数据目录：/data 可写",
+      "✓ dsh：0.2.2-rc.5"
+    ]
+  },
+  "processes": [
+    "PID USER     GROUP    COMMAND",
+    "      1 root     root     docker-init",
+    "      7 eos      eos      MainThread",
+    "     40 eos      eos      esbuild",
+    "     96 root     root     ps"
+  ],
+  "platformProcess": [
+    "CapInh:\t00000000000000c0",
+    "CapPrm:\t00000000000000c0",
+    "CapEff:\t00000000000000c0",
+    "CapAmb:\t00000000000000c0",
+    "NoNewPrivs:\t1",
+    "umask=Umask: 0002"
+  ],
+  "probe": {
+    "platform": {
+      "uid": 10001,
+      "groups": [
+        10001,
+        10010
+      ],
+      "caps": "00000000000000c0"
+    },
+    "checkUser": {
+      "name": "eos-check",
+      "gid": 10002,
+      "home": "/home/eos-check"
+    },
+    "realDsh": {
+      "pid": 147,
+      "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+      "caps": {
+        "Uid": "10001",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1"
+      },
+      "exitAfterSigterm": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    "gitCaps": [
+      "CapEff:\t0000000000000000",
+      "CapAmb:\t0000000000000000"
+    ],
+    "worktreeDir": {
+      "gid": 10010,
+      "mode": "2775"
+    },
+    "worktreeFile": {
+      "gid": 10010,
+      "mode": "664"
+    },
+    "viaCheck": {
+      "result": {
+        "check": {
+          "kind": "run",
+          "run": [
+            "sh",
+            "-c",
+            "node /app/scripts/check-user-scan.mjs \"$@\" > /data/worktrees/probe/scan-check.json",
+            "scan",
+            "/data/worktrees/probe/a.txt",
+            "/data/eos.db",
+            "/data/repos/probe/a.txt",
+            "/home/eos/.bashrc"
+          ],
+          "timeoutSec": 30
+        },
+        "passed": true,
+        "detail": ""
+      },
+      "scan": {
+        "uid": 10002,
+        "gid": 10002,
+        "groups": [
+          10002,
+          10010
+        ],
+        "home": "/home/eos-check",
+        "caps": {
+          "inheritable": "0000000000000000",
+          "permitted": "0000000000000000",
+          "effective": "0000000000000000",
+          "ambient": "0000000000000000"
+        },
+        "noNewPrivs": "1",
+        "envHasSecrets": [],
+        "secretsFoundIn": [],
+        "processes": [
+          {
+            "pid": 1,
+            "ppid": 0,
+            "uid": 0,
+            "comm": "docker-init",
+            "cmdline": "/sbin/docker-init --",
+            "capEff": "00000000000000c0",
+            "capAmb": "0000000000000000",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 115,
+            "ppid": 0,
+            "uid": 10001,
+            "comm": "sh",
+            "cmdline": "sh -c",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 121,
+            "ppid": 115,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "node --import",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 130,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "esbuild",
+            "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 146,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "sleep",
+            "cmdline": "sleep 600",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 147,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "capEff": "0000000000000000",
+            "capAmb": "0000000000000000",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 165,
+            "ppid": 121,
+            "uid": 10002,
+            "comm": "sh",
+            "cmdline": "sh -c",
+            "capEff": "0000000000000000",
+            "capAmb": "0000000000000000",
+            "environ": "readable"
+          },
+          {
+            "pid": 40,
+            "ppid": 7,
+            "uid": 10001,
+            "comm": "esbuild",
+            "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 7,
+            "ppid": 1,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "node --import",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "EACCES"
+          }
+        ],
+        "switchToRoot": "setpriv: setresuid failed: Operation not permitted",
+        "switchToEos": "setpriv: setresuid failed: Operation not permitted",
+        "writeTrackedFileInWorktree": "ok",
+        "writeOutsideWorktree": {
+          "/data/eos.db": "EACCES",
+          "/data/repos/probe/a.txt": "EACCES",
+          "/home/eos/.bashrc": "EACCES"
+        },
+        "readOutsideWorktree": {
+          "/data/eos.db": "ok",
+          "/data/repos/probe/a.txt": "ok",
+          "/home/eos/.bashrc": "EACCES"
+        }
+      },
+      "outputFile": {
+        "gid": 10010,
+        "mode": "664"
+      }
+    },
+    "control": {
+      "status": 0,
+      "stderr": "",
+      "scan": {
+        "uid": 10001,
+        "gid": 10001,
+        "groups": [
+          10001,
+          10010
+        ],
+        "home": "/home/eos",
+        "caps": {
+          "inheritable": "00000000000000c0",
+          "permitted": "00000000000000c0",
+          "effective": "00000000000000c0",
+          "ambient": "00000000000000c0"
+        },
+        "noNewPrivs": "1",
+        "envHasSecrets": [
+          "EOS_MASTER_KEY",
+          "DEEPSEEK_API_KEY"
+        ],
+        "secretsFoundIn": [
+          {
+            "pid": 115,
+            "uid": 10001,
+            "comm": "sh",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 121,
+            "uid": 10001,
+            "comm": "MainThread",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 130,
+            "uid": 10001,
+            "comm": "esbuild",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 146,
+            "uid": 10001,
+            "comm": "sleep",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 147,
+            "uid": 10001,
+            "comm": "MainThread",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 177,
+            "uid": 10001,
+            "comm": "sh",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 40,
+            "uid": 10001,
+            "comm": "esbuild",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          },
+          {
+            "pid": 7,
+            "uid": 10001,
+            "comm": "MainThread",
+            "found": [
+              "EOS_MASTER_KEY",
+              "DEEPSEEK_API_KEY"
+            ]
+          }
+        ],
+        "processes": [
+          {
+            "pid": 1,
+            "ppid": 0,
+            "uid": 0,
+            "comm": "docker-init",
+            "cmdline": "/sbin/docker-init --",
+            "capEff": "00000000000000c0",
+            "capAmb": "0000000000000000",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 115,
+            "ppid": 0,
+            "uid": 10001,
+            "comm": "sh",
+            "cmdline": "sh -c",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 121,
+            "ppid": 115,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "node --import",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 130,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "esbuild",
+            "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 146,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "sleep",
+            "cmdline": "sleep 600",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 147,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "/usr/local/bin/node /app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "capEff": "0000000000000000",
+            "capAmb": "0000000000000000",
+            "environ": "readable"
+          },
+          {
+            "pid": 176,
+            "ppid": 121,
+            "uid": 10002,
+            "comm": "kill",
+            "cmdline": "",
+            "capEff": "0000000000000000",
+            "capAmb": "0000000000000000",
+            "environ": "EACCES"
+          },
+          {
+            "pid": 177,
+            "ppid": 121,
+            "uid": 10001,
+            "comm": "sh",
+            "cmdline": "sh -c",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 40,
+            "ppid": 7,
+            "uid": 10001,
+            "comm": "esbuild",
+            "cmdline": "/app/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          },
+          {
+            "pid": 7,
+            "ppid": 1,
+            "uid": 10001,
+            "comm": "MainThread",
+            "cmdline": "node --import",
+            "capEff": "00000000000000c0",
+            "capAmb": "00000000000000c0",
+            "environ": "readable"
+          }
+        ],
+        "switchToRoot": "ok",
+        "switchToEos": "ok",
+        "writeTrackedFileInWorktree": "ok",
+        "writeOutsideWorktree": {
+          "/data/eos.db": "ok",
+          "/data/repos/probe/a.txt": "ok",
+          "/home/eos/.bashrc": "ok"
+        },
+        "readOutsideWorktree": {
+          "/data/eos.db": "ok",
+          "/data/repos/probe/a.txt": "ok",
+          "/home/eos/.bashrc": "ok"
+        }
+      }
+    },
+    "gitCheck": {
+      "passed": true,
+      "detail": ""
+    },
+    "timeout": {
+      "passed": false,
+      "detail": "超过 2 秒没有结束，已终止。输出：",
+      "ms": 2514,
+      "leftoverCheckUserProcesses": []
+    }
+  }
+}
