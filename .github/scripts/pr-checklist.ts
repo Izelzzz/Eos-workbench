@@ -14,7 +14,8 @@
 // 这样 PR 不能靠改脚本或规则放宽对自己的检查；改动要等合并后才对后面的 PR 生效。
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export type Rule = { need: boolean; pattern: string; regex: RegExp }
@@ -185,48 +186,75 @@ export type Result = { errors: string[]; warnings: string[]; notes: string[] }
 /** 这个 PR 改动的一个文件。删掉的文件算「改动」（要不要 E2E），但不能当证据。 */
 export type Change = { path: string; deleted: boolean }
 
-/** E2E 报告里核对证据用的两项（scripts/e2e.ts 写的 report.json）。 */
-export type Report = { commit?: string; uncommitted?: string[] }
+/** E2E 报告里核对证据用的几项（scripts/e2e.ts 写的 report.json），在边界按格式校验过 */
+export type Report = { commit?: string; commitAtEnd?: string; uncommitted?: string[] }
+
+/** 外部数据（PR 里的文件内容）在这里解析成 Report；格式不对返回 undefined */
+export function parseReport(text: string): Report | undefined {
+  let v: unknown
+  try {
+    v = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  const o = v as Record<string, unknown>
+  const str = (x: unknown) => x === undefined || typeof x === 'string'
+  if (!str(o.commit) || !str(o.commitAtEnd)) return undefined
+  if (o.uncommitted !== undefined && !(Array.isArray(o.uncommitted) && o.uncommitted.every(x => typeof x === 'string'))) return undefined
+  return {
+    ...(o.commit === undefined ? {} : { commit: o.commit as string }),
+    ...(o.commitAtEnd === undefined ? {} : { commitAtEnd: o.commitAtEnd as string }),
+    ...(o.uncommitted === undefined ? {} : { uncommitted: o.uncommitted as string[] }),
+  }
+}
 
 /** 核对证据要用的仓库操作；check() 本身不碰 git，测试里换成桩。 */
 export type Repo = {
-  /** 读出 PR 里的一份报告；不是合法的 JSON 时返回 undefined */
+  /** 读出 PR 里的一份报告（普通文件，不跟符号链接）；读不到或格式不对返回 undefined */
   report: (path: string) => Report | undefined
   /** 提交在 PR 的历史里（是 PR 最新提交的祖先或它本身） */
   inHistory: (commit: string) => boolean
-  /** 这个文件在那个提交和 PR 最新提交上内容一样（都不存在也算一样） */
-  same: (commit: string, path: string) => boolean
+  /** 从这个提交到 PR 最新提交，内容变过的文件 */
+  changedSince: (commit: string) => string[]
+  /** PR 对这个文件的改动从这个提交以来没变：把 base 带来的变化补到那个提交的版本上，等于 PR 最新提交的版本 */
+  samePrChange: (commit: string, path: string) => boolean
 }
 
-/** 证据对得上最终代码：报告的提交在历史里，PR 改过的「需要」的文件此后没再变，跑的时候也没有未提交的改动。 */
-function freshness(r: Result, reportPaths: string[], needed: string[], repo: Repo, reason: string | undefined): void {
+/**
+ * 证据对得上最终代码：报告的提交在历史里；需要真实模型的文件里，PR 改过的和这个提交之后变过的，PR 自己的改动都没再变；
+ * 跑的时候没有没提交的改动、提交也没变。对不上时报错；描述里有「证据之后的改动」一节写了理由时改成要人确认的提示。
+ */
+function freshness(r: Result, reportPaths: string[], needed: string[], isReal: (p: string) => boolean, repo: Repo, reason: string | undefined): void {
   if (reportPaths.length === 0) {
-    r.warnings.push('证据里没有 E2E 报告（report.json），核对不了证据对应哪个提交：请独立审查人工核对证据对得上最终代码')
+    r.warnings.push('证据里没有带提交记录的 E2E 报告（目前只有 scripts/e2e.ts 写的 report.json 带），核对不了证据对应哪个提交：请独立审查人工核对证据对得上最终代码')
     return
   }
   for (const path of reportPaths) {
     const report = repo.report(path)
     if (report === undefined) {
-      r.errors.push(`证据 ${path} 不是合法的 JSON`)
+      r.errors.push(`证据 ${path} 读不出来，或者不是 E2E 报告的格式`)
       continue
     }
-    if (typeof report.commit !== 'string' || report.commit === '') {
-      r.warnings.push(`证据 ${path} 没有记下跑的是哪个提交（旧版 e2e.ts 写的？），核对不了证据对得上最终代码：请独立审查人工核对`)
+    if (report.commit === undefined || report.commit === '') {
+      r.warnings.push(`证据 ${path} 没有记下跑的是哪个提交（只有 scripts/e2e.ts 的报告记），核对不了证据对得上最终代码：请独立审查人工核对`)
       continue
     }
     const commit = report.commit
+    const short = commit.slice(0, 12)
+    const problems: string[] = []
     if (!repo.inHistory(commit)) {
-      r.errors.push(`证据 ${path} 跑的是提交 ${commit.slice(0, 12)}，它不在这个 PR 的历史里`)
-      continue
+      problems.push(`报告记的提交 ${short} 不在这个 PR 的历史里（分支 rebase 或强推过？）`)
+    } else {
+      const candidates = [...new Set([...needed, ...repo.changedSince(commit).filter(isReal)])]
+      const changedAfter = candidates.filter(p => !repo.samePrChange(commit, p))
+      if (changedAfter.length > 0) problems.push(`这些文件在 ${short} 之后又改过：${changedAfter.join('、')}`)
     }
-    const changedAfter = needed.filter(p => !repo.same(commit, p))
-    const dirty = (report.uncommitted ?? []).filter(p => needed.includes(p))
-    const problems = [
-      ...(changedAfter.length === 0 ? [] : [`这些文件在 ${commit.slice(0, 12)} 之后又改过：${changedAfter.join('、')}`]),
-      ...(dirty.length === 0 ? [] : [`跑的时候这些文件有没提交的改动：${dirty.join('、')}`]),
-    ]
+    const dirty = (report.uncommitted ?? []).filter(isReal)
+    if (dirty.length > 0) problems.push(`跑的时候这些文件有没提交的改动：${dirty.join('、')}`)
+    if (report.commitAtEnd !== undefined && report.commitAtEnd !== commit) problems.push(`跑的过程中提交变了（${short} → ${report.commitAtEnd.slice(0, 12)}）`)
     if (problems.length === 0) {
-      r.notes.push(`证据 ${path} 对得上最终代码（${commit.slice(0, 12)}）`)
+      r.notes.push(`证据 ${path} 自称跑的提交 ${short} 对得上最终代码（报告是 PR 里的文件，提交号是自报的，没有签名）`)
       continue
     }
     if (reason === undefined) {
@@ -276,16 +304,19 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[]; r
   // 只写目录时，这个目录下有任何新增或修改的文件就算数。
   const evidence = [...e2e.content.matchAll(/docs\/e2e\/[^\s`'"<>()（）[\]，,。；;：:、*|]+/g)].map(m => m[0].replace(/[.)]+$/, ''))
   if (evidence.length > 0) {
-    const reports = new Set<string>()
+    // 报告：写的证据（目录或文件）所在目录里、这个 PR 新增或修改的 report.json
+    const reportDirs = new Set<string>()
     for (const p of new Set(evidence)) {
       const dir = p.endsWith('/') ? p : `${p}/`
       const files = present.filter(c => c === p || c.startsWith(dir))
       if (files.length === 0) r.errors.push(`「端到端验证」写的证据 ${p} 不在这个 PR 新增或修改的文件里`)
-      for (const f of files) if (f === 'report.json' || f.endsWith('/report.json')) reports.add(f)
+      for (const f of files) reportDirs.add(f.slice(0, f.lastIndexOf('/') + 1))
     }
+    const reports = present.filter(c => c.endsWith('/report.json') && reportDirs.has(c.slice(0, c.lastIndexOf('/') + 1)))
     if (input.repo !== undefined) {
       const after = find(t => t.startsWith('证据之后的改动'))
-      freshness(r, [...reports], needed, input.repo, after === undefined || after.content === '' ? undefined : after.content.replace(/\s+/g, ' '))
+      const isReal = (p: string) => needsE2E(p, input.rules)
+      freshness(r, reports, needed, isReal, input.repo, after === undefined || after.content === '' ? undefined : after.content.replace(/\s+/g, ' '))
     }
     return r
   }
@@ -306,37 +337,59 @@ export function parseNameStatusZ(out: string): Change[] {
   return changes
 }
 
+/** 报告最大多少字节：比这大的不读 */
+const MAX_REPORT = 1 << 20
+
 /**
- * 用 git 实现 Repo。cwd 是检出的合并提交：HEAD^1 是 base，HEAD^2 是 PR 的最新提交。
- * 核对证据要完整的历史（工作流用 fetch-depth: 0），否则证据的提交找不到，会当成不在历史里而报错。
+ * 用 git 实现 Repo。cwd 是检出的合并提交（HEAD），head 是 PR 的最新提交，base 是合并提交的第一个父提交。
+ * 文件一律从 git 对象读，不读工作区（PR 里的文件可能是符号链接）。核对证据要完整的历史（工作流用 fetch-depth: 0）。
  */
-export function gitRepo(cwd: string): Repo {
-  const git = (...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  const blob = (rev: string, path: string) => {
+export function gitRepo(cwd: string, head: string): Repo {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 * MAX_REPORT })
+  const tryGit = (...a: string[]) => {
     try {
-      return git('rev-parse', '--verify', '-q', `${rev}:${path}`).trim()
+      return git(...a)
     } catch {
       return undefined
     }
   }
+  const isCommit = (c: string) => /^[0-9a-f]{40}$/.test(c)
+  const base = () => git('rev-parse', 'HEAD^1').trim()
+  const blob = (rev: string, path: string) => tryGit('rev-parse', '--verify', '-q', `${rev}:${path}`)?.trim()
+  const content = (rev: string, path: string) => (blob(rev, path) === undefined ? undefined : tryGit('cat-file', 'blob', `${rev}:${path}`))
   return {
     report: path => {
+      // 只认普通文件（100644 或 100755），不认符号链接；大小有上限
+      const entry = tryGit('ls-tree', '-l', 'HEAD', '--', path)?.split('\n')[0] ?? ''
+      const m = /^(100644|100755) blob [0-9a-f]+\s+(\d+)\t/.exec(entry)
+      if (m === null || Number(m[2]) > MAX_REPORT) return undefined
+      const text = tryGit('cat-file', 'blob', `HEAD:${path}`)
+      return text === undefined ? undefined : parseReport(text)
+    },
+    inHistory: commit => isCommit(commit) && tryGit('merge-base', '--is-ancestor', commit, head) !== undefined,
+    changedSince: commit => (tryGit('diff', '--name-only', '--no-renames', '-z', commit, head) ?? '').split('\0').filter(p => p !== ''),
+    samePrChange: (commit, path) => {
+      const final = blob(head, path)
+      if (blob(commit, path) === final) return true
+      // base 带来的变化：证据提交与 base 的分叉点 → PR 最新提交与 base 的分叉点。补到证据提交的版本上，看是否等于最终版本
+      const mbThen = tryGit('merge-base', commit, base())?.trim()
+      const mbNow = tryGit('merge-base', head, base())?.trim()
+      if (mbThen === undefined || mbNow === undefined || mbThen === mbNow) return false
+      const [tested, before, after] = [content(commit, path), content(mbThen, path), content(mbNow, path)]
+      if (tested === undefined || before === undefined || after === undefined) return false
+      const dir = mkdtempSync(join(tmpdir(), 'pr-checklist-'))
       try {
-        return JSON.parse(readFileSync(join(cwd, path), 'utf8')) as Report
-      } catch {
-        return undefined
+        const files = ['tested', 'before', 'after'].map(n => join(dir, n))
+        writeFileSync(files[0]!, tested)
+        writeFileSync(files[1]!, before)
+        writeFileSync(files[2]!, after)
+        // 有冲突时 merge-file 退出码非 0，当成对不上
+        const merged = tryGit('merge-file', '-p', files[0]!, files[1]!, files[2]!)
+        return merged !== undefined && merged === content(head, path)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
       }
     },
-    inHistory: commit => {
-      if (!/^[0-9a-f]{7,40}$/.test(commit)) return false
-      try {
-        git('merge-base', '--is-ancestor', commit, 'HEAD^2')
-        return true
-      } catch {
-        return false
-      }
-    },
-    same: (commit, path) => blob(commit, path) === blob('HEAD^2', path),
   }
 }
 
@@ -344,7 +397,18 @@ function main(): void {
   const body = process.env.PR_BODY ?? ''
   const changed = parseNameStatusZ(execFileSync('git', ['diff', '--name-status', '--no-renames', '-z', 'HEAD^1', 'HEAD'], { encoding: 'utf8' }))
   const rules = parseRules(readFileSync(new URL('../e2e-paths.txt', import.meta.url), 'utf8'))
-  const r = check({ body, changed, rules, repo: gitRepo(process.cwd()) })
+  // 工作流传入 PR 的最新提交；检出的合并提交的第二个父提交必须就是它，否则核对的对象不对
+  const head = process.env.PR_HEAD_SHA ?? ''
+  const parent2 = (() => {
+    try {
+      return execFileSync('git', ['rev-parse', 'HEAD^2'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    } catch {
+      return ''
+    }
+  })()
+  const repo = /^[0-9a-f]{40}$/.test(head) && parent2 === head ? gitRepo(process.cwd(), head) : undefined
+  const r = check({ body, changed, rules, ...(repo === undefined ? {} : { repo }) })
+  if (repo === undefined) console.log(`::warning title=需要人确认::没有核对证据对得上最终代码：检出的不是 PR 的合并提交，或者没传 PR_HEAD_SHA（HEAD^2=${parent2 || '无'}）`)
   for (const n of r.notes) console.log(n)
   for (const w of r.warnings) console.log(`::warning title=需要人确认::${w}`)
   for (const e of r.errors) console.log(`::error title=PR 流程检查::${e}`)

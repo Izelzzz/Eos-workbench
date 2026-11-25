@@ -41,6 +41,7 @@ jobs:
       - name: 检查描述和 E2E 证据
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           base="$RUNNER_TEMP/base"; mkdir -p "$base"
           if git cat-file -e HEAD^1:.github/scripts/pr-checklist.ts 2>/dev/null; then

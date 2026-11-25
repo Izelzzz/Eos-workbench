@@ -133,6 +133,23 @@ else {
   seedStore.close()
   if (!saved.ok) throw new Error(`保存 feature-pr 失败：${JSON.stringify(saved)}`)
 }
+/**
+ * 跑的是哪份代码：Eos 仓库的提交，以及没提交的改动（pr-checklist 用它们核对证据对得上 PR 的最终代码）。
+ * 在开头记：git 出错（不是检出、所有者不同被 git 拒绝）时记成没有提交，不让整次 E2E（花了钱的模型调用）白跑。
+ */
+function codeState(): { commit?: string; uncommitted?: string[] } {
+  try {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const uncommitted = git('status', '--porcelain', '-z', '--no-renames', '--untracked-files=all')
+      .split('\0')
+      .filter(Boolean)
+      .map(l => l.slice(3))
+    return { commit: git('rev-parse', 'HEAD').trim(), uncommitted }
+  } catch {
+    return {}
+  }
+}
+const atStart = codeState()
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
 const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', remote === undefined ? 'feature' : 'feature-pr', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
@@ -233,15 +250,11 @@ const checks = {
   ...(remote === undefined ? {} : remoteChecks()),
 }
 const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
-// 跑的是哪份代码：Eos 仓库的提交，以及跑的时候没提交的改动（pr-checklist 用它们核对证据对得上 PR 的最终代码）
-const eosGit = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' })
-const uncommitted = eosGit('status', '--porcelain', '-z', '--no-renames', '--untracked-files=all')
-  .split('\0')
-  .filter(Boolean)
-  .map(l => l.slice(3))
+const atEnd = codeState()
 const result = {
-  commit: eosGit('rev-parse', 'HEAD').trim(),
-  uncommitted,
+  // 跑的是哪份代码（开头记下的）；结束时提交变了（跑的过程中有人提交）时另记 commitAtEnd，pr-checklist 会当成对不上
+  ...atStart,
+  ...(atEnd.commit !== atStart.commit ? { commitAtEnd: atEnd.commit } : {}),
   task: first.id,
   killed: first.killed,
   checks,
