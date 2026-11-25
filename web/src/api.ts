@@ -27,6 +27,8 @@ import type {
   ForgeAppsResponse,
   RegisterAppRequest,
   RegisterAppResponse,
+  AuthorizeUserResponse,
+  RevokeUserResponse,
 } from '../../src/web/types.ts'
 import type { CredentialKind } from '../../src/credentials/types.ts'
 
@@ -95,3 +97,5 @@ export const deleteCredential = (name: string) => post<DeleteCredentialResponse>
 
 export const listForgeApps = () => get<ForgeAppsResponse>('/api/forge-apps')
 export const registerForgeApp = (body: RegisterAppRequest) => post<RegisterAppResponse>('/api/forge-apps/register', body)
+export const authorizeForgeUser = (name: string) => post<AuthorizeUserResponse>('/api/forge-apps/authorize', { name })
+export const revokeForgeUser = (name: string) => post<RevokeUserResponse>('/api/forge-apps/revoke', { name })

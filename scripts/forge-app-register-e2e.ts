@@ -113,7 +113,8 @@ const installHref = await page.getByRole('link', { name: '把 App 安装到仓�
 checks['安装链接指向这个 App 的安装页'] = installHref === `http://${host}/apps/eos-e2e/installations/new`
 const saved = credentials.get(LOCAL_OWNER, `github-app.${host}`)
 const value = saved.kind === 'ok' ? (JSON.parse(saved.value) as { appId: string; privateKey: string; slug: string }) : undefined
-checks['凭据存储里有 App 凭据（只有 id、私钥、短名、页面地址）'] = value !== undefined && Object.keys(value).sort().join() === 'appId,htmlUrl,privateKey,slug'
+checks['凭据存储里有 App 凭据（id、私钥、短名、页面地址，以及用户授权用的 client id、secret 和回调地址；不存 webhook secret）'] =
+  value !== undefined && Object.keys(value).sort().join() === 'appId,clientId,clientSecret,htmlUrl,privateKey,slug,userCallbackUrl'
 
 // 装到仓库，在页面上建任务：克隆用 App 的令牌（凭据存储里没有个人令牌，私有仓库只能这样访问）。
 await fetch(`http://${host}/__control/install?repo=acme/app`)

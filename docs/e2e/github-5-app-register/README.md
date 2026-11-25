@@ -12,7 +12,7 @@ node --import tsx scripts/forge-app-register-e2e.ts docs/e2e/github-5-app-regist
 
 流程：打开「代码托管」页 → 填 App 名字、点注册 → 浏览器把清单表单提交到「GitHub」 → 跳回平台回调 → 平台用 code 换回 App 凭据并存进凭据存储 → 页面显示已注册和安装链接 → 把 App 装到 `acme/app` → 在页面上建任务，平台用 App 换来的令牌克隆私有仓库（凭据存储里没有个人令牌）。
 
-结果 13/13，见 `report.json`。截图：
+结果 14/14，见 `report.json`。截图：
 
 | 文件 | 内容 |
 |---|---|
