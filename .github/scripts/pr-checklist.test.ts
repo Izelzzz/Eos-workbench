@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, needsE2E, parseNameStatusZ, parseRules, sections, stripHtmlComments, type Change } from './pr-checklist.ts'
+import { check, e2eNeed, parseNameStatusZ, parseRules, sections, stripHtmlComments, type Change } from './pr-checklist.ts'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,9 +14,16 @@ const ch = (...paths: string[]): Change[] => paths.map(path => ({ path, deleted:
 
 const proof = '## 能用证据证明的\n\n- 测试通过\n\n## 证明不了的和原因\n\n- 没有在别的内核上测\n'
 
-test('仓库的规则文件：平台代码和构建、依赖、部署需要 E2E，文档、测试、验证脚本、CI 配置不需要，没列出的默认需要', () => {
+test('仓库的规则文件：影响模型行为的文件、其余平台代码、构建、依赖、部署要真实模型；确定性 E2E 跑到的代码归「确定性」；文档、测试、脚本、CI 配置不需要；没列出的默认要真实模型', () => {
   const need = [
-    'src/engine/reduce.ts',
+    'src/engine/prompts.ts',
+    'src/workflow/agents/developer.yaml',
+    'src/workflow/docs/研发约定.md',
+    'src/improve/generate.ts',
+    'src/forge/github.ts',
+    'src/credentials/store.ts',
+    'src/web/server.ts',
+    'src/conventions/conventions.ts',
     'src/workflow/skills/write-changes.md',
     'src/workflow/templates/standard.yaml',
     'web/src/App.tsx',
@@ -47,13 +54,27 @@ test('仓库的规则文件：平台代码和构建、依赖、部署需要 E2E�
     'LICENSE',
     '.gitignore',
   ]
-  for (const p of need) assert.equal(needsE2E(p, rules), true, p)
-  for (const p of skip) assert.equal(needsE2E(p, rules), false, p)
+  const ci = [
+    'src/cli.ts',
+    'src/runner/runner.ts',
+    'src/engine/machine.ts',
+    'src/engine/verdict.ts',
+    'src/store/store.ts',
+    'src/trace/build.ts',
+    'src/workflow/parse.ts',
+    'src/workflow/templates.ts',
+    'src/executor/dsh.ts',
+  ]
+  for (const p of need) assert.equal(e2eNeed(p, rules), 'real', p)
+  for (const p of ci) assert.equal(e2eNeed(p, rules), 'ci', p)
+  for (const p of skip) assert.equal(e2eNeed(p, rules), 'none', p)
 })
 
 test('规则按顺序匹配，第一条算数；看不懂的行报出行号', () => {
-  const r = parseRules('# 注释\n\n需要 a/**\n不需要 a/b/**\n')
-  assert.equal(needsE2E('a/b/c', r), true)
+  const r = parseRules('# 注释\n\n需要 a/**\n不需要 a/b/**\n确定性 c/**\n')
+  assert.equal(e2eNeed('a/b/c', r), 'real')
+  assert.equal(e2eNeed('c/d', r), 'ci')
+  assert.equal(e2eNeed('z', r), 'real')
   assert.throws(() => parseRules('需要\n'), /第 1 行/)
   assert.throws(() => parseRules('也许 x\n'), /第 1 行/)
 })
@@ -219,4 +240,14 @@ test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响�
   assert.deepEqual(tick.errors, ['「能用证据证明的」一节是空的'])
   const para = check({ body: '## 能用证据证明的\n\n- 见 a <!-- 这里\n\n## 证明不了的\n- A --> B\n', changed: ch('docs/a.md'), rules })
   assert.deepEqual(para.errors, [])
+})
+
+test('只碰到「确定性」的路径：不要求「端到端验证」一节，提示由 e2e-fake-model 验证；同时碰到要真实模型的路径时照旧要求', () => {
+  const only = check({ body: proof, changed: ch('src/runner/runner.ts', 'tests/runner.test.ts'), rules })
+  assert.deepEqual(only.errors, [])
+  assert.match(only.notes.join(), /e2e-fake-model/)
+  const mixed = check({ body: proof, changed: ch('src/runner/runner.ts', 'src/engine/prompts.ts'), rules })
+  assert.match(mixed.errors.join(), /端到端验证/)
+  assert.match(mixed.notes.join(), /src\/engine\/prompts\.ts/)
+  assert.doesNotMatch(mixed.notes.join(), /runner\.ts/)
 })

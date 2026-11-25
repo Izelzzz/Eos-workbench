@@ -1,11 +1,29 @@
-# 哪些路径的改动需要端到端验证（E2E）。
+# 哪些路径的改动需要端到端验证（E2E），需要哪一种。
 # CI（.github/scripts/pr-checklist.ts）和人读的都是这一份，CLAUDE.md 自检第 3 条引用它。
 #
-# 每行：「需要」或「不需要」，空格，路径模式。* 不跨目录，** 跨目录。
+# 每行：「需要」「确定性」或「不需要」，空格，路径模式。* 不跨目录，** 跨目录。
+# - 需要：要用真实模型跑一次 E2E（npm run e2e），证据放 docs/e2e/，PR 描述写「端到端验证」一节。
+# - 确定性：CI 的 e2e-fake-model 每个 PR 都会用假模型跑同一份 E2E（scripts/e2e-ci.ts），由它验证，不用跑真实模型、
+#   不要求「端到端验证」一节。只放确定性 E2E 真正跑到、而且不影响模型行为的代码。
+# - 不需要：不用 E2E。
 # 按顺序匹配，第一条匹配到的算数；一条都不匹配的路径默认「需要」。
-# 加严（新增「需要」）可以由 agent 提出；放宽（新增「不需要」、删掉「需要」）由人批准。
+# 加严（新增「需要」、把「确定性」「不需要」改成更严的）可以由 agent 提出；放宽由人批准。
 
-# 平台代码，包括内置的工作流模板、Agent 模板、技能、提示词等非代码文件
+# 影响模型行为的平台文件：提示词、内置的工作流模板、Agent 模板、技能、约定文档。确定性 E2E 的假模型不看它们的内容，要真实模型
+需要 src/engine/prompts.ts
+需要 src/workflow/templates/**
+需要 src/workflow/agents/**
+需要 src/workflow/skills/**
+需要 src/workflow/docs/**
+# 确定性 E2E 跑到的平台代码：CLI、runner、引擎、存储、trace、工作流解析、执行器（dsh 的会话、续接、回复解析）
+确定性 src/cli.ts
+确定性 src/runner/**
+确定性 src/engine/**
+确定性 src/store/**
+确定性 src/trace/**
+确定性 src/workflow/**
+确定性 src/executor/**
+# 其余平台代码（improve、conventions、forge、web、credentials 等）确定性 E2E 没跑到，仍要真实模型
 需要 src/**
 # 网页源码和构建配置
 需要 web/**

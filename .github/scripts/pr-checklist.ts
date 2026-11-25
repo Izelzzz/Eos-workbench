@@ -13,16 +13,19 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
-export type Rule = { need: boolean; pattern: string; regex: RegExp }
+/** real：要真实模型的 E2E；ci：CI 的确定性 E2E（e2e-fake-model）就够；none：不需要 */
+export type Need = 'real' | 'ci' | 'none'
+export type Rule = { need: Need; pattern: string; regex: RegExp }
+const NEEDS: Record<string, Need> = { 需要: 'real', 确定性: 'ci', 不需要: 'none' }
 
 export function parseRules(text: string): Rule[] {
   const rules: Rule[] = []
   text.split('\n').forEach((raw, i) => {
     const line = raw.trim()
     if (line === '' || line.startsWith('#')) return
-    const m = /^(需要|不需要)\s+(\S+)$/.exec(line)
+    const m = /^(需要|确定性|不需要)\s+(\S+)$/.exec(line)
     if (!m) throw new Error(`e2e-paths.txt 第 ${i + 1} 行看不懂：${line}`)
-    rules.push({ need: m[1] === '需要', pattern: m[2]!, regex: globToRegex(m[2]!) })
+    rules.push({ need: NEEDS[m[1]!]!, pattern: m[2]!, regex: globToRegex(m[2]!) })
   })
   return rules
 }
@@ -46,9 +49,9 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${re}$`)
 }
 
-/** 第一条匹配到的规则算数；都不匹配时默认需要。 */
-export function needsE2E(path: string, rules: Rule[]): boolean {
-  return rules.find(r => r.regex.test(path))?.need ?? true
+/** 第一条匹配到的规则算数；都不匹配时默认要真实模型。 */
+export function e2eNeed(path: string, rules: Rule[]): Need {
+  return rules.find(r => r.regex.test(path))?.need ?? 'real'
 }
 
 /**
@@ -203,12 +206,18 @@ export function check(input: { body: string; changed: Change[]; rules: Rule[] })
     r.warnings.push(`这个 PR 改了检查规则或允许清单（${guards.join('、')}）。放宽规则要人批：独立审查核实，合并卡片上单独列出`)
   }
 
-  const needed = paths.filter(p => needsE2E(p, input.rules))
+  const list = (ps: string[]) => `${ps.slice(0, 10).join('、')}${ps.length > 10 ? ` 等 ${ps.length} 个文件` : ''}`
+  const needed = paths.filter(p => e2eNeed(p, input.rules) === 'real')
+  const ci = paths.filter(p => e2eNeed(p, input.rules) === 'ci')
   if (needed.length === 0) {
-    r.notes.push('改动没有碰到需要 E2E 的路径（.github/e2e-paths.txt），不要求「端到端验证」一节')
+    r.notes.push(
+      ci.length === 0
+        ? '改动没有碰到需要 E2E 的路径（.github/e2e-paths.txt），不要求「端到端验证」一节'
+        : `改动只碰到「确定性」的路径（${list(ci)}）：由 CI 的 e2e-fake-model 验证，不要求真实模型的 E2E 和「端到端验证」一节`,
+    )
     return r
   }
-  r.notes.push(`需要 E2E 的改动：${needed.slice(0, 10).join('、')}${needed.length > 10 ? ` 等 ${needed.length} 个文件` : ''}`)
+  r.notes.push(`需要真实模型 E2E 的改动：${list(needed)}`)
 
   const e2e = find(t => t.startsWith('端到端验证'))
   if (!e2e || e2e.content === '') {
