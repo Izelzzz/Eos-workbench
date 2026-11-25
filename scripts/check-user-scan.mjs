@@ -1,7 +1,8 @@
 // 由 check-user-probe.ts 在容器里运行：作为检查命令执行，报告这个进程能读到、能写、能切换到什么。
 // 输出一行 JSON。只报告找到的变量名和进程，不输出变量的值。
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 const WATCH = ['EOS_MASTER_KEY', 'DEEPSEEK_API_KEY']
 const status = readFileSync('/proc/self/status', 'utf8')
@@ -29,6 +30,9 @@ for (const pid of readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) 
 const tryRun = (cmd, args) => {
   try { execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] }); return 'ok' } catch (e) { return String(e.stderr ?? e.message).trim().split('\n')[0] }
 }
+const tryRename = (from, to) => {
+  try { renameSync(from, to); renameSync(to, from); return 'ok' } catch (e) { return e.code }
+}
 const tryWrite = (path, append = false) => {
   try { (append ? appendFileSync : writeFileSync)(path, ''); return 'ok' } catch (e) { return e.code }
 }
@@ -47,6 +51,8 @@ console.log(JSON.stringify({
   processes: procs.map(({ found: _found, ...p }) => p),
   switchToRoot: tryRun('setpriv', ['--reuid=0', '--regid=0', '--clear-groups', 'true']),
   switchToEos: tryRun('setpriv', ['--reuid=eos', '--regid=eos', '--clear-groups', 'true']),
+  // 把自己任务的 worktree 目录改名（在 worktrees 目录里改名，和替换别的任务的 worktree 需要同样的权限）。
+  renameWorktreeDir: worktreeFile === undefined ? 'skipped' : tryRename(dirname(worktreeFile), join(dirname(dirname(worktreeFile)), 'renamed-by-check')),
   writeTrackedFileInWorktree: worktreeFile === undefined ? 'skipped' : tryWrite(worktreeFile, true),
   writeOutsideWorktree: Object.fromEntries(forbidden.map(p => [p, tryWrite(p, true)])),
   readOutsideWorktree: Object.fromEntries(forbidden.map(p => [p, tryRead(p)])),

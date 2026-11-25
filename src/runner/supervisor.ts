@@ -268,7 +268,7 @@ export class Supervisor {
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
         // 检查命令（另一个用户）留下的进程平台杀不了，以那个用户去杀。
-        const byCheck = this.o.checkUser === undefined ? [] : killUserProcessesIn(this.o.checkUser, worktree)
+        const byCheck = this.o.checkUser === undefined ? [] : await killUserProcessesIn(this.o.checkUser, worktree)
         if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)

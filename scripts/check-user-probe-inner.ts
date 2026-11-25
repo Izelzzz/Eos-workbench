@@ -41,7 +41,8 @@ const gitCaps = execFileSync('git', ['-c', 'alias.caps=!grep -E "^Cap(Eff|Amb)" 
 
 const user = resolveCheckUser(process.env)
 if (user.kind !== 'ok') throw new Error(`EOS_CHECK_USER 没有设置好：${JSON.stringify(user)}`)
-const forbidden = [join(data, 'eos.db'), join(repo, 'a.txt'), '/home/eos/.bashrc']
+// worktrees 目录本身：检查命令在里面建不了、改不了名（否则能把别的任务的 worktree 换成符号链接）。
+const forbidden = [join(data, 'eos.db'), join(repo, 'a.txt'), '/home/eos/.bashrc', join(data, 'worktrees', 'made-by-check')]
 /** 扫描结果写到 out（检查命令通过时 runChecks 不带输出）。 */
 const scanArgs = (out: string) => ['sh', '-c', 'out="$1"; scan="$2"; shift 2; node "$scan" "$@" > "$out"', 'scan', out, SCAN, join(worktree, 'a.txt'), ...forbidden]
 
@@ -67,7 +68,7 @@ process.kill(-fakeDsh.pid!, 'SIGKILL')
 
 console.log(JSON.stringify({
   platform: { uid: process.getuid?.(), groups: process.getgroups?.(), caps: /^CapEff:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8'))?.[1] },
-  checkUser: user.user,
+  checkUser: user.user.name,
   // 平台给的 SIGTERM 直接到 dsh，退出时报的就是这个信号。
   realDsh: { ...realDsh, exitAfterSigterm: dshExit },
   gitCaps,

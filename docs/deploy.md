@@ -138,8 +138,8 @@ agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任
 | `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到 `eos` 和 root 进程的环境 | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
 - compose 去掉了全部能力，只加回 `SETUID`、`SETGID`。`eos` 命令以 root 启动，降到 `eos` 时把这两个能力带过去（ambient），平台用它们把检查命令切换到 `eos-check`；切换时清掉全部能力，检查命令切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
-- worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
-- 平台启动的、会运行仓库代码或第三方程序的进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs` 启动，git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。平台撤销越界改动时用的固定脚本（`sh`、`rm`、`find`）还带着。
+- worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。`/data/worktrees` 目录本身是 2755，组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接（独立审查发现的，`probe-report.json` 的 `renameWorktreeDir`）。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
+- 平台启动的、会运行仓库代码或第三方程序的进程不带这两个能力：dsh 经 `deploy/dsh-launch.mjs` 启动，git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。平台撤销越界改动时用的固定脚本（`sh`、`rm`、`find`）和 tsx 的 esbuild 服务进程还带着，它们不运行仓库里的代码。
 - 平台给 `eos-check` 的进程发不了信号：超时或中止时以 `eos-check` 的身份结束检查命令的进程组，撤销越界改动前以它的身份结束它留在 worktree 里的进程。
 - **还没做到的**：agent 和平台同一个用户，挡住它读平台进程环境的只有 Landlock。下一个 PR 让 dsh 以独立的用户 `eos-agent` 运行。
 

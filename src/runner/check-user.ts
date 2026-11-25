@@ -1,7 +1,7 @@
 // 检查命令用哪个系统用户运行（路线图第 3 项，ADR-006）。部署镜像里是 eos-check：
 // 它和平台、dsh 不是同一个用户，读不到它们进程环境（/proc/<pid>/environ）里的主密钥和模型 key。
 // 没有设置时检查命令和平台是同一个用户（本机开发时就是这样）。
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 
 export const CHECK_USER_ENV = 'EOS_CHECK_USER'
@@ -62,9 +62,26 @@ const KILL_IN_DIR = 'for p in /proc/[0-9]*; do c=$(readlink "$p/cwd" 2>/dev/null
 /**
  * 结束 user 的、工作目录在 dir 里的进程（检查命令留下的、脱离了进程组的后台进程），返回进程号。
  * 平台撤销越界改动之前调用，和 procs.ts 的 killProcessesIn 一起：那边只结束得了平台用户自己的进程。
+ * 异步：不在扫描 /proc 期间卡住 Web 服务。worktree 已经不在时什么都不做。
  */
-export const killUserProcessesIn = (user: CheckUser, dir: string): number[] => {
-  const [cmd, ...args] = asUser(user, ['sh', '-c', KILL_IN_DIR, 'sh', realpathSync(dir)])
-  const r = spawnSync(cmd!, args, { cwd: '/', encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 })
-  return (r.stdout ?? '').split('\n').filter(l => /^\d+$/.test(l)).map(Number)
+export const killUserProcessesIn = async (user: CheckUser, dir: string): Promise<number[]> => {
+  let real: string
+  try {
+    real = realpathSync(dir)
+  } catch {
+    return []
+  }
+  const [cmd, ...args] = asUser(user, ['sh', '-c', KILL_IN_DIR, 'sh', real])
+  const out = await new Promise<string>(done => {
+    let text = ''
+    const p = spawn(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'ignore'] })
+    const timer = setTimeout(() => p.kill('SIGKILL'), 10_000)
+    p.stdout.setEncoding('utf8').on('data', (c: string) => (text += c))
+    p.on('error', () => {})
+    p.on('close', () => {
+      clearTimeout(timer)
+      done(text)
+    })
+  })
+  return out.split('\n').filter(l => /^\d+$/.test(l)).map(Number)
 }

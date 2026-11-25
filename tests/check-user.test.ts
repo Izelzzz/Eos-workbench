@@ -65,7 +65,8 @@ test('leftover processes of the check user inside the worktree are killed as tha
   const path = process.env.PATH
   process.env.PATH = env.PATH
   try {
-    assert.deepEqual(killUserProcessesIn({ name: 'eos-check', gid: 10002, home: '/home/eos-check' }, w), [inside.pid])
+    assert.deepEqual(await killUserProcessesIn({ name: 'eos-check', gid: 10002, home: '/home/eos-check' }, w), [inside.pid])
+    assert.deepEqual(await killUserProcessesIn({ name: 'eos-check', gid: 10002, home: '/home/eos-check' }, join(w, 'gone')), [], 'a worktree that is gone is not an error')
   } finally {
     process.env.PATH = path
     outside.kill('SIGKILL')
