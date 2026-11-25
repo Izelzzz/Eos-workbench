@@ -140,7 +140,8 @@ const server = createServer((req, res) => {
     else if (ctl[1] === 'install') installed.push(q.get('repo')!)
     else if (ctl[1] === 'expire-user') for (const k of userTokens.keys()) userTokens.set(k, 0)
     else if (ctl[1] === 'deny-next') userControl.denyNext = true
-    else if (ctl[1] === 'slow-refresh') userControl.slowRefreshMs = Number(q.get('ms'))
+    // 延迟最多 5 秒：只给测试用，也不让一个请求把服务卡住太久。
+    else if (ctl[1] === 'slow-refresh') userControl.slowRefreshMs = Math.min(Math.max(Number(q.get('ms')) || 0, 0), 5000)
     else if (ctl[1] === 'fail-refresh') userControl.failRefresh = Number(q.get('times'))
     else if (ctl[1] === 'merge' && pr !== undefined) Object.assign(pr, { state: 'closed', merged_at: new Date().toISOString() })
     res.writeHead(204)

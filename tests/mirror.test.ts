@@ -1229,7 +1229,8 @@ test('用户授权：App 记下了注册时的回调地址，换了访问地址�
   const other = r.web.base.replace('127.0.0.1', 'localhost')
   const res = await fetch(`${other}/api/forge-apps/authorize`, { method: 'POST', headers: { origin: other, 'content-type': 'application/json' }, body: JSON.stringify({ name: r.name }) })
   assert.equal(res.status, 409)
-  assert.match((await res.json()).error, new RegExp(`用 ${r.web.base.replace(/[.]/g, '\\.')} 打开平台后再授权`))
+  const said = (await res.json()).error as string
+  assert.ok(said.includes(`用 ${r.web.base} 打开平台后再授权`), said)
 
   await r.authorize()
   const first = JSON.parse((r.credentials.get(LOCAL_OWNER, r.user) as { value: string }).value)
