@@ -100,7 +100,7 @@ test('gather：设置了检查命令的用户时真的切换一次；系统里�
   assert.deepEqual(f.checkUser, { kind: 'fail', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' })
   // 测试进程没有切换用户的能力（CI 和本机都不是带 SETUID 的平台进程）：探测要报失败，而不是当成能切换。
   if (process.getuid?.() !== 0) {
-    const g = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'ok', user: { name: 'nobody', home: '/nonexistent' } } })
+    const g = gather({ root: ROOT, dataDir: join(tmp(), 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'ok', user: { name: 'nobody', gid: 65534, home: '/nonexistent' } } })
     assert.equal(g.checkUser.kind, 'fail')
   }
 })

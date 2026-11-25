@@ -9,7 +9,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
-import type { CheckUser } from './check-user.ts'
+import { killUserProcessesIn, type CheckUser } from './check-user.ts'
 import { KILL_WAIT_MS, killProcessesIn } from './procs.ts'
 import type { Credentials } from '../credentials/store.ts'
 import { LOCAL_OWNER } from '../credentials/types.ts'
@@ -267,6 +267,9 @@ export class Supervisor {
         await this.o.executor.release(worktree)
         const killed = await killProcessesIn(worktree)
         if (killed.length > 0) log(`  结束了 ${killed.length} 个留在 worktree 里的进程：${killed.map(k => `${k.name}(${k.pid})`).join('、')}`)
+        // 检查命令（另一个用户）留下的进程平台杀不了，以那个用户去杀。
+        const byCheck = this.o.checkUser === undefined ? [] : killUserProcessesIn(this.o.checkUser, worktree)
+        if (byCheck.length > 0) log(`  结束了 ${byCheck.length} 个检查命令留在 worktree 里的进程：${byCheck.join('、')}`)
         const stuck = killed.filter(k => !k.exited)
         if (stuck.length > 0) log(`  （警告：${stuck.map(k => `${k.name}(${k.pid})`).join('、')} 被结束后等了 ${KILL_WAIT_MS / 1000} 秒还没退出，照常撤销越界改动）`)
       },

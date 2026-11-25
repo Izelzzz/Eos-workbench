@@ -119,7 +119,14 @@ try {
   const after = (await api(`/api/tasks/${id}`)).body
   const afterWorktree = inContainer(`git -C ${worktree} log --oneline -1 && ls /data`)
   const head = commits.out.trim().split('\n')[0]?.split(' ')[0] ?? ''
-  const scanned = scan?.code === 0 ? JSON.parse(scan.out.trim().split('\n').at(-1)!) : undefined
+  // 输出里混着别的行（例如 Node 的警告）时不让整个 E2E 在写报告之前崩掉：记成没有扫到，原始输出进报告。
+  const scanned = (() => {
+    try {
+      return scan?.code === 0 ? JSON.parse(scan.out.trim().split('\n').findLast(l => l.startsWith('{'))!) : undefined
+    } catch {
+      return undefined
+    }
+  })()
 
   const checks = {
     '容器里 eos doctor 没有 ✗': doctor.code === 0,

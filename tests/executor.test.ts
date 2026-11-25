@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { after, test } from 'node:test'
 import zlib, { zstdCompressSync } from 'node:zlib'
 import { parse as parseYaml } from 'yaml'
@@ -71,6 +72,15 @@ test('on this host the sandbox probe agrees with the backend dsh itself selects 
   const verdict = provider.chainVerdict()
   const dsh = verdict === 'unavailable' ? { backend: 'none' } : verdict.runner === 'landlock' ? { backend: 'landlock', enforcement: verdict.enforcement } : { backend: verdict.runner }
   assert.deepEqual(dshSandbox(), dsh)
+})
+
+test('the Landlock probe doctor uses is the same installed copy of node-addon-system that dsh\'s sandbox loads', () => {
+  // Eos 钉的是精确版本，dsh 的包写的是范围；两边解析出不同的版本时会装两份，doctor 探测的就不是 dsh 用的那份代码。
+  const ours = createRequire(join(import.meta.dirname, '..', 'package.json')).resolve('@deepseek-ai/node-addon-system/package.json')
+  for (const pkg of ['dsh-sandbox-local', 'dsh-bash-sandbox', 'dsh-session-persistence-jsonl']) {
+    const theirs = createRequire(createRequire(join(import.meta.dirname, '..', 'package.json')).resolve(`@deepseek-ai/${pkg}/package.json`)).resolve('@deepseek-ai/node-addon-system/package.json')
+    assert.equal(theirs, ours, pkg)
+  }
 })
 
 test('without the cache variables (running outside the image) nothing extra is passed, not even empty values', () => {

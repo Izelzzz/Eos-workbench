@@ -36,6 +36,9 @@ const viaCheckOut = join(worktree, 'scan-check.json')
 const [viaCheck] = await runChecks(worktree, [{ kind: 'run', run: scanArgs(viaCheckOut), timeoutSec: 30 }], process.env, undefined, undefined, user.user)
 const control = spawnSync('sh', scanArgs(join(data, 'scan-control.json')).slice(1), { encoding: 'utf8' })
 
+// 检查命令里跑 git：worktree 和它的 git 目录属于平台用户。
+const [gitCheck] = await runChecks(worktree, [{ kind: 'run', run: ['sh', '-c', 'git status --porcelain && git diff --check && git log --oneline -1'], timeoutSec: 30 }], process.env, undefined, undefined, user.user)
+
 // 超时：检查命令和它的子进程要被结束（平台不能直接给 eos-check 的进程发信号）。
 const started = Date.now()
 const [hung] = await runChecks(worktree, [{ kind: 'run', run: ['sh', '-c', 'sleep 300 & sleep 300'], timeoutSec: 2 }], process.env, undefined, undefined, user.user)
@@ -50,5 +53,6 @@ console.log(JSON.stringify({
   worktreeDir: mode(join(data, 'worktrees')), worktreeFile: mode(join(worktree, 'a.txt')),
   viaCheck: { result: viaCheck, scan: JSON.parse(readFileSync(viaCheckOut, 'utf8')), outputFile: mode(viaCheckOut) },
   control: { status: control.status, stderr: control.stderr, scan: JSON.parse(readFileSync(join(data, 'scan-control.json'), 'utf8')) },
+  gitCheck: { passed: gitCheck?.passed, detail: gitCheck?.detail },
   timeout: { passed: hung?.passed, detail: hung?.detail.split('\n')[0], ms: Date.now() - started, leftoverCheckUserProcesses: leftover === '' ? [] : leftover.split('\n') },
 }))

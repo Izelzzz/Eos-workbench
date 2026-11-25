@@ -4,7 +4,7 @@
 // 命令检查在 worktree 里执行仓库代码（例如 npm test 会跑 agent 改过的 package.json），和 CI runner 一样不在 agent 的沙箱里。
 // 所以只给它最小的环境变量，不传模型密钥等其它变量；部署镜像里还换成独立的用户运行（check-user.ts），
 // 读不到平台和 dsh 进程环境里的主密钥和模型 key。
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import type { CheckResult } from '../engine/types.ts'
@@ -23,10 +23,13 @@ export const PROXY_ENV = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_prox
 /** 设置了、但因为带账号密码没有传给检查命令的代理变量。 */
 export const droppedProxies = (env: NodeJS.ProcessEnv): string[] => PROXY_ENV.filter(k => env[k]?.includes('@') === true)
 
-/** 检查命令的环境。user 给定时 HOME 换成它的家目录（平台的家目录它写不了）。 */
+/**
+ * 检查命令的环境。user 给定时 HOME 换成它的家目录（平台的家目录它写不了）；
+ * worktree 和它的 git 目录属于平台用户，git 默认拒绝在别的用户的仓库里运行（dubious ownership），这里放行。
+ */
 export const checkEnv = (env: NodeJS.ProcessEnv, user?: CheckUser): NodeJS.ProcessEnv => ({
   ...Object.fromEntries([...KEEP_ENV, ...PROXY_ENV].flatMap(k => (env[k] === undefined || droppedProxies(env).includes(k) ? [] : [[k, env[k]]]))),
-  ...(user === undefined ? {} : { HOME: user.home }),
+  ...(user === undefined ? {} : { HOME: user.home, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: '*' }),
   CI: '1',
 })
 
@@ -96,7 +99,7 @@ const checkRun = (worktree: string, c: Extract<Check, { kind: 'run' }>, env: Nod
       // 别的用户的进程平台发不了信号（EPERM），以同一个用户去杀。进程组已经没有进程时 kill 报错，不用管。
       if (user !== undefined) {
         const [k, ...kargs] = asUser(user, ['kill', '-KILL', '--', `-${p.pid}`])
-        spawnSync(k!, kargs, { env: checkEnv(env, user), stdio: 'ignore', timeout: 5000 })
+        spawn(k!, kargs, { env: checkEnv(env, user), stdio: 'ignore' }).on('error', () => {})
         return
       }
       try {
