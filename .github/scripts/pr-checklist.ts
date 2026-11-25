@@ -70,7 +70,7 @@ export function sections(body: string): { title: string; content: string }[] {
 /** 决定 CI 查什么、放行什么的文件。PR 改它们就能放宽自己的检查，所以要醒目地提示。 */
 export function isGuardFile(path: string): boolean {
   return path === '.gitleaksignore' || path === '.gitleaks.toml' || path === '.github/e2e-paths.txt' ||
-    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/') || path.startsWith('.github/lint/')
+    path.startsWith('.github/workflows/') || path.startsWith('.github/scripts/') || path.startsWith('.github/lint/') || path.startsWith('.github/codeql/')
 }
 
 export type Result = { errors: string[]; warnings: string[]; notes: string[] }

@@ -1,6 +1,8 @@
 # CodeQL 代码扫描（JavaScript/TypeScript）。仓库是公开的，代码扫描免费。
-# 结果在仓库的 Security → Code scanning 页；PR 上由 GitHub 的「CodeQL」检查显示新出现的告警。
-# job 名字（codeql）会设成必需检查，改名前先改分支保护。见 docs/roadmap.md 的 CI 一项。
+# 结果在仓库的 Security → Code scanning 页。
+# 拦告警的是 GitHub 自动生成的「CodeQL」检查（或规则集里的 Code scanning results 规则）：有新告警时它变红。
+# 下面的 codeql-analyze job 只证明扫描跑完并上传了结果，有告警时它照样通过。
+# 设必需检查时两个都勾；改 job 名前先改分支保护。见 docs/roadmap.md 的 CI 一项。
 name: CodeQL
 
 on:
@@ -21,8 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  codeql:
-    name: codeql
+  codeql-analyze:
+    name: codeql-analyze
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
