@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { check, needsE2E, parseNameStatusZ, parseRules, sections, type Change } from './pr-checklist.ts'
+import { check, needsE2E, parseNameStatusZ, parseRules, sections, stripHtmlComments, type Change } from './pr-checklist.ts'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -142,4 +142,40 @@ test('真实 git 输出：中文文件名不被转义，删除记成 deleted；�
 test('表格里紧挨 | 的证据路径能取出来', () => {
   const r = check({ body: `${proof}\n## 端到端验证\n\n| 证据 |docs/e2e/b1/run.log|\n`, changed: ch('src/a.ts', 'docs/e2e/b1/run.log'), rules })
   assert.deepEqual(r.errors, [])
+})
+
+test('HTML 注释和 GitHub 渲染一致：嵌套、没闭合、空注释、代码里的 <!--', () => {
+  assert.equal(stripHtmlComments('a<!-- x -->b<!-- y -->c'), 'abc')
+  // 嵌套的只到第一个 -->，剩下的 --> 在 GitHub 上看得见
+  assert.equal(stripHtmlComments('<!--<!-- x -->-->'), '-->')
+  assert.equal(stripHtmlComments('<!-<!---->-'), '<!--')
+  // <!--> 和 <!---> 是空注释，后面照常显示
+  assert.equal(stripHtmlComments('- a <!--> b\n- c'), '- a  b\n- c')
+  assert.equal(stripHtmlComments('a<!--->b'), 'ab')
+  // 跨行注释
+  assert.equal(stripHtmlComments('a<!-- x\ny -->b\nc'), 'a\nb\nc')
+  // 没闭合：行首的藏到末尾，行中间的是普通文字
+  assert.equal(stripHtmlComments('a\n<!-- 待填\n## 标题'), 'a\n')
+  assert.equal(stripHtmlComments('见 a<!-- 待填\nb'), '见 a<!-- 待填\nb')
+  // 代码块和行内代码里的不算
+  assert.equal(stripHtmlComments('```html\n<!-- 示例\n```\nb'), '```html\n<!-- 示例\n```\nb')
+  assert.equal(stripHtmlComments('用 `<!--` 开头\nb'), '用 `<!--` 开头\nb')
+  // 去掉的注释里的反引号不影响后面：行首的是 HTML 块，块里不认行内代码；行中间的只数保留下来的反引号
+  assert.equal(stripHtmlComments('<!-- ` --> <!-- 待填 -->'), ' ')
+  assert.equal(stripHtmlComments('x<!-- ` -->y <!-- z -->'), 'xy ')
+  // 行内注释不能跨过空行
+  assert.equal(stripHtmlComments('见 a <!-- 这里\n\n## 标题\n- A --> B'), '见 a <!-- 这里\n\n## 标题\n- A --> B')
+  // HTML 块可以跨过空行
+  assert.equal(stripHtmlComments('<!-- a\n\nb -->c\nd'), '\nc\nd')
+})
+
+test('只有没闭合注释的一节算空的；代码块里写 <!-- 不影响后面的节', () => {
+  const hidden = check({ body: '## 能用证据证明的\n\n<!-- 待填\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
+  assert.ok(hidden.errors.some((e) => e.includes('能用证据证明的')), hidden.errors.join())
+  const fenced = check({ body: '## 能用证据证明的\n\n```html\n<!-- 示例\n```\n- ok\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(fenced.errors, [])
+  const tick = check({ body: '## 能用证据证明的\n\n<!-- ` --> <!-- 待填 -->\n## 证明不了的\n- x\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(tick.errors, ['「能用证据证明的」一节是空的'])
+  const para = check({ body: '## 能用证据证明的\n\n- 见 a <!-- 这里\n\n## 证明不了的\n- A --> B\n', changed: ch('docs/a.md'), rules })
+  assert.deepEqual(para.errors, [])
 })
