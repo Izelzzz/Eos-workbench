@@ -1,122 +1,175 @@
 # 用 Docker Compose 部署 Eos
 
-适合一个小团队共用一台服务器。设计和取舍见 [ADR-006](adr/006-docker-deployment.md)。
+本文面向在服务器上安装和维护 Eos 的人，说明怎样部署、访问、升级和备份。设计上的取舍不在本文，见 [ADR-006](adr/006-docker-deployment.md)。
 
-> **模型 key 对 agent 只靠沙箱挡住。** 平台、agent、检查命令是三个不同的用户（见「用户和权限」）：主密钥只在平台进程的环境里，agent 和检查命令都读不到（`docs/e2e/deploy-3c-agent-user/`）。模型 key 在 dsh 进程的环境里，检查命令读不到；agent 是 dsh 启动的，和 dsh 是同一个用户，读不到它靠的是 Landlock（见「沙箱」）。dsh 在沙箱外启动的 MCP 服务能读到模型 key。模型 key 请用额度受限的。
->
-> **没有登录。** 能打开 Eos 地址的人都能建任务、看所有 trace、在服务器的仓库上跑 agent。默认只监听服务器的 `127.0.0.1`，请保持这个默认，或者放在带认证的反向代理后面。登录是路线图第 7 项。
+## 部署前须知
+
+**宿主机要求**
+
+- Docker Engine 和 Compose v2。
+- Linux 内核 5.13 以上，并且启用了 Landlock：`cat /sys/kernel/security/lsm` 的输出里有 `landlock`。
+
+**安全注意事项**
+
+| 事项 | 要做的 |
+|---|---|
+| Eos 没有登录，能打开地址的人权限相同 | 不要把端口暴露到网络上，按「访问」一节的两种方式访问 |
+| 主密钥丢失后，存过的凭据只能重新录入 | 把 `.env` 里的 `EOS_MASTER_KEY` 另外备份一份 |
+| 能使用 docker 的宿主机用户能看到主密钥 | 只让可信的人加入 docker 组 |
+| 配置了 MCP 服务时，MCP 服务读得到模型 key；沙箱失效时 agent 也读得到 | 使用额度受限的模型 key |
+| 一个任务的 agent 能读服务器上所有仓库和所有任务的记录 | 只放入对全体使用者都可见的仓库 |
+| agent 访问网络不受限制 | 需要限制时在宿主机或 Docker 网络一层配置 |
 
 ## 启动
 
-需要 Docker Engine 和 Compose v2。宿主机内核要支持 Landlock（Linux 5.13 以上并启用了 landlock：`cat /sys/kernel/security/lsm` 的输出里要有 `landlock`），原因见下面的「沙箱」。
+1. 克隆仓库。
+
+   ```bash
+   git clone https://github.com/Izelzzz/Eos-workbench.git && cd Eos-workbench
+   ```
+
+2. 在同一目录创建 `.env`。这个文件不要提交。
+
+   ```bash
+   umask 077
+   cat > .env <<EOF
+   DEEPSEEK_API_KEY=<你的 key>
+   EOS_MASTER_KEY=$(openssl rand -base64 32)
+   EOF
+   ```
+
+3. 构建并启动。
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. 检查运行环境，各项应为 ✓。
+
+   ```bash
+   docker compose exec eos eos doctor
+   ```
+
+5. 按「访问」一节打开页面。
+
+**把模型 key 移到凭据页（可选）。** 启动后在 Web 的凭据页添加名为 `deepseek` 的凭据，再从 `.env` 删掉 `DEEPSEEK_API_KEY` 一行，执行 `docker compose up -d`。凭据页里有 `deepseek` 时，`.env` 里的 key 不再使用。
+
+**在容器里运行命令。** 平台的命令行是 `eos`（例如 `eos doctor`）。运行其他命令时加 `-u eos`：
 
 ```bash
-git clone https://github.com/Izelzzz/Eos-workbench.git && cd Eos-workbench
+docker compose exec -u eos eos git ...
 ```
-
-在同一目录建 `.env`，只给自己读。这个文件不要提交：
-
-```bash
-umask 077
-cat > .env <<EOF
-DEEPSEEK_API_KEY=<你的 key>
-EOS_MASTER_KEY=$(openssl rand -base64 32)
-EOF
-```
-
-```bash
-docker compose up -d --build
-```
-
-检查运行环境：
-
-```bash
-docker compose exec eos eos doctor
-```
-
-镜像里的 `eos` 命令就是平台的命令行（`eos web`、`eos doctor`……）。容器以 root 启动，`eos` 先降到平台用户再运行，见下面的「用户和权限」。在容器里运行别的命令时加 `-u eos`，以平台用户运行，例如 `docker compose exec -u eos eos git ...`。
-
-- 模型 key 先看凭据存储里名为 `deepseek` 的凭据，没有才用 `.env` 里的 `DEEPSEEK_API_KEY`。第一次启动要靠 `.env`。两边都没有时平台不会起来，compose 会一直重启它，`docker compose exec` 用不了；看原因用 `docker compose logs eos`，或 `docker compose run --rm eos eos doctor`。启动后可以在 Web 的凭据页添加 `deepseek`，再从 `.env` 删掉这一行并 `docker compose up -d`。
-- `EOS_MASTER_KEY` 是凭据存储的主密钥（ADR-005）。**弄丢了，存过的凭据只能重新录入**，请另外备份一份。它只以环境变量的形式进容器，不写进容器的文件系统。能用 docker 的宿主机用户可以用 `docker inspect` 或 `docker compose config` 看到它，所以这台服务器上 docker 组的成员要可信。
-- 「沙箱」一项报告 dsh 实际会用的沙箱：在这份 compose 下是 Landlock（镜像里装了 bwrap，但 Docker 默认权限下用不了）。两个都用不了时是 ✗，平台不启动。
-- 「检查命令的用户」一项真正切换一次到 `eos-check`。切换不过去（例如 compose 里去掉了 `cap_add`）时是 ✗，平台不启动：不会退回到用平台的用户运行检查命令。
-- 「凭据隔离」一项在这份 compose 下是 ✓：检查命令读不到主密钥和模型 key；agent 读不到主密钥，读不到模型 key 只靠沙箱（见顶部的警告）。
 
 ## 用发布的镜像
 
-不想在服务器上构建时，可以用 GitHub Actions 发布到 ghcr 的镜像（`.github/workflows/image.yml`），拉镜像不用登录：
+不在服务器上构建时，使用发布到 ghcr 的镜像。拉取不需要登录。
 
-| 标签 | 什么时候更新 |
+### 可用的标签
+
+| 标签 | 更新时机 |
 |---|---|
-| `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时，例如 `v0.1.0` 发布 `0.1.0` |
-| `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-` 的）。给旧版本补发修订版时它也会指过去；一次推送多个正式版标签时，指向哪个不确定 |
-| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main。连续合并时只有 main 分支最新的那个提交会推它；它的构建失败时 `main` 不更新，停在上一个推成功的提交 |
-| `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main，不会被覆盖 |
+| `ghcr.io/izelzzz/eos-workbench:<版本号>` | 推送 `v<版本号>` 标签时。例如 `v0.1.0` 发布 `0.1.0` |
+| `ghcr.io/izelzzz/eos-workbench:latest` | 最近一次推送的正式版标签（版本号里没有 `-`）。给旧版本补发修订版时它也会指向那个修订版；一次推送多个正式版标签时，指向哪一个不确定 |
+| `ghcr.io/izelzzz/eos-workbench:main` | 每次合并到 main。连续合并时只有最新的提交会推送；构建失败时不更新，停在上一个成功的提交 |
+| `ghcr.io/izelzzz/eos-workbench:sha-<短提交号>` | 每次合并到 main。不会被覆盖 |
 
-仍然需要克隆仓库：要用里面的 `compose.yaml`。在 `.env` 里加一行，指定镜像：
+建议使用具体的版本号或 `sha-` 标签，不使用 `latest`、`main`。
 
-```bash
-echo 'EOS_IMAGE=ghcr.io/izelzzz/eos-workbench:0.1.0' >> .env
-docker compose pull
-docker compose up -d --no-build
-```
+### 步骤
 
-- 推荐写具体的版本号或 `sha-` 标签，不写 `latest`、`main`：升级是你自己决定的，回退时也知道退到哪个。
-- `--no-build`：不要在本地构建。不加时，`docker compose up --build` 会用本地的代码构建，并打上 ghcr 的标签，盖掉拉下来的镜像。
-- 仓库的代码和镜像的版本尽量一致（`git checkout v0.1.0`）：`compose.yaml` 里的能力、tmpfs 等设置是和镜像一起改的。
-- 用了派生镜像（见「执行器环境」）时，`compose.override.yaml` 里的 `image:` 会盖掉 `EOS_IMAGE`，`EOS_IMAGE` 不起作用。把 `Dockerfile.team` 的 `FROM` 改成发布的标签，例如 `FROM ghcr.io/izelzzz/eos-workbench:0.1.0`，然后 `docker compose build --pull && docker compose up -d`。
+1. 克隆仓库（需要其中的 `compose.yaml`），并检出和镜像一致的版本，例如 `git checkout v0.1.0`。
+2. 按「启动」第 2 步创建 `.env`，再加一行指定镜像：
 
-**升级**：先备份（见「数据和升级」），改 `.env` 里的 `EOS_IMAGE`，再执行 `docker compose pull && docker compose up -d --no-build`。**回退**：把 `EOS_IMAGE` 改回原来的标签，执行同样的命令。用派生镜像时改的是 `Dockerfile.team` 的 `FROM`，执行 `docker compose build --pull && docker compose up -d`。数据卷不动；升级后如果数据已经被新版本改过（例如 dsh 目录的迁移），回退前先恢复升级前的备份。
+   ```bash
+   echo 'EOS_IMAGE=ghcr.io/izelzzz/eos-workbench:0.1.0' >> .env
+   ```
+
+3. 拉取并启动。使用 `--no-build`，不要使用 `--build`：`--build` 会用本地代码构建并覆盖拉下来的镜像。
+
+   ```bash
+   docker compose pull
+   docker compose up -d --no-build
+   ```
+
+### 升级和回退
+
+升级前先备份（见「备份」）。
+
+| 操作 | 步骤 |
+|---|---|
+| 升级 | 把 `.env` 里的 `EOS_IMAGE` 改成新标签，执行 `docker compose pull && docker compose up -d --no-build` |
+| 回退 | 把 `EOS_IMAGE` 改回原标签，执行同样的命令 |
+
+- 升级和回退都保留数据卷。
+- 新版本启动时可能修改数据（例如迁移目录）。发生这种情况后要回退的，先恢复升级前的备份。
+- 同时使用派生镜像时，步骤不同，见「增加系统依赖」。
 
 ## 访问
 
-平台在容器里监听 `0.0.0.0:4317`，compose 只把它映射到服务器的 `127.0.0.1:4317`。
+平台只监听服务器的 `127.0.0.1:4317`。有两种访问方式。
 
-**SSH 隧道（默认）。** 在自己的电脑上运行下面的命令，然后打开 http://localhost:4317：
+### SSH 隧道（默认）
+
+在自己的电脑上执行下面的命令，然后打开 http://localhost:4317 。
 
 ```bash
 ssh -N -L 4317:127.0.0.1:4317 <服务器>
 ```
 
-本地端口要和容器里的端口一样是 4317。换成别的本地端口时，浏览器发的 Host 是 `localhost:<那个端口>`，平台会拒绝（421）。这种情况把 `.env` 里的 `EOS_PUBLIC_URL` 设成 `http://localhost:<那个端口>`。
+本地端口必须是 4317。要用别的本地端口时，把 `.env` 里的 `EOS_PUBLIC_URL` 设为 `http://localhost:<那个端口>`，再执行 `docker compose up -d`。
 
-**反向代理（需要用域名访问时）。** 代理负责 HTTPS 和认证（例如 SSO 或 basic auth），转发到服务器的 `127.0.0.1:4317`。在 `.env` 里设置：
+### 反向代理（用域名访问）
 
-```
-EOS_PUBLIC_URL=https://eos.example.com
-```
+代理负责 HTTPS 和认证（例如 SSO 或 basic auth），转发到服务器的 `127.0.0.1:4317`。
 
-代理必须把原始 Host 传过来。nginx 的配置：
+1. 在 `.env` 里设置外部地址，执行 `docker compose up -d`。
 
-```nginx
-location / {
-  proxy_pass http://127.0.0.1:4317;
-  proxy_set_header Host $http_host;
-}
-```
+   ```
+   EOS_PUBLIC_URL=https://eos.example.com
+   ```
 
-没有传原始 Host 时，页面能打开，但所有写操作都会被拒绝（403），提示里会写明原因。
+2. 配置代理传递原始 Host。nginx 的配置：
 
-**不要**把 compose 的端口改成 `0.0.0.0:4317` 或 `4317:4317`。这样整个网络都能访问，而且非浏览器客户端可以伪造 Host 绕过检查。
+   ```nginx
+   location / {
+     proxy_pass http://127.0.0.1:4317;
+     proxy_set_header Host $http_host;
+   }
+   ```
+
+### 不要直接暴露端口
+
+不要把 `compose.yaml` 的端口改成 `0.0.0.0:4317` 或 `4317:4317`。
 
 ## 仓库放在哪里
 
-每个任务在 `/data/worktrees/<任务id>` 建自己的 worktree 和分支 `eos/<任务id>`。新建任务时，「仓库」一栏填下面两种之一：
+新建任务时「仓库」一栏有两种填法。
 
-- **GitHub 地址**（`https://github.com/<owner>/<repo>`）：平台自己克隆到 `/data/repos/github.com/<owner>/<repo>.git`，在默认分支的最新提交上建分支。私有仓库要先在 Web 的凭据页添加名字为 `github.com` 的 Git 令牌（需要设置 `EOS_MASTER_KEY`）。令牌只由平台的 git 进程使用，不进数据目录。推分支和开 PR 是路线图第 2 项后面的 PR。
-- **容器里的路径**：自己先克隆进去。为了不和平台的镜像混在一起，建议放在 `/data/repos/local/` 下：
+### GitHub 地址
 
-  ```bash
-  docker compose exec -u eos eos sh -c 'umask 022 && git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>'
-  ```
+填 `https://github.com/<owner>/<repo>`，平台自己克隆。
 
-  `-u eos`：以 root 克隆的话，平台写不了这个仓库。`umask 022`：`docker compose exec` 起的进程 umask 是 0，不设的话克隆出来的文件人人可写，检查命令也能改。不要把令牌写进这种仓库的 remote URL：agent 能读整个 `/data`（见下面的「沙箱」）。
+访问私有仓库前，先完成下面两项：
+
+1. `.env` 里设置了 `EOS_MASTER_KEY`。
+2. 在 Web 的凭据页添加名为 `github.com` 的 Git 令牌。
+
+### 容器里的路径
+
+先把仓库克隆进容器，新建任务时填它的路径。建议放在 `/data/repos/local/` 下。
+
+```bash
+docker compose exec -u eos eos sh -c 'umask 022 && git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>'
+```
+
+- `-u eos` 和 `umask 022` 都不能省。
+- 不要把令牌写进 remote URL。
 
 ## 执行器环境
 
-### 镜像里有什么
+agent 运行任务时使用的就是这个镜像。
 
-agent 跑任务时的环境，就是这个镜像：
+### 镜像里有什么
 
 | 内容 | 版本 | 检查 |
 |---|---|---|
@@ -127,88 +180,115 @@ agent 跑任务时的环境，就是这个镜像：
 | 编译 | build-essential（gcc、make）、pkg-config | `printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' \| gcc -x c - -o /tmp/probe-c && /tmp/probe-c`、`printf '#include <vector>\nint main(){return std::vector<int>{0}[0];}\n' \| g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx`、`make --version`、`pkg-config --version` |
 | 其他 | git、ca-certificates、bubblewrap | `git --version`、`test -s /etc/ssl/certs/ca-certificates.crt`、`bwrap --version` |
 
-「检查」一列是 CI 的依赖探针（`.github/scripts/image-probe.ts`）在构建好的镜像里以 agent 的用户（`eos-agent`）、断网逐条运行的命令，每条的退出码都必须是 0。探针执行的是 `.github/scripts/image-probe-checks.json` 里的同一份清单，这张表给人看，`tests/image-probe.test.ts` 核对两边一致：改检查时两处一起改。探针用的是镜像本身的环境，不经过 dsh：dsh 的环境白名单和沙箱（只能写 worktree 和 `/tmp`）另有测试和实测（`tests/agent-env-contract.test.ts`、`docs/e2e/deploy-2-image/sandbox/`）。
+「检查」一列是 CI 验证镜像时运行的命令（清单在 `.github/scripts/image-probe-checks.json`，修改时两处同时修改）。
 
-### 依赖和别的工具
+### 安装项目依赖
 
-平台自己的 `/app` 里没有 typescript（只用来做类型检查的开发依赖，它带的编译器二进制有漏洞），所以在容器里的 `/app` 下跑 `npm run typecheck` 会报 `tsc: not found`；类型检查在 CI 和开发机上做。任务仓库自己的 typescript 照常装进 worktree，不受影响。
+项目自己的依赖由 agent 安装在任务的工作目录里，不需要部署方操作。支持：
 
-agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任务时装不了系统包**（`apt-get` 会失败）。
+- `npm install`
+- `pnpm install`
+- `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 
-- **项目自己的依赖**照常装进 worktree：`npm install`、`pnpm install`、`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。在沙箱里实测过这三种（`docs/e2e/deploy-2-image/sandbox/deps-probe.json`）。
-- 包管理器的缓存在 `/tmp/cache`（npm、pip、corepack），因为家目录在沙箱里不可写。`/tmp` 是 tmpfs（默认上限 4g），重启容器后缓存清空，依赖和 pnpm、yarn 会重新下载。
-- 别的工具如果要写家目录，在沙箱里会失败，需要用它自己的环境变量把缓存或配置指到 worktree 或 `/tmp` 下。例如需要编译原生模块的 npm 包（node-gyp 要写 `~/.cache/node-gyp`）：在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp`（实测能传到安装脚本，但 npm 11 会警告这个配置项下个大版本不再支持）。镜像没有统一设 `XDG_CACHE_HOME`，因为 dsh 自己（在沙箱外）也按它找缓存目录。
-- **需要别的系统依赖**（某个版本的 Python、Go、Java、系统库）时，写一个基于 Eos 镜像的 Dockerfile，例如 `Dockerfile.team`：
+注意：
 
-  ```dockerfile
-  FROM eos-workbench:local
-  RUN apt-get update && apt-get install -y --no-install-recommends golang-go libpq-dev && rm -rf /var/lib/apt/lists/*
-  ```
+- agent 不能安装系统包（`apt-get` 会失败）。需要系统包时见「增加系统依赖」。
+- 依赖缓存在 `/tmp/cache`。`/tmp` 的上限是 4g，重启容器后清空，依赖会重新下载。
+- 要往家目录写缓存或配置的工具会失败，需要用它自己的配置把位置指到任务的工作目录或 `/tmp` 下。例如编译原生模块的 npm 包，在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp`。
 
-  不要加 `USER eos`：容器要以 root 启动，`eos` 命令才能降到平台用户、并带上切换到 `eos-check` 的能力（见「用户和权限」）。
+### 增加系统依赖
 
-  再写一个 `compose.override.yaml`（compose 会自动读它），给派生镜像一个**不同的标签**：
+需要镜像里没有的系统依赖（特定版本的 Python、Go、Java、系统库）时，使用派生镜像。
 
-  ```yaml
-  services:
-    eos:
-      build: { context: ., dockerfile: Dockerfile.team }
-      image: eos-workbench:team
-  ```
+1. 编写 `Dockerfile.team`。不要加 `USER eos`。
 
-  第一次部署和每次升级都要先建基础镜像，再建派生镜像，见下面的「升级」。派生镜像沿用 `eos-workbench:local` 这个标签的话，它会盖掉基础镜像，以后升级拿不到新的 Eos 代码。
+   ```dockerfile
+   FROM eos-workbench:local
+   RUN apt-get update && apt-get install -y --no-install-recommends golang-go libpq-dev && rm -rf /var/lib/apt/lists/*
+   ```
 
-- agent 访问网络不受限制（拉依赖要用到）。需要限制出网时，在宿主机或 Docker 网络这一层做。
-- **检查命令**（工作流里的 `npm test` 等，由平台在沙箱外运行）以 `eos-check` 运行，只拿到最少的环境变量：`PATH`、语言和时区、`CI=1`，`HOME` 是 `/home/eos-check`（npm 等的缓存在这里，各任务的检查命令共用）。另外传证书和代理设置（`NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`、`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY` 及小写形式、`NODE_USE_ENV_PROXY`），服务器经代理上网时联网的检查（`npm install` 等）也能跑。**代理地址带账号密码（`http://user:pass@...`）时不传**：检查命令跑的是 agent 改过的代码，会把账号密码带出去。这时 `eos doctor` 有一条 ⚠，联网的检查会失败。agent 那一边（dsh 的环境）现在还拿得到完整的代理地址，下一个 PR 按同样的规则收紧。
+2. 编写 `compose.override.yaml`（compose 会自动读取这个文件）。镜像标签不能是 `eos-workbench:local`。
+
+   ```yaml
+   services:
+     eos:
+       build: { context: ., dockerfile: Dockerfile.team }
+       image: eos-workbench:team
+   ```
+
+3. 先构建基础镜像，再构建派生镜像并启动。
+
+   ```bash
+   docker compose -f compose.yaml build
+   docker compose up -d --build
+   ```
+
+**和发布的镜像一起用。** 此时 `.env` 里的 `EOS_IMAGE` 不起作用。
+
+1. 把 `Dockerfile.team` 的 `FROM` 改成发布的标签，例如 `FROM ghcr.io/izelzzz/eos-workbench:0.1.0`。
+2. 执行 `docker compose build --pull && docker compose up -d`。
+3. 升级和回退时修改 `FROM` 里的标签，执行同样的命令。
+
+### MCP 服务
+
+- 把 MCP 服务安装进派生镜像，在 Agent 模板里写它的绝对路径。
+- 不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类下载后立即运行的命令启动 MCP 服务。
+
+### 服务器经代理上网
+
+`compose.yaml` 默认不把代理和证书变量传进容器。需要时在 `compose.override.yaml` 里加上，再执行 `docker compose up -d`：
+
+```yaml
+services:
+  eos:
+    environment:
+      HTTPS_PROXY: http://proxy.example.com:3128
+      HTTP_PROXY: http://proxy.example.com:3128
+      NO_PROXY: localhost,127.0.0.1
+```
+
+支持的变量：`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY`、`NODE_USE_ENV_PROXY`、`NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`。平台把它们传给 agent 和检查命令（工作流里的 `npm test` 等）。
+
+构建镜像的机器在会解开 TLS 的代理后面时，构建时传入代理的根证书：`docker build --secret id=extra_ca,src=<证书> .`
+
+- 代理地址带账号密码（`http://user:pass@...`）时，不会传给检查命令，其中联网的步骤会失败，`eos doctor` 给出一条 ⚠。
+- 带账号密码的代理地址仍会传给 agent。
 
 ## 用户和权限
 
-容器里有四个用户（ADR-006）：
+容器以 root 启动，然后切换到三个普通用户运行：
 
-| 用户 | 运行什么 | 能读 | 能写 |
-|---|---|---|---|
-| root | 只有 1 号进程（`docker-init`），以及 `docker compose exec` 不加 `-u` 时的命令 | 只有 `SETUID`、`SETGID`、`KILL` 三个能力，读写不了别的用户的文件 | 同左 |
-| `eos` | 平台、git；平台进程自己带着 `SETUID`、`SETGID`、`KILL` | `/data` 全部（dsh 的会话日志以 `eos-agent` 的身份读）、自己进程的环境（主密钥） | `/data` 全部，`/data/dsh` 里 dsh 自己建的 0700 目录除外 |
-| `eos-agent` | dsh、agent、dsh 启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、dsh 进程的环境（模型 key；agent 在 Landlock 里读不到）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；agent 在 Landlock 里只能写自己的 worktree 和 `/tmp` |
-| `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
+| 用户 | 运行什么 |
+|---|---|
+| `eos` | 平台 |
+| `eos-agent` | agent |
+| `eos-check` | 检查命令 |
 
-- compose 去掉了全部能力，只加回 `SETUID`、`SETGID`、`KILL`。`eos` 命令以 root 启动，降到 `eos` 时把这三个能力带过去（ambient）：平台用前两个把检查命令切换到 `eos-check`、把 dsh 切换到 `eos-agent`，用 `KILL` 给它们的进程发信号（关掉 dsh、结束超时的命令）。切换时清掉全部能力，它们切换不回 `eos` 或 root。`no-new-privileges` 照常生效。
-- dsh 的数据目录 `/data/dsh` 属于 `eos`、组 `eos-dsh`、3770（带 sticky 位）：dsh 在里面写会话日志等自己的目录。平台自己的两个目录 `eos-profiles/`（能力面）、`eos-process-cwd/`（dsh 进程的工作目录）在启动时建好，2755，`eos-agent` 只能读；sticky 位让它改不了名、删不掉这两个目录，平台写之前也核对它们不是符号链接。MCP 服务的工作目录 `mcp-cwd/` 属于 `eos-agent`（MCP 服务要在里面写缓存、日志），平台不往里写。升级后留下的旧 `profiles/<指纹>/`、`process-cwd/` 不再使用，可以删掉（它们属于 `eos-agent`：`docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd`）。否则 dsh 起的 MCP 服务能把它们换成链接，让平台顺着链接覆盖 `eos.db` 等文件（独立审查实测过）。dsh 建的会话目录是 0700，只有 `eos-agent` 能读，平台以 `eos-agent` 的身份读（`src/cli.ts` 的 `readSessionLogAs`）。检查命令不在 `eos-dsh` 里，进不了这个目录。
-- worktree 归共用组 `eos-work`（`/data/worktrees` 带 setgid，平台的 umask 是 002），检查命令能写 agent 改过的文件。`/data/worktrees` 目录本身是 2755，组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接（独立审查发现的，`probe-report.json` 的 `renameWorktreeDir`）。升级前建的 worktree 在第一次启动时改成这个组（`/data/.worktrees-group` 是做过的标记）。
-- 平台启动的、会运行仓库代码或第三方程序的进程不带这三个能力：dsh 经 `deploy/dsh-launch.mjs` 启动（清掉能力并切换到 `eos-agent`），git 经 `/usr/local/bin/git`（`deploy/git`），都先用 `setpriv` 清掉全部能力。所以 agent、dsh 在沙箱外启动的 MCP 服务、git 都切换不了用户。平台撤销越界改动时用的 `sh`、`rm`、`find` 也先清掉能力（`docs/e2e/deploy-3c-agent-user/without-caps.txt`）。还带着能力的只有 Landlock 探测（doctor 起一次 node-addon-system 自带的程序）和 tsx 的 esbuild 服务进程（编译平台自己的源码），它们都不碰 worktree，也不运行仓库里的代码。
-- 平台读不到别的用户进程的工作目录：撤销越界改动前，以 `eos-check`、`eos-agent` 的身份找出并结束它们留在 worktree 里的进程。
-- 平台提交、撤销越界改动之前（以及检查命令跑完之后），以 `eos-agent`、`eos-check` 的身份把它们在 worktree 里建的文件改回 worktree 的组、开放组读写。dsh 写文件时经过一个 `chmod 0700` 的临时目录，文件会落在 `eos-agent` 自己的组里、权限 0600，不这样做平台读不了（第一次部署 E2E 就失败在这里，`deploy-e2e-1-failed-report.json`）。
-- **升级**：之前的版本里 dsh 以 `eos` 运行，`/data/dsh` 里的文件属于 `eos`。新版本第一次启动平台时，以 `eos-agent` 的身份把它复制一份（不复制 `.credentials.yaml`，dsh 会重新生成，里面是 dsh 自己的浏览器会话授权），旧的改名为 `/data/dsh.before-agent`。进行中的任务能续接原来的 dsh 会话（`docs/e2e/deploy-3c-agent-user/`）。确认任务都正常后可以删掉 `dsh.before-agent`。`/data/.dsh-agent` 是做过的标记。迁移在最后两步之间被打断时（`/data/dsh` 不在、`/data/dsh.agent-new` 在），除了 `eos doctor`，`eos` 的命令（启动平台、`run`、`resume` 等）都不运行并提示：手工运行 `docker compose run --rm -u eos eos mv /data/dsh.agent-new /data/dsh` 再 `docker compose up -d`。
-- **还没做到的**：agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 只靠 Landlock；dsh 在沙箱外启动的 MCP 服务读得到它。
+部署方需要遵守：
 
-## 沙箱
+- 不要删除 `compose.yaml` 里的 `cap_add`（`SETUID`、`SETGID`、`KILL`）。删除后平台不启动。
+- 派生镜像里不要加 `USER eos`。
+- 在容器里手工运行命令时加 `-u eos`。
 
-- dsh 用 Landlock 限制 agent 的写入范围：只能写自己任务的 worktree 和 `/tmp`，写不了别的任务和数据目录，也读不到别的进程的环境（模型 key、主密钥）。实测记录在 `docs/e2e/deploy-2-image/sandbox/`。
-- **模型 key 在 dsh 进程的环境里**（这一版 dsh 只能这样拿到 key）。在实测过的配置下（本镜像、这份 compose、内核 6.18），Landlock 挡住了 agent 读 dsh 和平台进程的 `/proc/<pid>/environ`（`docs/e2e/deploy-2-image/sandbox/modelkey-probe.json`）。**Landlock 没有生效时**，例如内核不支持、或者用别的方式运行没有走沙箱，同一用户的 agent 就能读到模型 key。换了宿主机内核时，请用这个探针重新确认。
-- **Landlock 只限制写，不限制读。** agent 能读整个 `/data`：别的任务和别的成员的 worktree、`/data/repos` 下所有仓库、`eos.db`（所有任务的 trace）、`/data/dsh` 的会话日志。放进这台服务器的仓库和任务，对所有任务的 agent 都是可见的。
-- 镜像里装了 bubblewrap，但在 Docker 默认权限下用不了。要用它就得放宽容器的 seccomp 和 `/proc` 屏蔽，所以没有这样做（见 ADR-006）。
-- 宿主机内核没有 Landlock 时，dsh 会拒绝执行命令，任务会失败，不会不受限制地运行。`eos doctor` 的「沙箱」一项会真正探测一次（bwrap 按 dsh 的参数起一次，Landlock 真正施加一次规则），都用不了时报 ✗。它不检查 dsh 本身能不能启动：doctor 全是 ✓ 时，任务仍可能在第一步失败（部署 E2E 第一次运行就遇到过，见 `docs/e2e/deploy-2-image/README.md`）。
-- 和 bwrap 相比的差别：
-  - 同一个容器里的任务共用 `/tmp`（tmpfs），而且都能写：能读到别的任务的临时文件和 dsh 的输出暂存文件（`/tmp/dsh-spill-*`）；也能改共享的依赖缓存，一个任务的 agent 往缓存里放的东西，会被下一个任务用到。npm 按 lockfile 里的 hash 校验包，pip 的缓存和 corepack 下载的 pnpm、yarn 没有这种校验。
-- **MCP 服务不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类「现下载现运行」的命令启动。** MCP 服务跑在沙箱外，并继承 dsh 的环境，包括上面这几个缓存目录；用这类命令启动时，它可能运行 agent 放进缓存里的代码。把 MCP 服务装进派生镜像（见「执行器环境」），在模板里写它的绝对路径。
-  - agent 能看到进程列表。
-- agent 能写 `/tmp`，所以平台和 dsh 会加载的缓存都不放在那里：镜像关掉了 tsx 的编译缓存和 Node 的字节码缓存，dsh 的 native 模块缓存放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`）。检查命令是例外：它的环境里没有关字节码缓存的开关，npm 会在 `/tmp/node-compile-cache` 留下缓存（属于 `eos-check`），之后的检查命令会加载它。检查命令本来就在沙箱外运行 agent 改过的代码，所以这不会让 agent 多拿到权限。`/tmp` 挂成可执行，是为了 agent 跑测试和编译时能执行自己生成的文件。
+各用户能读写什么，见 ADR-006。
 
 ## 数据和升级
 
-所有数据都在命名卷 `eos-data`（容器里的 `/data`）：
+### 数据在哪里
+
+所有数据都在命名卷 `eos-data`，即容器里的 `/data`。
 
 | 路径 | 内容 |
 |---|---|
 | `eos.db`（和 `-wal`、`-shm`） | 任务、事件、trace、约定、改进提案、加密的凭据 |
-| `dsh/` | dsh 的会话日志（续跑和回放 trace 要用） |
-| `worktrees/` | 每个任务的 worktree |
-| `repos/` | 克隆的仓库：平台维护的 GitHub 镜像在 `repos/github.com/` 下，自己克隆的放在 `repos/local/` 下 |
-| `git-home/` | 平台访问远程仓库时 git 用的空 HOME（不读宿主机或镜像里的 git 全局配置） |
+| `dsh/` | agent 的会话日志（续跑和回放 trace 要用） |
+| `worktrees/` | 每个任务的工作目录 |
+| `repos/` | 克隆的仓库：平台克隆的在 `repos/github.com/` 下，自行克隆的在 `repos/local/` 下 |
+| `git-home/` | 平台运行 git 时使用的空 HOME |
 | `logs/` | `eos.log` 和每个任务的日志 |
 | `locks/` | 任务锁 |
 
-**备份**。先停下来，保证 SQLite 文件一致。`--volumes-from` 按容器找卷，不用知道卷名：
+### 备份
 
 ```bash
 docker compose stop
@@ -216,7 +296,9 @@ docker run --rm --volumes-from "$(docker compose ps -aq eos)" -v "$PWD":/backup 
 docker compose start
 ```
 
-**恢复**。`down -v` 会删掉现在的数据卷，先确认备份文件完好（`tar tzf <备份>` 能列出 `eos.db`）：
+### 恢复
+
+`down -v` 会删除现有的数据。执行前先确认备份文件完好：`tar tzf <备份文件>` 能列出 `eos.db`。
 
 ```bash
 docker compose down -v && docker compose create
@@ -224,21 +306,51 @@ docker run --rm --volumes-from "$(docker compose ps -aq eos)" -v "$PWD":/backup 
 docker compose start
 ```
 
-这两组命令实测过，文件属主会保留（`docs/e2e/deploy-2-image/backup-restore.txt`）。
+### 升级
 
-**升级**：
+本节适用于在服务器上构建镜像的部署。使用发布的镜像时按「用发布的镜像」里的步骤升级，不要用这组命令。
+
+1. 备份。
+2. 执行：
+
+   ```bash
+   git pull
+   docker compose -f compose.yaml build
+   docker compose up -d --build
+   ```
+
+- 升级保留数据卷。
+- 没有运行完的任务在新容器启动后自动继续。
+
+### 从旧版本升级后的清理
+
+适用于从「agent 和平台同一个用户」的旧版本升级上来的部署。新版本第一次启动时自动迁移 `/data/dsh`，进行中的任务能继续。
+
+确认任务正常后，可以删除迁移留下的目录：
 
 ```bash
-git pull
-docker compose -f compose.yaml build
-docker compose up -d --build
+docker compose run --rm -u eos eos rm -rf /data/dsh.before-agent
+docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd /data/dsh/profiles
 ```
 
-用发布的镜像（`.env` 里设了 `EOS_IMAGE`）时不要用这组命令，见「用发布的镜像」的升级步骤：`--build` 会用本地的代码构建，盖掉拉下来的镜像。
+备份目录的名字也可能是 `/data/dsh.before-agent-<时间戳>`，用 `docker compose run --rm -u eos eos ls /data` 查看。
 
-- 第二行只重建 Eos 的基础镜像。用了派生镜像（`compose.override.yaml`）时必须先跑它，否则派生镜像会建在旧的基础镜像上；没有派生镜像时它和第三行重复，没有坏处。
-- 换的只是容器，卷不动。升级前先备份。
-- 没跑完的任务会在新容器启动后自动接着跑，已完成的调用不会重发。
-- 数据库现在没有迁移：建表都是 `CREATE TABLE IF NOT EXISTS`，没有改表的语句。以后有不兼容的变更，会在发布说明里写迁移步骤。
+### 删除全部数据
 
-**删除全部数据**：`docker compose down -v`。不可恢复。
+`docker compose down -v`。不可恢复。
+
+## 排查问题
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 容器不断重启，`docker compose exec` 不可用 | 平台没能启动。常见原因是 `.env` 和凭据页都没有模型 key | 用 `docker compose logs eos` 或 `docker compose run --rm eos eos doctor` 查看原因。缺模型 key 时补上 `DEEPSEEK_API_KEY`，再执行 `docker compose up -d` |
+| 日志里有「切换不到平台用户 eos」，容器不断重启 | `compose.yaml` 里的 `cap_add` 被去掉或不全 | 恢复 `cap_add`（`SETUID`、`SETGID`、`KILL`） |
+| `eos doctor` 的「沙箱」为 ✗ | 宿主机内核不支持 Landlock | 换用 5.13 以上并启用 Landlock 的内核 |
+| `eos doctor` 的「检查命令的用户」为 ✗ | 平台不是以 root 启动的，例如派生镜像里加了 `USER eos` | 去掉派生镜像里的 `USER eos` |
+| `eos doctor` 全部为 ✓，任务在第一步失败 | doctor 不检查 agent 的运行时能否启动 | 查看任务页的日志 |
+| 浏览器返回 421 | SSH 隧道的本地端口不是 4317；或者用域名访问但 `EOS_PUBLIC_URL` 没有设置、和域名不一致 | 隧道改用 4317，或把 `EOS_PUBLIC_URL` 设成浏览器里实际使用的地址（见「访问」） |
+| 页面能打开，写操作返回 403 | 反向代理没有传递原始 Host | 按「反向代理」配置 |
+| 启动时提示上次迁移停在了中间 | 迁移 `/data/dsh` 时被打断 | 执行 `docker compose run --rm -u eos eos mv /data/dsh.agent-new /data/dsh`，再执行 `docker compose up -d` |
+| 检查命令里的 `npm install` 等联网步骤失败 | 代理地址带账号密码，没有传给检查命令 | 改用不带账号密码的代理 |
+| 在容器的 `/app` 下执行 `npm run typecheck` 报 `tsc: not found` | 镜像里的平台目录不带 typescript | 类型检查在开发机上进行；任务仓库自己的 typescript 不受影响 |
+| 升级后拿不到新的 Eos 代码 | 派生镜像沿用了 `eos-workbench:local` 标签，或没有先构建基础镜像 | 按「增加系统依赖」第 2、3 步修正 |
