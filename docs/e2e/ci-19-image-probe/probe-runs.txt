@@ -1,0 +1,41 @@
+# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录
+
+## 1. 当前 Dockerfile 构建的镜像（main 8598c67 的 Dockerfile，本地构建）
+$ node .github/scripts/image-probe.ts eos-di:after
+✓ 系统：grep -qx 'VERSION_ID="24.04"' /etc/os-release
+✓ Node、npm：node --version | grep -q '^v24\.'
+✓ Node、npm：npm --version
+✓ pnpm、yarn：corepack --version
+✓ Python：python3 --version | grep -q '^Python 3\.12\.'
+✓ Python：python3 -m venv --help
+✓ Python：python3 -m pip --version
+✓ 编译：gcc --version
+✓ 编译：make --version
+✓ 编译：pkg-config --version
+✓ 其他：git --version
+✓ 其他：test -s /etc/ssl/certs/ca-certificates.crt
+✓ 其他：bwrap --version
+✓ 用户和 /data 属主：eos(10001; eos-work,eos-dsh)、eos-check(10002; eos-work)、eos-agent(10003; eos-work,eos-dsh)
+依赖探针通过：13 条检查，3 个用户
+exit=0
+
+## 2. 反例：在同一个镜像上删掉 bwrap 和 pkg-config、把 /data 的属主改成 root
+#   FROM eos-di:after
+#   RUN rm -f /usr/bin/bwrap /usr/bin/pkg-config && chown root:root /data
+$ node .github/scripts/image-probe.ts eos-probe:neg
+✓ 系统：grep -qx 'VERSION_ID="24.04"' /etc/os-release
+✓ Node、npm：node --version | grep -q '^v24\.'
+✓ Node、npm：npm --version
+✓ pnpm、yarn：corepack --version
+✓ Python：python3 --version | grep -q '^Python 3\.12\.'
+✓ Python：python3 -m venv --help
+✓ Python：python3 -m pip --version
+✓ 编译：gcc --version
+✓ 编译：make --version
+✗ 编译：pkg-config --version（退出码 127）bash: line 1: pkg-config: command not found
+✓ 其他：git --version
+✓ 其他：test -s /etc/ssl/certs/ca-certificates.crt
+✗ 其他：bwrap --version（退出码 127）bash: line 1: bwrap: command not found
+✗ 用户和 /data 属主：eos(10001; eos-work,eos-dsh)、eos-check(10002; eos-work)、eos-agent(10003; eos-work,eos-dsh)：/data 的属主不是 eos:eos：root:root
+::error title=依赖探针::镜像里有 3 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表
+exit=1
