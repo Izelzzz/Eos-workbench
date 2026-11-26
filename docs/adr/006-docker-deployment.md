@@ -123,8 +123,6 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | `eos-agent` | dsh、agent、dsh 启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、dsh 进程的环境（模型 key；agent 在 Landlock 里读不到）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；agent 在 Landlock 里只能写自己的 worktree 和 `/tmp` |
 | `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
-把检查命令和 agent 放在独立用户下的目的：它们运行的是 agent 写的代码，不能读到平台进程环境里的主密钥。
-
 **为什么分成三个普通用户**
 
 - 检查命令和 agent 运行的是 agent 写的代码。放在独立用户下，它们读不到平台进程环境里的主密钥。
