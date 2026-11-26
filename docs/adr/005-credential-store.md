@@ -21,6 +21,21 @@
 
 ### 总览
 
+主密钥和凭据的走向。虚线表示不传递或被挡住：
+
+```mermaid
+flowchart LR
+  env["部署方注入<br/>EOS_MASTER_KEY"] --> plat["平台进程<br/>读出后从 process.env 删除"]
+  webui["Web 凭据页"] -- "录入" --> plat
+  plat -- "AES-256-GCM 加密" --> db[("eos.db<br/>credentials 表")]
+  db -- "解密，只在平台进程内" --> plat
+  plat -- "模型 key，经环境变量" --> dsh["dsh 进程"]
+  plat -- "Git 令牌，经环境变量" --> git["平台的 git 进程"]
+  plat -. "不传" .-> check["检查命令"]
+  dsh -. "沙箱挡住" .-> agent["agent"]
+  plat -- "遮蔽已知的凭据值" --> out["trace 和日志"]
+```
+
 | 方面 | 设计 |
 |---|---|
 | 主密钥 | 环境变量 `EOS_MASTER_KEY`，32 字节，base64 编码，由部署方注入。不写到磁盘 |

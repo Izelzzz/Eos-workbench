@@ -28,6 +28,22 @@
 
 ### 总览
 
+模板怎样变成 agent 的边界：
+
+```mermaid
+flowchart TD
+  tpl[("团队约定<br/>Agent 模板、技能")] -- "创建任务时展开并快照" --> role["角色的配置"]
+  role --> prof["能力面<br/>去掉的工具组、技能、MCP、后台作业"]
+  role --> scope["写入范围<br/>write、writePaths"]
+  prof -- "profile 补丁和技能目录" --> dsh["dsh 进程<br/>按能力面区分"]
+  dsh --> agent["agent"]
+  scope -- "沙箱：只能写 worktree" --> agent
+  agent -- "改动" --> wt["worktree"]
+  wt --> revert{"平台在提交前核对<br/>改动在 writePaths 内？"}
+  revert -- "在" --> commit["提交"]
+  revert -- "不在" --> undo["撤销，记入 trace<br/>下一轮告知 agent"]
+```
+
 | 方面 | 设计 |
 |---|---|
 | 存放 | 模板和技能是团队约定的两个类型，存在平台数据库里，只追加、带版本（ADR-002 的机制） |
