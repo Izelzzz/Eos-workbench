@@ -21,8 +21,12 @@ const PIPE = '\u{F8FF}'
  */
 export function parseChecks(markdown: string): Row[] {
   const lines = markdown.split('\n').map(l => l.trimEnd())
+  // 两个标题在整份文件里都只许出现一次：不然可以在 HTML 注释或代码块里放一个假的，让探针去读假的那张表，或者在第二个同名小节里放一张不检查的表
+  for (const h of ['## 执行器环境', '### 镜像里有什么']) {
+    const n = lines.filter(l => l === h).length
+    if (n !== 1) throw new Error(`docs/deploy.md 里「${h}」要正好出现一次，现在是 ${n} 次`)
+  }
   const top = lines.findIndex(l => l === '## 执行器环境')
-  if (top < 0) throw new Error('docs/deploy.md 里找不到「## 执行器环境」一节')
   const start = lines.findIndex((l, i) => i > top && l === '### 镜像里有什么')
   const topEnd = lines.findIndex((l, i) => i > top && /^## /.test(l))
   if (start < 0 || (topEnd >= 0 && start > topEnd)) throw new Error('「## 执行器环境」下找不到「### 镜像里有什么」一小节')
@@ -35,7 +39,8 @@ export function parseChecks(markdown: string): Row[] {
   const table = section.slice(first, last + 1)
   const bad = table.find(l => !l.startsWith('|'))
   if (bad !== undefined) throw new Error(`「镜像里有什么」的表里这一行要以 | 开头、前面不缩进：${bad}`)
-  const plain = (l: string) => l === '' || (!/^[\s>#<`~*+-]|^\d+[.)]\s/.test(l) && !l.includes('|'))
+  // 表外的行还不许有 <：段落中间的 HTML（<table>、<pre>）在页面上也能显示成表格或代码块
+  const plain = (l: string) => l === '' || (!/^[\s>#<`~*+-]|^\d+[.)]\s/.test(l) && !l.includes('|') && !l.includes('<'))
   const other = [...section.slice(0, first), ...section.slice(last + 1)].find(l => !plain(l))
   if (other !== undefined) throw new Error(`「镜像里有什么」一小节里表外只能是不带格式的说明文字（这一行不行，把它挪到别的小节）：${other}`)
   const cells = (l: string) =>
@@ -47,7 +52,12 @@ export function parseChecks(markdown: string): Row[] {
   const header = cells(table[0]!)
   const col = header.indexOf('检查')
   if (col < 0) throw new Error(`「镜像里有什么」的表里没有「检查」一列（表头：${header.join('、')}）`)
-  if (table.length < 3 || !/^\|[-|: ]+\|$/.test(table[1]!)) throw new Error('「执行器环境」的表格式不对：第二行要是 |---|')
+  if (table.length < 3 || !/^\|[-|: ]+\|$/.test(table[1]!)) throw new Error('「镜像里有什么」的表格式不对：第二行要是 |---|')
+  // 分隔行的列数和表头不一样时，GFM 不把它当表，页面上看不到这张表
+  if (cells(table[1]!).length !== header.length) throw new Error('「镜像里有什么」的表格式不对：分隔行的列数要和表头一样')
+  // 表格里检查命令以外的地方也不许有 HTML（反引号里的不算，比如 #include <stdio.h>）
+  const html = table.find(l => l.replace(/`[^`]*`/g, '').includes('<'))
+  if (html !== undefined) throw new Error(`「镜像里有什么」的表里不能有 HTML（反引号里的除外）：${html}`)
   return table.slice(2).map(l => {
     const c = cells(l)
     if (c.length !== header.length) throw new Error(`「镜像里有什么」的表里这一行列数不对：${l}`)

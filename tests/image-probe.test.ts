@@ -23,7 +23,7 @@ const head = '| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `true`
 
 test('解析不出来就报错，不静默跳过', () => {
   assert.deepEqual(parseChecks(doc(head)), [{ item: '系统', checks: ['true'] }])
-  assert.throws(() => parseChecks('# 没有这一节\n'), /找不到「## 执行器环境」/)
+  assert.throws(() => parseChecks('# 没有这一节\n'), /「## 执行器环境」要正好出现一次，现在是 0 次/)
   assert.throws(() => parseChecks('## 执行器环境\n\n| a |\n\n## 别的\n\n### 镜像里有什么\n'), /找不到「### 镜像里有什么」/)
   assert.throws(() => parseChecks(doc('没有表')), /找不到表/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 |\n|---|---|\n| 系统 | x |')), /没有「检查」一列/)
@@ -50,11 +50,19 @@ test('这一小节里只能有这张表和不带格式的说明：在页面上�
     '- 列表',
     '1. 列表',
     '#### 小标题',
+    '说明 <table><tr><td>`false`</td></tr></table>',
+    '说明 <pre>false</pre>',
   ]
   for (const extra of outside) {
     assert.throws(() => parseChecks(doc(`${head}\n\n${extra}`)), /表外只能是不带格式的说明文字/, `表后：${extra}`)
     assert.throws(() => parseChecks(doc(`${extra}\n\n${head}`)), /表外只能是不带格式的说明文字|以 \| 开头/, `表前：${extra}`)
   }
+  // 第四轮复审：在注释或代码块里放一个假的同名小节、同一节里写两遍小节标题、分隔行列数不对、表格里的 HTML
+  assert.throws(() => parseChecks(`<!--\n## 执行器环境\n\n### 镜像里有什么\n\n| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | \`true\` |\n-->\n${doc(head)}`), /正好出现一次，现在是 2 次/)
+  assert.throws(() => parseChecks(doc(head).replace('### 依赖和别的工具', `### 镜像里有什么\n\n${head.replace('`true`', '`false`')}\n\n### 依赖和别的工具`)), /正好出现一次/)
+  assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|\n| 系统 | x | `true` |')), /分隔行的列数/)
+  assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | <pre>false</pre> | `true` |')), /不能有 HTML/)
+  assert.equal(parseChecks(doc("| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `printf '#include <stdio.h>'` |")).length, 1)
   // 不该误报的：普通说明文字（含反引号）、行尾空格
   assert.equal(parseChecks(doc(`说明里有 \`code\` 和（括号）。\n\n${head}\n\n又一段说明。`)).length, 1)
   assert.equal(parseChecks(doc(head.replace('`true` |', '`true` |   '))).length, 1)
