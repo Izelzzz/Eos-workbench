@@ -5,10 +5,13 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { describePosition, sessionOf } from '../engine/machine.ts'
+import { approverOf } from '../engine/prompts.ts'
 import { insights, sampleAt } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
 import { report } from '../engine/report.ts'
 import type { CheckLink, Task } from '../engine/types.ts'
+import { isTerminal } from '../engine/types.ts'
+import type { NodeId } from '../workflow/types.ts'
 import type { Executor } from '../executor/types.ts'
 import { generate } from '../improve/generate.ts'
 import { Proposals } from '../improve/proposals.ts'
@@ -27,6 +30,8 @@ import type { ConventionKind } from '../store/types.ts'
 import type {
   ActionResponse,
   AnswerResponse,
+  GateInfo,
+  GateResponse,
   ConventionDetail,
   CredentialsResponse,
   ForgeAppsResponse,
@@ -209,6 +214,26 @@ export const createWebServer = (o: {
     return rows
   }
 
+  /** 停在卡点上时：验收什么、由谁验收、第几次、被验收的产出和这个卡点上已有的结论。 */
+  const gateOf = (task: Task): GateInfo | undefined => {
+    const g = task.gate
+    const n = task.workflow.nodes.find(x => x.id === g?.node)
+    if (g === undefined || n?.kind !== 'gate') return undefined
+    const output = task.outputs[n.with]
+    return {
+      node: n.id,
+      with: n.with,
+      by: n.by.kind === 'human' ? { kind: 'human' } : { kind: 'agent', role: n.by.role },
+      approver: approverOf(n),
+      task: n.task,
+      round: g.round,
+      phase: g.phase,
+      waiting: task.status === 'waiting_accept',
+      ...(output === undefined ? {} : { output }),
+      decisions: task.log.flatMap(e => (e.type === 'decision' && e.node === n.id ? [{ round: e.round, by: e.by, pass: e.pass, comment: e.comment, at: e.at }] : [])),
+    }
+  }
+
   const detail = async (id: string): Promise<TaskDetail | undefined> => {
     const task = o.store.get(id)
     if (task === undefined) return undefined
@@ -218,6 +243,10 @@ export const createWebServer = (o: {
       request: task.request,
       position: describePosition(task),
       ...(task.question === undefined ? {} : { question: task.question }),
+      ...(() => {
+        const gate = gateOf(task)
+        return gate === undefined ? {} : { gate }
+      })(),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
       logPath: o.supervisor.logPath(id),
       repo: meta.repo,
@@ -257,6 +286,23 @@ export const createWebServer = (o: {
     if ('tooBig' in read) return [413, { ok: false, error: '请求体太大' }]
     const body = read.value
     return typeof body === 'object' && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : [400, { ok: false, error: '请求体必须是 JSON 对象' }]
+  }
+
+  /**
+   * 人在卡点上通过或打回（actor 记成 web）。结论之后有工作要做（往下走，或交回修改）：没有 runner 在跑就起一个，
+   * 不用再点「继续」；已经有 runner（例如命令行里的 eos run）在等，就由它接着做。
+   */
+  const decideGate = (id: string, body: Record<string, unknown>): [number, GateResponse] => {
+    if (typeof body.gate !== 'string' || typeof body.round !== 'number' || typeof body.pass !== 'boolean' || typeof body.comment !== 'string')
+      return [400, { ok: false, error: '需要 gate、round、pass 和 comment' }]
+    if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
+    const step = o.store.dispatch(id, { kind: 'decided', gate: body.gate as NodeId, round: body.round, pass: body.pass, comment: body.comment }, Date.now(), 'web')
+    if (!step.accepted) return [409, { ok: false, error: step.reason ?? '结论没有被接受' }]
+    if (!isTerminal(step.task) && !o.supervisor.running(id)) {
+      const started = o.supervisor.start(id)
+      if (!started.ok) return [500, { ok: false, error: `结论已记下，但没能接着运行：${started.error}。点「继续」重试` }]
+    }
+    return [200, { ok: true }]
   }
 
   const answer = (id: string, body: Record<string, unknown>): [number, AnswerResponse] => {
@@ -668,7 +714,7 @@ export const createWebServer = (o: {
       if (allowedOrigin(req) === undefined) return json(res, 421, { error: o.publicUrl === undefined ? '只接受通过本机地址访问' : `只接受通过本机地址或 ${o.publicUrl.origin} 访问` })
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'POST') {
-        const action = /^\/api\/tasks\/([\w-]+)\/(answer|resume|retry|abort)$/.exec(url.pathname)
+        const action = /^\/api\/tasks\/([\w-]+)\/(answer|gate|resume|retry|abort)$/.exec(url.pathname)
         const conv = CONVENTION.exec(url.pathname)
         const dec = DECIDE.exec(url.pathname)
         const gen = url.pathname === '/api/improve/generate'
@@ -690,6 +736,7 @@ export const createWebServer = (o: {
           return name === undefined ? json(res, 400, { ok: false, error: '名字的 URL 编码不对' }) : json(res, ...saveConvention(conv[1] as ConventionKind, name, g.body))
         }
         if (action === null) return json(res, ...(await create(g.body)))
+        if (action[2] === 'gate') return json(res, ...decideGate(action[1]!, g.body))
         return json(res, ...(action[2] === 'answer' ? answer(action[1]!, g.body) : act(action[1]!, action[2]!)))
       }
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })

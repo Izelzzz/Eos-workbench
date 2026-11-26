@@ -4,6 +4,7 @@ import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { Changes } from './Changes.tsx'
+import { Gate } from './Gate.tsx'
 import { Credentials } from './Credentials.tsx'
 import { ForgeApps } from './ForgeApps.tsx'
 import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
@@ -30,6 +31,7 @@ const LIVE = new Set(['running', 'waiting_user', 'waiting_accept'])
 function TaskList() {
   const [tasks, setTasks] = useState<TaskSummary[]>()
   const [error, setError] = useState<string>()
+  const [onlyGate, setOnlyGate] = useState(false)
   useEffect(() => {
     // 失败时显示错误，但不停止刷新；服务恢复后自动清掉错误。
     const load = () =>
@@ -60,6 +62,8 @@ function TaskList() {
         <p className="muted">还没有任务。点「新建任务」开始第一个。</p>
       </>
     )
+  const waiting = tasks.filter(t => t.status === 'waiting_accept')
+  const shown = onlyGate ? waiting : tasks
   return (
     <>
       {head}
@@ -68,28 +72,36 @@ function TaskList() {
           连接不上服务：{error}（每 5 秒自动重试）
         </p>
       )}
+      {waiting.length > 0 && (
+        <div className="gate-filter">
+          <span>{waiting.length} 个任务在等验收</span>
+          <button type="button" className={onlyGate ? 'active' : ''} aria-pressed={onlyGate} onClick={() => setOnlyGate(v => !v)}>
+            {onlyGate ? '显示全部' : '只看等验收的'}
+          </button>
+        </div>
+      )}
       <table className="tasks">
         <thead>
           <tr>
             <th>任务</th>
             <th>状态</th>
-            <th>工作流</th>
+            <th className="col-workflow">工作流</th>
             <th>需求</th>
-            <th>更新</th>
+            <th className="col-updated">更新</th>
           </tr>
         </thead>
         <tbody>
-          {tasks.map(t => (
-            <tr key={t.id} onClick={() => (location.hash = `#/tasks/${t.id}`)}>
+          {shown.map(t => (
+            <tr key={t.id} className={t.status === 'waiting_accept' ? 'awaiting' : ''} onClick={() => (location.hash = `#/tasks/${t.id}`)}>
               <td>
                 <a href={`#/tasks/${t.id}`}>{t.id}</a>
               </td>
               <td>
                 <span className={`pill ${statusClass(t.status)}`}>{STATUS[t.status]}</span>
               </td>
-              <td>{t.workflow}</td>
+              <td className="col-workflow">{t.workflow}</td>
               <td className="request">{t.request.split('\n')[0]}</td>
-              <td className="muted">{ago(t.updatedAt)}</td>
+              <td className="muted col-updated">{ago(t.updatedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -296,6 +308,15 @@ function TaskPage(props: { id: string }) {
             task={task}
             onAnswered={resumeNeeded => {
               setNotice(resumeNeeded ? '已回答。没有程序在运行这个任务，点「继续」让它接着跑。' : '已回答，任务继续。')
+              setReload(n => n + 1)
+            }}
+          />
+        )}
+        {task.gate && (
+          <Gate
+            task={task}
+            onDecided={pass => {
+              setNotice(pass ? '已通过，任务继续。' : '已打回，交回修改；改完会回到这个卡点。')
               setReload(n => n + 1)
             }}
           />

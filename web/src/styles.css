@@ -275,3 +275,27 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .credentials .new-task h2 { font-size: 15px; margin: 0; }
 .credential-list td, .credential-list th { white-space: nowrap; }
 @media (max-width: 600px) { .credential-list .fp { display: none; } .credential-list th, .credential-list td { padding: 8px; } }
+
+/* 卡点 */
+.gate { margin-top: 12px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+.gate.waiting { background: color-mix(in srgb, var(--waiting) 12%, transparent); border-color: color-mix(in srgb, var(--waiting) 45%, transparent); }
+.gate-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.gate-state, .gate-task { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gate-output summary { cursor: pointer; margin: 6px 0; }
+.gate-output pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 0; }
+.gate .link { background: none; border: none; padding: 4px 0; color: var(--k-call); cursor: pointer; }
+.gate-history { margin: 8px 0; padding-left: 20px; }
+.gate-history li { margin: 4px 0; }
+.gate-comment { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.gate-form textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+.gate-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.gate-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.gate-filter button.active { border-color: var(--waiting); }
+.tasks tr.awaiting td:first-child { box-shadow: inset 3px 0 0 var(--waiting); }
+/* 窄屏的任务列表：只留任务、状态、需求三列，需求换行显示，不横向滚动 */
+@media (max-width: 600px) {
+  .tasks .col-workflow, .tasks .col-updated { display: none; }
+  .tasks th, .tasks td { padding: 8px; }
+  .tasks td:first-child { overflow-wrap: anywhere; }
+  .tasks td.request { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+}
