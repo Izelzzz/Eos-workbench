@@ -174,6 +174,7 @@ export function isGuardFile(path: string): boolean {
     path === '.gitleaksignore' ||
     path === '.gitleaks.toml' ||
     path === '.trivyignore.yaml' ||
+    path === 'docs/deploy.md' || // 「执行器环境」表的「检查」一列由 CI 的依赖探针（image-probe.ts）执行
     path === '.github/e2e-paths.txt' ||
     path.startsWith('.github/workflows/') ||
     path.startsWith('.github/scripts/') ||

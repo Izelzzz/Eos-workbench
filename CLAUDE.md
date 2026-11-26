@@ -42,7 +42,7 @@ Eos 是一个自部署的多 agent 工作流平台。方向和优先级见 `docs
 |---|---|---|
 | 轻 | 只改 `.github/e2e-paths.txt` 里「不需要」的路径，并且不碰下面「重」档列出的文件 | 自检第 1、2、7 条，CI 全绿。不做代码评审和独立审查 |
 | 中 | 其余所有改动 | 自检全部 7 条 |
-| 重 | 凭据和权限：`src/credentials/`、`src/runner/check-user.ts`、`Dockerfile`、`compose*.yaml`、`deploy/`；检查规则本身：`.github/workflows/`、`.github/scripts/`、`.github/e2e-paths.txt`、`.github/lint/eslint.config.mjs`、`.gitleaksignore`、`.gitleaks.toml`、`.trivyignore.yaml`、`.github/codeql/` | 自检全部 7 条。另外：独立审查之后如果改了代码，这次修改要再经过一次独立审查（只审修改的部分）才能合并 |
+| 重 | 凭据和权限：`src/credentials/`、`src/runner/check-user.ts`、`Dockerfile`、`compose*.yaml`、`deploy/`；检查规则本身：`.github/workflows/`、`.github/scripts/`、`.github/e2e-paths.txt`、`.github/lint/eslint.config.mjs`、`.gitleaksignore`、`.gitleaks.toml`、`.trivyignore.yaml`、`.github/codeql/`，以及 `docs/deploy.md`「执行器环境」表的「检查」一列（CI 的依赖探针会执行这一列的命令） | 自检全部 7 条。另外：独立审查之后如果改了代码，这次修改要再经过一次独立审查（只审修改的部分）才能合并 |
 
 - 「轻」档不免除的：PR 要小、PR 描述的几节、合并前由用户或协调会话确认。
 - 「重」档的清单不是全部：别的文件里的改动如果改变了谁能读到凭据、进程以什么用户和能力运行、沙箱放行什么（例如执行器的环境白名单、检查命令的环境、代码托管的令牌处理），由做的会话自己升到「重」档，并在 PR 描述里说明。
