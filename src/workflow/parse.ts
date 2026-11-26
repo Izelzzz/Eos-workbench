@@ -151,14 +151,14 @@ const gateErrors = (nodes: ParsedNode[]): WorkflowError[] =>
   })
 
 /**
- * 卡点打回、修改之后重跑的检查：被验收节点和它之后、卡点之前各节点的交付物和命令检查。
- * 平台动作不重跑（它们会改到远程）；同样的检查只跑一次（例如测试和评审两个节点都跑 npm test）。
+ * 卡点打回、修改之后重跑的检查：被验收节点自己的，和卡点之前评审或测试它（with 是它）的对话节点的交付物和命令检查。
+ * 只有这些是被验收方改得了的（别的节点的交付物由别的角色写）。平台动作不重跑（它们会改到远程）；
+ * 同样的检查只跑一次（例如测试和评审两个节点都跑 npm test）。
  */
 const gateNode = (n: Extract<ParsedNode, { kind: 'gate' }>, before: ParsedNode[]): GateNode => {
-  const from = before.findIndex(x => x.id === n.with)
   const seen = new Set<string>()
-  const checks = (from < 0 ? [] : before.slice(from))
-    .flatMap(x => (x.kind === 'gate' ? [] : checksOf(x)))
+  const checks = before
+    .flatMap(x => (x.kind !== 'gate' && (x.id === n.with || (x.kind === 'dialog' && x.with === n.with)) ? checksOf(x) : []))
     .filter(c => {
       if (c.kind === 'platform') return false
       const k = JSON.stringify(c)
@@ -191,8 +191,13 @@ const semantic = (wf: Workflow): WorkflowError[] => {
       const target = seen.get(n.with)
       if (target === undefined) errors.push({ path: at('with'), message: `「${n.with}」必须是排在前面的节点` })
       else if (target.kind !== 'agent') errors.push({ path: at('with'), message: `「${n.with}」必须是 agent 节点：打回时交回它原来的会话修改` })
+      // 打回修改的提交只有在卡点之后的交付里才会推送：放在交付后面，通过的改动推不到远程。
+      if ([...seen.values()].some(p => p.checks.some(c => c.kind === 'platform'))) {
+        errors.push({ path: at('kind'), message: '卡点要放在交付节点（平台动作）前面：放在后面时，打回修改的提交不会再推送' })
+      }
       n.inputs.forEach((input, j) => {
         if (!seen.has(input)) errors.push({ path: `${at('inputs')}[${j}]`, message: `「${input}」必须是排在前面的节点` })
+        else if (seen.get(input)!.kind === 'gate') errors.push({ path: `${at('inputs')}[${j}]`, message: `「${input}」是卡点，没有产出` })
       })
       seen.set(n.id, n)
       return
@@ -242,6 +247,7 @@ const semantic = (wf: Workflow): WorkflowError[] => {
     }
     n.inputs.forEach((input, j) => {
       if (!seen.has(input)) errors.push({ path: `${at('inputs')}[${j}]`, message: `「${input}」必须是排在前面的节点` })
+      else if (seen.get(input)!.kind === 'gate') errors.push({ path: `${at('inputs')}[${j}]`, message: `「${input}」是卡点，没有产出` })
     })
     if (n.kind === 'dialog') {
       const target = seen.get(n.with)

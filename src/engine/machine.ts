@@ -30,6 +30,10 @@ export const CALL_FAILED_PREFIX = '调用失败：'
 /** 越界撤销的说明以它开头（证据归纳用来跳过这条说明）。 */
 export const REVERTED_NOTE_PREFIX = '撤销了 '
 
+/** 卡点开始等验收人时的说明。耗时统计（metrics.ts）按 GATE_WAIT_MARK 认出人验收的等待从哪里开始。 */
+export const GATE_WAIT_MARK = '次验收：等'
+const gateWaitNote = (round: number, approver: string, target: string): string => `第 ${round} ${GATE_WAIT_MARK}${approver}验收「${target}」`
+
 /** 回复格式不对时重新要求的次数；用完后任务失败，等人工重试。 */
 export const MAX_FORMAT_RETRIES = 2
 
@@ -89,7 +93,7 @@ const enter = (task: Task, at: number): Task => {
   const n = current(task)
   if (n === undefined) return append({ ...task, status: 'done', pending: undefined, dialog: undefined, gate: undefined }, { type: 'note', at, text: '所有节点已完成' })
   if (n.kind === 'agent') return issue(task, { node: n.id, session: n.id, role: n.role, purpose: 'produce', prompt: producePrompt(task, n) })
-  if (n.kind === 'gate') return decide({ ...task, gate: { node: n.id, round: 1, phase: 'decide', fixes: 0, formatRetries: 0 } }, n, at)
+  if (n.kind === 'gate') return decide({ ...task, gate: { node: n.id, round: 1, cycle: 1, phase: 'decide', fixes: 0, formatRetries: 0 } }, n, at)
   const opened: Task = { ...task, dialog: { node: n.id, round: 1, escalated: false, phase: 'check', formatRetries: 0, review: 'first' } }
   return beginRound(opened, n, 'first')
 }
@@ -174,7 +178,7 @@ const agentFailures = (results: CheckResult[]): CheckResult[] => results.filter(
  */
 const decide = (task: Task, g: GateNode, at: number): Task => {
   const t = withGate(task, { phase: 'decide', fixes: 0 })
-  const noted = append(t, { type: 'note', at, node: g.id, text: `第 ${t.gate!.round} 次验收：等${approverOf(g)}验收「${g.with}」` })
+  const noted = append(t, { type: 'note', at, node: g.id, text: gateWaitNote(t.gate!.round, approverOf(g), g.with) })
   if (g.by.kind === 'human') return { ...noted, status: 'waiting_accept', pending: undefined }
   return issue(noted, { node: g.id, session: g.id, role: g.by.role, purpose: 'accept', prompt: acceptPrompt(t, g, t.sessions[g.id] === undefined ? 'first' : 'again') })
 }
@@ -183,15 +187,16 @@ const amend = (task: Task, g: GateNode, prompt: string): Task => issue(withGate(
 
 /**
  * 验收人给出了结论（人或 agent）。通过：往下走。打回：记下意见，交回被验收方原来的会话修改；
- * agent 验收打回次数用完了就问用户。round 在打回时加一：之后挂着的修改和检查都属于下一次验收。
+ * agent 验收这一段的打回次数用完了就问用户。round 在打回时加一：之后的修改、检查、提问都属于下一次验收，
+ * 对上一次的结论（例如两个人同时看着同一次）因此作废。
  */
 const onDecision = (task: Task, g: GateNode, d: { pass: boolean; comment: string; by: 'human' | RoleId }, at: number): Task => {
-  const round = task.gate!.round
+  const { round, cycle } = task.gate!
   const t = append(task, { type: 'decision', at, node: g.id, round, by: d.by, pass: d.pass, comment: d.comment })
   if (d.pass) return advance(append(t, { type: 'note', at, node: g.id, text: `第 ${round} 次验收通过` }), at)
-  const rejected = withGate(t, { lastComment: d.comment, formatRetries: 0 })
-  if (g.by.kind === 'agent' && round >= g.by.maxRounds) return ask(withGate(rejected, { phase: 'ask' }), { source: 'loop', text: gateStuckQuestion(rejected, g, 'rounds') }, at)
-  return amend(withGate(rejected, { round: round + 1 }), g, amendPrompt(rejected, g, { comment: d.comment, round }))
+  const rejected = withGate(t, { lastComment: d.comment, formatRetries: 0, round: round + 1 })
+  if (g.by.kind === 'agent' && cycle >= g.by.maxRounds) return ask(withGate(rejected, { phase: 'ask' }), { source: 'loop', text: gateStuckQuestion(rejected, g, 'rounds') }, at)
+  return amend(withGate(rejected, { cycle: cycle + 1 }), g, amendPrompt(rejected, g, { comment: d.comment, round }))
 }
 
 /** 被验收方改完：只重跑程序检查（不再请评审 agent），通过了（或没有检查）回到卡点。 */
@@ -332,7 +337,7 @@ const onLoopAnswer = (task: Task, text: string): Task => {
   if (n?.kind === 'agent') return issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })
   if (n?.kind === 'gate') {
     const g = gateNode(task)
-    return amend(withGate(task, { round: 1, fixes: 0 }), g, amendPrompt(task, g, { instruction: text }))
+    return amend(withGate(task, { cycle: 1, fixes: 0 }), g, amendPrompt(task, g, { instruction: text }))
   }
   const d = dialogNode(task)
   return d.escalate !== undefined ? toUpstream(task, d, reconfirmPrompt(task, d, { instruction: text })) : toTarget(task, d, 'instruct', instructPrompt(text))

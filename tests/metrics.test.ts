@@ -3,7 +3,7 @@ import test from 'node:test'
 import { formatMetrics, secs, taskMetrics } from '../src/engine/metrics.ts'
 import type { Task } from '../src/engine/types.ts'
 import { isCheck } from '../src/engine/types.ts'
-import { Clock, PASS } from './helpers.ts'
+import { Clock, PASS, workflow } from './helpers.ts'
 
 const stage = (t: Task, node: string, now = 1e9) => taskMetrics(t, now).stages.find(s => s.node === node)!
 
@@ -224,4 +224,17 @@ test('running time in every engine state: a check, a failure, a retry, a loop qu
   assert.ok(c.task.pending !== undefined)
   assert.equal(run(12_700).runningMs, 700, 'after the answer the next call runs from the answer')
   consistent(c.task, 12_700)
+})
+
+test('人验收的卡点：等结论的时间算等用户，第一次就通过的卡点也有自己的阶段', () => {
+  const c = new Clock('none', workflow({ maxRounds: 1, escalate: false, gate: 'human' }))
+  c.reply(1000, 800, '方案')
+  c.reply(2000, 900, '实现')
+  c.reply(3000, 900, PASS) // 评审通过，3000 起等人验收
+  c.send(9000, { kind: 'decided', gate: 'accept' as never, round: 1, pass: false, comment: '补注释' })
+  c.reply(9500, 400, '补了注释') // 修改 [9100, 9500]，之后又等人验收
+  assert.equal(stage(c.task, 'accept', 12000).waitUserMs, 6000 + 2500, '还在等的那段算到现在')
+  c.send(13000, { kind: 'decided', gate: 'accept' as never, round: 2, pass: true, comment: '' })
+  const accept = stage(c.task, 'accept')
+  assert.deepEqual([accept.waitUserMs, accept.agentMs, accept.calls], [6000 + 3500, 400, 1])
 })

@@ -25,7 +25,7 @@ test('人验收：评审通过后停在卡点，状态是等待验收、写明�
   assert.equal(d.task.status, 'waiting_accept')
   assert.equal(d.task.pending, undefined)
   assert.equal(d.task.question, undefined)
-  assert.deepEqual(d.task.gate, { node: 'accept', round: 1, phase: 'decide', fixes: 0, formatRetries: 0 })
+  assert.deepEqual(d.task.gate, { node: 'accept', round: 1, cycle: 1, phase: 'decide', fixes: 0, formatRetries: 0 })
   assert.match(describePosition(d.task), /accept 第 1 次验收 · 等待验收（任何能访问平台的人）/)
   assert.ok(d.task.log.some(e => e.type === 'note' && e.text === '第 1 次验收：等任何能访问平台的人验收「build」'))
   d.send(decided(d, true, '可以'))
@@ -84,7 +84,7 @@ test('不接受的结论：空意见的打回、过期的那一次、别的卡�
   assert.equal(reduce(d.task, first, 99).accepted, false)
 })
 
-test('打回之后只重跑程序检查（被验收节点和它之后各节点的交付物、命令检查，去掉重复的，不含平台动作），通过后回到卡点', () => {
+test('打回之后只重跑程序检查（被验收节点自己的和测试、评审它的对话节点的交付物、命令检查，去掉重复的，不含平台动作），通过后回到卡点', () => {
   const wf = workflow({ maxRounds: 1, escalate: false, checks: 'review', gate: 'human', gateFixes: 1, ship: 1 })
   const gate = wf.nodes.find(n => n.kind === 'gate')!
   assert.deepEqual(
@@ -113,7 +113,8 @@ test('打回之后只重跑程序检查（被验收节点和它之后各节点�
   d.reply('重写了')
   d.check(true)
   assert.equal(d.task.status, 'waiting_accept')
-  assert.equal(d.task.gate?.round, 1, '用户给出指示后从第 1 次重新计')
+  assert.equal(d.task.gate?.round, 2, '第几次只增不减：对第 1 次的结论作废')
+  assert.equal(d.task.gate?.cycle, 1, '用户给出指示后，这一段从第 1 次重新计')
   d.send(decided(d, true))
   // 卡点之后才是交付：测试通过再推送。
   assert.equal(d.checking.node, 'ship')

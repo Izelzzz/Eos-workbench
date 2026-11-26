@@ -28,10 +28,10 @@ const commandsOf = (w: Workflow): string[] =>
         if (c.kind !== 'platform') return []
         const reviews = w.nodes
           .slice(0, i)
-          .filter(p => p.kind === 'dialog' && p.role !== undefined)
+          .filter(p => (p.kind === 'dialog' && p.role !== undefined) || p.kind === 'gate')
           .map(p => p.id)
           .sort()
-        return [`${n.id}：平台动作 ${c.action}（之前的评审：${reviews.join('、')}）`]
+        return [`${n.id}：平台动作 ${c.action}（之前的评审和卡点：${reviews.join('、')}）`]
       }),
     )
     .sort()

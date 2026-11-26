@@ -75,8 +75,9 @@ const key = (t: Task): string =>
     c: t.cursor,
     f: t.fixes,
     d: t.dialog && { ...t.dialog, lastCritique: undefined },
-    // 人验收不限次数，第几次不影响之后的行为（只出现在说明文字里），不算进状态，否则状态空间无穷。
-    g: t.gate && { ...t.gate, lastComment: undefined, round: gateOf(t.workflow, t.gate.node).by.kind === 'human' ? undefined : t.gate.round },
+    // 第几次验收只增不减，只用来核对结论是不是过期的（事件按当前的 round 生成），不影响之后的行为，不算进状态，否则状态空间无穷。
+    // 这一段的第几次（cycle）只在 agent 验收时和 maxRounds 比；人验收不限次数，也不算。
+    g: t.gate && { ...t.gate, lastComment: undefined, round: undefined, cycle: gateOf(t.workflow, t.gate.node).by.kind === 'human' ? undefined : t.gate.cycle },
     p: t.pending && { u: t.pending.purpose, s: isCheck(t.pending) ? undefined : t.pending.session, n: t.pending.node },
     q: t.question?.source,
     sessions: Object.keys(t.sessions).sort(),
@@ -220,10 +221,11 @@ const INVARIANTS: Record<string, Check> = {
     if (a.gate?.phase !== 'decide' || gateOf(wf, a.gate.node).by.kind !== 'agent' || a.status === 'aborted') return undefined
     return a.pending?.purpose === 'accept' && !isCheck(a.pending) && a.pending.session === a.gate.node ? undefined : `agent gate deciding with ${a.pending?.purpose}`
   },
-  '卡点的次数在范围内：agent 验收的第几次不超过 maxRounds，重跑检查的补齐不超过 maxFixes': (_b, _e, a, _acc, wf) => {
+  '卡点的次数在范围内：第几次只增不减，agent 验收这一段的第几次不超过 maxRounds，重跑检查的补齐不超过 maxFixes': (b, _e, a, _acc, wf) => {
     if (a.gate === undefined) return undefined
     const g = gateOf(wf, a.gate.node)
-    if (a.gate.round < 1 || (g.by.kind === 'agent' && a.gate.round > g.by.maxRounds)) return `gate round ${a.gate.round}`
+    if (b.gate?.node === a.gate.node && a.gate.round < b.gate.round) return `gate round went back ${b.gate.round} → ${a.gate.round}`
+    if (a.gate.round < 1 || a.gate.cycle < 1 || (g.by.kind === 'agent' && a.gate.cycle > g.by.maxRounds)) return `gate round ${a.gate.round} cycle ${a.gate.cycle}`
     if (a.gate.fixes > g.maxFixes) return `gate fixes ${a.gate.fixes}`
     return a.gate.formatRetries > MAX_FORMAT_RETRIES ? 'gate format retries' : undefined
   },

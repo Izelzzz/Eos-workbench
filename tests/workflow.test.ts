@@ -216,18 +216,20 @@ test('卡点：by: human 或 by: agent + role；字段组合不对、验收对�
   assert.equal(semantic['nodes[4].role'], '没有名为「ghost」的角色')
 })
 
-test('卡点打回后重跑的检查：从被验收节点到卡点之前的交付物和命令检查，去掉重复的，不含平台动作和后面的节点', () => {
+test('卡点打回后重跑的检查：被验收节点自己的，和评审、测试它的对话节点的交付物和命令检查，去掉重复的；别的节点的不算', () => {
   const r = parseWorkflow(`
 name: demo
 roles:
   dev: { prompt: 写代码, write: worktree }
+  doc: { prompt: 写文档, write: worktree }
   rev: { prompt: 审代码 }
 nodes:
   - { id: plan, kind: agent, role: rev, task: 方案, checks: [{ run: [make, plan] }] }
   - { id: build, kind: agent, role: dev, task: 实现, deliverables: [{ path: NOTES.md, sections: [改动] }] }
+  - { id: docs, kind: agent, role: doc, task: 文档, deliverables: [{ path: docs/CHANGES.md }] }
   - { id: test, kind: dialog, with: build, task: 测试, checks: [{ run: [npm, test] }] }
   - { id: review, kind: dialog, role: rev, with: build, task: 评审, checks: [{ run: [npm, test], timeoutSec: 600 }] }
-  - { id: ship, kind: dialog, with: build, task: 交付, checks: [{ run: [npm, run, lint] }, { platform: push }] }
+  - { id: docs-check, kind: dialog, with: docs, task: 文档检查, checks: [{ run: [npm, run, docs] }] }
   - { id: accept, kind: gate, with: build, by: human, task: 验收 }
   - { id: after, kind: dialog, with: build, task: 之后, checks: [{ run: [npm, run, e2e] }] }
 `)
@@ -236,6 +238,17 @@ nodes:
   assert.deepEqual(gate?.kind === 'gate' && gate.checks, [
     { kind: 'file', path: 'NOTES.md', sections: ['改动'] },
     { kind: 'run', run: ['npm', 'test'], timeoutSec: 600 },
-    { kind: 'run', run: ['npm', 'run', 'lint'], timeoutSec: 600 },
   ])
+})
+
+test('卡点不能放在交付节点（平台动作）后面；卡点没有产出，不能当别的节点的输入', () => {
+  const errors = errorsOf(`${base}  - { id: ship, kind: dialog, with: build, task: 交付, checks: [{ platform: push }] }
+  - { id: accept, kind: gate, with: build, by: human, task: 验收 }
+  - { id: after, kind: agent, role: dev, task: 之后, inputs: [accept] }
+  - { id: sign, kind: gate, with: build, by: human, task: 签字, inputs: [accept] }
+`)
+  const byPath = Object.fromEntries(errors.map(e => [e.path, e.message]))
+  assert.equal(byPath['nodes[3].kind'], '卡点要放在交付节点（平台动作）前面：放在后面时，打回修改的提交不会再推送')
+  assert.equal(byPath['nodes[4].inputs[0]'], '「accept」是卡点，没有产出')
+  assert.equal(byPath['nodes[5].inputs[0]'], '「accept」是卡点，没有产出')
 })

@@ -206,7 +206,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       const at = `${task.gate.node}#${task.gate.round}#${task.log.length}`
       if (announced !== at) {
         announced = at
-        log(`⏸ 等待验收（${task.gate.node} 第 ${task.gate.round} 次）：${describePosition(task)}\n  通过：eos accept ${id} ["<备注>"]；打回：eos send-back ${id} "<意见>"；或在任务页面上操作`)
+        log(`⏸ 等待验收（${task.gate.node} 第 ${task.gate.round} 次）：${describePosition(task)}\n  通过：eos accept ${id} ["<备注>"]；打回：eos send-back ${id} "<意见>"`)
       }
     }
     if (!o.wait) return task

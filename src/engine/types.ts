@@ -74,8 +74,10 @@ export type GatePhase = 'decide' | 'amend' | 'check' | 'ask'
 
 export type GateState = {
   node: NodeId
-  /** 第几次验收，从 1 开始；用户给出指示后从 1 重新计。agent 验收时不超过它的 maxRounds。 */
+  /** 第几次验收，从 1 开始，只增不减：人的结论按它核对是不是过期的，日志里的结论也按它区分。 */
   round: number
+  /** 这一段自动处理里第几次验收，用户给出指示后从 1 重新计；agent 验收时不超过它的 maxRounds。 */
+  cycle: number
   phase: GatePhase
   /** 这一次打回之后，重跑检查不通过、自动交回修改的次数。 */
   fixes: number

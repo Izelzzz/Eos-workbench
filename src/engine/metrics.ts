@@ -16,6 +16,7 @@
 // 指标是纯函数，不知道 runner 在不在跑，由页面根据 runnerAlive 提示。
 import type { Entry, Task, Usage } from './types.ts'
 import { addUsage, zeroUsage } from './types.ts'
+import { GATE_WAIT_MARK } from './machine.ts'
 
 export type StageMetrics = {
   node: string
@@ -60,6 +61,12 @@ export type TaskMetrics = {
 /** 引擎写下的说明：调用失败、回复格式无法解析（任务停下）；人工重试（任务继续）。 */
 const isFailure = (e: Entry): boolean => e.type === 'note' && (e.text.startsWith('调用失败：') || e.text.startsWith('回复格式无法解析'))
 const isRetry = (e: Entry): boolean => e.type === 'note' && e.text === '人工重试'
+/** 人验收的卡点开始等结论（agent 验收的等待是一次调用，按调用算）。 */
+const isHumanGateWait = (task: Task, e: Entry): e is Extract<Entry, { type: 'note' }> => {
+  if (e.type !== 'note' || !e.text.includes(GATE_WAIT_MARK)) return false
+  const n = task.workflow.nodes.find(x => x.id === e.node)
+  return n?.kind === 'gate' && n.by.kind === 'human'
+}
 
 type Span = { start: number; end: number }
 const len = (s: Span) => Math.max(0, s.end - s.start)
@@ -90,9 +97,12 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
 
   // 提问的等待区间：到下一条日志为止。等回答时只有这些事会写日志，而且都结束这次等待：回答、调用回复（问题作废）、
   // 调用失败、换成新问题（续跑后 agent 重新提问）、中止。还没有下一条日志的算到 until。
-  const waits = task.log.flatMap((e, i) =>
-    e.type === 'question' ? [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end: task.log[i + 1]?.at ?? until } }] : [],
-  )
+  // 人验收的卡点也一样：从开始等验收的说明到下一条日志（结论或中止）。
+  const waits = task.log.flatMap((e, i) => {
+    const end = task.log[i + 1]?.at ?? until
+    if (e.type === 'question') return [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end } }]
+    return isHumanGateWait(task, e) ? [{ node: e.node as string | undefined, call: undefined, span: { start: e.at, end } }] : []
+  })
 
   // 失败到重试的阻塞区间：失败说明带着节点，重试说明不带，按顺序配对。
   const blocks: { node: string | undefined; span: Span }[] = []
