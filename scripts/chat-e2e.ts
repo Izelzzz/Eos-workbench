@@ -152,6 +152,12 @@ const report = {
   transcript: show.out,
 }
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
+// 真实模型的报告作为 PR 的证据放进 docs/e2e/chat-a/（pr-checklist 按 report.json 里的 commit 核对证据对得上最终代码）。
+if (!fake) {
+  const evidence = join(ROOT, 'docs', 'e2e', 'chat-a')
+  mkdirSync(evidence, { recursive: true })
+  writeFileSync(join(evidence, 'report.json'), JSON.stringify(report, null, 2))
+}
 for (const [name, ok] of checks) console.log(`${ok ? '✓' : '✗'} ${name}`)
 console.log(`\n报告：${join(OUT, 'report.json')}`)
 process.exit(checks.every(([, ok]) => ok) ? 0 : 1)

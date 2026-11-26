@@ -1,0 +1,47 @@
+{
+  "commit": "0c9e7219908c5c8e872d716b143f2048abfdaa56",
+  "image": "eos-workbench:chat-probe",
+  "results": {
+    "eos-check: 不带令牌": "401",
+    "eos-check: 错的令牌": "401",
+    "eos-agent: 不带令牌": "401",
+    "eos-agent: 错的令牌": "401",
+    "eos-check: 对的令牌（令牌泄露时）": "200",
+    "eos-check: 读 dsh 配置里的令牌": "读不到",
+    "eos-agent: 读 dsh 配置里的令牌": "读得到",
+    "dsh home 的权限": "drwxrws--T eos:eos-dsh",
+    "端点关闭后 eos-agent 带对的令牌": "ERR fetch failed"
+  },
+  "checks": [
+    {
+      "name": "eos-check: 不带令牌",
+      "expected": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "name": "eos-check: 错的令牌",
+      "expected": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "name": "eos-agent: 不带令牌",
+      "expected": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "name": "eos-agent: 错的令牌",
+      "expected": "401",
+      "actual": "401",
+      "ok": true
+    },
+    {
+      "name": "eos-check: 读 dsh 配置里的令牌",
+      "expected": "读不到",
+      "actual": "读不到",
+      "ok": true
+    }
+  ]
+}
