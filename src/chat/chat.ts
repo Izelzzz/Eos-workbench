@@ -41,18 +41,21 @@ export type ChatOptions = {
 const keyOf = (id: string) => `chat/${id}`
 const nonceOf = (id: string, seq: number) => `chat/${id}/${seq}`
 
-/** trace 里的工具调用 → agent 读了哪些数据（认领回来的调用没有端点的记录，从 trace 里还原）。 */
-const readsIn = (events: TraceEvent[]): ChatRead[] => {
-  const failed = new Set(events.flatMap(e => (e.kind === 'tool_end' && e.isError ? [e.id] : [])))
-  return events.flatMap(e => (e.kind === 'tool_start' ? [{ tool: e.name, args: e.args.slice(0, 500), isError: failed.has(e.id) }] : []))
-}
-
 /**
- * 工具名是不是平台的只读工具。执行器可能给 MCP 工具加前缀（例如 mcp__eos__list_tasks），所以按结尾认。
- * 出现了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。
+ * 执行器报告的工具名 → 平台工具的名字；不是平台的只读工具时 undefined。执行器可能给 MCP 工具加前缀（例如 mcp__eos__list_tasks），所以按结尾认。
+ * 执行了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。
  */
 const OURS = TOOLS.map(t => t.name)
-const isOurs = (name: string) => OURS.some(t => name === t || name.endsWith(`__${t}`))
+const ours = (name: string): string | undefined => OURS.find(t => name === t || name.endsWith(`__${t}`))
+
+/** 这次调用执行了的工具里，不是平台只读工具的那些（只看真正执行了的 tool_start；模型要了但执行器没有的工具不算）。 */
+const foreignIn = (events: TraceEvent[]): string[] => [...new Set(events.flatMap(e => (e.kind === 'tool_start' && ours(e.name) === undefined ? [e.name] : [])))]
+
+/** trace 里的工具调用 → agent 读了哪些数据（认领回来的调用没有端点的记录，从 trace 里还原；工具名和端点记的一样，不带前缀）。 */
+const readsIn = (events: TraceEvent[]): ChatRead[] => {
+  const failed = new Set(events.flatMap(e => (e.kind === 'tool_end' && e.isError ? [e.id] : [])))
+  return events.flatMap(e => (e.kind === 'tool_start' ? [{ tool: ours(e.name) ?? e.name, args: e.args.slice(0, 500), isError: failed.has(e.id) }] : []))
+}
 
 export class Chats {
   constructor(private readonly o: ChatOptions) {}
@@ -137,7 +140,7 @@ export class Chats {
       await endpoint.close()
       await this.o.executor.release(cwd).catch(() => undefined)
     }
-    const foreign = [...new Set(events.flatMap(e => (e.kind === 'tool_start' ? [e.name] : e.kind === 'model' ? e.toolCalls.map(c => c.name) : [])).filter(n => !isOurs(n)))]
+    const foreign = foreignIn(events)
     if (foreign.length > 0) return this.failed(id, `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`)
     return this.succeeded(id, reply, endpoint.reads())
   }
@@ -167,9 +170,9 @@ export class Chats {
     const events = redactDeep(await this.o.executor.traceOf(keyOf(id), nonce).catch(() => []), this.o.redact)
     // 运行时已经记下的事件不重复写（进程是在调用中途死的，事件流可能已经记了一部分；只在一条都没有时补上回放的）。
     if (!this.o.chats.trace(id).some(r => r.call === nonce && r.event.kind !== 'call_start')) this.o.chats.appendTrace(id, nonce, events)
-    const foreign = readsIn(events).filter(r => !isOurs(r.tool))
+    const foreign = foreignIn(events)
     if (foreign.length > 0) {
-      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: `agent 调用了平台只读工具以外的工具（${foreign.map(r => r.tool).join('、')}），这一轮作废` })
+      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废` })
       return
     }
     this.succeeded(id, found, readsIn(events))

@@ -84,9 +84,7 @@ export class ChatStore {
 
   private summaries(where: string, ...args: string[]): ChatSummary[] {
     const rows = this.db
-      .prepare(
-        `SELECT c.id, c.created_at, c.updated_at, c.title, c.actor, (SELECT COUNT(*) FROM chat_messages m WHERE m.chat_id = c.id) AS n FROM chats c ${where} ORDER BY c.updated_at DESC, c.id`,
-      )
+      .prepare(`SELECT c.id, c.created_at, c.updated_at, c.title, c.actor, (SELECT COUNT(*) FROM chat_messages m WHERE m.chat_id = c.id) AS n FROM chats c ${where} ORDER BY c.updated_at DESC, c.id`)
       .all(...args) as Record<string, unknown>[]
     return rows.map(r => ({
       id: String(r.id),

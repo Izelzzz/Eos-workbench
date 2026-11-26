@@ -23,10 +23,7 @@ const progress = (say: (s: string) => void) => (_id: string, e: TraceEvent) => {
   if (e.kind === 'tool_start') say(`  … 读取 ${e.name}`)
 }
 
-export const chatCommand = async (
-  args: string[],
-  o: Omit<ChatOptions, 'executor' | 'onEvent'> & { executor: () => Executor; say: (s: string) => void; fail: (s: string) => never },
-): Promise<void> => {
+export const chatCommand = async (args: string[], o: Omit<ChatOptions, 'executor' | 'onEvent'> & { executor: () => Executor; say: (s: string) => void; fail: (s: string) => never }): Promise<void> => {
   const [sub, ...rest] = args
   const usage = `用法：\n${CHAT_HELP}`
   if (sub === 'list') {

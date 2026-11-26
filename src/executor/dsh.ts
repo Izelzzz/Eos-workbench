@@ -172,7 +172,7 @@ export const ALWAYS_DISABLED = ['tool-plugin-manager', 'skill-office']
 /**
  * builtinTools 为 'none' 时再关掉的行：sdk profile 里所有给模型提供工具的行（文件读写和搜索、命令行、技能、子 agent、
  * 提问、计划模式、交付物、Office、MCP 资源……），以及会把本机文件内容带进会话的行（消息里的 @文件引用、工作区的 AGENTS.md）。
- * 剩下的工具只有平台经 mcp 交给它的。scripts/chat-probe.ts 用真实的 dsh 核对：请求头的工具表里只有 mcp__ 开头的工具。
+ * 剩下的工具只有平台经 mcp 交给它的。scripts/chat-e2e.ts 用真实的 dsh 核对：请求头的工具表里只有 mcp__ 开头的工具。
  */
 export const BUILTIN_TOOL_ROWS = [
   'tool-working-directory',

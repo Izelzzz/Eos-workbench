@@ -9,7 +9,25 @@ const ROOT = join(import.meta.dirname, '..')
 const image = process.env.EOS_PROBE_IMAGE ?? 'eos-workbench:chat-probe'
 const out = execFileSync(
   'docker',
-  ['run', '--rm', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--cap-add', 'KILL', '-v', `${join(ROOT, 'scripts', 'chat-docker-probe-inner.ts')}:/probe/inner.ts:ro`, '-w', '/app', image, 'node', '--import', 'tsx', '/probe/inner.ts'],
+  [
+    'run',
+    '--rm',
+    '--cap-add',
+    'SETUID',
+    '--cap-add',
+    'SETGID',
+    '--cap-add',
+    'KILL',
+    '-v',
+    `${join(ROOT, 'scripts', 'chat-docker-probe-inner.ts')}:/probe/inner.ts:ro`,
+    '-w',
+    '/app',
+    image,
+    'node',
+    '--import',
+    'tsx',
+    '/probe/inner.ts',
+  ],
   { encoding: 'utf8' },
 )
 const results = JSON.parse(out.slice(out.indexOf('{'))) as Record<string, string>

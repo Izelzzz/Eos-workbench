@@ -6,7 +6,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 // 用镜像里的代码（/app），不是挂进来的这份脚本旁边的。
 const { openEndpoint } = (await import(String('/app/src/chat/mcp.ts'))) as typeof import('../src/chat/mcp.ts')
 
-const as = (user: string, ...cmd: string[]) => spawnSync('setpriv', [`--reuid=${user}`, `--regid=${execFileSync('id', ['-g', user], { encoding: 'utf8' }).trim()}`, '--init-groups', '--', ...cmd], { encoding: 'utf8' })
+const as = (user: string, ...cmd: string[]) =>
+  spawnSync('setpriv', [`--reuid=${user}`, `--regid=${execFileSync('id', ['-g', user], { encoding: 'utf8' }).trim()}`, '--init-groups', '--', ...cmd], { encoding: 'utf8' })
 const status = (user: string, url: string, auth?: string) => {
   const code = `fetch(${JSON.stringify(url)},{method:'POST',headers:{'content-type':'application/json'${auth === undefined ? '' : `,authorization:${JSON.stringify(auth)}`}},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}).then(r=>console.log(r.status)).catch(e=>console.log('ERR '+e.message))`
   return as(user, process.execPath, '-e', code).stdout.trim()

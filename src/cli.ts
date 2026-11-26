@@ -96,7 +96,7 @@ const fail = (s: string): never => {
 // 启动检查在打开数据库之前做：数据目录不可写时也能给出看得懂的说明。
 const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
-const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web', 'chat'])
+const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
 /** 检查命令用的系统用户（部署镜像里设置 EOS_CHECK_USER）。设置错了由启动检查拦下。 */
 const checkUser = resolveCheckUser(process.env)
 /** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */
@@ -107,7 +107,8 @@ if (positionals[0] === 'doctor' && !values.help) {
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
-if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
+// chat 只有新建和接着说会调用模型；list、show 只读数据库。
+if (!values.help && (NEEDS_ENV.has(positionals[0] ?? '') || (positionals[0] === 'chat' && ['new', 'send'].includes(positionals[1] ?? '')))) {
   const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)

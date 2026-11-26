@@ -1,5 +1,6 @@
 // 对话 agent 的只读工具：读平台的工作流、约定文档、Agent 模板、技能、任务和任务的状态、trace、指标、改动摘要。
-// 一张表列出全部工具：没有写操作，也没有任何读凭据、读仓库文件内容的工具（改动只给文件列表和增删行数）。
+// 一张表列出全部工具：没有写操作，也没有读凭据、读仓库文件的工具（改动只给文件列表和增删行数）。
+// 任务的 trace 和产出里可能带着任务 agent 读过的代码片段：trace 在读取范围内，这些片段跟着 trace 一起返回（截断、遮蔽）。
 // 参数在这里（边界）按 schema 解析；每个工具的返回都先截断、再遮蔽已知凭据值，才交给 agent。
 import { z } from 'zod'
 import type { Conventions } from '../conventions/conventions.ts'
@@ -56,7 +57,12 @@ const callSummary = (clip: Ctx['clip'], call: string, events: TraceEvent[]) => {
     steps: models.length,
     tools: [...new Set(events.flatMap(e => (e.kind === 'tool_start' ? [e.name] : [])))],
     toolErrors: events.filter(e => e.kind === 'tool_end' && e.isError).length,
-    lastText: clip(models.map(m => m.text).filter(t => t.trim() !== '').at(-1) ?? ''),
+    lastText: clip(
+      models
+        .map(m => m.text)
+        .filter(t => t.trim() !== '')
+        .at(-1) ?? '',
+    ),
   }
 }
 

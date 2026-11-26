@@ -40,7 +40,12 @@ const platform = () => {
   const key = parseMasterKey(Buffer.alloc(32, 7).toString('base64'))
   const credentials = new Credentials(db, (key as { key: MasterKey }).key)
   credentials.put(LOCAL_OWNER, 'deepseek', 'api-key', SECRET)
-  const data: DataSource = { store, conventions, changes: () => ({ base: 'b', head: 'h', files: [{ path: 'src/a.ts', status: 'modified', add: 3, del: 1, binary: false }], omitted: 0 }), now: () => 100 }
+  const data: DataSource = {
+    store,
+    conventions,
+    changes: () => ({ base: 'b', head: 'h', files: [{ path: 'src/a.ts', status: 'modified', add: 3, del: 1, binary: false }], omitted: 0 }),
+    now: () => 100,
+  }
   const chats = new ChatStore(store.db)
   const redact = (s: string) => redactText(s, [SECRET])
   const opts = (executor: McpExecutor): ChatOptions => ({ chats, data, conventions, executor, dataDir: dir, redact, now: () => 100 })
@@ -66,10 +71,7 @@ test('a chat runs through the Executor interface alone: the agent gets only the 
   assert.equal(spec.write, 'none')
   assert.equal(spec.profile.mcp.length, 1)
   assert.ok(isHttpMcp(spec.profile.mcp[0]!))
-  assert.deepEqual(
-    ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(),
-    TOOLS.map(t => t.name).sort(),
-  )
+  assert.deepEqual(ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(), TOOLS.map(t => t.name).sort())
   assert.match(ex.history.get(`chat/${r.chat.id}`)?.[0] ?? '', /你是 Eos 平台里的对话助手/, 'the first message carries the assistant template prompt')
   assert.deepEqual(
     r.call.reads.map(x => x.tool),
@@ -154,7 +156,15 @@ test('tool arguments are parsed at the boundary and long output is cut after red
   const out = callTool(p.data, p.redact, 'get_task_trace', { id: 't1', call: 'c2' }).text
   assert.ok(!out.includes(SECRET.slice(0, 10)), out)
   p.store.appendTrace('t1', 'c3', [{ kind: 'model', t: 1, step: 1, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, reasoning: '', text: 'y'.repeat(60_000), toolCalls: [] }])
-  const many = Array.from({ length: 40 }, (_, i) => ({ kind: 'model' as const, t: i, step: i, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, reasoning: '', text: 'z'.repeat(1999), toolCalls: [] }))
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    kind: 'model' as const,
+    t: i,
+    step: i,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    reasoning: '',
+    text: 'z'.repeat(1999),
+    toolCalls: [],
+  }))
   p.store.appendTrace('t1', 'c4', many)
   const big = callTool(p.data, p.redact, 'get_task_trace', { id: 't1', call: 'c4' }).text
   assert.ok(big.length < MAX_OUTPUT_CHARS + 200 && big.includes('省略'))
@@ -224,7 +234,8 @@ test('the MCP endpoint refuses requests without the right token, from browsers o
   })
   const url = ep.mcp.url
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
-  const post = (headers: Record<string, string>, b = body, method = 'POST') => fetch(url, { method, headers: { 'content-type': 'application/json', ...headers }, ...(method === 'POST' ? { body: b } : {}) })
+  const post = (headers: Record<string, string>, b = body, method = 'POST') =>
+    fetch(url, { method, headers: { 'content-type': 'application/json', ...headers }, ...(method === 'POST' ? { body: b } : {}) })
   assert.equal((await post({})).status, 401, 'no token')
   assert.equal((await post({ Authorization: 'Bearer wrong' })).status, 401, 'wrong token')
   assert.equal((await post({ Authorization: `${ep.mcp.headers.Authorization}x` })).status, 401, 'token with a suffix')
