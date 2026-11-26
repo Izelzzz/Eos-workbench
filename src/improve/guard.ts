@@ -28,10 +28,10 @@ const commandsOf = (w: Workflow): string[] =>
         if (c.kind !== 'platform') return []
         const reviews = w.nodes
           .slice(0, i)
-          .filter(p => (p.kind === 'dialog' && p.role !== undefined) || p.kind === 'gate')
+          .filter(p => p.kind === 'dialog' && p.role !== undefined)
           .map(p => p.id)
           .sort()
-        return [`${n.id}：平台动作 ${c.action}（之前的评审和卡点：${reviews.join('、')}）`]
+        return [`${n.id}：平台动作 ${c.action}（之前的评审：${reviews.join('、')}）`]
       }),
     )
     .sort()
@@ -43,6 +43,17 @@ const rolesAt = (w: Workflow): Map<string, string | undefined> => new Map(w.node
 
 /** 卡点：验收什么、由谁验收。改进提案可以加卡点（加严），不能删掉或改掉已有的（放宽要人批）。 */
 const gatesOf = (w: Workflow): Map<string, string> => new Map(w.nodes.flatMap(n => (n.kind === 'gate' ? [[n.id, JSON.stringify({ with: n.with, by: n.by })] as const] : [])))
+
+/**
+ * 卡点之后、它后面第一个交付节点（平台动作）之前的节点（卡点除外）：人验收通过之后，这些节点还能让 agent 改代码，
+ * 改动会不经验收就推送出去。提案不能往这里加节点（可以删，也可以在这里加卡点）。
+ */
+const afterGate = (w: Workflow, gate: string): Set<string> => {
+  const from = w.nodes.findIndex(n => n.id === gate)
+  const rest = w.nodes.slice(from + 1)
+  const ship = rest.findIndex(n => n.checks.some(c => c.kind === 'platform'))
+  return new Set((ship < 0 ? [] : rest.slice(0, ship)).filter(n => n.kind !== 'gate').map(n => n.id))
+}
 
 /**
  * 新内容相对旧内容改了哪些权限相关的东西（中文说明）；没有就是空数组。失败就关：旧内容解析不了时直接拒绝。
@@ -83,7 +94,15 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
     }
     if (JSON.stringify(commandsOf(a.workflow)) !== JSON.stringify(commandsOf(b.workflow))) out.push('不能改检查命令和平台动作')
     const newGates = gatesOf(b.workflow)
-    for (const [id, g] of gatesOf(a.workflow)) if (newGates.get(id) !== g) out.push(`不能删掉卡点「${id}」，也不能改它验收的节点和验收人`)
+    for (const [id, g] of gatesOf(a.workflow)) {
+      if (newGates.get(id) !== g) {
+        out.push(`不能删掉卡点「${id}」，也不能改它验收的节点和验收人`)
+        continue
+      }
+      const before = afterGate(a.workflow, id)
+      const added = [...afterGate(b.workflow, id)].filter(n => !before.has(n))
+      if (added.length > 0) out.push(`不能在卡点「${id}」和交付之间加节点（${added.join('、')}）：验收通过之后的改动会不经验收就推送`)
+    }
     return out
   }
   return []
