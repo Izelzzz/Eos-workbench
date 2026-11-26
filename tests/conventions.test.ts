@@ -109,6 +109,7 @@ test('templates and skills are seeded, validated against each other, and snapsho
   assert.deepEqual(
     c.list('template').map(t => [t.name, t.version, t.write]),
     [
+      ['assistant', 1, 'none'],
       ['developer', 1, 'worktree'],
       ['improver', 1, 'none'],
       ['reviewer', 1, 'none'],

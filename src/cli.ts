@@ -23,6 +23,9 @@ import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
+import { CHAT_HELP, chatCommand } from './chat/cli.ts'
+import { ChatStore } from './chat/store.ts'
+import { committedChanges } from './runner/git.ts'
 
 const HELP = `用法：
   eos run --repo <仓库路径或 GitHub 地址> [--workflow standard] "<需求>"   创建任务并运行
@@ -39,6 +42,7 @@ const HELP = `用法：
   eos proposals                                           列出改进提案
   eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
   eos reject <提案号> "<理由>"                             拒绝
+${CHAT_HELP}
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
 web：--host 是监听地址（容器里用 0.0.0.0）；通过别的地址访问时（端口映射、反向代理）设 EOS_PUBLIC_URL，例如 https://eos.example.com。没有登录，不要直接暴露到公网。
@@ -92,7 +96,7 @@ const fail = (s: string): never => {
 // 启动检查在打开数据库之前做：数据目录不可写时也能给出看得懂的说明。
 const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
-const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
+const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web', 'chat'])
 /** 检查命令用的系统用户（部署镜像里设置 EOS_CHECK_USER）。设置错了由启动检查拦下。 */
 const checkUser = resolveCheckUser(process.env)
 /** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */
@@ -358,6 +362,21 @@ const commands: Record<string, () => Promise<void> | void> = {
     process.once('SIGINT', shutdown)
     process.once('SIGTERM', shutdown)
     await new Promise(() => {})
+  },
+  async chat() {
+    const conventions = new Conventions(store)
+    conventions.seed(Date.now())
+    await chatCommand(positionals.slice(1), {
+      chats: new ChatStore(store.db),
+      data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
+      conventions,
+      executor,
+      dataDir,
+      redact,
+      now: Date.now,
+      say,
+      fail,
+    })
   },
   workflows() {
     const conventions = new Conventions(store)

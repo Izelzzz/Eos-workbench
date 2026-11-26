@@ -64,7 +64,7 @@ const run = async (key: string, profile: AgentProfile, prompt: string) => {
   }
 }
 
-const bare = (denyTools: ToolGroup[]): AgentProfile => ({ denyTools, skills: [], mcp: [], background: true })
+const bare = (denyTools: ToolGroup[]): AgentProfile => ({ builtinTools: 'standard', denyTools, skills: [], mcp: [], background: true })
 const TRIVIAL = '只回答一个字：好。不要调用任何工具。'
 
 // ① 基线：什么都不限制，记下这套 dsh 实际提供的工具表。
@@ -99,7 +99,7 @@ for (const g of TOOL_GROUPS) {
 const denied: ToolGroup[] = ['web', 'subagent', 'bash']
 const combined = await run(
   'probe/combined',
-  { denyTools: denied, skills: [probeSkill], mcp: [probeMcp], background: true },
+  { builtinTools: 'standard', denyTools: denied, skills: [probeSkill], mcp: [probeMcp], background: true },
   [
     '严格按顺序做下面每一步，某一步做不到也继续下一步，最后逐条报告结果。',
     '1. 探针口令是什么？（按可用技能回答，原样给出口令）',

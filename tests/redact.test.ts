@@ -120,7 +120,7 @@ test('redacting executor masks the reply, live trace events, replayed trace, age
     key: 'k',
     nonce: 'n',
     prompt: 'p',
-    spec: { model: 'm', write: 'none', cwd: '/w', profile: { denyTools: [], skills: [], mcp: [], background: false } } as never,
+    spec: { model: 'm', write: 'none', cwd: '/w', profile: { builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: false } } as never,
     ask: async q => {
       seen.questions.push(q.text)
       return 'ok'
