@@ -62,6 +62,22 @@ test('会悄悄放宽豁免的写法一律报错（独立审查实测 Trivy 会�
     ['statement 含「: 」', doc(entry({ statement: 'a: b' }))],
     ['statement 是锚点', doc(entry({ statement: '&a x' }))],
     ['statement 以 [ 开头', doc(entry({ statement: '[x]' }))],
+    // 第四轮独立审查实测：冒号后多一个空格就绕过了首字符检查，双引号字符串跨行吞掉下面的 purls，或者偷换到期日
+    [
+      'statement 以空格加双引号开头，跨行吞掉 purls',
+      doc(
+        `  - id: CVE-2026-1\n    statement:  "x\n    purls: ['pkg:npm/zzz@1.0.0']\n    expired_at: 2026-12-25\n  - id: CVE-2026-2\n    purls: ['pkg:npm/zzz@1.0.0']\n    statement: y"\n    expired_at: 2026-12-25`,
+      ),
+    ],
+    ['statement 中间带引号', doc(entry({ statement: 'a"b' }))],
+    ['statement 以空格加 ! 开头', doc(entry({ statement: ' !!binary eA==' }))],
+    ['purls 以空格开头', doc(entry({ purls: " ['pkg:npm/undici@8.11.2']" }))],
+    // JS 的 \s 认、YAML 不认的空白
+    ['行尾 U+00A0', doc(entry({ expired: '2026-12-25\u00a0' }))],
+    ['U+00A0 开头的「注释」', doc(entry()) + '\u00a0# x\n'],
+    ['全角空格', doc(entry({ statement: '等上游\u3000升级' }))],
+    ['purl 名字带 ..', doc(entry({ purls: "['pkg:npm/../undici@8.11.2']" }))],
+    ['purl 名字有空段', doc(entry({ purls: "['pkg:npm//undici/@8.11.2']" }))],
   ]
   for (const [name, text] of cases) assert.notDeepEqual(check(text, TODAY).errors, [], name)
 })

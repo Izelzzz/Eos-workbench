@@ -1,5 +1,6 @@
-# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（逐行严格校验，第三轮独立审查后加了字符和 purl 的限制）。
+# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（逐行严格校验；四轮独立审查后的版本）。
 # 被扫描的是 #87 之后的平台镜像（本地构建）。校验通过才会真的跑 Trivy；不通过时在那之前就报错退出。每段先列出豁免清单的关键行（不可见字符用 cat -v 显示：^M 是 CR，M-BM-^E 是 NEL）
+# 7–12 用的是独立审查实测能让 Trivy 放宽豁免的文件
 
 ## 1-仓库里的原样（会跑完 Trivy）
 #   4:vulnerabilities:
@@ -120,7 +121,7 @@ exit=1
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 1 行：只认 vulnerabilities 一节，按 .trivyignore.yaml 开头注释里的写法写
 exit=1
 
-## 7-注释里夹 CR 藏一条（审查实测 Trivy 会多豁免一条）
+## 7-注释里夹 CR 藏一条
 #   1:vulnerabilities:
 #   2:  - id: CVE-2026-109383
 #   3:    purls: ['pkg:npm/undici@8.11.2']
@@ -129,7 +130,7 @@ exit=1
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行有不可见的控制字符（U+000D）：只允许普通文字和换行（LF）
 exit=1
 
-## 8-statement 里夹 NEL 偷走到期日（审查实测）
+## 8-statement 里夹 NEL 偷走到期日
 #   1:vulnerabilities:
 #   2:  - id: CVE-2026-109383
 #   3:    purls: ['pkg:npm/undici@8.11.2']
@@ -138,7 +139,7 @@ exit=1
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 4 行有不可见的控制字符（U+0085）：只允许普通文字和换行（LF）
 exit=1
 
-## 9-purl 版本是 #（审查实测等于不限版本）
+## 9-purl 版本是 #（等于不限版本）
 #   1:vulnerabilities:
 #   2:  - id: CVE-2026-109383
 #   3:    purls: ['pkg:npm/undici@#']
@@ -148,7 +149,7 @@ exit=1
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 purls
 exit=1
 
-## 10-purl 双引号转义（审查实测）
+## 10-purl 双引号转义
 #   1:vulnerabilities:
 #   2:  - id: CVE-2026-109383
 #   3:    purls: ["pkg:npm/undici@\x23"]
@@ -156,5 +157,37 @@ exit=1
 #   5:    expired_at: 2026-12-25
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 3 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 purls
+exit=1
+
+## 11-statement 冒号后两个空格加双引号，跨行吞掉 purls
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    statement:  "x
+#   4:    purls: ['pkg:npm/zzz@1.0.0']
+#   5:    expired_at: 2026-12-25
+#   6:  - id: CVE-2026-1
+#   7:    purls: ['pkg:npm/zzz@1.0.0']
+#   8:    statement: y"
+#   9:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 3 行写法不认识：每条豁免以「  - id: CVE-…」开头，下面四个空格缩进写 purls、statement、expired_at，各一行
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 statement
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 8 行：statement 写成一行普通文字：冒号后只空一格，不以 YAML 的特殊字符开头，不含引号、「: 」和「 #」
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-1 缺少 statement
+exit=1
+
+## 12-同上，偷换到期日
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    purls: ['pkg:npm/undici@8.11.2']
+#   4:    statement:  "x
+#   5:    expired_at: 2026-01-01
+#   6:  - id: CVE-2026-1
+#   7:    purls: ['pkg:npm/zzz@1.0.0']
+#   8:    statement: y"
+#   9:    expired_at: 2099-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 4 行写法不认识：每条豁免以「  - id: CVE-…」开头，下面四个空格缩进写 purls、statement、expired_at，各一行
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 statement
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 8 行：statement 写成一行普通文字：冒号后只空一格，不以 YAML 的特殊字符开头，不含引号、「: 」和「 #」
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-1 缺少 statement
 exit=1
 

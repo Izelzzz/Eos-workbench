@@ -28,7 +28,12 @@ function parsePurls(v: string): string[] | undefined {
   if (m === null) return undefined
   const items = m[1]!.split(',').map(x => x.trim())
   // 只认单引号（双引号里有转义，例如 \x23 解码后是 #）；版本只认这几种字符：# 后面是 subpath、? 后面是 qualifier，都会让版本失效
-  if (items.length === 0 || items.some(x => !/^'pkg:[a-z]+\/[A-Za-z0-9._~/-]+@[A-Za-z0-9.+_~-]+'$/.test(x))) return undefined
+  // 名字按 / 分段，每段非空、不是 . 或 ..（这类写法 Trivy 匹配不上或解析失败，等于写错了）
+  const ok = (x: string) => {
+    const m = /^'pkg:[a-z]+\/([A-Za-z0-9._~/-]+)@[A-Za-z0-9.+_~-]+'$/.exec(x)
+    return m !== null && m[1]!.split('/').every(seg => seg !== '' && seg !== '.' && seg !== '..')
+  }
+  if (items.length === 0 || !items.every(ok)) return undefined
   return items.map(x => x.slice(1, -1))
 }
 
@@ -49,7 +54,8 @@ export function check(text: string, today: string): Checked {
   // 所以整个文件只允许 \n 换行和可见字符，别的控制字符、这几种换行、BOM 一律拒绝
   const bad = [...text].findIndex(ch => {
     const c = ch.codePointAt(0)!
-    return (c < 0x20 && c !== 0x0a) || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029 || c === 0xfeff
+    // 另外拒绝 ASCII 空格以外的空白（U+00A0、U+3000 等）：JS 的 \s 认它们，YAML 不认，两边对一行的理解会不同
+    return (c < 0x20 && c !== 0x0a) || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029 || c === 0xfeff || (c !== 0x20 && /\p{Zs}/u.test(ch))
   })
   if (bad >= 0) {
     const chars = [...text]
@@ -59,8 +65,8 @@ export function check(text: string, today: string): Checked {
   }
   text.split('\n').forEach((raw, i) => {
     const n = i + 1
-    const line = raw.replace(/\s+$/, '')
-    if (line === '' || /^\s*#/.test(line)) return
+    const line = raw.replace(/ +$/, '')
+    if (line === '' || /^ *#/.test(line)) return
     if (line === 'vulnerabilities:') {
       if (seenRoot) errors.push(`第 ${n} 行：vulnerabilities 写了两次`)
       seenRoot = true
@@ -73,7 +79,7 @@ export function check(text: string, today: string): Checked {
       cur = { id: start[1]!, line: n }
       return
     }
-    const field = /^ {4}(purls|statement|expired_at): (.+)$/.exec(line)
+    const field = /^ {4}(purls|statement|expired_at): (\S.*)$/.exec(line)
     if (field === null || cur === undefined) return void errors.push(`第 ${n} 行写法不认识：每条豁免以「  - id: CVE-…」开头，下面四个空格缩进写 purls、statement、expired_at，各一行`)
     const key = field[1] as (typeof KEYS)[number]
     const value = field[2]!
@@ -87,8 +93,10 @@ export function check(text: string, today: string): Checked {
       cur.expired_at = value
     } else {
       // 以 YAML 的特殊字符开头、或者含「: 」「 #」时，Trivy 会解析成别的东西或直接报错
-      if (/^[-?:,[\]{}#&*!|>'"%@`]/.test(value) || value.includes(': ') || value.includes(' #')) {
-        return void errors.push(`第 ${n} 行：statement 写成一行普通文字：不以 YAML 的特殊字符开头，不含「: 」和「 #」`)
+      // 只允许一行普通文字（YAML 的 plain scalar）：冒号后只有一个空格、不以特殊字符开头、不含引号（引号字符串能跨行，
+      // 吞掉后面几行的 purls、expired_at）、不含「: 」和「 #」
+      if (/^[-?:,[\]{}#&*!|>'"%@`]/.test(value) || /['"]/.test(value) || value.includes(': ') || value.includes(' #')) {
+        return void errors.push(`第 ${n} 行：statement 写成一行普通文字：冒号后只空一格，不以 YAML 的特殊字符开头，不含引号、「: 」和「 #」`)
       }
       cur.statement = value
     }
