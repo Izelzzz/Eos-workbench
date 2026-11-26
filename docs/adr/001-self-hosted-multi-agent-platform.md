@@ -31,6 +31,22 @@
 
 ### 总览
 
+平台的组成和一次调用的走向：
+
+```mermaid
+flowchart LR
+  user["使用者"] --> web["Web 和命令行"]
+  web --> runner["runner<br/>执行 effect"]
+  runner -- "事件" --> engine["引擎<br/>纯函数 reducer"]
+  engine -- "新状态和 effect" --> runner
+  runner <--> store[("SQLite<br/>事件和状态快照")]
+  runner -- "调用 agent" --> iface["Executor 接口"]
+  iface --> dsh["dsh 进程<br/>每个（worktree，模型，能力面）一个"]
+  dsh --> model["模型 API"]
+  dsh -- "读写" --> wt["任务的 worktree"]
+  runner -- "检查、提交、推送" --> wt
+```
+
 | 部分 | 设计 |
 |---|---|
 | 平台层 | 自建，TypeScript（Node 24） |

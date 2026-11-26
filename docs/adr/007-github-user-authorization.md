@@ -21,6 +21,24 @@
 
 ### 总览
 
+授权的过程：
+
+```mermaid
+sequenceDiagram
+  participant U as 使用者
+  participant P as 平台
+  participant G as GitHub
+  U->>P: 点击「用 GitHub 账号授权」
+  P->>U: 跳转到 GitHub 授权页（带一次性的 state）
+  U->>G: 在 GitHub 上同意
+  G->>P: 回调（code 和 state）
+  P->>G: 用 code 换用户令牌和刷新令牌
+  P->>P: 加密保存为 github-user 凭据
+  Note over P,G: 之后的任务
+  P->>G: 以授权人的身份克隆、推送、开 PR
+  P->>G: 令牌到期前 5 分钟用刷新令牌续期
+```
+
 | 方面 | 设计 |
 |---|---|
 | 授权方式 | GitHub App 的用户授权 |

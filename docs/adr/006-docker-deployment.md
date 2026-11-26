@@ -24,6 +24,26 @@
 
 ### 总览
 
+容器里的进程、用户和数据：
+
+```mermaid
+flowchart TB
+  browser["浏览器<br/>SSH 隧道或反向代理"] --> port["宿主机 127.0.0.1:4317"]
+  port --> plat
+  envf[".env<br/>主密钥、模型 key"] --> plat
+  subgraph container["容器（Docker 默认权限）"]
+    plat["平台<br/>用户 eos"]
+    plat -- "切换用户，清掉能力" --> dsh["dsh<br/>用户 eos-agent"]
+    plat -- "切换用户，清掉能力" --> chk["检查命令<br/>用户 eos-check"]
+    dsh --> agent["agent<br/>Landlock：只能写自己的 worktree 和 /tmp"]
+    dsh --> mcp["MCP 服务<br/>沙箱外，用户 eos-agent"]
+    plat <--> data[("/data 数据卷<br/>eos.db、dsh、worktrees、repos")]
+    agent -- "写" --> wt["任务的 worktree"]
+    chk -- "写" --> wt
+  end
+  plat --> ext["模型 API、GitHub"]
+```
+
 | 方面 | 设计 |
 |---|---|
 | 容器 | 一个容器运行平台、所有任务的 agent 和检查命令 |
