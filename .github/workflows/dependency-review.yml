@@ -18,14 +18,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-
 env:
   # 和 ci.yml、image.yml、Dockerfile 的 Node 版本一致
   NODE_VERSION: 24.22.3
 
 jobs:
   # 纯文档 PR 跳过下面重的检查（判断见 .github/scripts/docs-only.ts）。脚本从 base（HEAD^1）取，PR 改它改变不了自己的结果。
-  # 不是 pull_request、base 上还没有这个脚本、或者这个 job 出错时，docs_only 都不是 true，下面照跑全套。
+  # 不是 pull_request、PR 不是指向默认分支（main）、base 上还没有这个脚本、或者这个 job 出错时，docs_only 都不是 true，下面照跑全套。
+  # 只认指向 main 的 PR：不然先指向一个带了代码改动的分支（相对它只改文档）跳过检查，再把 base 改成 main，检查结果不会重跑。
   # 重的 job 跳过时，按原来的名字报告为 skipped（分支保护里算通过），不会卡在等待中。
   changes:
     name: changes-deps
@@ -34,17 +34,17 @@ jobs:
     outputs:
       docs_only: ${{ steps.check.outputs.docs_only }}
     steps:
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
-      - if: github.event_name == 'pull_request'
+      - if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - id: check
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
         run: |
           if git show HEAD^1:.github/scripts/docs-only.ts > "$RUNNER_TEMP/docs-only.ts" 2>/dev/null; then
             node "$RUNNER_TEMP/docs-only.ts"

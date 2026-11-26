@@ -1,6 +1,8 @@
 # 纯文档 PR 跳过重的检查：实测
 
-临时 PR #96（标题「临时，验证用，不合并」）：base 是这个 PR 的分支 `claude/ci-21-docs-only`（提交 9c84386，已经有 `.github/scripts/docs-only.ts`），改动只是 `docs/roadmap.md` 末尾加了一个空行（提交 a6d459d）。记完就关掉、删掉了分支。
+临时 PR #96（标题「临时，验证用，不合并」）：base 是这个 PR 的分支 `claude/ci-21-docs-only`（提交 9c84386，已经有 `.github/scripts/docs-only.ts`），改动只是 `docs/roadmap.md` 末尾加了一个空行（提交 a6d459d）。记完就关掉了；分支 `claude/ci-21-docs-only-probe` 用 git 推送删除时被这个环境的代理断开，没删成，请在 GitHub 上手动删除。
+
+注意：独立审查后改成只有指向默认分支（main）的 PR 才会判为纯文档，所以合并后不能再用「base 是 PR 分支」的方法复现这次实测；合并后指向 main 的纯文档 PR 会走同样的路径。
 
 ## 实际跑出来的检查（2026-11-26，GitHub 的 check runs）
 

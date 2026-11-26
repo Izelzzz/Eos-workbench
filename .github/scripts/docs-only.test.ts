@@ -12,7 +12,21 @@ const z = (...pairs: [string, string][]) => pairs.map(([s, p]) => `${s}\0${p}\0`
 
 test('docs/ 下和根目录的 *.md 算文档；docs/deploy.md、src/ 下的 md 和别的文件都不算', () => {
   for (const p of ['docs/roadmap.md', 'docs/e2e/x/run.log', 'docs/adr/a.png', 'README.md', 'CLAUDE.md']) assert.equal(isDocPath(p), true, p)
-  for (const p of ['docs/deploy.md', 'src/engine/prompts/plan.md', 'src/skills/x/SKILL.md', 'web/README.md', '.github/README.md', 'README.txt', 'package.json', 'docs', 'Dockerfile']) {
+  for (const p of [
+    'docs/deploy.md',
+    'src/engine/prompts/plan.md',
+    'src/skills/x/SKILL.md',
+    'web/README.md',
+    '.github/README.md',
+    'README.txt',
+    'package.json',
+    'docs',
+    'Dockerfile',
+    'DOCS/x.md',
+    'Docs/x.md',
+    'README.MD',
+    './README.md',
+  ]) {
     assert.equal(isDocPath(p), false, p)
   }
 })
@@ -104,5 +118,25 @@ test('四个工作流里的 changes job 除了名字完全一样（改一处要�
   }
   const [first, ...rest] = ['ci.yml', 'image.yml', 'codeql.yml', 'dependency-review.yml'].map(block)
   assert.match(first!, /git show HEAD\^1:\.github\/scripts\/docs-only\.ts/)
+  // 只认指向默认分支的 PR（独立审查：先指向别的分支跳过、再改 base，检查结果不会重跑）
+  assert.match(first!, /id: check\n\s+if: github\.event_name == 'pull_request' && github\.base_ref == github\.event\.repository\.default_branch\n/)
   for (const b of rest) assert.equal(b, first)
+})
+
+test('重的 job 都依赖 changes，条件是「没取消且 docs_only 不等于 true」：changes 出错（输出为空）时照跑', () => {
+  const heavy: Record<string, string[]> = {
+    'ci.yml': ['typecheck', 'unit-test', 'build-web', 'e2e-fake-model', 'lint', 'format'],
+    'image.yml': ['image-build'],
+    'codeql.yml': ['codeql-analyze'],
+    'dependency-review.yml': ['dependency-review'],
+  }
+  for (const [f, names] of Object.entries(heavy)) {
+    const s = readFileSync(join(ROOT, '.github/workflows', f), 'utf8')
+    for (const n of names) {
+      const m = new RegExp(
+        `\\n    name: ${n}\\n    needs: changes\\n    if: \\$\\{\\{ !cancelled\\(\\) && (github\\.event_name == 'pull_request' && )?needs\\.changes\\.outputs\\.docs_only != 'true' \\}\\}\\n`,
+      ).exec(s)
+      assert.ok(m !== null, `${f} 的 ${n} 条件不对`)
+    }
+  }
 })
