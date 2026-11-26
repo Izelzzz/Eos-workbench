@@ -1,4 +1,0 @@
-# .trivyignore.yaml 的到期日临时改成 2026-11-28（3 天后），其余同 1-block.txt；只留下提示、汇总和退出码
-
-::warning title=镜像漏洞扫描::.trivyignore.yaml 里有豁免 2026-11-28 到期（还剩 2 天）：到期后扫描会重新拦下，请提前重新评估
-Total: 6 (HIGH: 6, CRITICAL: 0)
