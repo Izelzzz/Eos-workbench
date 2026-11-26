@@ -85,7 +85,7 @@ test('会悄悄放宽豁免的写法一律报错（独立审查实测 Trivy 会�
 test('到期日：带引号、不存在的日期报错；已过期、7 天内到期给提示，天数按整天算', () => {
   assert.match(check(doc(entry({ expired: "'2026-12-25'" })), TODAY).errors.join(), /不加引号/)
   assert.match(check(doc(entry({ expired: '"2026-12-25"' })), TODAY).errors.join(), /不加引号/)
-  for (const bad of ['2026-13-45', '2026-02-30', '2026/12/25']) assert.notDeepEqual(check(doc(entry({ expired: bad })), TODAY).errors, [], bad)
+  for (const bad of ['2026-13-45', '2026-02-30', '2026/12/25', '0001-01-01', '1999-12-31']) assert.notDeepEqual(check(doc(entry({ expired: bad })), TODAY).errors, [], bad)
   const w = (d: string) => check(doc(entry({ expired: d })), TODAY).warnings.join()
   assert.match(w('2026-11-26'), /已经过期/)
   assert.match(w('2026-11-01'), /已经过期/)

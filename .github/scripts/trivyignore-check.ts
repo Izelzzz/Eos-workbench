@@ -4,7 +4,7 @@
 //   - id: CVE-…              漏洞编号
 //     purls: ['pkg:…@版本']   至少一个，每个都锁到版本（升级后自动不再匹配）
 //     statement: 理由         一行，不为空
-//     expired_at: YYYY-MM-DD  不加引号（Trivy 0.76 解析不了带引号的日期），必须是真实存在的日期
+//     expired_at: YYYY-MM-DD  不加引号（原文件里带引号的 YYYY-MM-DD，Trivy 0.76 解析不了），必须是 2000 年以后真实存在的日期
 // 用法：node .github/scripts/trivyignore-check.ts <.trivyignore.yaml> <今天，YYYY-MM-DD> <输出文件>
 // 输出：GitHub 的 ::error / ::warning 行；有错误时退出码 1。校验通过时把解析出的条目重新写成 JSON（也是合法的 YAML）到输出文件，
 // image-scan.sh 交给 Trivy 的是这份文件，不是原文件：Trivy 看到的豁免和这里校验过的完全一样，YAML 解析上的差异（隐形换行、
@@ -17,9 +17,9 @@ export type Checked = { entries: Entry[]; errors: string[]; warnings: string[] }
 const KEYS = ['purls', 'statement', 'expired_at'] as const
 const DAY = 86_400_000
 
-/** YYYY-MM-DD 且是真实存在的日期（排除 2026-02-30 这种） */
+/** YYYY-MM-DD、2000 年以后、真实存在的日期（排除 2026-02-30 这种）。0001-01-01 是 Go 的零时间，Trivy 当成「不过期」 */
 export function isDate(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
+  if (!/^(2\d{3})-\d{2}-\d{2}$/.test(s)) return false
   const d = new Date(`${s}T00:00:00Z`)
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
@@ -91,7 +91,7 @@ export function check(text: string, today: string): Checked {
       if (p === undefined) return void errors.push(`第 ${n} 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']`)
       cur.purls = p
     } else if (key === 'expired_at') {
-      if (!isDate(value)) return void errors.push(`第 ${n} 行：expired_at 要写成不加引号、真实存在的日期 YYYY-MM-DD（Trivy 解析不了带引号的日期）`)
+      if (!isDate(value)) return void errors.push(`第 ${n} 行：expired_at 要写成不加引号、2000 年以后真实存在的日期 YYYY-MM-DD`)
       cur.expired_at = value
     } else {
       // 以 YAML 的特殊字符开头、或者含「: 」「 #」时，Trivy 会解析成别的东西或直接报错
