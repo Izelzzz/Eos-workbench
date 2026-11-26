@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseChecks, parseUsers, usersScript } from '../.github/scripts/image-probe.ts'
+import { EXPECTED_USERS, parseChecks, parseUsers, usersScript } from '../.github/scripts/image-probe.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const doc = (table: string) => `# 部署\n\n## 执行器环境\n\n说明\n\n${table}\n\n后文\n\n## 下一节\n\n| a | b |\n|---|---|\n| x | y |\n`
@@ -29,18 +29,26 @@ test('解析不出来就报错，不静默跳过', () => {
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n| 系统 | x | `true` |')), /格式不对/)
 })
 
-test('Dockerfile 的三个用户：uid 和组都解析出来；核对脚本里每个用户、每个组和 /data 属主都有一条', () => {
-  const users = parseUsers(readFileSync(join(ROOT, 'Dockerfile'), 'utf8'))
-  assert.deepEqual(users, [
-    { name: 'eos', uid: 10001, groups: ['eos-work', 'eos-dsh'] },
-    { name: 'eos-check', uid: 10002, groups: ['eos-work'] },
-    { name: 'eos-agent', uid: 10003, groups: ['eos-work', 'eos-dsh'] },
-  ])
-  const script = usersScript(users)
-  for (const u of users) {
+test('探针期望的用户和 Dockerfile 的 useradd 对得上（改 Dockerfile 的用户时两边一起改，由审查把关）', () => {
+  const parsed = parseUsers(readFileSync(join(ROOT, 'Dockerfile'), 'utf8'))
+  // Dockerfile 里的 --groups 是附加组，主组是和用户同名的组
+  assert.deepEqual(
+    parsed.map(u => ({ ...u, groups: [u.name, ...u.groups].sort() })),
+    EXPECTED_USERS.map(u => ({ ...u, groups: [...u.groups].sort() })),
+  )
+})
+
+test('useradd 认不出来就报错，不会悄悄少查一个用户；选项顺序不影响', () => {
+  assert.throws(() => parseUsers('FROM x\n'), /找不到 useradd/)
+  assert.throws(() => parseUsers('RUN useradd --uid 1 --groups a x \\\n && useradd --create-home y\n'), /认不出来/)
+  assert.deepEqual(parseUsers('RUN useradd --groups a,b --uid 7 --create-home u \\\n && true\n'), [{ name: 'u', uid: 7, groups: ['a', 'b'] }])
+})
+
+test('核对脚本：每个用户的 uid、完整的组集合，以及 /data 属主都有一条', () => {
+  const script = usersScript(EXPECTED_USERS)
+  for (const u of EXPECTED_USERS) {
     assert.match(script, new RegExp(`id -u ${u.name}\\)" = ${u.uid}`))
-    for (const g of u.groups) assert.match(script, new RegExp(`id -nG ${u.name} .* grep -qx ${g}`))
+    assert.ok(script.includes(`test "$g" = "${[...u.groups].sort().join(' ')}"`), u.name)
   }
   assert.match(script, /stat -c %U:%G \/data\)" = eos:eos/)
-  assert.throws(() => parseUsers('FROM x\n'), /找不到 useradd/)
 })

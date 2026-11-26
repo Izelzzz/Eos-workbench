@@ -2,7 +2,7 @@
 
 `probe-runs.txt`：`.github/scripts/image-probe.ts` 在本地跑的两次。
 
-1. **当前 Dockerfile 构建的镜像**：`docs/deploy.md`「执行器环境」表里的 13 条检查（以 `eos-agent`、断网运行）全部 ✓；三个用户的 uid、组和 `/data` 的属主也都对。退出码 0。
-2. **反例**：在同一个镜像上删掉 `bwrap` 和 `pkg-config`、把 `/data` 的属主改成 root。这 3 项 ✗，其余 ✓，退出码 1，并输出中文说明。
+1. **当前 Dockerfile 构建的镜像**：`docs/deploy.md`「执行器环境」表里的 16 条检查（以 `eos-agent`、断网运行）全部 ✓；三个用户的 uid、完整的组和 `/data` 的属主也都对。退出码 0。
+2. **反例**：在同一个镜像上做代码评审举的几种回退：删 `bwrap`、`pkg-config` 和 `pnpm` 的 shim；删 ensurepip（相当于没装 python3-venv）；删 `stdio.h`（相当于缺 libc6-dev）；给 `eos-check` 多加 `eos-dsh` 组；把 `/data` 的属主改成 root。对应的 5 条检查 ✗，用户那一项 ✗ 并同时报出组和属主两个问题，其余 ✓，退出码 1，并输出中文说明。
 
 平台镜像在 CI 上的结果，见这个 PR 的 `image-build` job 里「依赖探针」那一步。本地的基础镜像因为 Docker Hub 限流，改从 `mirror.gcr.io` 拉了同名标签。
