@@ -16,7 +16,7 @@
 | Eos 没有登录，能打开地址的人权限相同 | 不要把端口暴露到网络上，按「访问」一节的两种方式访问 |
 | 主密钥丢失后，存过的凭据只能重新录入 | 把 `.env` 里的 `EOS_MASTER_KEY` 另外备份一份 |
 | 能使用 docker 的宿主机用户能看到主密钥 | 只让可信的人加入 docker 组 |
-| agent 在特定条件下可能读到模型 key | 使用额度受限的模型 key |
+| 配置了 MCP 服务时，MCP 服务读得到模型 key；沙箱失效时 agent 也读得到 | 使用额度受限的模型 key |
 | 一个任务的 agent 能读服务器上所有仓库和所有任务的记录 | 只放入对全体使用者都可见的仓库 |
 | agent 访问网络不受限制 | 需要限制时在宿主机或 Docker 网络一层配置 |
 
@@ -52,7 +52,7 @@
 
 5. 按「访问」一节打开页面。
 
-**把模型 key 移到凭据页（可选）。** 启动后在 Web 的凭据页添加名为 `deepseek` 的凭据，再从 `.env` 删掉 `DEEPSEEK_API_KEY` 一行，执行 `docker compose up -d`。
+**把模型 key 移到凭据页（可选）。** 启动后在 Web 的凭据页添加名为 `deepseek` 的凭据，再从 `.env` 删掉 `DEEPSEEK_API_KEY` 一行，执行 `docker compose up -d`。凭据页里有 `deepseek` 时，`.env` 里的 key 不再使用。
 
 **在容器里运行命令。** 平台的命令行是 `eos`（例如 `eos doctor`）。运行其他命令时加 `-u eos`：
 
@@ -84,7 +84,7 @@ docker compose exec -u eos eos git ...
    echo 'EOS_IMAGE=ghcr.io/izelzzz/eos-workbench:0.1.0' >> .env
    ```
 
-3. 拉取并启动。必须加 `--no-build`，否则会用本地代码构建并覆盖拉下来的镜像。
+3. 拉取并启动。使用 `--no-build`，不要使用 `--build`：`--build` 会用本地代码构建并覆盖拉下来的镜像。
 
    ```bash
    docker compose pull
@@ -100,8 +100,8 @@ docker compose exec -u eos eos git ...
 | 升级 | 把 `.env` 里的 `EOS_IMAGE` 改成新标签，执行 `docker compose pull && docker compose up -d --no-build` |
 | 回退 | 把 `EOS_IMAGE` 改回原标签，执行同样的命令 |
 
-- 升级和回退都不改动数据。
-- 升级后数据如果已被新版本修改，回退前先恢复升级前的备份。
+- 升级和回退都保留数据卷。
+- 新版本启动时可能修改数据（例如迁移目录）。发生这种情况后要回退的，先恢复升级前的备份。
 - 同时使用派生镜像时，步骤不同，见「增加系统依赖」。
 
 ## 访问
@@ -156,7 +156,7 @@ ssh -N -L 4317:127.0.0.1:4317 <服务器>
 
 ### 容器里的路径
 
-先把仓库克隆进容器的 `/data/repos/local/` 下，新建任务时填这个路径。
+先把仓库克隆进容器，新建任务时填它的路径。建议放在 `/data/repos/local/` 下。
 
 ```bash
 docker compose exec -u eos eos sh -c 'umask 022 && git clone https://github.com/<组织>/<仓库>.git /data/repos/local/<仓库>'
@@ -194,7 +194,7 @@ agent 运行任务时使用的就是这个镜像。
 
 - agent 不能安装系统包（`apt-get` 会失败）。需要系统包时见「增加系统依赖」。
 - 依赖缓存在 `/tmp/cache`。`/tmp` 的上限是 4g，重启容器后清空，依赖会重新下载。
-- 要往家目录写缓存或配置的工具会失败，需要用它自己的配置把位置指到 `/tmp` 下。例如编译原生模块的 npm 包，在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp`。
+- 要往家目录写缓存或配置的工具会失败，需要用它自己的配置把位置指到任务的工作目录或 `/tmp` 下。例如编译原生模块的 npm 包，在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp`。
 
 ### 增加系统依赖
 
@@ -207,7 +207,7 @@ agent 运行任务时使用的就是这个镜像。
    RUN apt-get update && apt-get install -y --no-install-recommends golang-go libpq-dev && rm -rf /var/lib/apt/lists/*
    ```
 
-2. 编写 `compose.override.yaml`。镜像标签不能是 `eos-workbench:local`。
+2. 编写 `compose.override.yaml`（compose 会自动读取这个文件）。镜像标签不能是 `eos-workbench:local`。
 
    ```yaml
    services:
@@ -236,7 +236,20 @@ agent 运行任务时使用的就是这个镜像。
 
 ### 服务器经代理上网
 
-平台把宿主环境里的代理和证书设置传给 agent 和检查命令（工作流里的 `npm test` 等）。
+`compose.yaml` 默认不把代理和证书变量传进容器。需要时在 `compose.override.yaml` 里加上，再执行 `docker compose up -d`：
+
+```yaml
+services:
+  eos:
+    environment:
+      HTTPS_PROXY: http://proxy.example.com:3128
+      HTTP_PROXY: http://proxy.example.com:3128
+      NO_PROXY: localhost,127.0.0.1
+```
+
+支持的变量：`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY`、`NODE_USE_ENV_PROXY`、`NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`。平台把它们传给 agent 和检查命令（工作流里的 `npm test` 等）。
+
+构建镜像的机器在会解开 TLS 的代理后面时，构建时传入代理的根证书：`docker build --secret id=extra_ca,src=<证书> .`
 
 - 代理地址带账号密码（`http://user:pass@...`）时，不会传给检查命令，其中联网的步骤会失败，`eos doctor` 给出一条 ⚠。
 - 带账号密码的代理地址仍会传给 agent。
@@ -255,7 +268,7 @@ agent 运行任务时使用的就是这个镜像。
 
 - 不要删除 `compose.yaml` 里的 `cap_add`（`SETUID`、`SETGID`、`KILL`）。删除后平台不启动。
 - 派生镜像里不要加 `USER eos`。
-- 在容器里手工运行命令时加 `-u eos`。以 root 创建的文件平台写不了。
+- 在容器里手工运行命令时加 `-u eos`。
 
 各用户能读写什么，见 ADR-006。
 
@@ -306,7 +319,7 @@ docker compose start
    docker compose up -d --build
    ```
 
-- 升级不改动数据。
+- 升级保留数据卷。
 - 没有运行完的任务在新容器启动后自动继续。
 
 ### 从旧版本升级后的清理
@@ -317,8 +330,10 @@ docker compose start
 
 ```bash
 docker compose run --rm -u eos eos rm -rf /data/dsh.before-agent
-docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd
+docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd /data/dsh/profiles
 ```
+
+备份目录的名字也可能是 `/data/dsh.before-agent-<时间戳>`，用 `docker compose run --rm -u eos eos ls /data` 查看。
 
 ### 删除全部数据
 
@@ -328,11 +343,12 @@ docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 容器不断重启，`docker compose exec` 不可用 | `.env` 和凭据页都没有模型 key | 用 `docker compose logs eos` 或 `docker compose run --rm eos eos doctor` 查看原因，补上 `DEEPSEEK_API_KEY` |
+| 容器不断重启，`docker compose exec` 不可用 | 平台没能启动。常见原因是 `.env` 和凭据页都没有模型 key | 用 `docker compose logs eos` 或 `docker compose run --rm eos eos doctor` 查看原因。缺模型 key 时补上 `DEEPSEEK_API_KEY`，再执行 `docker compose up -d` |
+| 日志里有「切换不到平台用户 eos」，容器不断重启 | `compose.yaml` 里的 `cap_add` 被去掉或不全 | 恢复 `cap_add`（`SETUID`、`SETGID`、`KILL`） |
 | `eos doctor` 的「沙箱」为 ✗ | 宿主机内核不支持 Landlock | 换用 5.13 以上并启用 Landlock 的内核 |
-| `eos doctor` 的「检查命令的用户」为 ✗ | `compose.yaml` 里的 `cap_add` 被去掉了 | 恢复 `cap_add` |
+| `eos doctor` 的「检查命令的用户」为 ✗ | 平台不是以 root 启动的，例如派生镜像里加了 `USER eos` | 去掉派生镜像里的 `USER eos` |
 | `eos doctor` 全部为 ✓，任务在第一步失败 | doctor 不检查 agent 的运行时能否启动 | 查看任务页的日志 |
-| 浏览器返回 421 | SSH 隧道的本地端口不是 4317 | 改用 4317，或设置 `EOS_PUBLIC_URL`（见「SSH 隧道」） |
+| 浏览器返回 421 | SSH 隧道的本地端口不是 4317；或者用域名访问但 `EOS_PUBLIC_URL` 没有设置、和域名不一致 | 隧道改用 4317，或把 `EOS_PUBLIC_URL` 设成浏览器里实际使用的地址（见「访问」） |
 | 页面能打开，写操作返回 403 | 反向代理没有传递原始 Host | 按「反向代理」配置 |
 | 启动时提示上次迁移停在了中间 | 迁移 `/data/dsh` 时被打断 | 执行 `docker compose run --rm -u eos eos mv /data/dsh.agent-new /data/dsh`，再执行 `docker compose up -d` |
 | 检查命令里的 `npm install` 等联网步骤失败 | 代理地址带账号密码，没有传给检查命令 | 改用不带账号密码的代理 |

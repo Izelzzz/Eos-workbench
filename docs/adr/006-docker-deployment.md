@@ -157,6 +157,8 @@
 
 仍带能力的两个进程都不接触 worktree，也不运行仓库里的代码。
 
+派生镜像不能加 `USER eos`：容器必须以 root 启动，`eos` 命令才能降到平台用户并保留这三个能力。
+
 #### 目录的归属和权限
 
 | 目录 | 属主、组、权限 | 设计目的 |
@@ -213,7 +215,7 @@ docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd
 
 ### 沙箱
 
-dsh 用 Landlock 限制 agent。镜像里装了 bubblewrap，但在 Docker 默认权限下不可用；启用它需要放宽容器的 seccomp 和 `/proc` 屏蔽，因此没有采用（见 ADR-006）。
+dsh 用 Landlock 限制 agent。镜像里装了 bubblewrap，但在 Docker 默认权限下不可用；启用它需要放宽容器的 seccomp 和 `/proc` 屏蔽，因此没有采用（见上文「沙箱：Docker 默认权限，dsh 用 Landlock」）。
 
 #### 沙箱限制什么
 
@@ -253,7 +255,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 |---|---|
 | tsx 的编译缓存 | 关闭 |
 | Node 的字节码缓存 | 关闭 |
-| dsh 的 native 模块缓存 | 放在平台用户的家目录（`NARB_NATIVE_CACHE_DIR`） |
+| dsh 的 native 模块缓存 | 放在家目录（`NARB_NATIVE_CACHE_DIR`）：平台一份在 `eos` 的家目录，dsh 以 `eos-agent` 运行时改到 `eos-agent` 的家目录 |
 
 例外：检查命令的环境里没有关闭字节码缓存的开关，npm 会在 `/tmp/node-compile-cache` 留下缓存（属于 `eos-check`），之后的检查命令会加载它。检查命令本来就在沙箱外运行 agent 改过的代码，这不会让 agent 获得更多权限。
 
@@ -266,6 +268,8 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 - MCP 服务运行在沙箱外，并继承 dsh 的环境，包括指向 `/tmp/cache` 的依赖缓存设置。
 - 用这类命令启动时，它可能运行 agent 放进缓存的代码。
 - 做法：把 MCP 服务安装进派生镜像（见 `docs/deploy.md` 的「增加系统依赖」），在模板里写它的绝对路径。
+
+### 启动和执行器环境
 
 #### 模型 key
 
@@ -283,7 +287,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | 检查项 | 预期结果 | 失败时 |
 |---|---|---|
 | 沙箱 | Landlock。镜像里装了 bwrap，但在 Docker 默认权限下不可用 | bwrap 和 Landlock 都不可用时为 ✗，平台不启动 |
-| 检查命令的用户 | 实际切换一次到 `eos-check` 并成功 | 切换失败（例如 compose 里去掉了 `cap_add`）时为 ✗，平台不启动；不会退回到用平台用户运行检查命令 |
+| 检查命令的用户 | 实际切换一次到 `eos-check` 并成功 | 切换失败时为 ✗，平台不启动；不会退回到用平台用户运行检查命令。平台不以 root 启动时（例如派生镜像加了 `USER eos`）会这样：`eos` 命令跳过降权，平台没有切换用户的能力。compose 里去掉 `cap_add` 时走不到 doctor：`eos` 命令降权失败，直接退出 |
 | 凭据隔离 | ✓：检查命令读不到主密钥和模型 key；agent 读不到主密钥，读不到模型 key 只依赖沙箱 | — |
 
 #### 平台目录里没有 typescript
@@ -343,7 +347,10 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 - 数据库没有迁移机制：建表语句都是 `CREATE TABLE IF NOT EXISTS`，没有修改表结构的语句。
 - 在服务器上构建时，升级命令的第二行（`docker compose -f compose.yaml build`）只重建基础镜像。使用派生镜像时必须先执行它，否则派生镜像建在旧的基础镜像上；派生镜像沿用 `eos-workbench:local` 标签时会覆盖基础镜像，之后升级拿不到新的 Eos 代码。
 - 使用发布的镜像时，`docker compose up --build` 会用本地代码构建并打上 ghcr 的标签，覆盖拉下来的镜像，所以要加 `--no-build`。`compose.override.yaml` 里的 `image:` 会覆盖 `EOS_IMAGE`。
-- 访问：使用 4317 以外的本地端口时，浏览器发送的 Host 是 `localhost:<那个端口>`，平台拒绝请求（421）。反向代理没有传递原始 Host 时，写操作被拒绝（403），响应里写明原因。不直接暴露端口的两个原因：平台没有登录；非浏览器客户端可以伪造 Host 绕过检查。
+
+### 访问
+
+- 使用 4317 以外的本地端口时，浏览器发送的 Host 是 `localhost:<那个端口>`，平台拒绝请求（421）。反向代理没有传递原始 Host 时，写操作被拒绝（403），响应里写明原因。不直接暴露端口的两个原因：平台没有登录；非浏览器客户端可以伪造 Host 绕过检查。
 
 ### 证据
 
