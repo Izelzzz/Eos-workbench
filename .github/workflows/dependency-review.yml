@@ -19,8 +19,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 纯文档 PR 跳过下面重的检查（判断见 .github/scripts/docs-only.ts）。脚本从 base（HEAD^1）取，PR 改它改变不了自己的结果。
+  # 不是 pull_request、base 上还没有这个脚本、或者这个 job 出错时，docs_only 都不是 true，下面照跑全套。
+  # 重的 job 跳过时，按原来的名字报告为 skipped（分支保护里算通过），不会卡在等待中。
+  changes:
+    name: changes-deps
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - if: github.event_name == 'pull_request'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+      - id: check
+        if: github.event_name == 'pull_request'
+        run: |
+          if git show HEAD^1:.github/scripts/docs-only.ts > "$RUNNER_TEMP/docs-only.ts" 2>/dev/null; then
+            node "$RUNNER_TEMP/docs-only.ts"
+          else
+            echo "base 上还没有 .github/scripts/docs-only.ts，跑全套"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   dependency-review:
     name: dependency-review
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
