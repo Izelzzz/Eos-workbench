@@ -300,9 +300,11 @@ test('permission guard: template permission fields, workflow role permissions, n
   const shipped = (between: string, withGate = true) => `${w(dev)}${rv}${withGate ? gate('by: human') : ''}${between}${push}`
   const more = '  - { id: more, kind: agent, role: dev, task: 再改一点 }\n'
   assert.deepEqual(permissionChanges('workflow', shipped('', false), shipped(''), none), [], 'adding a gate before delivery is fine')
-  const blocked = (ids: string) => [`不能在卡点「accept」和交付之间加节点或改节点（${ids}）：验收通过之后的改动会不经验收就推送`]
+  // 这些工作流里卡点前面都有评审：卡点到交付这一段也在「评审到交付」那一段里，两条核对都会报。
+  const reviewed = (ids: string) => `不能改评审到交付之间的节点（${ids}）：加、挪、删节点或改它们的做法，都可能让改动不经评审就推送；只能加人验收的卡点`
+  const blocked = (ids: string) => [reviewed(ids), `不能在卡点「accept」和交付之间加节点或改节点（${ids}）：验收通过之后的改动会不经验收就推送`]
   assert.deepEqual(permissionChanges('workflow', shipped(''), shipped(more), none), blocked('more'))
-  assert.deepEqual(permissionChanges('workflow', shipped(more), shipped(''), none), [], 'removing a node between gate and delivery is fine')
+  assert.deepEqual(permissionChanges('workflow', shipped(more), shipped(''), none), [reviewed('more')], '卡点在评审后面：删掉评审到交付之间的节点也拦下')
   assert.deepEqual(permissionChanges('workflow', shipped(more), shipped(more.replace('再改一点', '再改好一点')), none), [], 'changing only the task text is fine')
   // 加 agent 验收的卡点：打回时会交回开发改代码，不算加严。人验收的卡点可以加。
   const agentGate = '  - { id: g2, kind: gate, with: build, by: agent, role: rev, task: 再验 }\n'
@@ -327,11 +329,36 @@ test('permission guard: template permission fields, workflow role permissions, n
   // 不能删掉推送前的评审，也不能把交付挪到评审前面（挪了解析就不通过，删掉评审换成别的评审也算改了）。
   const otherReview = `${w(dev)}  - { id: check2, kind: dialog, role: rev, with: build, task: 另一个评审 }\n${ship}`
   assert.ok(parseWorkflow(otherReview).ok)
-  assert.deepEqual(permissionChanges('workflow', withPush(dev), otherReview, none), ['不能改检查命令和平台动作'])
+  assert.deepEqual(permissionChanges('workflow', withPush(dev), otherReview, none), ['不能改检查命令和平台动作', reviewed('review、check2')])
   const extraBefore = `${w(dev)}${review}  - { id: check2, kind: dialog, role: rev, with: build, task: 再评审一次 }\n${ship}`
-  assert.deepEqual(permissionChanges('workflow', withPush(dev), extraBefore, none), ['不能改检查命令和平台动作'], '推送前的评审有变化也要人改')
+  assert.deepEqual(permissionChanges('workflow', withPush(dev), extraBefore, none), ['不能改检查命令和平台动作', reviewed('check2')], '推送前的评审有变化也要人改')
   assert.deepEqual(permissionChanges('workflow', w(dev), withPush(dev), none), ['不能改检查命令和平台动作'])
-  assert.deepEqual(permissionChanges('workflow', withPush(dev), w(dev), none), ['不能改检查命令和平台动作'])
+  assert.deepEqual(permissionChanges('workflow', withPush(dev), w(dev), none), ['不能改检查命令和平台动作', reviewed('review、ship')])
+  // 评审到交付这一段（没有卡点的工作流）：加、挪、删节点，改评审的 with，删评审，都拦下。
+  const flow = (before: string, between: string, target = 'build') =>
+    `${w(`${dev}\n  doc: { prompt: 写文档, write: worktree }`).replace('nodes:\n', 'nodes:\n  - { id: docs, kind: agent, role: doc, task: 文档 }\n')}${before}  - { id: review, kind: dialog, role: rev, with: ${target}, task: 评审 }\n${between}${ship}`
+  const tweak = '  - { id: tweak, kind: agent, role: dev, task: 再改一点 }\n'
+  const test = '  - { id: test, kind: dialog, with: build, task: 测试, checks: [{ run: [npm, test] }] }\n'
+  assert.ok(parseWorkflow(flow('', tweak)).ok)
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', tweak), none), [reviewed('tweak')], '评审和交付之间加节点')
+  assert.deepEqual(permissionChanges('workflow', flow(tweak, ''), flow('', tweak), none), [reviewed('tweak')], '把节点挪到评审和交付之间')
+  assert.deepEqual(permissionChanges('workflow', flow('', tweak), flow('', ''), none), [reviewed('tweak')], '删掉评审和交付之间的节点')
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '', 'docs'), none), [reviewed('review')], '换评审的 with')
+  // 删掉评审（还剩另一个评审，否则保存校验就不通过）。
+  const review2 = '  - { id: review2, kind: dialog, role: rev, with: build, task: 复审 }\n'
+  assert.deepEqual(
+    permissionChanges('workflow', flow('', review2), flow('', review2).replace('  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n', ''), none),
+    ['不能改检查命令和平台动作', reviewed('review')],
+    '删掉评审',
+  )
+  assert.deepEqual(permissionChanges('workflow', flow('', test + tweak), flow('', tweak + test), none), [reviewed('顺序')], '只调换顺序也拦下')
+  // 合法的提案不拦：改工作说明、改角色的提示词、在评审前面加节点、加人验收的卡点。
+  assert.deepEqual(permissionChanges('workflow', flow('', tweak), flow('', tweak.replace('再改一点', '再改好一点')).replace('task: 评审', 'task: 认真评审'), none), [])
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '').replace('写文档', '写清楚的文档'), none), [])
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow(tweak, ''), none), [], '评审前面加节点不在这一段里')
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '  - { id: ok, kind: gate, with: build, by: human, task: 验收 }\n'), none), [])
+  // 误拦（失败就关，交给人在团队约定页改）：这一段里加严的改动，例如给交付节点加 maxRounds: 1。
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '').replace('task: 交付,', 'task: 交付, maxRounds: 1,'), none), [reviewed('ship')])
   assert.deepEqual(permissionChanges('workflow', withPush(dev), withPush(dev.replace('写代码', '写好代码')), none), [])
   // 节点换成别的角色、新增节点
   const nodes = (extra: string) =>

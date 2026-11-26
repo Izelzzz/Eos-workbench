@@ -55,13 +55,33 @@ const afterGate = (w: Workflow, gate: string): string[] => {
   return rest
     .slice(0, last + 1)
     .filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))
-    .map(({ task: _task, inputs: _inputs, ...n }) => JSON.stringify(n))
+    .map(shape)
+}
+
+/** 比较用的节点内容：工作说明和输入不算（改它们不改变谁能动代码、推送前经过哪些关）。 */
+const shape = ({ task: _task, inputs: _inputs, ...n }: Workflow['nodes'][number]): string => JSON.stringify(n)
+const idOf = (shaped: string): string => (JSON.parse(shaped) as { id: string }).id
+
+/**
+ * 推送前的那一段：从第一个排在交付节点（平台动作）前面的对话节点（评审或测试），到最后一个交付节点为止，按顺序。
+ * 这一段决定改动推送之前经过哪些评审和检查：提案在这里加、挪、删节点，或者改节点的做法（例如换评审的 with），
+ * 都可能让改动不经评审就推送出去，所以按顺序整段比较。人验收的卡点除外：加一个只会让推送前多一道人工验收。
+ * 没有交付节点时没有这一段（不推送）。
+ */
+const beforeDelivery = (w: Workflow): string[] => {
+  const last = w.nodes.findLastIndex(n => n.checks.some(c => c.kind === 'platform'))
+  if (last < 0) return []
+  const first = w.nodes.findIndex((n, i) => i < last && n.kind === 'dialog' && !n.checks.some(c => c.kind === 'platform'))
+  return w.nodes
+    .slice(first < 0 ? last : first, last + 1)
+    .filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))
+    .map(shape)
 }
 
 /**
  * 新内容相对旧内容改了哪些权限相关的东西（中文说明）；没有就是空数组。失败就关：旧内容解析不了时直接拒绝。
  * 工作流：已有角色的权限不变；新角色的权限必须和旧工作流里某个角色完全相同；已有节点用的角色权限不变；
- * 新节点用的角色权限必须是旧工作流里已经有的；检查命令不变。
+ * 新节点用的角色权限必须是旧工作流里已经有的；检查命令不变；推送前的那一段（评审到交付）不变；卡点不删不改。
  */
 export const permissionChanges = (kind: TargetKind, before: string, after: string, lookup: TemplateLookup): string[] => {
   if (kind === 'template') {
@@ -96,6 +116,11 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
       } else if (role !== undefined && !existing.has(perm(b.workflow, role))) out.push(`新增的节点「${node}」只能用已有权限的角色`)
     }
     if (JSON.stringify(commandsOf(a.workflow)) !== JSON.stringify(commandsOf(b.workflow))) out.push('不能改检查命令和平台动作')
+    const [x, y] = [beforeDelivery(a.workflow), beforeDelivery(b.workflow)]
+    if (x.length > 0 && JSON.stringify(x) !== JSON.stringify(y)) {
+      const changed = [...new Set([...x.filter(n => !y.includes(n)), ...y.filter(n => !x.includes(n))].map(idOf))]
+      out.push(`不能改评审到交付之间的节点（${changed.length > 0 ? changed.join('、') : '顺序'}）：加、挪、删节点或改它们的做法，都可能让改动不经评审就推送；只能加人验收的卡点`)
+    }
     const newGates = gatesOf(b.workflow)
     for (const [id, g] of gatesOf(a.workflow)) {
       if (newGates.get(id) !== g) {
@@ -105,7 +130,7 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
       const before = new Set(afterGate(a.workflow, id))
       const added = afterGate(b.workflow, id)
         .filter(n => !before.has(n))
-        .map(n => (JSON.parse(n) as { id: string }).id)
+        .map(idOf)
       if (added.length > 0) out.push(`不能在卡点「${id}」和交付之间加节点或改节点（${added.join('、')}）：验收通过之后的改动会不经验收就推送`)
     }
     return out
