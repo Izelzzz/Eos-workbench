@@ -1,10 +1,12 @@
+# Docker 的模式只从构建上下文的根目录开始匹配（和 .gitignore 不同）：要排除任意层级的，写 **/。
+# docs 只排除根目录的：src/workflow/docs/ 是平台内容，镜像里要有。
 .git
-node_modules
-.eos
+**/node_modules
+**/.eos
 .claude
 web/dist
 docs
 poc/logs
-*.log
-.env
-.env.*
+**/*.log
+**/.env
+**/.env.*

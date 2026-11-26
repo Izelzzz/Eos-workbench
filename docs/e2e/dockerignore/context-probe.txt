@@ -1,0 +1,5 @@
+#7 [3/3] RUN find /ctx/src/zz-probe /ctx/src/workflow/docs | sort
+/ctx/src/workflow/docs
+/ctx/src/workflow/docs/研发约定.md
+/ctx/src/zz-probe
+/ctx/src/zz-probe/keep.txt

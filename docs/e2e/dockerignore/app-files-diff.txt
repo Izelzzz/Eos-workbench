@@ -1,0 +1,23 @@
+< /app/poc/claude-code/logs/mock/c1-resume-a.log
+< /app/poc/claude-code/logs/mock/c1-resume-b.log
+< /app/poc/claude-code/logs/mock/c2-ask.log
+< /app/poc/claude-code/logs/mock/c3-perms.log
+< /app/poc/claude-code/logs/mock/c4-recover-a.log
+< /app/poc/claude-code/logs/mock/c4-recover-b.log
+< /app/poc/claude-code/logs/mock/c5-events.log
+< /app/poc/claude-code/logs/mock/c6-context.log
+< /app/poc/claude-code/logs/mock/c7-abort.log
+< /app/poc/claude-code/logs/mock/c8-env.log
+< /app/poc/claude-code/logs/real-no-socat/c3-perms.log
+< /app/poc/claude-code/logs/real/c1-resume-a.log
+< /app/poc/claude-code/logs/real/c1-resume-b.log
+< /app/poc/claude-code/logs/real/c2-ask.log
+< /app/poc/claude-code/logs/real/c3-perms.log
+< /app/poc/claude-code/logs/real/c4-recover-a.log
+< /app/poc/claude-code/logs/real/c4-recover-b.log
+< /app/poc/claude-code/logs/real/c5-events-summarized.log
+< /app/poc/claude-code/logs/real/c5-events.log
+< /app/poc/claude-code/logs/real/c6-context.log
+< /app/poc/claude-code/logs/real/c7-abort.log
+< /app/poc/claude-code/logs/real/c8-env.log
+（另有 2693 行 /app/.github/lint/node_modules/... 只在改动前的镜像里，没有逐行列出）

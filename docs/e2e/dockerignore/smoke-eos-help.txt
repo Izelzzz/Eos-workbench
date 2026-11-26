@@ -1,0 +1,19 @@
+用法：
+  eos run --repo <仓库路径或 GitHub 地址> [--workflow standard] "<需求>"   创建任务并运行
+  eos resume <任务>                                       续跑（进程中断后）
+  eos retry <任务>                                        重试失败的任务
+  eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
+  eos status [任务]                                       列出任务，或查看一个任务
+  eos log <任务>                                          完整对话记录与耗时、token 统计
+  eos abort <任务>                                        中止任务
+  eos workflows                                           列出内置工作流
+  eos doctor                                              检查运行环境（Node、API key、git、数据目录、dsh）
+  eos web [--port 4317] [--host 127.0.0.1]                打开 Web 界面（任务列表与 trace 详情）
+  eos improve [--workflow standard] [--tasks <id,…>]      从已结束的任务归纳证据，生成改进提案（待审批）
+  eos proposals                                           列出改进提案
+  eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
+  eos reject <提案号> "<理由>"                             拒绝
+
+选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
+web：--host 是监听地址（容器里用 0.0.0.0）；通过别的地址访问时（端口映射、反向代理）设 EOS_PUBLIC_URL，例如 https://eos.example.com。没有登录，不要直接暴露到公网。
+run、resume、retry、improve、web 启动前会做同样的环境检查：有 ✗ 不启动，只有 ⚠ 时提示后照常启动。
