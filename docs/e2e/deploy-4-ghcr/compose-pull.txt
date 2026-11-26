@@ -1,9 +1,0 @@
-# 仓库里的 compose.yaml（服务 eos 带 build: .），EOS_IMAGE 指向一个公开镜像（还没发布的 ghcr 镜像的替身）
-$ grep -n "build:\|image:" compose.yaml
-5:    build: .
-7:    image: ${EOS_IMAGE:-eos-workbench:local}
-$ EOS_IMAGE=hello-world:latest docker compose -f compose.yaml -p eos-pull-check pull
- 4f55086f7dd0 Pull complete 0B
- Image hello-world:latest Pulled 
-exit=0
-pulled: sha256:1e4c05b897a751332ce85c7e9449da2d93514ea2dea6dbb0e2753c9e949b2bfa

@@ -1,4 +1,0 @@
-
-> eos-workbench@0.1.0 typecheck
-> tsc -p . && tsc -p web
-
