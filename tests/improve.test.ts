@@ -300,8 +300,21 @@ test('permission guard: template permission fields, workflow role permissions, n
   const shipped = (between: string, withGate = true) => `${w(dev)}${rv}${withGate ? gate('by: human') : ''}${between}${push}`
   const more = '  - { id: more, kind: agent, role: dev, task: 再改一点 }\n'
   assert.deepEqual(permissionChanges('workflow', shipped('', false), shipped(''), none), [], 'adding a gate before delivery is fine')
-  assert.deepEqual(permissionChanges('workflow', shipped(''), shipped(more), none), ['不能在卡点「accept」和交付之间加节点（more）：验收通过之后的改动会不经验收就推送'])
+  const blocked = (ids: string) => [`不能在卡点「accept」和交付之间加节点或改节点（${ids}）：验收通过之后的改动会不经验收就推送`]
+  assert.deepEqual(permissionChanges('workflow', shipped(''), shipped(more), none), blocked('more'))
   assert.deepEqual(permissionChanges('workflow', shipped(more), shipped(''), none), [], 'removing a node between gate and delivery is fine')
+  assert.deepEqual(permissionChanges('workflow', shipped(more), shipped(more.replace('再改一点', '再改好一点')), none), [], 'changing only the task text is fine')
+  // 加 agent 验收的卡点：打回时会交回开发改代码，不算加严。人验收的卡点可以加。
+  const agentGate = '  - { id: g2, kind: gate, with: build, by: agent, role: rev, task: 再验 }\n'
+  assert.deepEqual(permissionChanges('workflow', shipped(''), shipped(agentGate), none), blocked('g2'))
+  assert.deepEqual(permissionChanges('workflow', shipped(''), shipped(agentGate.replace('g2', 'g3').replace('by: agent, role: rev', 'by: human')), none), [])
+  // 改已有节点的做法（换 with）也拦下。
+  const docs = `${w(`${dev}\n  doc: { prompt: 写文档, write: worktree }`).replace('nodes:\n', 'nodes:\n  - { id: docs, kind: agent, role: doc, task: 文档 }\n')}${rv}${gate('by: human')}`
+  const chk = (target: string) => `${docs}  - { id: chk, kind: dialog, role: rev, with: ${target}, task: 查 }\n${push}`
+  assert.deepEqual(permissionChanges('workflow', chk('docs'), chk('build'), none), blocked('chk'))
+  // 两个交付节点之间加节点：pull-request 也会推送，一样拦下。
+  const pr = '  - { id: pr, kind: dialog, with: build, task: 开 PR, checks: [{ platform: pull-request }] }\n'
+  assert.deepEqual(permissionChanges('workflow', shipped('') + pr, shipped('') + more + pr, none), blocked('more'))
   assert.deepEqual(permissionChanges('workflow', `${w(dev)}${gate('by: human')}`, `${w(dev)}${gate('by: agent, role: rev')}`, none), [
     '不能让节点「accept」换成权限不同的角色',
     '不能删掉卡点「accept」，也不能改它验收的节点和验收人',

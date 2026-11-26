@@ -45,14 +45,17 @@ const rolesAt = (w: Workflow): Map<string, string | undefined> => new Map(w.node
 const gatesOf = (w: Workflow): Map<string, string> => new Map(w.nodes.flatMap(n => (n.kind === 'gate' ? [[n.id, JSON.stringify({ with: n.with, by: n.by })] as const] : [])))
 
 /**
- * 卡点之后、它后面第一个交付节点（平台动作）之前的节点（卡点除外）：人验收通过之后，这些节点还能让 agent 改代码，
- * 改动会不经验收就推送出去。提案不能往这里加节点（可以删，也可以在这里加卡点）。
+ * 卡点之后、到它后面最后一个交付节点（平台动作）为止的节点：人验收通过之后，这些节点还能让 agent 改代码，
+ * 改动会不经验收就推送出去。按节点的全部字段比较（工作说明和输入除外），人验收的卡点除外（只会让推送前多一道人工验收）。
+ * 提案不能往这里加节点、也不能改这里已有节点的做法（例如换 with、换成 agent 验收的卡点）；可以删，也可以加人验收的卡点。
  */
-const afterGate = (w: Workflow, gate: string): Set<string> => {
-  const from = w.nodes.findIndex(n => n.id === gate)
-  const rest = w.nodes.slice(from + 1)
-  const ship = rest.findIndex(n => n.checks.some(c => c.kind === 'platform'))
-  return new Set((ship < 0 ? [] : rest.slice(0, ship)).filter(n => n.kind !== 'gate').map(n => n.id))
+const afterGate = (w: Workflow, gate: string): string[] => {
+  const rest = w.nodes.slice(w.nodes.findIndex(n => n.id === gate) + 1)
+  const last = rest.findLastIndex(n => n.checks.some(c => c.kind === 'platform'))
+  return rest
+    .slice(0, last + 1)
+    .filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))
+    .map(({ task: _task, inputs: _inputs, ...n }) => JSON.stringify(n))
 }
 
 /**
@@ -99,9 +102,11 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
         out.push(`不能删掉卡点「${id}」，也不能改它验收的节点和验收人`)
         continue
       }
-      const before = afterGate(a.workflow, id)
-      const added = [...afterGate(b.workflow, id)].filter(n => !before.has(n))
-      if (added.length > 0) out.push(`不能在卡点「${id}」和交付之间加节点（${added.join('、')}）：验收通过之后的改动会不经验收就推送`)
+      const before = new Set(afterGate(a.workflow, id))
+      const added = afterGate(b.workflow, id)
+        .filter(n => !before.has(n))
+        .map(n => (JSON.parse(n) as { id: string }).id)
+      if (added.length > 0) out.push(`不能在卡点「${id}」和交付之间加节点或改节点（${added.join('、')}）：验收通过之后的改动会不经验收就推送`)
     }
     return out
   }
