@@ -48,7 +48,7 @@ test('image-probe-checks.json 在边界上校验格式，认不出就报错', ()
     '{"items":[{"item":"a","checks":[1]}]}',
     'not json',
   ]) {
-    assert.throws(() => parseChecks(bad), undefined, bad)
+    assert.throws(() => parseChecks(bad), Error, bad)
   }
 })
 
