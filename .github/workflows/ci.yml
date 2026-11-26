@@ -20,8 +20,40 @@ env:
   NODE_VERSION: 24.22.3
 
 jobs:
+  # 纯文档 PR 跳过下面重的检查（判断见 .github/scripts/docs-only.ts）。脚本从 base（HEAD^1）取，PR 改它改变不了自己的结果。
+  # 不是 pull_request、PR 不是指向默认分支（main）、base 上还没有这个脚本、或者这个 job 出错时，docs_only 都不是 true，下面照跑全套。
+  # 只认指向 main 的 PR：不然先指向一个带了代码改动的分支（相对它只改文档）跳过检查，再把 base 改成 main，检查结果不会重跑。
+  # 重的 job 跳过时，按原来的名字报告为 skipped（分支保护里算通过），不会卡在等待中。
+  changes:
+    name: changes-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - id: check
+        if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
+        run: |
+          if git show HEAD^1:.github/scripts/docs-only.ts > "$RUNNER_TEMP/docs-only.ts" 2>/dev/null; then
+            node "$RUNNER_TEMP/docs-only.ts"
+          else
+            echo "base 上还没有 .github/scripts/docs-only.ts，跑全套"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   typecheck:
     name: typecheck
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -39,6 +71,8 @@ jobs:
 
   unit-test:
     name: unit-test
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -55,6 +89,8 @@ jobs:
 
   build-web:
     name: build-web
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -72,6 +108,8 @@ jobs:
   # 覆盖平台、dsh、沙箱、git、检查命令；不覆盖模型本身的行为（提示词、技能、模板），那部分仍要真实模型的 E2E。
   e2e-fake-model:
     name: e2e-fake-model
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -122,6 +160,8 @@ jobs:
   # 那里装 TS 6 只给 lint 用。规则见 .github/lint/eslint.config.mjs（架构规则、通用规则和逐条列出的例外）
   lint:
     name: lint
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -142,6 +182,8 @@ jobs:
   # 格式化（Prettier）：检查全部代码文件，范围和忽略规则见 .github/lint/check-format.sh
   format:
     name: format
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
