@@ -122,7 +122,7 @@ agent 跑任务时的环境，就是这个镜像：
 | Node、npm | Node 24（见 `Dockerfile` 第一行）；npm 换成了修过漏洞的版本（`Dockerfile` 里的 `NPM_VERSION`） | `node --version \| grep -q '^v24\.'`、`npm --version` |
 | pnpm、yarn | 通过 corepack，按仓库 `package.json` 的 `packageManager` 字段取版本。镜像里没有预装，第一次用时联网下载 | `corepack --version`、`command -v pnpm`、`command -v yarn` |
 | Python | 3.12，带 venv 和 pip | `python3 --version \| grep -q '^Python 3\.12\.'`、`python3 -m pip --version`、`python3 -m venv /tmp/probe-venv && /tmp/probe-venv/bin/python -m pip --version` |
-| 编译 | build-essential（gcc、make）、pkg-config | `printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' \| gcc -x c - -o /tmp/probe-c && /tmp/probe-c`、`g++ --version`、`make --version`、`pkg-config --version` |
+| 编译 | build-essential（gcc、make）、pkg-config | `printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' \| gcc -x c - -o /tmp/probe-c && /tmp/probe-c`、`printf '#include <vector>\nint main(){return std::vector<int>{0}[0];}\n' \| g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx`、`make --version`、`pkg-config --version` |
 | 其他 | git、ca-certificates、bubblewrap | `git --version`、`test -s /etc/ssl/certs/ca-certificates.crt`、`bwrap --version` |
 
 「检查」一列是 CI 的依赖探针（`.github/scripts/image-probe.ts`）在构建好的镜像里以 agent 的用户（`eos-agent`）、断网逐条运行的命令，每条的退出码都必须是 0。改这张表时一起改这一列。探针用的是镜像本身的环境，不经过 dsh：dsh 的环境白名单和沙箱（只能写 worktree 和 `/tmp`）另有测试和实测（`tests/agent-env-contract.test.ts`、`docs/e2e/deploy-2-image/sandbox/`）。

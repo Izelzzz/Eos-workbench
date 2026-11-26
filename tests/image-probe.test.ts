@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { EXPECTED_USERS, parseChecks, parseUsers, usersScript } from '../.github/scripts/image-probe.ts'
 
 const ROOT = join(import.meta.dirname, '..')
-const doc = (table: string) => `# 部署\n\n## 执行器环境\n\n说明\n\n${table}\n\n后文\n\n## 下一节\n\n| a | b |\n|---|---|\n| x | y |\n`
+const doc = (table: string) => `# 部署\n\n## 执行器环境\n\n说明\n\n${table}\n\n后文，可以有 \`a\` 这样的反引号\n\n## 下一节\n\n| a | b |\n|---|---|\n| x | y |\n`
 
 test('docs/deploy.md 的「执行器环境」表：每一行都有检查命令，表里的 \\| 还原成管道', () => {
   const rows = parseChecks(readFileSync(join(ROOT, 'docs/deploy.md'), 'utf8'))
@@ -27,6 +27,13 @@ test('解析不出来就报错，不静默跳过', () => {
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | 没写命令 |')), /没有写检查命令/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | `true` |')), /列数不对/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n| 系统 | x | `true` |')), /格式不对/)
+  // 第一轮独立审查实测：下面这几种行在 GFM 里照样是表格的一行，原来会被悄悄跳过、或者检查被截断
+  const head = '| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `true` |\n'
+  assert.throws(() => parseChecks(doc(`${head}  | b | x | \`false\` |`)), /以 \| 开头/)
+  assert.throws(() => parseChecks(doc(`${head}b | x | \`false\` |`)), /以 \| 开头/)
+  assert.throws(() => parseChecks(doc(`${head}\n| b | x | \`false\` |`)), /表后面还有表格行/)
+  assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ` ` |')), /空的检查命令/)
+  assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ``echo `x` `` |')), /双反引号/)
 })
 
 test('探针期望的用户和 Dockerfile 的 useradd 对得上（改 Dockerfile 的用户时两边一起改，由审查把关）', () => {

@@ -20,13 +20,19 @@ export function parseChecks(markdown: string): Row[] {
   if (start < 0) throw new Error('docs/deploy.md 里找不到「## 执行器环境」一节')
   const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
   const section = lines.slice(start + 1, end < 0 ? undefined : end)
-  const first = section.findIndex(l => l.startsWith('|'))
+  // 这一节里只许有一张表，表的每一行都以 | 开头、前面不缩进：GFM 里行首有空格或不写 | 的行照样算表格的一行，
+  // 但这种行容易被看漏，一律报错，免得某一行的检查被悄悄跳过
+  const isRow = (l: string) => l.includes('|')
+  const first = section.findIndex(isRow)
   if (first < 0) throw new Error('「执行器环境」一节里找不到表')
   const table: string[] = []
-  for (const l of section.slice(first)) {
-    if (!l.startsWith('|')) break
-    table.push(l)
+  let i = first
+  for (; i < section.length && isRow(section[i]!); i++) {
+    if (!section[i]!.startsWith('|')) throw new Error(`「执行器环境」的表里这一行要以 | 开头、前面不缩进：${section[i]}`)
+    table.push(section[i]!)
   }
+  const later = section.slice(i).find(l => /^\s*\|/.test(l))
+  if (later !== undefined) throw new Error(`「执行器环境」一节里表后面还有表格行（表中间不能有空行，这一节只能有一张表）：${later}`)
   const cells = (l: string) =>
     l
       .replaceAll('\\|', PIPE)
@@ -40,8 +46,11 @@ export function parseChecks(markdown: string): Row[] {
   return table.slice(2).map(l => {
     const c = cells(l)
     if (c.length !== header.length) throw new Error(`「执行器环境」的表里这一行列数不对：${l}`)
-    const checks = [...c[col]!.matchAll(/`([^`]+)`/g)].map(m => m[1]!)
+    // 双反引号写法（``a `b` ``）会被切成几段、每段都不完整，直接报错
+    if (c[col]!.includes('``')) throw new Error(`「执行器环境」的表里「${c[0]}」这一行的检查不能用双反引号`)
+    const checks = [...c[col]!.matchAll(/`([^`]+)`/g)].map(m => m[1]!.trim())
     if (checks.length === 0) throw new Error(`「执行器环境」的表里「${c[0]}」这一行没有写检查命令`)
+    if (checks.some(x => x === '')) throw new Error(`「执行器环境」的表里「${c[0]}」这一行有空的检查命令`)
     return { item: c[0]!, checks }
   })
 }
@@ -80,7 +89,7 @@ export function usersScript(users: User[]): string {
     const want = [...u.groups].sort().join(' ')
     return [
       `test "$(id -u ${u.name})" = ${u.uid} || { echo "用户 ${u.name} 的 uid 不是 ${u.uid}"; fail=1; }`,
-      `g="$(id -nG ${u.name} | tr ' ' '\\n' | sort | xargs)"; test "$g" = "${want}" || { echo "用户 ${u.name} 的组是 $g，应该是 ${want}"; fail=1; }`,
+      `g="$(id -nG ${u.name} | tr ' ' '\\n' | LC_ALL=C sort | xargs)"; test "$g" = "${want}" || { echo "用户 ${u.name} 的组是 $g，应该是 ${want}"; fail=1; }`,
     ]
   })
   lines.push(`test "$(stat -c %U:%G /data)" = eos:eos || { echo "/data 的属主不是 eos:eos：$(stat -c %U:%G /data)"; fail=1; }`)
@@ -98,7 +107,7 @@ if (import.meta.main) {
   const rows = parseChecks(readFileSync(join(root, 'docs/deploy.md'), 'utf8'))
   /** 每条检查一个新容器；卡住的命令（比如等标准输入）2 分钟后算失败，不拖到 job 超时 */
   const run = (user: string, script: string): { ok: boolean; detail: string } => {
-    const r = spawnSync('docker', ['run', '--rm', '--network', 'none', '--user', user, '--entrypoint', 'bash', image, '-c', script], {
+    const r = spawnSync('docker', ['run', '--rm', '--pull=never', '--network', 'none', '--user', user, '--entrypoint', 'bash', image, '-c', script], {
       encoding: 'utf8',
       timeout: 120_000,
       stdio: ['ignore', 'pipe', 'pipe'],

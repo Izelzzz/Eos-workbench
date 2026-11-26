@@ -1,4 +1,4 @@
-# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（代码评审之后的版本）
+# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（第一轮独立审查之后的版本）
 
 ## 1. 当前 Dockerfile 构建的镜像（main 8598c67 的 Dockerfile，本地构建）
 $ node .github/scripts/image-probe.ts eos-di:after
@@ -12,7 +12,7 @@ $ node .github/scripts/image-probe.ts eos-di:after
 ✓ Python：python3 -m pip --version
 ✓ Python：python3 -m venv /tmp/probe-venv && /tmp/probe-venv/bin/python -m pip --version
 ✓ 编译：printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' | gcc -x c - -o /tmp/probe-c && /tmp/probe-c
-✓ 编译：g++ --version
+✓ 编译：printf '#include <vector>\nint main(){return std::vector<int>{0}[0];}\n' | g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx
 ✓ 编译：make --version
 ✓ 编译：pkg-config --version
 ✓ 其他：git --version
@@ -38,7 +38,7 @@ $ node .github/scripts/image-probe.ts eos-probe:neg2
 ✗ Python：python3 -m venv /tmp/probe-venv && /tmp/probe-venv/bin/python -m pip --version（退出码 1）Error: Command '['/tmp/probe-venv/bin/python3', '-m', 'ensurepip', '--upgrade', '--default-pip']' returned non-zero exit status 1.
 ✗ 编译：printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' | gcc -x c - -o /tmp/probe-c && /tmp/probe-c（退出码 1）<stdin>:1:10: fatal error: stdio.h: No such file or directory
 compilation terminated.
-✓ 编译：g++ --version
+✓ 编译：printf '#include <vector>\nint main(){return std::vector<int>{0}[0];}\n' | g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx
 ✓ 编译：make --version
 ✗ 编译：pkg-config --version（退出码 127）bash: line 1: pkg-config: command not found
 ✓ 其他：git --version
@@ -47,4 +47,29 @@ compilation terminated.
 ✗ 用户和 /data 属主：eos(10001; eos,eos-dsh,eos-work)、eos-check(10002; eos-check,eos-work)、eos-agent(10003; eos-agent,eos-dsh,eos-work)（退出码 1）用户 eos-check 的组是 eos-check eos-dsh eos-work，应该是 eos-check eos-work
 /data 的属主不是 eos:eos：root:root
 ::error title=依赖探针::镜像里有 6 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表
+exit=1
+
+## 3. 反例：第一轮独立审查做的镜像（删掉 /usr/include/c++，npm 换成只会 echo 版本号的假脚本）
+#   FROM eos-di:after
+#   RUN rm -rf /usr/include/c++ && rm -f /usr/local/bin/npm && printf "#!/bin/sh\necho 10.0.0\n" > /usr/local/bin/npm && chmod +x /usr/local/bin/npm
+$ node .github/scripts/image-probe.ts eos-review:neg3
+✓ 系统：grep -qx 'VERSION_ID="24.04"' /etc/os-release
+✓ Node、npm：node --version | grep -q '^v24\.'
+✓ Node、npm：npm --version
+✓ pnpm、yarn：corepack --version
+✓ pnpm、yarn：command -v pnpm
+✓ pnpm、yarn：command -v yarn
+✓ Python：python3 --version | grep -q '^Python 3\.12\.'
+✓ Python：python3 -m pip --version
+✓ Python：python3 -m venv /tmp/probe-venv && /tmp/probe-venv/bin/python -m pip --version
+✓ 编译：printf '#include <stdio.h>\nint main(void){return puts("ok") < 0;}\n' | gcc -x c - -o /tmp/probe-c && /tmp/probe-c
+✗ 编译：printf '#include <vector>\nint main(){return std::vector<int>{0}[0];}\n' | g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx（退出码 1）<stdin>:1:10: fatal error: vector: No such file or directory
+compilation terminated.
+✓ 编译：make --version
+✓ 编译：pkg-config --version
+✓ 其他：git --version
+✓ 其他：test -s /etc/ssl/certs/ca-certificates.crt
+✓ 其他：bwrap --version
+✓ 用户和 /data 属主：eos(10001; eos,eos-dsh,eos-work)、eos-check(10002; eos-check,eos-work)、eos-agent(10003; eos-agent,eos-dsh,eos-work)
+::error title=依赖探针::镜像里有 1 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表
 exit=1
