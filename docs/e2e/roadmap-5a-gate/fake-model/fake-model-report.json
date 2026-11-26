@@ -1,7 +1,7 @@
 {
-  "commit": "c786769e26102144f96965118baf5939d7dfe49f",
+  "commit": "bb07bd94502d7651b9764c878e78dded6afe6269",
   "uncommitted": [],
-  "task": "t2611261553573fn",
+  "task": "t261126155819u49",
   "killed": true,
   "killedAtGate": true,
   "gateLog": [
@@ -40,7 +40,7 @@
   },
   "sessions": {
     "plan": {
-      "sid": "session-b3854aac7d3359cf4644435d82a60a10",
+      "sid": "session-2d4ff02df7bd337410ed6553bad85b07",
       "calls": [
         "c1"
       ],
@@ -51,7 +51,7 @@
       "asks": 1
     },
     "build": {
-      "sid": "session-b5f97532611cc1d0c7c6922024f7ffb0",
+      "sid": "session-6a2682748c4d33a87432aa22578d5fec",
       "calls": [
         "c2",
         "c4",
@@ -64,7 +64,7 @@
       "asks": 0
     },
     "review": {
-      "sid": "session-c360e8b5e5d13e997ae0c90d36dff073",
+      "sid": "session-8b705902cc6daf66a1f7020aea9be976",
       "calls": [
         "c3",
         "c5"
@@ -76,7 +76,7 @@
       "asks": 0
     },
     "sign-off": {
-      "sid": "session-f70a27a3babb302e2b0756f99be2f17b",
+      "sid": "session-4b3a80b7777eabb1d311b718ad9114b5",
       "calls": [
         "c6",
         "c8"
@@ -90,16 +90,16 @@
   },
   "rejectedReplies": 0,
   "calls": [
-    "c1 produce@plan 1152ms",
-    "c2 produce@build 503ms",
-    "c3 critique@review#1 471ms",
-    "c4 respond@review#1 444ms",
-    "c5 critique@review#2 138ms",
-    "c6 accept@sign-off#1 353ms",
-    "c7 amend@sign-off#2 426ms",
-    "c8 accept@sign-off#2 156ms",
-    "c9 amend@accept#2 442ms"
+    "c1 produce@plan 1137ms",
+    "c2 produce@build 434ms",
+    "c3 critique@review#1 477ms",
+    "c4 respond@review#1 493ms",
+    "c5 critique@review#2 143ms",
+    "c6 accept@sign-off#1 373ms",
+    "c7 amend@sign-off#2 507ms",
+    "c8 accept@sign-off#2 192ms",
+    "c9 amend@accept#2 470ms"
   ],
-  "commits": "c0f32c7 eos: review respond (c4)\n1d73017 eos: build produce (c2)\n",
-  "npmTest": "test\n> node --test\n\nTAP version 13\n# Subtest: 求和\nok 1 - 求和\n  ---\n  duration_ms: 0.74206\n  type: 'test'\n  ...\n# Subtest: 空数组返回 0\nok 2 - 空数组返回 0\n  ---\n  duration_ms: 0.104869\n  type: 'test'\n  ...\n# Subtest: 有非数字时抛 TypeError\nok 3 - 有非数字时抛 TypeError\n  ---\n  duration_ms: 0.390374\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 66.721774\n"
+  "commits": "dbd0138 eos: review respond (c4)\nbe85214 eos: build produce (c2)\n",
+  "npmTest": "est\n> node --test\n\nTAP version 13\n# Subtest: 求和\nok 1 - 求和\n  ---\n  duration_ms: 0.825159\n  type: 'test'\n  ...\n# Subtest: 空数组返回 0\nok 2 - 空数组返回 0\n  ---\n  duration_ms: 0.122438\n  type: 'test'\n  ...\n# Subtest: 有非数字时抛 TypeError\nok 3 - 有非数字时抛 TypeError\n  ---\n  duration_ms: 0.384758\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 66.595081\n"
 }
