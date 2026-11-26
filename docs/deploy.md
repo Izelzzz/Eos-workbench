@@ -6,10 +6,10 @@
 
 | 事项 | 现状 | 部署方要做的 |
 |---|---|---|
-| 登录 | 没有登录。能打开 Eos 地址的人都能建任务、看所有 trace、在服务器的仓库上运行 agent | 保持默认的 `127.0.0.1` 绑定，或放在带认证的反向代理后面（见「访问」） |
+| 登录 | 没有登录（路线图第 7 项）。能打开 Eos 地址的人都能建任务、看所有 trace、在服务器的仓库上运行 agent | 保持默认的 `127.0.0.1` 绑定，或放在带认证的反向代理后面（见「访问」） |
 | 主密钥 | 只在平台进程的环境里，agent 和检查命令都读不到 | 另外备份一份；丢失后存过的凭据只能重新录入 |
 | 模型 key | 在 dsh 进程的环境里。检查命令读不到；agent 读不到它只依赖沙箱；dsh 在沙箱外启动的 MCP 服务读得到 | 使用额度受限的模型 key |
-| 任务之间的隔离 | 没有。agent 能读整个 `/data`，包括别的任务的 worktree、所有仓库和所有 trace | 只放入对全体使用者都可见的仓库 |
+| 任务之间的隔离 | 只隔离写入：agent 只能写自己任务的 worktree 和 `/tmp`。读取不隔离：agent 能读整个 `/data`，包括别的任务的 worktree、所有仓库和所有 trace | 只放入对全体使用者都可见的仓库 |
 | 出网 | agent 和检查命令访问网络不受限制 | 需要限制时在宿主机或 Docker 网络一层配置 |
 
 宿主机要求：
@@ -98,9 +98,9 @@ docker compose pull
 docker compose up -d --no-build
 ```
 
-- **写具体的版本号或 `sha-` 标签**，不写 `latest`、`main`。这样升级时机由部署方决定，回退时目标明确。
+- **建议写具体的版本号或 `sha-` 标签**，不写 `latest`、`main`。这样升级时机由部署方决定，回退时目标明确。
 - **必须加 `--no-build`**。不加时 `docker compose up --build` 会用本地代码构建，打上 ghcr 的标签，覆盖拉下来的镜像。
-- **仓库代码和镜像版本保持一致**（`git checkout v0.1.0`）。`compose.yaml` 里的能力、tmpfs 等设置随镜像一起变化。
+- **仓库代码和镜像版本尽量一致**（`git checkout v0.1.0`）。`compose.yaml` 里的能力、tmpfs 等设置随镜像一起变化。
 
 ### 和派生镜像一起用
 
@@ -171,8 +171,9 @@ ssh -N -L 4317:127.0.0.1:4317 <服务器>
 填 `https://github.com/<owner>/<repo>`。
 
 - 平台把仓库克隆到 `/data/repos/github.com/<owner>/<repo>.git`，在默认分支的最新提交上建任务分支。
+- 平台用凭据克隆仓库、推送任务分支、调用 GitHub 接口开 PR。
 - 访问私有仓库需要凭据，并且需要设置 `EOS_MASTER_KEY`。可以在 Web 的凭据页添加名为 `github.com` 的 Git 令牌；GitHub App 和用户授权见 [ADR-007](adr/007-github-user-authorization.md)。
-- 令牌只由平台的 git 进程使用，不写进数据目录。
+- 凭据加密保存在 `eos.db` 里。git 操作时令牌经环境变量传给平台的 git 进程，不以明文写进数据目录。
 
 ### 容器里的路径
 
@@ -208,7 +209,7 @@ agent 运行任务时的环境就是这个镜像。
 
 - 探针在构建好的镜像里，以 agent 的用户 `eos-agent`、在断网条件下逐条运行，每条的退出码都必须是 0。
 - 探针执行的是 `.github/scripts/image-probe-checks.json`，这张表是同一份清单的可读版本。`tests/image-probe.test.ts` 核对两者一致，修改检查时两处同时修改。
-- 探针使用镜像本身的环境，不经过 dsh。dsh 的环境白名单和沙箱另有测试（`tests/agent-env-contract.test.ts`）。
+- 探针使用镜像本身的环境，不经过 dsh。dsh 的环境白名单另有测试，沙箱另有实测记录（见「证据」）。
 
 ### 平台目录里没有 typescript
 
@@ -229,14 +230,13 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 
 ### 缓存位置
 
-| 缓存 | 位置 | 说明 |
-|---|---|---|
-| npm、pip、corepack | `/tmp/cache` | 家目录在沙箱里不可写 |
-| 其他要写家目录的工具 | 需要用该工具自己的环境变量或配置指到 worktree 或 `/tmp` 下 | 否则在沙箱里失败 |
+家目录在沙箱里不可写，所以缓存不能放在默认位置。
 
+- npm、pip、corepack 的缓存在 `/tmp/cache`，由镜像设置。
+- 其他要写家目录的工具在沙箱里会失败，需要用该工具自己的环境变量或配置，把缓存指到 worktree 或 `/tmp` 下。
 - `/tmp` 是 tmpfs，默认上限 4g。重启容器后缓存清空，依赖以及 pnpm、yarn 会重新下载。
 - 镜像没有统一设置 `XDG_CACHE_HOME`，因为 dsh 自己在沙箱外也按它寻找缓存目录。
-- 示例：需要编译原生模块的 npm 包会写 `~/.cache/node-gyp`。在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp` 可以解决；npm 11 会警告这个配置项在下一个大版本不再支持。
+- 示例：需要编译原生模块的 npm 包会写 `~/.cache/node-gyp`。在仓库的 `.npmrc` 里写 `devdir=/tmp/cache/node-gyp` 可以解决（验证过这个配置能传到安装脚本）；npm 11 会警告这个配置项在下一个大版本不再支持。
 
 ### 增加系统依赖
 
@@ -263,7 +263,7 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 - **不要加 `USER eos`。** 容器必须以 root 启动，`eos` 命令才能降到平台用户并保留切换用户所需的能力（见「用户和权限」）。
 - **派生镜像不能沿用 `eos-workbench:local` 这个标签。** 沿用时它会覆盖基础镜像，之后升级拿不到新的 Eos 代码。
 
-第一次部署和每次升级都要先构建基础镜像，再构建派生镜像（见「升级」）。
+第一次部署和每次升级都要先构建基础镜像，再构建派生镜像（见「数据和升级」下的「升级」）。
 
 ### 网络
 
@@ -276,14 +276,15 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 
 | 类别 | 变量 |
 |---|---|
-| 基本 | `PATH`、语言和时区、`CI=1`；`HOME` 是 `/home/eos-check` |
+| 基本 | `PATH`、`LANG`、`LC_ALL`、`TZ`、`TMPDIR`、`CI=1`；`HOME` 是 `/home/eos-check` |
+| git | `GIT_CONFIG_COUNT`、`GIT_CONFIG_KEY_0`、`GIT_CONFIG_VALUE_0`（`safe.directory=*`：worktree 属于平台用户，不设时 git 拒绝在其中运行） |
 | 证书 | `NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR` |
 | 代理 | `HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY` 及其小写形式，`NODE_USE_ENV_PROXY` |
 
 - npm 等工具的缓存在 `/home/eos-check` 下，各任务的检查命令共用。
 - 传递证书和代理设置，是为了服务器经代理上网时，联网的检查（例如 `npm install`）仍能运行。
 - **带账号密码的代理地址（`http://user:pass@...`）不传递。** 检查命令运行的是 agent 改过的代码，可能把账号密码发送出去。此时 `eos doctor` 给出一条 ⚠，联网的检查会失败。
-- agent 一侧（dsh 的环境）没有这条限制，得到完整的代理地址。
+- agent 一侧（dsh 的环境）没有这条限制，得到完整的代理地址，包括其中的账号密码（见「用户和权限」的「限制」）。
 
 ## 用户和权限
 
@@ -313,6 +314,8 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 |---|---|---|
 | dsh、agent、dsh 在沙箱外启动的 MCP 服务 | `deploy/dsh-launch.mjs`：清掉能力并切换到 `eos-agent` | 否 |
 | git | `/usr/local/bin/git`（`deploy/git`） | 否 |
+| 检查命令 | 切换到 `eos-check` 时清掉能力 | 否 |
+| 平台借 `eos-check`、`eos-agent` 的身份运行的辅助命令 | 切换用户时清掉能力 | 否 |
 | 撤销越界改动用的 `sh`、`rm`、`find` | 平台启动前清掉能力 | 否 |
 | Landlock 探测（doctor 运行一次 node-addon-system 自带的程序） | 平台直接启动 | 是 |
 | tsx 的 esbuild 服务进程（编译平台自己的源码） | 平台直接启动 | 是 |
@@ -324,9 +327,9 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 | 目录 | 属主、组、权限 | 设计目的 |
 |---|---|---|
 | `/data/dsh` | `eos`、组 `eos-dsh`、3770（带 sticky 位） | dsh 在里面写会话日志等目录；检查命令不在 `eos-dsh` 组里，进不去 |
-| `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
+| `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。上一级 `/data/dsh` 的 sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
 | `/data/dsh/mcp-cwd/` | 属于 `eos-agent` | MCP 服务在里面写缓存和日志；平台不往里写 |
-| dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/cli.ts` 的 `readSessionLogAs`） |
+| dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/runner/check-user.ts` 的 `readSessionLogAs`） |
 | `/data/worktrees` | 2755，带 setgid，组 `eos-work` | 目录本身组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接 |
 | 各任务的 worktree | 组 `eos-work`，平台的 umask 是 002 | 检查命令能写 agent 改过的文件 |
 
@@ -345,13 +348,14 @@ agent 以普通用户运行，只能写自己任务的 worktree 和 `/tmp`，因
 
 **自动迁移。** 新版本第一次启动平台时：
 
-1. 以 `eos-agent` 的身份复制一份 `/data/dsh`。不复制 `.credentials.yaml`（dsh 自己的浏览器会话授权，dsh 会重新生成）。
-2. 把旧目录改名为 `/data/dsh.before-agent`。
-3. 写标记文件 `/data/.dsh-agent`。
+1. 以 `eos-agent` 的身份把 `/data/dsh` 复制到 `/data/dsh.agent-new`。不复制 `.credentials.yaml`（dsh 自己的浏览器会话授权，dsh 会重新生成）。
+2. 把旧目录 `/data/dsh` 改名为 `/data/dsh.before-agent`。
+3. 把 `/data/dsh.agent-new` 改名为 `/data/dsh`。
+4. 写标记文件 `/data/.dsh-agent`。
 
 进行中的任务能续接原来的 dsh 会话。确认任务正常后可以删除 `dsh.before-agent`。
 
-**迁移被打断。** 最后两步之间被打断时，`/data/dsh` 不存在而 `/data/dsh.agent-new` 存在。此时除 `eos doctor` 外，`eos` 的命令（启动平台、`run`、`resume` 等）都不运行并给出提示。手工恢复：
+**迁移被打断。** 在第 2 步和第 3 步之间被打断时，`/data/dsh` 不存在而 `/data/dsh.agent-new` 存在。此时除 `eos doctor` 外，`eos` 的命令（启动平台、`run`、`resume` 等）都不运行并给出提示。手工恢复：
 
 ```bash
 docker compose run --rm -u eos eos mv /data/dsh.agent-new /data/dsh
@@ -360,7 +364,7 @@ docker compose up -d
 
 **worktree 的组。** 升级前创建的 worktree 在第一次启动时改为 `eos-work` 组。`/data/.worktrees-group` 是已完成的标记。
 
-**旧目录要删除。** 升级后遗留的 `/data/dsh/profiles/<指纹>/`、`/data/dsh/process-cwd/` 不再使用，它们属于 `eos-agent`。不删除时，dsh 启动的 MCP 服务可以把它们换成符号链接，使平台顺着链接覆盖 `eos.db` 等文件。删除命令：
+**不再使用的旧目录。** 升级后遗留的 `/data/dsh/profiles/<指纹>/`、`/data/dsh/process-cwd/` 不再使用，可以删除。它们属于 `eos-agent`，所以以 `eos-agent` 的身份删除，例如：
 
 ```bash
 docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd
@@ -370,6 +374,7 @@ docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd
 
 - agent 和 dsh 是同一个用户。agent 读不到 dsh 进程环境里的模型 key，只依赖 Landlock。
 - dsh 在沙箱外启动的 MCP 服务读得到模型 key。
+- 服务器的代理地址带账号密码时，这个地址会进入 dsh 和 agent 的环境。
 
 ## 沙箱
 
@@ -381,6 +386,8 @@ dsh 用 Landlock 限制 agent。镜像里装了 bubblewrap，但在 Docker 默�
 - **别的进程的环境**：agent 读不到 dsh 和平台进程的 `/proc/<pid>/environ`，即读不到模型 key 和主密钥。
 
 ### 沙箱不限制什么
+
+下表后三行是 Landlock 相对 bwrap 的差别：bwrap 下每个任务有私有的 `/tmp` 和单独的进程号空间。
 
 | 不限制的 | 后果 |
 |---|---|
@@ -395,7 +402,7 @@ dsh 用 Landlock 限制 agent。镜像里装了 bubblewrap，但在 Docker 默�
 
 - 验证过的配置：本镜像、这份 compose、内核 6.18。在这个配置下 Landlock 挡住了 agent 读取 dsh 和平台进程的环境。
 - Landlock 没有生效时（内核不支持，或以别的方式运行而没有经过沙箱），同一用户的 agent 能读到模型 key。
-- 更换宿主机内核后，用探针重新确认（见「证据」）。
+- 更换宿主机内核后，重新运行探针确认。探针是 `docs/e2e/deploy-2-image/sandbox/modelkey-probe.mts`，运行方法见同目录 `README.md` 第 4 节。
 
 ### 内核不支持 Landlock 时
 
@@ -421,7 +428,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 
 **不要用 `npx`、`pnpm dlx`、`uvx`、`pipx run` 这类下载后立即运行的命令启动 MCP 服务。**
 
-- MCP 服务运行在沙箱外，并继承 dsh 的环境，包括上面的依赖缓存目录。
+- MCP 服务运行在沙箱外，并继承 dsh 的环境，包括指向 `/tmp/cache` 的依赖缓存设置。
 - 用这类命令启动时，它可能运行 agent 放进缓存的代码。
 - 做法：把 MCP 服务安装进派生镜像（见「增加系统依赖」），在模板里写它的绝对路径。
 
@@ -490,9 +497,11 @@ docker compose up -d --build
 
 | 结论 | 证据 |
 |---|---|
-| agent 和检查命令读不到主密钥；撤销越界改动用的命令不带能力；升级后任务能续接 dsh 会话 | `docs/e2e/deploy-3c-agent-user/`（其中 `without-caps.txt`） |
+| agent 和检查命令读不到主密钥；升级后任务能续接 dsh 会话 | `docs/e2e/deploy-3c-agent-user/` |
+| 撤销越界改动用的命令不带能力 | `docs/e2e/deploy-3c-agent-user/without-caps.txt` |
+| 迁移被打断时的行为和恢复命令 | `docs/e2e/deploy-3c-agent-user/migration-edge.txt` |
 | 沙箱的写入范围；agent 读不到别的进程的环境 | `docs/e2e/deploy-2-image/sandbox/` |
-| agent 读不到模型 key（更换内核后重新运行的探针） | `docs/e2e/deploy-2-image/sandbox/modelkey-probe.json` |
+| agent 读不到模型 key | `docs/e2e/deploy-2-image/sandbox/modelkey-probe.json` |
 | 三种安装项目依赖的方式在沙箱里可用 | `docs/e2e/deploy-2-image/sandbox/deps-probe.json` |
 | 检查命令不能把别的任务的 worktree 改名 | `docs/e2e/deploy-3b-check-user/probe-report.json` 的 `renameWorktreeDir` |
 | 平台读不了 dsh 写出的 0600 文件 | `docs/e2e/deploy-3c-agent-user/` 的 `deploy-e2e-1-failed-report.json` |
