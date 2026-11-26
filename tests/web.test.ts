@@ -922,7 +922,7 @@ test('卡点：任务页带上卡点信息；页面上打回（写意见）、�
     assert.equal((await gate({ gate: 'accept', round: 1 })).status, 400)
     assert.equal((await fetch(`${s.base}/api/tasks/t2/gate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 403, '只接受本页面的请求')
     const back = await gate({ gate: 'accept', round: 1, pass: false, comment: '补注释' })
-    assert.deepEqual(await back.json(), { ok: true })
+    assert.deepEqual(await back.json(), { ok: true, resumeNeeded: false })
     // 没有 runner 在跑：接口起一个，交回开发修改，改完回到卡点（第 2 次）。
     for (let i = 0; i < 200 && (d = await get()).gate?.round !== 2; i++) await new Promise(r => setTimeout(r, 10))
     for (let i = 0; i < 200 && (d = await get()).status !== 'waiting_accept'; i++) await new Promise(r => setTimeout(r, 10))
@@ -932,7 +932,7 @@ test('卡点：任务页带上卡点信息；页面上打回（写意见）、�
       [[1, 'human', false, '补注释']],
     )
     assert.equal(d.gate?.output, '回复', '显示修改后的产出')
-    assert.deepEqual(await (await gate({ gate: 'accept', round: 2, pass: true, comment: '可以' })).json(), { ok: true })
+    assert.deepEqual(await (await gate({ gate: 'accept', round: 2, pass: true, comment: '可以' })).json(), { ok: true, resumeNeeded: false })
     for (let i = 0; i < 200 && (d = await get()).status !== 'done'; i++) await new Promise(r => setTimeout(r, 10))
     assert.equal(d.status, 'done')
     assert.equal(d.gate, undefined)

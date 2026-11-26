@@ -73,7 +73,8 @@ export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; 
 
 /** 人在卡点上的结论：gate、round 指明验收的是哪一次（页面上看到的那一次），过期的被拒绝；打回时 comment 不能为空。 */
 export type GateRequest = { gate: string; round: number; pass: boolean; comment: string }
-export type GateResponse = { ok: true } | { ok: false; error: string }
+/** resumeNeeded：结论记下了，但没有 runner 接着做（起不来），要点「继续」。 */
+export type GateResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }
 
 export type CreateResponse = { ok: true; id: string } | { ok: false; error: string }
 export type ActionResponse = { ok: true } | { ok: false; error: string }

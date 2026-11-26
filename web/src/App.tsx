@@ -72,7 +72,7 @@ function TaskList() {
           连接不上服务：{error}（每 5 秒自动重试）
         </p>
       )}
-      {waiting.length > 0 && (
+      {(waiting.length > 0 || onlyGate) && (
         <div className="gate-filter">
           <span>{waiting.length} 个任务在等验收</span>
           <button type="button" className={onlyGate ? 'active' : ''} aria-pressed={onlyGate} onClick={() => setOnlyGate(v => !v)}>
@@ -315,8 +315,9 @@ function TaskPage(props: { id: string }) {
         {task.gate && (
           <Gate
             task={task}
-            onDecided={pass => {
-              setNotice(pass ? '已通过，任务继续。' : '已打回，交回修改；改完会回到这个卡点。')
+            onDecided={(pass, resumeNeeded) => {
+              const what = pass ? '已通过' : '已打回，交回修改；改完会回到这个卡点'
+              setNotice(resumeNeeded ? `${what}。没有程序在运行这个任务，点「继续」让它接着跑。` : `${what}。`)
               setReload(n => n + 1)
             }}
           />

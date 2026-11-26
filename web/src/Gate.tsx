@@ -6,26 +6,27 @@ import { decideGate } from './api.ts'
 
 const PHASE = { decide: '等验收人给结论', amend: '被验收方按意见修改中', check: '修改后重跑检查中', ask: '等你给出指示（见上面的问题）' }
 
-export function Gate(props: { task: TaskDetail; onDecided: (pass: boolean) => void }) {
+export function Gate(props: { task: TaskDetail; onDecided: (pass: boolean, resumeNeeded: boolean) => void }) {
   const g = props.task.gate!
   const [comment, setComment] = useState('')
-  const [busy, setBusy] = useState(false)
+  /** 正在提交的是哪个结论：提交中的提示显示在那个按钮上。 */
+  const [busy, setBusy] = useState<'pass' | 'back'>()
   const [error, setError] = useState<string>()
 
   const send = async (pass: boolean) => {
     if (!pass && comment.trim() === '') return setError('打回时要写明意见：哪里不对、要怎么改')
-    setBusy(true)
+    setBusy(pass ? 'pass' : 'back')
     setError(undefined)
     try {
       const r = await decideGate(props.task.id, { gate: g.node, round: g.round, pass, comment })
       if (r.ok) {
         setComment('')
-        props.onDecided(pass)
+        props.onDecided(pass, r.resumeNeeded)
       } else setError(r.error)
     } catch (e) {
       setError(`提交失败：${(e as Error).message}`)
     } finally {
-      setBusy(false)
+      setBusy(undefined)
     }
   }
 
@@ -68,13 +69,20 @@ export function Gate(props: { task: TaskDetail; onDecided: (pass: boolean) => vo
             void send(false)
           }}
         >
-          <textarea value={comment} disabled={busy} rows={3} placeholder="打回时写明意见：哪里不对、要怎么改。通过时可以留空，也可以写备注。" aria-label="验收意见" onChange={e => setComment(e.target.value)} />
+          <textarea
+            value={comment}
+            disabled={busy !== undefined}
+            rows={3}
+            placeholder="打回时写明意见：哪里不对、要怎么改。通过时可以留空，也可以写备注。"
+            aria-label="验收意见"
+            onChange={e => setComment(e.target.value)}
+          />
           <div className="gate-buttons">
-            <button type="button" className="primary" disabled={busy} onClick={() => void send(true)}>
-              {busy ? '提交中…' : '通过'}
+            <button type="button" className="primary" disabled={busy !== undefined} onClick={() => void send(true)}>
+              {busy === 'pass' ? '提交中…' : '通过'}
             </button>
-            <button type="submit" disabled={busy}>
-              打回修改
+            <button type="submit" disabled={busy !== undefined}>
+              {busy === 'back' ? '提交中…' : '打回修改'}
             </button>
           </div>
         </form>

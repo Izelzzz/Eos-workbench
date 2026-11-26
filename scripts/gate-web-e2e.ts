@@ -79,7 +79,7 @@ if (!saved.ok) throw new Error(JSON.stringify(saved))
 const created = await supervisor.create({ repo: REPO, workflow: 'gate-web', request: '在 src/math.js 实现 sum：求一个数字数组的总和。' })
 if (!created.ok) throw new Error(created.error)
 id = created.id
-// 另一个已经完成的任务（无卡点），列表里应能和等验收的任务区分开。
+// 另一个任务（没有卡点，只建不跑，列表里显示运行中），列表里应能和等验收的任务区分开。
 const other = await supervisor.create({ repo: REPO, workflow: 'feature', request: '一个不用验收的任务（示意）' })
 if (!other.ok) throw new Error(other.error)
 // 凭据存储不带主密钥（这里用不到凭据）。
@@ -154,10 +154,20 @@ const narrowTask = await overflow(narrow)
 await narrow.locator('section.gate').screenshot({ path: join(out, '6-gate-390.png') })
 await shot(narrow, '7-task-390.png')
 
+// 另一个标签页开着「只看等验收的」：任务被通过之后（没有等验收的了），还要能切回显示全部。
+const filtered = await open(1280)
+await filtered.goto(`${base}/#/`)
+await filtered.getByRole('button', { name: '只看等验收的' }).click()
 await page.getByRole('button', { name: '通过' }).click()
 await until('通过后任务完成', () => store.get(id)?.status === 'done')
 await page.waitForSelector('text=已完成')
 await shot(page, '8-done.png')
+// 列表每 5 秒刷新一次：等到刷新后没有等验收的任务，再看切换按钮还在不在。
+await filtered.waitForSelector('tr.awaiting', { state: 'detached', timeout: 15_000 })
+const toggleLeft = await filtered.getByRole('button', { name: '显示全部' }).isVisible()
+await filtered.getByRole('button', { name: '显示全部' }).click()
+const allBack = await filtered.locator('table.tasks tbody tr').count()
+await shot(filtered, '9-list-filter-after-accept.png')
 await browser.close()
 await supervisor.idle()
 
@@ -171,14 +181,25 @@ const committed = execFileSync('git', ['show', `${store.meta(id).branch}:src/mat
 const checks = {
   '列表能看出等验收的任务（提示条、行标记），能筛出只看等验收的': /1 个任务在等验收/.test(listBanner) && awaitingRows === 1 && filteredRows === 1,
   '任务页显示卡点：第几次、验收对象和验收人、被验收的产出': /第 1 次验收/.test(gateText) && /验收「build」，验收人：任何能访问平台的人/.test(gateText) && gateText.includes('实现了 sum。'),
-  '任务页的改动里有被验收的文件': changed,
+  任务页的改动里有被验收的文件: changed,
   '不写意见打回：页面提示要写意见': /打回时要写明意见/.test(emptyError),
   '页面上打回后交回开发修改，改完回到卡点（第 2 次），页面显示打回记录和新的产出': /第 2 次验收/.test(round2Text) && round2Text.includes(SEND_BACK) && round2Text.includes('按验收意见'),
-  '页面上通过后任务完成': task.status === 'done',
-  '结论来自网页（actor 是 web），先打回后通过': JSON.stringify(actors) === JSON.stringify([['web', true], ['web', true]]) && JSON.stringify(decisions) === JSON.stringify([[1, 'human', false, SEND_BACK], [2, 'human', true, '']]),
-  '修改提交到了任务分支': committed.includes('@param'),
+  页面上通过后任务完成: task.status === 'done',
+  '结论来自网页（actor 是 web），先打回后通过':
+    JSON.stringify(actors) ===
+      JSON.stringify([
+        ['web', true],
+        ['web', true],
+      ]) &&
+    JSON.stringify(decisions) ===
+      JSON.stringify([
+        [1, 'human', false, SEND_BACK],
+        [2, 'human', true, ''],
+      ]),
+  修改提交到了任务分支: committed.includes('@param'),
   '390 宽度：任务列表没有横向滚动': narrowList.scrollWidth <= narrowList.innerWidth,
   '390 宽度：任务页没有横向滚动': narrowTask.scrollWidth <= narrowTask.innerWidth,
+  '筛选打开时任务被通过（没有等验收的了）：还能切回显示全部': toggleLeft && allBack === 2,
   页面没有报错: errors.length === 0,
 }
 const commit = (() => {

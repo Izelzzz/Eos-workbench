@@ -290,7 +290,8 @@ export const createWebServer = (o: {
 
   /**
    * 人在卡点上通过或打回（actor 记成 web）。结论之后有工作要做（往下走，或交回修改）：没有 runner 在跑就起一个，
-   * 不用再点「继续」；已经有 runner（例如命令行里的 eos run）在等，就由它接着做。
+   * 不用再点「继续」；已经有 runner（例如命令行里的 eos run）在等，就由它接着做。起不来时（刚好被别的进程抢先起了也算）
+   * 结论照样记下了：再看一次有没有 runner，没有才让页面提示点「继续」。
    */
   const decideGate = (id: string, body: Record<string, unknown>): [number, GateResponse] => {
     if (typeof body.gate !== 'string' || typeof body.round !== 'number' || typeof body.pass !== 'boolean' || typeof body.comment !== 'string')
@@ -298,11 +299,9 @@ export const createWebServer = (o: {
     if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
     const step = o.store.dispatch(id, { kind: 'decided', gate: body.gate as NodeId, round: body.round, pass: body.pass, comment: body.comment }, Date.now(), 'web')
     if (!step.accepted) return [409, { ok: false, error: step.reason ?? '结论没有被接受' }]
-    if (!isTerminal(step.task) && !o.supervisor.running(id)) {
-      const started = o.supervisor.start(id)
-      if (!started.ok) return [500, { ok: false, error: `结论已记下，但没能接着运行：${started.error}。点「继续」重试` }]
-    }
-    return [200, { ok: true }]
+    if (isTerminal(step.task) || o.supervisor.running(id)) return [200, { ok: true, resumeNeeded: false }]
+    const started = o.supervisor.start(id)
+    return [200, { ok: true, resumeNeeded: !started.ok && !o.supervisor.running(id) }]
   }
 
   const answer = (id: string, body: Record<string, unknown>): [number, AnswerResponse] => {
