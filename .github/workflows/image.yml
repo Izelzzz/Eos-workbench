@@ -1,7 +1,7 @@
 # 构建 Docker 镜像并发布到 ghcr（路线图第 3 项）。用法见 docs/deploy.md「用发布的镜像」。
 # - 推送 v* 标签：发布 <版本号>（去掉 v）；不是预发布版（版本号里没有 -）时同时发布 latest。
 # - 合并到 main：发布 main 和 sha-<短提交号>。
-# - PR：按同样的步骤算标签（用固定的 v0.0.0-ci）、构建、冒烟、扫描漏洞，不登录、不推送。
+# - PR：按同样的步骤算标签（用固定的 v0.0.0-ci）、构建、冒烟、依赖探针、扫描漏洞，不登录、不推送。
 #   每个 PR 都跑：镜像里有 src/、web/ 的构建，只按路径触发会漏掉弄坏镜像的改动。
 # - 扫描（image-scan.sh）在推送之前：有已有修复版本的 HIGH/CRITICAL 漏洞时不发布，豁免见 .trivyignore.yaml。
 name: image
@@ -41,6 +41,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: node .github/scripts/image-tags.ts "$IMAGE" tag v0.0.0-ci "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
       - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
+      # 依赖探针：.github/scripts/image-probe-checks.json 里列的检查、ADR-006 的三个用户和 /data 属主（image-probe.ts）
+      - name: 依赖探针
+        run: node .github/scripts/image-probe.ts "$(sed -n 's/^first=//p' "$RUNNER_TEMP/tags")"
       - name: 扫描漏洞
         run: bash .github/scripts/image-scan.sh "$RUNNER_TEMP/tags"
 
@@ -65,6 +68,9 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: node .github/scripts/image-tags.ts "$IMAGE" "$REF_TYPE" "$REF_NAME" "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
       - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
+      # 依赖探针：.github/scripts/image-probe-checks.json 里列的检查、ADR-006 的三个用户和 /data 属主（image-probe.ts）
+      - name: 依赖探针
+        run: node .github/scripts/image-probe.ts "$(sed -n 's/^first=//p' "$RUNNER_TEMP/tags")"
       - name: 扫描漏洞
         run: bash .github/scripts/image-scan.sh "$RUNNER_TEMP/tags"
       - name: 登录 ghcr
