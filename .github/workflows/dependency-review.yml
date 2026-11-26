@@ -18,6 +18,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+
+env:
+  # 和 ci.yml、image.yml、Dockerfile 的 Node 版本一致
+  NODE_VERSION: 24.22.3
+
 jobs:
   # 纯文档 PR 跳过下面重的检查（判断见 .github/scripts/docs-only.ts）。脚本从 base（HEAD^1）取，PR 改它改变不了自己的结果。
   # 不是 pull_request、base 上还没有这个脚本、或者这个 job 出错时，docs_only 都不是 true，下面照跑全套。
@@ -37,7 +42,7 @@ jobs:
       - if: github.event_name == 'pull_request'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.3
+          node-version: ${{ env.NODE_VERSION }}
       - id: check
         if: github.event_name == 'pull_request'
         run: |

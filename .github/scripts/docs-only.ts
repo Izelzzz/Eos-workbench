@@ -22,7 +22,8 @@ export function changedPaths(nameStatusZ: string): string[] {
   if (parts.length % 2 !== 0) throw new Error('git diff --name-status -z 的输出格式不对')
   const paths: string[] = []
   for (let i = 0; i < parts.length; i += 2) {
-    if (!/^[ACDMRTUX]\d*$/.test(parts[i]!)) throw new Error(`认不出的改动状态：${parts[i]}`)
+    // R、C 后面跟两个路径，用 --no-renames 时不会出现；出现了就报错，免得后面的字段全部错位
+    if (!/^[ADMTUX]$/.test(parts[i]!)) throw new Error(`认不出的改动状态：${parts[i]}`)
     paths.push(parts[i + 1]!)
   }
   return paths
