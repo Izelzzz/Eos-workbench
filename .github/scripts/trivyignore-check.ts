@@ -28,7 +28,7 @@ function parsePurls(v: string): string[] | undefined {
   if (m === null) return undefined
   const items = m[1]!.split(',').map(x => x.trim())
   // 只认单引号（双引号里有转义，例如 \x23 解码后是 #）；版本只认这几种字符：# 后面是 subpath、? 后面是 qualifier，都会让版本失效
-  if (items.length === 0 || items.some(x => !/^'pkg:[a-z]+\/[A-Za-z0-9._~\/-]+@[A-Za-z0-9.+_~-]+'$/.test(x))) return undefined
+  if (items.length === 0 || items.some(x => !/^'pkg:[a-z]+\/[A-Za-z0-9._~/-]+@[A-Za-z0-9.+_~-]+'$/.test(x))) return undefined
   return items.map(x => x.slice(1, -1))
 }
 
@@ -47,10 +47,15 @@ export function check(text: string, today: string): Checked {
   }
   // YAML 还把单独的 \r、U+0085、U+2028、U+2029 当换行，按 \n 切行就看不到：藏在注释或 statement 里的「换行」能偷偷多出一条豁免。
   // 所以整个文件只允许 \n 换行和可见字符，别的控制字符、这几种换行、BOM 一律拒绝
-  const bad = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\ufeff]/.exec(text)
-  if (bad !== null) {
-    const n = text.slice(0, bad.index).split('\n').length
-    return { entries: [], errors: [`第 ${n} 行有不可见的控制字符（U+${bad[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}）：只允许普通文字和换行（LF）`], warnings: [] }
+  const bad = [...text].findIndex(ch => {
+    const c = ch.codePointAt(0)!
+    return (c < 0x20 && c !== 0x0a) || (c >= 0x7f && c <= 0x9f) || c === 0x2028 || c === 0x2029 || c === 0xfeff
+  })
+  if (bad >= 0) {
+    const chars = [...text]
+    const n = chars.slice(0, bad).join('').split('\n').length
+    const code = chars[bad]!.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')
+    return { entries: [], errors: [`第 ${n} 行有不可见的控制字符（U+${code}）：只允许普通文字和换行（LF）`], warnings: [] }
   }
   text.split('\n').forEach((raw, i) => {
     const n = i + 1
