@@ -13,31 +13,31 @@ export type Row = { item: string; checks: string[] }
 /** 表格里转义的 \| 先换成这个占位，按 | 切完列再换回来 */
 const PIPE = '\u{F8FF}'
 
-/** 「## 执行器环境」下第一张表里每一行的「检查」：反引号里的命令，表格里的 \| 还原成 | */
+/**
+ * 「### 镜像里有什么」（在「## 执行器环境」下）这一小节里那张表每一行的「检查」：反引号里的命令，表格里的 \| 还原成 |。
+ * 这一小节只许有这一张表和普通的说明文字：表外的每一行要么是空行，要么是不带 Markdown 格式的一段话（不以缩进、>、<、-、*、#、
+ * 数字加点、反引号或波浪线代码块开头，也不含 |）。这样就没有别的写法（第二张表、引用块里的表、HTML 表格、代码块）能在页面上
+ * 显示出一些检查、实际却没被执行。
+ */
 export function parseChecks(markdown: string): Row[] {
-  const lines = markdown.split('\n')
-  const start = lines.findIndex(l => l.trim() === '## 执行器环境')
-  if (start < 0) throw new Error('docs/deploy.md 里找不到「## 执行器环境」一节')
-  const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
-  const section = lines.slice(start + 1, end < 0 ? undefined : end).map(l => l.trimEnd())
-  // 这一节里只许有一张表。表从第一条以 | 开头的行起，到第一个空行止（GFM 的表在空行处结束）；
-  // 表里每一行都要以 | 开头、前面不缩进。GFM 里不写 | 或缩进的行照样算表格的一行，但容易被看漏，一律报错
-  const first = section.findIndex(l => /^\s*\|/.test(l))
-  if (first < 0) throw new Error('「执行器环境」一节里找不到表')
-  const table: string[] = []
-  let i = first
-  for (; i < section.length && section[i] !== ''; i++) {
-    if (!section[i]!.startsWith('|')) throw new Error(`「执行器环境」的表里这一行要以 | 开头、前面不缩进：${section[i]}`)
-    table.push(section[i]!)
-  }
-  // 表后面（代码块之外）再出现表格行或分隔行（|---|、--|--），说明有第二张表或表被空行断开了
-  let fenced = false
-  for (const l of section.slice(i)) {
-    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced
-    if (!fenced && (/^\s*\|/.test(l) || /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(l))) {
-      throw new Error(`「执行器环境」一节里表后面还有表格行（表中间不能有空行，这一节只能有一张表）：${l}`)
-    }
-  }
+  const lines = markdown.split('\n').map(l => l.trimEnd())
+  const top = lines.findIndex(l => l === '## 执行器环境')
+  if (top < 0) throw new Error('docs/deploy.md 里找不到「## 执行器环境」一节')
+  const start = lines.findIndex((l, i) => i > top && l === '### 镜像里有什么')
+  const topEnd = lines.findIndex((l, i) => i > top && /^## /.test(l))
+  if (start < 0 || (topEnd >= 0 && start > topEnd)) throw new Error('「## 执行器环境」下找不到「### 镜像里有什么」一小节')
+  const end = lines.findIndex((l, i) => i > start && /^#{1,3} /.test(l))
+  const section = lines.slice(start + 1, end < 0 ? undefined : end)
+  const first = section.findIndex(l => l.startsWith('|'))
+  if (first < 0) throw new Error('「镜像里有什么」一小节里找不到表')
+  let last = first
+  while (last + 1 < section.length && section[last + 1] !== '') last++
+  const table = section.slice(first, last + 1)
+  const bad = table.find(l => !l.startsWith('|'))
+  if (bad !== undefined) throw new Error(`「镜像里有什么」的表里这一行要以 | 开头、前面不缩进：${bad}`)
+  const plain = (l: string) => l === '' || (!/^[\s>#<`~*+-]|^\d+[.)]\s/.test(l) && !l.includes('|'))
+  const other = [...section.slice(0, first), ...section.slice(last + 1)].find(l => !plain(l))
+  if (other !== undefined) throw new Error(`「镜像里有什么」一小节里表外只能是不带格式的说明文字（这一行不行，把它挪到别的小节）：${other}`)
   const cells = (l: string) =>
     l
       .replaceAll('\\|', PIPE)
@@ -46,16 +46,16 @@ export function parseChecks(markdown: string): Row[] {
       .map(c => c.trim().replaceAll(PIPE, '|'))
   const header = cells(table[0]!)
   const col = header.indexOf('检查')
-  if (col < 0) throw new Error(`「执行器环境」的表里没有「检查」一列（表头：${header.join('、')}）`)
+  if (col < 0) throw new Error(`「镜像里有什么」的表里没有「检查」一列（表头：${header.join('、')}）`)
   if (table.length < 3 || !/^\|[-|: ]+\|$/.test(table[1]!)) throw new Error('「执行器环境」的表格式不对：第二行要是 |---|')
   return table.slice(2).map(l => {
     const c = cells(l)
-    if (c.length !== header.length) throw new Error(`「执行器环境」的表里这一行列数不对：${l}`)
+    if (c.length !== header.length) throw new Error(`「镜像里有什么」的表里这一行列数不对：${l}`)
     // 双反引号写法（``a `b` ``）会被切成几段、每段都不完整，直接报错
-    if (c[col]!.includes('``')) throw new Error(`「执行器环境」的表里「${c[0]}」这一行的检查不能用双反引号`)
+    if (c[col]!.includes('``')) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行的检查不能用双反引号`)
     const checks = [...c[col]!.matchAll(/`([^`]+)`/g)].map(m => m[1]!.trim())
-    if (checks.length === 0) throw new Error(`「执行器环境」的表里「${c[0]}」这一行没有写检查命令`)
-    if (checks.some(x => x === '')) throw new Error(`「执行器环境」的表里「${c[0]}」这一行有空的检查命令`)
+    if (checks.length === 0) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行没有写检查命令`)
+    if (checks.some(x => x === '')) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行有空的检查命令`)
     return { item: c[0]!, checks }
   })
 }

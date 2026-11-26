@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { EXPECTED_USERS, parseChecks, parseUsers, usersScript } from '../.github/scripts/image-probe.ts'
 
 const ROOT = join(import.meta.dirname, '..')
-const doc = (table: string) => `# 部署\n\n## 执行器环境\n\n说明\n\n${table}\n\n后文，可以有 \`a\` 这样的反引号\n\n## 下一节\n\n| a | b |\n|---|---|\n| x | y |\n`
+const doc = (table: string) =>
+  `# 部署\n\n## 执行器环境\n\n### 镜像里有什么\n\n说明，可以有 \`a\` 这样的反引号\n\n${table}\n\n后文\n\n### 依赖和别的工具\n\n- 列表、\`\`\`代码块\`\`\`、| 都可以\n\n## 下一节\n\n| a | b |\n|---|---|\n| x | y |\n`
 
-test('docs/deploy.md 的「执行器环境」表：每一行都有检查命令，表里的 \\| 还原成管道', () => {
+test('docs/deploy.md 的「镜像里有什么」表：每一行都有检查命令，表里的 \\| 还原成管道', () => {
   const rows = parseChecks(readFileSync(join(ROOT, 'docs/deploy.md'), 'utf8'))
   assert.deepEqual(
     rows.map(r => r.item),
@@ -18,29 +19,45 @@ test('docs/deploy.md 的「执行器环境」表：每一行都有检查命令�
   assert.ok(rows.flatMap(r => r.checks).includes('bwrap --version'))
 })
 
+const head = '| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `true` |'
+
 test('解析不出来就报错，不静默跳过', () => {
-  const ok = '| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `true` |'
-  assert.deepEqual(parseChecks(doc(ok)), [{ item: '系统', checks: ['true'] }])
+  assert.deepEqual(parseChecks(doc(head)), [{ item: '系统', checks: ['true'] }])
   assert.throws(() => parseChecks('# 没有这一节\n'), /找不到「## 执行器环境」/)
+  assert.throws(() => parseChecks('## 执行器环境\n\n| a |\n\n## 别的\n\n### 镜像里有什么\n'), /找不到「### 镜像里有什么」/)
   assert.throws(() => parseChecks(doc('没有表')), /找不到表/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 |\n|---|---|\n| 系统 | x |')), /没有「检查」一列/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | 没写命令 |')), /没有写检查命令/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | `true` |')), /列数不对/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n| 系统 | x | `true` |')), /格式不对/)
-  // 第一轮独立审查实测：下面这几种行在 GFM 里照样是表格的一行，原来会被悄悄跳过、或者检查被截断
-  const head = '| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | `true` |\n'
-  assert.throws(() => parseChecks(doc(`${head}  | b | x | \`false\` |`)), /以 \| 开头/)
-  assert.throws(() => parseChecks(doc(`${head}b | x | \`false\` |`)), /以 \| 开头/)
-  assert.throws(() => parseChecks(doc(`${head}\n| b | x | \`false\` |`)), /表后面还有表格行/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ` ` |')), /空的检查命令/)
-  // 第二轮复审：表最后一行下面紧跟一个不含 | 的行（GFM 里也是表格的一行）；空行后另起一张不写前导 | 的表
-  assert.throws(() => parseChecks(doc(`${head}\`false\``)), /以 \| 开头/)
-  assert.throws(() => parseChecks(doc(`${head}\na | b | c\n--|--|--\nx | y | \`false\``)), /表后面还有表格行/)
-  // 不该误报的：表前正文里的 |、表后代码块里以 | 开头的行、行尾空格
-  assert.equal(parseChecks(doc(`用 \`a | b\` 这样的管道：\n\n${head}`)).length, 1)
-  assert.equal(parseChecks(doc(`${head}\n\`\`\`\nfoo\n  | grep x\n\`\`\``)).length, 1)
-  assert.equal(parseChecks(doc(`${head.replace('`true` |', '`true` |   ')}`)).length, 1)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ``echo `x` `` |')), /双反引号/)
+})
+
+test('这一小节里只能有这张表和不带格式的说明：在页面上显示成表格、实际不检查的写法一律报错', () => {
+  // 表里：缩进的行、不以 | 开头的行（GFM 里照样是表格的一行）
+  assert.throws(() => parseChecks(doc(`${head}\n  | b | x | \`false\` |`)), /以 \| 开头/)
+  assert.throws(() => parseChecks(doc(`${head}\nb | x | \`false\` |`)), /以 \| 开头/)
+  assert.throws(() => parseChecks(doc(`${head}\n\`false\``)), /以 \| 开头/)
+  // 表外：几轮独立审查举的写法——空行后的第二张表、表前不写前导 | 的表、引用块里的表、HTML 表格、代码块、缩进、列表
+  const outside = [
+    '| b | x | `false` |',
+    'a | b | c\n--|--|--\nx | y | `false`',
+    '> | 内容 | 版本 | 检查 |\n> |---|---|---|\n> | b | y | `false` |',
+    '<table><tr><td>`false`</td></tr></table>',
+    '```\n~~~\n```',
+    '    | grep x',
+    '- 列表',
+    '1. 列表',
+    '#### 小标题',
+  ]
+  for (const extra of outside) {
+    assert.throws(() => parseChecks(doc(`${head}\n\n${extra}`)), /表外只能是不带格式的说明文字/, `表后：${extra}`)
+    assert.throws(() => parseChecks(doc(`${extra}\n\n${head}`)), /表外只能是不带格式的说明文字|以 \| 开头/, `表前：${extra}`)
+  }
+  // 不该误报的：普通说明文字（含反引号）、行尾空格
+  assert.equal(parseChecks(doc(`说明里有 \`code\` 和（括号）。\n\n${head}\n\n又一段说明。`)).length, 1)
+  assert.equal(parseChecks(doc(head.replace('`true` |', '`true` |   '))).length, 1)
 })
 
 test('探针期望的用户和 Dockerfile 的 useradd 对得上（改 Dockerfile 的用户时两边一起改，由审查把关）', () => {

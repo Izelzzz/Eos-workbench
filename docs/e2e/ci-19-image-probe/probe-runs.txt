@@ -1,4 +1,4 @@
-# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（第一轮独立审查之后的版本）
+# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（第三轮独立审查之后的版本：表放在「### 镜像里有什么」小节里）
 
 ## 1. 当前 Dockerfile 构建的镜像（main 8598c67 的 Dockerfile，本地构建）
 $ node .github/scripts/image-probe.ts eos-di:after
