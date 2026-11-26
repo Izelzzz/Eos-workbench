@@ -119,11 +119,13 @@ agent 跑任务时的环境，就是这个镜像：
 | 内容 | 版本 |
 |---|---|
 | 系统 | Ubuntu 24.04 |
-| Node、npm | Node 24（见 `Dockerfile` 第一行） |
+| Node、npm | Node 24（见 `Dockerfile` 第一行）；npm 换成了修过漏洞的版本（`Dockerfile` 里的 `NPM_VERSION`） |
 | pnpm、yarn | 通过 corepack，按仓库 `package.json` 的 `packageManager` 字段取版本。镜像里没有预装，第一次用时联网下载 |
 | Python | 3.12，带 venv 和 pip |
 | 编译 | build-essential（gcc、make）、pkg-config |
 | 其他 | git、ca-certificates、bubblewrap |
+
+平台自己的 `/app` 里没有 typescript（只用来做类型检查的开发依赖，它带的编译器二进制有漏洞），所以在容器里的 `/app` 下跑 `npm run typecheck` 会报 `tsc: not found`；类型检查在 CI 和开发机上做。任务仓库自己的 typescript 照常装进 worktree，不受影响。
 
 agent 以普通用户运行，只能写自己任务的 worktree，所以**跑任务时装不了系统包**（`apt-get` 会失败）。
 
