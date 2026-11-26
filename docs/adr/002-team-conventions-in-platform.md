@@ -28,10 +28,12 @@ flowchart TD
   conv[("conventions 表<br/>工作流、约定文档，只追加、带版本")] -- "创建任务时快照" --> task["任务<br/>记录用到的版本"]
   task --> node["节点：agent 产出"]
   node --> check{"平台检查<br/>交付物、命令"}
-  check -- "通过" --> next["下一个节点"]
-  check -- "不通过，带原因" --> fix["同一个 agent 补齐<br/>或计入对话轮次"]
+  check -- "通过" --> rev["有评审方时请评审方<br/>通过后进入下一个节点"]
+  check -- "不通过，带原因" --> fix["agent 节点：同一个 agent 补齐<br/>对话节点：计入轮次"]
   fix --> check
-  fix -- "次数或轮次用完" --> ask["上游重新确认<br/>再不通过问用户"]
+  fix -- "agent 节点：补齐次数用完" --> ask["问用户"]
+  fix -- "对话节点：轮次打满" --> up["请上游重新确认一次"]
+  up -- "仍不通过" --> ask
 ```
 
 | 方面 | 设计 |

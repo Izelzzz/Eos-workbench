@@ -37,14 +37,16 @@
 flowchart LR
   user["使用者"] --> web["Web 和命令行"]
   web --> runner["runner<br/>执行 effect"]
-  runner -- "事件" --> engine["引擎<br/>纯函数 reducer"]
-  engine -- "新状态和 effect" --> runner
-  runner <--> store[("SQLite<br/>事件和状态快照")]
+  web -- "回答、中止、重试" --> store
+  runner -- "事件" --> store[("存储（SQLite）<br/>事件和状态快照")]
+  store -- "在写事务里调用" --> engine["引擎<br/>纯函数 reducer"]
+  store -- "新状态和待执行的 effect" --> runner
   runner -- "调用 agent" --> iface["Executor 接口"]
-  iface --> dsh["dsh 进程<br/>每个（worktree，模型，能力面）一个"]
+  iface --> dsh["dsh 进程<br/>每个（worktree，模型路由，能力面）一个"]
   dsh --> model["模型 API"]
   dsh -- "读写" --> wt["任务的 worktree"]
-  runner -- "检查、提交、推送" --> wt
+  runner -- "检查、提交" --> wt
+  runner -- "推送分支、开 PR" --> remote["远程仓库"]
 ```
 
 | 部分 | 设计 |

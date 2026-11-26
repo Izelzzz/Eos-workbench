@@ -21,18 +21,20 @@
 
 ### 总览
 
-主密钥和凭据的走向。虚线表示不传递或被挡住：
+主密钥和凭据的走向。虚线表示不传递或被挡住。图里的「不传」说的是平台不主动交出；别的进程能否自己读到，取决于部署方式，见「谁能读到主密钥和模型 key」：
 
 ```mermaid
 flowchart LR
-  env["部署方注入<br/>EOS_MASTER_KEY"] --> plat["平台进程<br/>读出后从 process.env 删除"]
+  env["部署方注入<br/>EOS_MASTER_KEY、DEEPSEEK_API_KEY"] --> plat["平台进程<br/>读出后从 process.env 删除"]
   webui["Web 凭据页"] -- "录入" --> plat
   plat -- "AES-256-GCM 加密" --> db[("eos.db<br/>credentials 表")]
   db -- "解密，只在平台进程内" --> plat
   plat -- "模型 key，经环境变量" --> dsh["dsh 进程"]
-  plat -- "Git 令牌，经环境变量" --> git["平台的 git 进程"]
+  plat -- "Git 令牌，经环境变量" --> git["平台访问远程仓库的 git 进程"]
+  plat -- "令牌，在平台进程内使用" --> gh["GitHub 接口"]
   plat -. "不传" .-> check["检查命令"]
   dsh -. "沙箱挡住" .-> agent["agent"]
+  dsh -- "同一个用户、沙箱外，读得到模型 key" --> mcp["dsh 启动的 MCP 服务"]
   plat -- "遮蔽已知的凭据值" --> out["trace 和日志"]
 ```
 
