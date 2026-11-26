@@ -5,9 +5,11 @@
 //     purls: ['pkg:…@版本']   至少一个，每个都锁到版本（升级后自动不再匹配）
 //     statement: 理由         一行，不为空
 //     expired_at: YYYY-MM-DD  不加引号（Trivy 0.76 解析不了带引号的日期），必须是真实存在的日期
-// 用法：node .github/scripts/trivyignore-check.ts <.trivyignore.yaml> <今天，YYYY-MM-DD>
-// 输出：GitHub 的 ::error / ::warning 行；有错误时退出码 1。
-import { readFileSync } from 'node:fs'
+// 用法：node .github/scripts/trivyignore-check.ts <.trivyignore.yaml> <今天，YYYY-MM-DD> <输出文件>
+// 输出：GitHub 的 ::error / ::warning 行；有错误时退出码 1。校验通过时把解析出的条目重新写成 JSON（也是合法的 YAML）到输出文件，
+// image-scan.sh 交给 Trivy 的是这份文件，不是原文件：Trivy 看到的豁免和这里校验过的完全一样，YAML 解析上的差异（隐形换行、
+// 跨行的引号字符串之类，几轮独立审查各找到过一种）就算漏过了逐行校验，也不会让豁免变宽。
+import { readFileSync, writeFileSync } from 'node:fs'
 
 export type Entry = { id: string; purls: string[]; statement: string; expiredAt: string; line: number }
 export type Checked = { entries: Entry[]; errors: string[]; warnings: string[] }
@@ -111,10 +113,15 @@ export function check(text: string, today: string): Checked {
   return { entries, errors, warnings }
 }
 
+/** 交给 Trivy 的豁免清单：只有校验过的四个字段；日期写成 RFC 3339（Trivy 解析带引号的日期只认这种写法），当天 UTC 0 点起失效 */
+export function normalized(entries: Entry[]) {
+  return { vulnerabilities: entries.map(e => ({ id: e.id, purls: e.purls, statement: e.statement, expired_at: `${e.expiredAt}T00:00:00Z` })) }
+}
+
 if (import.meta.main) {
-  const [file, today] = process.argv.slice(2)
-  if (file === undefined || today === undefined || !isDate(today)) {
-    console.log('::error title=镜像漏洞扫描::用法：trivyignore-check.ts <.trivyignore.yaml> <今天 YYYY-MM-DD>')
+  const [file, today, out] = process.argv.slice(2)
+  if (file === undefined || today === undefined || !isDate(today) || out === undefined) {
+    console.log('::error title=镜像漏洞扫描::用法：trivyignore-check.ts <.trivyignore.yaml> <今天 YYYY-MM-DD> <输出文件>')
     process.exit(1)
   }
   const r = check(readFileSync(file, 'utf8'), today)
@@ -122,5 +129,6 @@ if (import.meta.main) {
   for (const w of r.warnings) console.log(`::warning title=镜像漏洞扫描::.trivyignore.yaml：${esc(w)}`)
   for (const e of r.errors) console.log(`::error title=镜像漏洞扫描::.trivyignore.yaml：${esc(e)}`)
   if (r.errors.length > 0) process.exit(1)
+  writeFileSync(out, `${JSON.stringify(normalized(r.entries), null, 2)}\n`)
   console.log(`.trivyignore.yaml 校验通过：${r.entries.length} 条豁免`)
 }

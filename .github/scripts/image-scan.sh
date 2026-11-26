@@ -13,7 +13,8 @@ root=$(git rev-parse --show-toplevel)
 work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/image-scan.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 # 扫描前先校验豁免清单（写法、每条四项写全、快到期和已过期的提示），见 trivyignore-check.ts
-node "$root/.github/scripts/trivyignore-check.ts" "$root/.trivyignore.yaml" "$(date -u +%F)"
+# 交给 Trivy 的是校验脚本按解析结果重新写出的那份（$work/trivyignore.yaml），不是原文件
+node "$root/.github/scripts/trivyignore-check.ts" "$root/.trivyignore.yaml" "$(date -u +%F)" "$work/trivyignore.yaml"
 docker save "$first" -o "$work/image.tar"
 mkdir -p "$work/cache"
 status=0
@@ -21,7 +22,7 @@ status=0
 # 漏洞库里新出的、已有修复版本的漏洞会让不相干的 PR 和发布变红，这是有意的（用户的决定），处理方法见下面的报错
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$work/image.tar:/scan/image.tar:ro" \
-  -v "$root/.trivyignore.yaml:/scan/.trivyignore.yaml:ro" \
+  -v "$work/trivyignore.yaml:/scan/.trivyignore.yaml:ro" \
   -v "$work/cache:/cache" \
   "$TRIVY" image --input /scan/image.tar --cache-dir /cache \
   --scanners vuln --pkg-types os,library --severity HIGH,CRITICAL --ignore-unfixed \

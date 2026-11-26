@@ -1,6 +1,6 @@
-# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（逐行严格校验；四轮独立审查后的版本）。
+# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（逐行严格校验），校验通过后把解析结果重写成 JSON 交给 Trivy（四轮独立审查后的版本）。
 # 被扫描的是 #87 之后的平台镜像（本地构建）。校验通过才会真的跑 Trivy；不通过时在那之前就报错退出。每段先列出豁免清单的关键行（不可见字符用 cat -v 显示：^M 是 CR，M-BM-^E 是 NEL）
-# 7–12 用的是独立审查实测能让 Trivy 放宽豁免的文件
+# 1、2 段的 ignored 行是 Trivy 按重写后的文件豁免的条目；7–12 用的是独立审查实测能让 Trivy 放宽豁免的文件
 
 ## 1-仓库里的原样（会跑完 Trivy）
 #   4:vulnerabilities:
@@ -23,6 +23,7 @@
 .trivyignore.yaml 校验通过：4 条豁免
 Total: 0 (HIGH: 0, CRITICAL: 0)
 Suppressed Vulnerabilities (Total: 4)
+│ undici  │ CVE-2026-87018  │ HIGH     │ ignored │ 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上 │ /scan/.trivyignore.yaml │
 镜像漏洞扫描通过（豁免的条目见上面 Suppressed 一节）
 exit=0
 
@@ -50,9 +51,12 @@ exit=0
 ::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-87018（第 18 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
 .trivyignore.yaml 校验通过：4 条豁免
 Total: 0 (HIGH: 0, CRITICAL: 0)
+Suppressed Vulnerabilities (Total: 4)
+│ undici  │ CVE-2026-109829 │ HIGH     │ ignored │ 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上 │ /scan/.trivyignore.yaml │
+镜像漏洞扫描通过（豁免的条目见上面 Suppressed 一节）
 exit=0
 
-## 3-日期带引号（Trivy 解析不了）
+## 3-日期带引号
 #   4:vulnerabilities:
 #   6:  - id: CVE-2026-109383
 #   7:    purls: ['pkg:npm/undici@8.11.2']
@@ -191,3 +195,17 @@ exit=1
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-1 缺少 statement
 exit=1
 
+## 13-已经过期（重写后的文件里日期是 2026-11-01T00:00:00Z，Trivy 不再豁免，扫描拦下）
+#   2:# 理由（statement）和到期日（expired_at，过期后不再豁免，扫描会重新拦下，到时重新评估）。
+#   9:    expired_at: 2026-11-01
+#   13:    expired_at: 2026-11-01
+#   17:    expired_at: 2026-11-01
+#   21:    expired_at: 2026-11-01
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109383（第 6 行）2026-11-01 已经过期，不再生效：扫描会按没有豁免处理
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109829（第 10 行）2026-11-01 已经过期，不再生效：扫描会按没有豁免处理
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109869（第 14 行）2026-11-01 已经过期，不再生效：扫描会按没有豁免处理
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-87018（第 18 行）2026-11-01 已经过期，不再生效：扫描会按没有豁免处理
+.trivyignore.yaml 校验通过：4 条豁免
+Total: 4 (HIGH: 4, CRITICAL: 0)
+::error title=镜像漏洞扫描::扫描没有通过（退出码 1）。上面有漏洞表时：镜像里有已有修复版本的 HIGH/CRITICAL 漏洞，升级对应的包或基础镜像；确实暂时不能升级时，在 .trivyignore.yaml 里逐条加豁免（写理由和到期日，由人批准）。上面没有漏洞表时：是扫描本身失败了，看上面 Trivy 或 docker 的报错（拉镜像、下载漏洞库出错时重跑即可）
+exit=1

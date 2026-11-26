@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { check, isDate } from '../.github/scripts/trivyignore-check.ts'
+import { check, isDate, normalized } from '../.github/scripts/trivyignore-check.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const TODAY = '2026-11-26'
@@ -97,4 +97,15 @@ test('vulnerabilities 之前或之外的内容报错；没有这一节报错', (
   assert.notDeepEqual(check('misconfigurations:\n  - id: AVD-1\n', TODAY).errors, [])
   assert.notDeepEqual(check('# 只有注释\n', TODAY).errors, [])
   assert.notDeepEqual(check(doc(entry()) + 'vulnerabilities:\n', TODAY).errors, [])
+})
+
+test('交给 Trivy 的是按解析结果重写的 JSON：只有四个字段，日期是 RFC 3339', () => {
+  const r = check(readFileSync(join(ROOT, '.trivyignore.yaml'), 'utf8'), TODAY)
+  const n = normalized(r.entries)
+  assert.equal(n.vulnerabilities.length, 4)
+  for (const v of n.vulnerabilities) {
+    assert.deepEqual(Object.keys(v), ['id', 'purls', 'statement', 'expired_at'])
+    assert.equal(v.expired_at, '2026-12-25T00:00:00Z')
+    assert.deepEqual(v.purls, ['pkg:npm/undici@8.11.2'])
+  }
 })
