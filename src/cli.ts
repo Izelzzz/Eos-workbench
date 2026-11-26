@@ -16,6 +16,7 @@ import { Credentials } from './credentials/store.ts'
 import { AGENT_USER_ENV, readSessionLogAs, resolveCheckUser } from './runner/check-user.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
+import { holder } from './runner/lock.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
@@ -29,6 +30,9 @@ const HELP = `用法：
   eos resume <任务>                                       续跑（进程中断后）
   eos retry <任务>                                        重试失败的任务
   eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
+  eos gates                                               列出停在卡点上、等人验收的任务
+  eos accept <任务> ["<备注>"]                             验收通过
+  eos send-back <任务> "<意见>"                            验收打回：交回被验收的节点按意见修改，改完回到卡点
   eos status [任务]                                       列出任务，或查看一个任务
   eos log <任务>                                          完整对话记录与耗时、token 统计
   eos abort <任务>                                        中止任务
@@ -44,7 +48,7 @@ const HELP = `用法：
 web：--host 是监听地址（容器里用 0.0.0.0）；通过别的地址访问时（端口映射、反向代理）设 EOS_PUBLIC_URL，例如 https://eos.example.com。没有登录，不要直接暴露到公网。
 run、resume、retry、improve、web 启动前会做同样的环境检查：有 ✗ 不启动，只有 ⚠ 时提示后照常启动。`
 
-const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_user: '等待回答', done: '已完成', failed: '失败', aborted: '已中止' }
+const STATUS: Record<Task['status'], string> = { running: '运行中', waiting_user: '等待回答', waiting_accept: '等待验收', done: '已完成', failed: '失败', aborted: '已中止' }
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -145,11 +149,29 @@ const summary = (t: Task) => {
   say(`\n任务 ${t.id}：${STATUS[t.status]} · ${describePosition(t)}`)
   if (t.failure !== undefined) say(`失败原因\n${t.failure}${t.failure.includes('eos -- retry') ? '' : `\n重试：npm run eos -- retry ${t.id}`}\n日志：${taskLogPath(dataDir, t.id)}`)
   showQuestion(t)
+  if (t.status === 'waiting_accept' && t.gate !== undefined) {
+    const g = t.workflow.nodes.find(n => n.id === t.gate!.node)
+    const target = g?.kind === 'gate' ? g.with : undefined
+    const meta = store.meta(t.id)
+    say(`\n待验收：「${target}」的产出\n${target === undefined ? '' : (t.outputs[target] ?? '（没有产出）')}\n\n改动（分支 ${meta.branch}，worktree ${meta.worktree}）\n${diffStat(meta)}`)
+    say(`通过：npm run eos -- accept ${t.id} ["<备注>"]\n打回：npm run eos -- send-back ${t.id} "<意见>"`)
+  }
   if (t.status === 'done') {
     const meta = store.meta(t.id)
     say(`\n分支 ${meta.branch}，worktree ${meta.worktree}\n${diffStat(meta)}`)
   }
   say(`\n${formatReport(report(t))}`)
+}
+
+/** 人在卡点上给出结论：验收的是任务现在等着的那一次。 */
+const decide = (pass: boolean) => {
+  const t = taskOf(positionals[1])
+  const comment = positionals.slice(2).join(' ')
+  if (t.status !== 'waiting_accept' || t.gate === undefined) fail(`任务 ${t.id} 没有在等验收（${STATUS[t.status]} · ${describePosition(t)}）`)
+  const step = store.dispatch(t.id, { kind: 'decided', gate: t.gate!.node, round: t.gate!.round, pass, comment }, Date.now(), 'cli')
+  if (!step.accepted) fail(step.reason!)
+  const alive = holder(join(dataDir, 'locks'), t.id) !== undefined
+  say(`「${t.gate!.node}」第 ${t.gate!.round} 次验收：${pass ? '通过' : '打回'}。${alive ? '运行中的 runner 会接着做。' : `runner 没有在运行，用 npm run eos -- resume ${t.id} 继续。`}`)
 }
 
 const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
@@ -229,6 +251,21 @@ const commands: Record<string, () => Promise<void> | void> = {
     if (!step.accepted) fail(step.reason!)
     say(`已回答 ${t.question!.id}。${t.question!.source === 'loop' ? `如果 runner 已经退出，用 npm run eos -- resume ${t.id} 继续。` : '运行中的 agent 会接着做。'}`)
   },
+  gates() {
+    const waiting = store.list().filter(s => s.status === 'waiting_accept')
+    if (waiting.length === 0) return say('没有等验收的任务')
+    for (const s of waiting) {
+      const t = store.get(s.id)!
+      say(`${t.id}  ${describePosition(t)}  ${t.request.split('\n')[0]!.slice(0, 50)}`)
+    }
+    say(`\n查看产出和改动：npm run eos -- status <任务>；通过：npm run eos -- accept <任务>；打回：npm run eos -- send-back <任务> "<意见>"`)
+  },
+  accept() {
+    decide(true)
+  },
+  'send-back'() {
+    decide(false)
+  },
   status() {
     if (positionals[1] !== undefined) return summary(taskOf(positionals[1]))
     const tasks = store.list()
@@ -248,6 +285,7 @@ const commands: Record<string, () => Promise<void> | void> = {
         say(
           `\n── ${time} [${e.node}${e.round === undefined ? '' : ` 第 ${e.round} 轮`}] 检查 · ${(e.ms / 1000).toFixed(1)}s\n${e.results.map(r => `${r.passed ? '✓' : '✗'} ${describeCheck(r.check)}${r.passed || r.detail === '' ? '' : `\n${r.detail}`}`).join('\n')}`,
         )
+      else if (e.type === 'decision') say(`\n── ${time} [${e.node} 第 ${e.round} 次验收] ${e.by === 'human' ? '人' : e.by}：${e.pass ? '通过' : '打回'}${e.comment === '' ? '' : `\n${e.comment}`}`)
       else say(`\n── ${time} ${e.node === undefined ? '' : `[${e.node}] `}${e.text}`)
     }
     say(`\n${formatReport(report(t))}`)

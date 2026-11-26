@@ -10,9 +10,10 @@ export type Usage = { input: number; output: number; cacheRead: number; cacheWri
 /**
  * 调用的用途：
  * produce 一个 agent 节点完成工作；fix 交付物检查没通过，同一个 agent 补齐；critique 评审给结论；respond 被评审方回应意见；
- * reconfirm 上游重新确认做法与需求；reapply 被评审方按修订方案调整；instruct 被评审方按用户指示调整。
+ * reconfirm 上游重新确认做法与需求；reapply 被评审方按修订方案调整；instruct 被评审方按用户指示调整；
+ * accept 卡点上由 agent 验收；amend 被验收方按打回意见（或重跑检查的失败、用户的指示）修改。
  */
-export type Purpose = 'produce' | 'fix' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct'
+export type Purpose = 'produce' | 'fix' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct' | 'accept' | 'amend'
 
 export type Call = {
   id: CallId
@@ -65,6 +66,27 @@ export type DialogState = {
   review: ReviewKind
 }
 
+/**
+ * 卡点进行到哪一步：decide 等验收人的结论（人验收时任务是 waiting_accept，agent 验收时挂着一次 accept 调用）；
+ * amend 被验收方在改；check 改完重跑程序检查；ask 自动处理用完了，等用户指示。
+ */
+export type GatePhase = 'decide' | 'amend' | 'check' | 'ask'
+
+export type GateState = {
+  node: NodeId
+  /** 第几次验收，从 1 开始，只增不减：人的结论按它核对是不是过期的，日志里的结论也按它区分。 */
+  round: number
+  /** 这一段自动处理里第几次验收，用户给出指示后从 1 重新计；agent 验收时不超过它的 maxRounds。 */
+  cycle: number
+  phase: GatePhase
+  /** 这一次打回之后，重跑检查不通过、自动交回修改的次数。 */
+  fixes: number
+  /** agent 验收的回复无法解析时已重新要求的次数。 */
+  formatRetries: number
+  /** 最近一次打回的意见或重跑检查的失败原因，问用户时引用。 */
+  lastComment?: string
+}
+
 export type QuestionSource = 'agent' | 'loop'
 
 export type Question = {
@@ -78,7 +100,8 @@ export type Question = {
   options?: string[]
 }
 
-export type TaskStatus = 'running' | 'waiting_user' | 'done' | 'failed' | 'aborted'
+/** waiting_user：等用户回答问题；waiting_accept：停在卡点上等人验收。 */
+export type TaskStatus = 'running' | 'waiting_user' | 'waiting_accept' | 'done' | 'failed' | 'aborted'
 
 export type Entry =
   | {
@@ -101,6 +124,8 @@ export type Entry =
   | { type: 'question'; at: number; question: Question }
   | { type: 'answer'; at: number; questionId: string; text: string }
   | { type: 'note'; at: number; node?: NodeId; text: string }
+  /** 卡点上的一次验收结论。by：human 是人，否则是验收的角色。打回时 comment 是意见，通过时可以为空。 */
+  | { type: 'decision'; at: number; node: NodeId; round: number; by: 'human' | RoleId; pass: boolean; comment: string }
 
 export type Task = {
   id: string
@@ -122,6 +147,8 @@ export type Task = {
    */
   scopeNotices: Partial<Record<string, string[]>>
   dialog?: DialogState
+  /** 停在卡点上时的进度；和 dialog 不会同时存在。 */
+  gate?: GateState
   /** 当前 agent 节点因检查没通过已自动补齐的次数，进入新节点时清零。 */
   fixes: number
   pending?: Work
@@ -139,6 +166,8 @@ export type Event =
   | { kind: 'call_failed'; call: CallId; error: string }
   | { kind: 'asked'; call: CallId; question: { id: string; text: string; options?: string[] } }
   | { kind: 'answered'; questionId: string; text: string }
+  /** 人在卡点上给出结论。gate、round 指明验收的是哪一次，过期的结论（已经有人决定过）被拒绝；打回时 comment 不能为空。 */
+  | { kind: 'decided'; gate: NodeId; round: number; pass: boolean; comment: string }
   | { kind: 'retry' }
   | { kind: 'abort' }
 

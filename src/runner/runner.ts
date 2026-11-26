@@ -6,6 +6,7 @@ import type { Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf } from '../workflow/types.ts'
 import { explain } from '../engine/failure.ts'
+import { describePosition } from '../engine/machine.ts'
 
 export type RunnerOptions = {
   store: Store
@@ -44,7 +45,10 @@ export const nonceOf = (taskId: string, call: Call) => `${taskId}/${call.id}`
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-const label = (task: Task, call: Call) => `[${call.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] ${call.role} · ${call.purpose}`
+/** 第几轮评审，或第几次验收。 */
+const roundOf = (task: Task): string => (task.gate !== undefined ? ` 第 ${task.gate.round} 次` : task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`)
+
+const label = (task: Task, call: Call) => `[${call.node}${roundOf(task)}] ${call.role} · ${call.purpose}`
 
 export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const now = o.now ?? Date.now
@@ -161,7 +165,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
    * （推送同一个分支：已经推上去时什么都不变；开 PR：已经有就复用）。
    */
   const check = async (task: Task, run: CheckRun): Promise<void> => {
-    const where = `[${run.node}${task.dialog === undefined ? '' : ` 第 ${task.dialog.round} 轮`}] 检查`
+    const where = `[${run.node}${roundOf(task)}] 检查`
     if (o.checker === undefined) {
       fail(where, run.id, '没有配置检查执行器')
       return
@@ -186,6 +190,8 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     dispatch({ kind: 'checked', call: run.id, results, ms: now() - started })
   }
 
+  /** 这一次等验收已经打过提示了：同一次（卡点、第几次、已有几条记录）只打一行。 */
+  let announced: string | undefined
   for (;;) {
     const task = o.store.get(id)
     if (task === undefined) throw new Error(`没有任务 ${id}`)
@@ -195,7 +201,14 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
       else await execute(task, task.pending)
       continue
     }
-    // 只剩一种情况：对话尽头在等用户指示。
+    // 只剩两种情况：对话尽头在等用户指示，或停在卡点上等人验收。两种都不挂工作，状态在存储里，进程重启后原样读回。
+    if (task.status === 'waiting_accept' && task.gate !== undefined) {
+      const at = `${task.gate.node}#${task.gate.round}#${task.log.length}`
+      if (announced !== at) {
+        announced = at
+        log(`⏸ 等待验收（${task.gate.node} 第 ${task.gate.round} 次）：${describePosition(task)}\n  通过：eos accept ${id} ["<备注>"]；打回：eos send-back ${id} "<意见>"`)
+      }
+    }
     if (!o.wait) return task
     await sleep(pollMs)
   }

@@ -32,7 +32,7 @@ test('stages are summed across tasks of the same workflow and sorted by total ti
   const c = run('c', wf(2), { plan: 1000, build: 4000, review: 500 })
   const o = run('o', wf(1, 'other'), { plan: 9000, build: 100, review: 100 })
   const r = insights([a, b, c, o])
-  assert.deepEqual(r.tasks, { total: 4, running: 0, waiting_user: 0, done: 4, failed: 0, aborted: 0 })
+  assert.deepEqual(r.tasks, { total: 4, running: 0, waiting_user: 0, waiting_accept: 0, done: 4, failed: 0, aborted: 0 })
   assert.deepEqual(
     r.byStage.map(s => [s.workflow, s.node, s.wallMs]),
     [
@@ -99,7 +99,7 @@ test('a failed task nobody has retried is counted up to its failure, not up to n
 })
 
 test('no tasks: empty tables and no bottleneck; a task still running is counted at now', () => {
-  assert.deepEqual(insights([]), { tasks: { total: 0, running: 0, waiting_user: 0, done: 0, failed: 0, aborted: 0 }, byWorkflow: [], byStage: [], byTemplate: [], bottlenecks: [] })
+  assert.deepEqual(insights([]), { tasks: { total: 0, running: 0, waiting_user: 0, waiting_accept: 0, done: 0, failed: 0, aborted: 0 }, byWorkflow: [], byStage: [], byTemplate: [], bottlenecks: [] })
   const c = new Clock('none', wf(1), 'live')
   c.reply(1000, 1000, '方案')
   const r = insights([{ task: c.task, metrics: taskMetrics(c.task, 4000, 0) }])

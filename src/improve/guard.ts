@@ -2,7 +2,7 @@
 // 这些决定"agent 能做什么、平台替它执行什么"，只能由人在团队约定页手动改（ADR-004）。纯函数。
 import { parseTemplate } from '../workflow/agent.ts'
 import { parseWorkflow } from '../workflow/parse.ts'
-import type { AgentConfig, TemplateLookup, Workflow } from '../workflow/types.ts'
+import { roleOfNode, type AgentConfig, type TemplateLookup, type Workflow } from '../workflow/types.ts'
 import type { TargetKind } from '../engine/evidence.ts'
 
 /** 权限相关的字段，键是 YAML 里的写法。 */
@@ -21,8 +21,9 @@ const permissionOf = (a: AgentConfig) => JSON.stringify(permissionFields(a))
  */
 const commandsOf = (w: Workflow): string[] =>
   w.nodes
+    // 卡点的检查是从前面节点的检查算出来的（打回修改后重跑），不另算一份。
     .flatMap((n, i) =>
-      n.checks.flatMap(c => {
+      (n.kind === 'gate' ? [] : n.checks).flatMap(c => {
         if (c.kind === 'run') return [`${n.id}：${JSON.stringify(c.run)}（${c.timeoutSec} 秒）`]
         if (c.kind !== 'platform') return []
         const reviews = w.nodes
@@ -38,7 +39,24 @@ const commandsOf = (w: Workflow): string[] =>
 const UNPARSABLE = '当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'
 
 /** 节点用到的角色：agent 节点的 role，对话节点的评审方（可以没有）。 */
-const rolesAt = (w: Workflow): Map<string, string | undefined> => new Map(w.nodes.map(n => [n.id, n.role]))
+const rolesAt = (w: Workflow): Map<string, string | undefined> => new Map(w.nodes.map(n => [n.id, roleOfNode(n)]))
+
+/** 卡点：验收什么、由谁验收。改进提案可以加卡点（加严），不能删掉或改掉已有的（放宽要人批）。 */
+const gatesOf = (w: Workflow): Map<string, string> => new Map(w.nodes.flatMap(n => (n.kind === 'gate' ? [[n.id, JSON.stringify({ with: n.with, by: n.by })] as const] : [])))
+
+/**
+ * 卡点之后、到它后面最后一个交付节点（平台动作）为止的节点：人验收通过之后，这些节点还能让 agent 改代码，
+ * 改动会不经验收就推送出去。按节点的全部字段比较（工作说明和输入除外），人验收的卡点除外（只会让推送前多一道人工验收）。
+ * 提案不能往这里加节点、也不能改这里已有节点的做法（例如换 with、换成 agent 验收的卡点）；可以删，也可以加人验收的卡点。
+ */
+const afterGate = (w: Workflow, gate: string): string[] => {
+  const rest = w.nodes.slice(w.nodes.findIndex(n => n.id === gate) + 1)
+  const last = rest.findLastIndex(n => n.checks.some(c => c.kind === 'platform'))
+  return rest
+    .slice(0, last + 1)
+    .filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))
+    .map(({ task: _task, inputs: _inputs, ...n }) => JSON.stringify(n))
+}
 
 /**
  * 新内容相对旧内容改了哪些权限相关的东西（中文说明）；没有就是空数组。失败就关：旧内容解析不了时直接拒绝。
@@ -78,6 +96,18 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
       } else if (role !== undefined && !existing.has(perm(b.workflow, role))) out.push(`新增的节点「${node}」只能用已有权限的角色`)
     }
     if (JSON.stringify(commandsOf(a.workflow)) !== JSON.stringify(commandsOf(b.workflow))) out.push('不能改检查命令和平台动作')
+    const newGates = gatesOf(b.workflow)
+    for (const [id, g] of gatesOf(a.workflow)) {
+      if (newGates.get(id) !== g) {
+        out.push(`不能删掉卡点「${id}」，也不能改它验收的节点和验收人`)
+        continue
+      }
+      const before = new Set(afterGate(a.workflow, id))
+      const added = afterGate(b.workflow, id)
+        .filter(n => !before.has(n))
+        .map(n => (JSON.parse(n) as { id: string }).id)
+      if (added.length > 0) out.push(`不能在卡点「${id}」和交付之间加节点或改节点（${added.join('、')}）：验收通过之后的改动会不经验收就推送`)
+    }
     return out
   }
   return []

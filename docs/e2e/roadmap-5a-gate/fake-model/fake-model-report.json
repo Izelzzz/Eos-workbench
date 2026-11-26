@@ -1,0 +1,105 @@
+{
+  "commit": "bb07bd94502d7651b9764c878e78dded6afe6269",
+  "uncommitted": [],
+  "task": "t261126155819u49",
+  "killed": true,
+  "killedAtGate": true,
+  "gateLog": [
+    "accept#1 SIGKILL",
+    "accept#1 send-back",
+    "accept#2 accept"
+  ],
+  "atGate": {
+    "status": "waiting_accept",
+    "gate": {
+      "node": "accept",
+      "round": 1,
+      "cycle": 1,
+      "phase": "decide",
+      "fixes": 0,
+      "formatRetries": 0
+    },
+    "calls": 8
+  },
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个 dsh 会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true,
+    "agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位": true,
+    "停在人验收的卡点上：状态是等待验收，不挂任何工作": true,
+    "卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）": true,
+    "命令行列出等验收的任务": true,
+    "人打回一次（带意见）、改完回到卡点后通过": true,
+    "打回后交回开发原来的会话修改": true,
+    "卡点打回之后没有再请评审 agent": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-2d4ff02df7bd337410ed6553bad85b07",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "session-6a2682748c4d33a87432aa22578d5fec",
+      "calls": [
+        "c2",
+        "c4",
+        "c7",
+        "c9"
+      ],
+      "presets": [
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "session-8b705902cc6daf66a1f7020aea9be976",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    },
+    "sign-off": {
+      "sid": "session-4b3a80b7777eabb1d311b718ad9114b5",
+      "calls": [
+        "c6",
+        "c8"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 1137ms",
+    "c2 produce@build 434ms",
+    "c3 critique@review#1 477ms",
+    "c4 respond@review#1 493ms",
+    "c5 critique@review#2 143ms",
+    "c6 accept@sign-off#1 373ms",
+    "c7 amend@sign-off#2 507ms",
+    "c8 accept@sign-off#2 192ms",
+    "c9 amend@accept#2 470ms"
+  ],
+  "commits": "dbd0138 eos: review respond (c4)\nbe85214 eos: build produce (c2)\n",
+  "npmTest": "est\n> node --test\n\nTAP version 13\n# Subtest: 求和\nok 1 - 求和\n  ---\n  duration_ms: 0.825159\n  type: 'test'\n  ...\n# Subtest: 空数组返回 0\nok 2 - 空数组返回 0\n  ---\n  duration_ms: 0.122438\n  type: 'test'\n  ...\n# Subtest: 有非数字时抛 TypeError\nok 3 - 有非数字时抛 TypeError\n  ---\n  duration_ms: 0.384758\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 66.595081\n"
+}

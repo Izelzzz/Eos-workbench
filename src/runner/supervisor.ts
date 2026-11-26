@@ -447,7 +447,7 @@ export class Supervisor {
   resumeAll(): string[] {
     return this.o.store
       .list()
-      .filter(t => (t.status === 'running' || t.status === 'waiting_user') && !this.running(t.id))
+      .filter(t => (t.status === 'running' || t.status === 'waiting_user' || t.status === 'waiting_accept') && !this.running(t.id))
       .flatMap(t => (this.start(t.id).ok ? [t.id] : []))
   }
 

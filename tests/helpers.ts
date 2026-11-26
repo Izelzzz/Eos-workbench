@@ -9,7 +9,17 @@ import type { Workflow } from '../src/workflow/types.ts'
  * checks：none 没有检查；review 开发节点有交付物（最多补齐 maxFixes 次），评审对话每轮先跑测试；
  * only 开发节点有交付物，对话只有测试、没有评审方。
  */
-export const workflow = (opts: { maxRounds: number; escalate: boolean; checks?: 'none' | 'review' | 'only'; maxFixes?: number; ship?: number }): Workflow => {
+/** gate：评审之后、交付之前加一个卡点，验收 build；human 由人验收，agent 由 rev 角色验收（最多打回 gateRounds 次）。 */
+export const workflow = (opts: {
+  maxRounds: number
+  escalate: boolean
+  checks?: 'none' | 'review' | 'only'
+  maxFixes?: number
+  ship?: number
+  gate?: 'human' | 'agent'
+  gateRounds?: number
+  gateFixes?: number
+}): Workflow => {
   const checks = opts.checks ?? 'none'
   const build = checks === 'none' ? '' : `, maxFixes: ${opts.maxFixes ?? 1}, deliverables: [{ path: NOTES.md, sections: [改动] }]`
   const review = checks === 'none' ? ', role: rev' : checks === 'review' ? ', role: rev, checks: [{ run: [npm, test] }]' : ', checks: [{ run: [npm, test] }]'
@@ -23,7 +33,7 @@ nodes:
   - { id: plan, kind: agent, role: planner, task: 写方案 }
   - { id: build, kind: agent, role: dev, task: 实现, inputs: [plan]${build} }
   - { id: review, kind: dialog${review}, with: build, maxRounds: ${opts.maxRounds}, task: 评审, inputs: [plan]${opts.escalate ? ', escalate: plan' : ''} }
-${opts.ship === undefined ? '' : `  - { id: ship, kind: dialog, with: build, maxRounds: ${opts.ship}, task: 交付, checks: [{ run: [npm, test] }, { platform: push }] }\n`}`)
+${opts.gate === undefined ? '' : `  - { id: accept, kind: gate, with: build, task: 验收, inputs: [plan], maxFixes: ${opts.gateFixes ?? 1}, ${opts.gate === 'human' ? 'by: human' : `by: agent, role: rev, maxRounds: ${opts.gateRounds ?? 2}`} }\n`}${opts.ship === undefined ? '' : `  - { id: ship, kind: dialog, with: build, maxRounds: ${opts.ship}, task: 交付, checks: [{ run: [npm, test] }, { platform: push }] }\n`}`)
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   return r.workflow
 }

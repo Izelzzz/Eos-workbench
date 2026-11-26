@@ -396,7 +396,7 @@ test('team conventions: list, validate without saving, save new versions, read h
     const v = await invalid.json()
     assert.equal(v.ok, false)
     assert.equal(v.errors[0].path, 'nodes[0].kind')
-    assert.match(v.errors[0].message, /agent 或 dialog/)
+    assert.match(v.errors[0].message, /agent、dialog 或 gate/)
     assert.equal((await fetch(`${s.base}/api/conventions/workflow/team`)).status, 404, 'validateOnly saved nothing')
     assert.deepEqual(await (await postTo(s.base, '/api/conventions/workflow/team', { content: wf, validateOnly: true })).json(), { ok: true })
     assert.equal((await postTo(s.base, '/api/conventions/workflow/team', { content: wf })).status, 201)

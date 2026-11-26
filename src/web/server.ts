@@ -289,7 +289,7 @@ export const createWebServer = (o: {
     if (action === 'retry') {
       const step = o.store.dispatch(id, { kind: 'retry' }, Date.now(), 'web')
       if (!step.accepted) return [409, { ok: false, error: step.reason ?? '无法重试' }]
-    } else if (task.status !== 'running' && task.status !== 'waiting_user') {
+    } else if (task.status !== 'running' && task.status !== 'waiting_user' && task.status !== 'waiting_accept') {
       return [409, { ok: false, error: '只有进行中的任务可以继续' }]
     }
     const started = o.supervisor.start(id)
