@@ -19,9 +19,9 @@ Docker 的 `.dockerignore` 模式只从构建上下文的根目录开始匹配�
 |---|---|---|
 | `/app/.github/lint/node_modules` | 存在，typescript 6.0.3 | 不存在 |
 | `/app` 下 `node_modules` 目录（不含 `/app/node_modules`） | 有 | 没有 |
-| `/app` 下的文件数（不含 `/app/node_modules`） | 2957 | 242 |
+| `/app` 下的普通文件数（`find /app -path /app/node_modules -prune -o -type f -print \| wc -l`） | 2951 | 242 |
 | 冒烟 `docker run --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --security-opt no-new-privileges:true <镜像> eos --help` | — | 退出码 0，见 `smoke-eos-help.txt` |
 
-- `app-files-diff.txt`：两个镜像 `/app` 文件清单的差别（不含 `/app/node_modules`）。只有 lint 的 node_modules（2693 个文件）和 `poc/claude-code/logs/**/*.log`（22 个）被去掉，没有新增的文件。2957 − 2693 − 22 = 242
+- `app-files-diff.txt`：两个镜像 `/app` 文件清单的差别（不含 `/app/node_modules`）。只有 lint 的 node_modules（2687 个普通文件）和 `poc/claude-code/logs/**/*.log`（22 个）被去掉，没有新增的文件。2951 − 2687 − 22 = 242
 - 改动后的镜像里 `/app/node_modules`（镜像里 `npm ci` 装的）、`/app/web/dist`、`/app/vendor/dsh-sdk-client`、`/app/src/workflow/docs/` 都还在
 - `context-probe.txt`：在 `src/zz-probe/` 下临时放了 `.env`、`.env.local`、`x.log`、`.eos/a`、`node_modules/a`、`keep.txt`，用 `COPY . /ctx` 的探测构建列出构建上下文：只有 `keep.txt` 进去了，`src/workflow/docs/研发约定.md` 还在。探测之后这些文件已删掉

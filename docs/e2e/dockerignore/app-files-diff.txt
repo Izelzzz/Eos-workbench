@@ -20,4 +20,4 @@
 < /app/poc/claude-code/logs/real/c6-context.log
 < /app/poc/claude-code/logs/real/c7-abort.log
 < /app/poc/claude-code/logs/real/c8-env.log
-（另有 2693 行 /app/.github/lint/node_modules/... 只在改动前的镜像里，没有逐行列出）
+（另有 /app/.github/lint/node_modules 下的 2687 个普通文件只在改动前的镜像里，没有逐行列出）
