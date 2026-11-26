@@ -23,14 +23,17 @@ function runtimeEnv(dockerfile: string): Record<string, string> {
   const joined = dockerfile.replace(/\\\n/g, ' ')
   const lines = joined.split('\n')
   const lastFrom = lines.findLastIndex(l => /^FROM\s/i.test(l))
+  assert.ok(lastFrom >= 0, 'Dockerfile 里找不到 FROM')
   const env: Record<string, string> = {}
   for (const line of lines.slice(lastFrom + 1)) {
     const m = /^ENV\s+(.+)$/i.exec(line.trim())
     if (m === null) continue
     for (const pair of m[1]!.trim().split(/\s+/)) {
-      const eq = pair.indexOf('=')
-      assert.ok(eq > 0, `Dockerfile 的 ENV 要写成 KEY=VALUE：${line}`)
-      env[pair.slice(0, eq)] = pair.slice(eq + 1)
+      // 解析得严：认不出的写法（旧的 ENV KEY VALUE、带引号或空格的值、变量替换）直接失败，不静默跳过，免得漏掉一个变量
+      const m2 = /^([A-Za-z_][A-Za-z0-9_]*)=([^"'$\s]*)$/.exec(pair)
+      assert.ok(m2 !== null, `Dockerfile 的 ENV 只认 KEY=VALUE（值里不带引号、空格、$），这一行要么改写法、要么同步改这个测试的解析：${line}`)
+      assert.ok(!(m2[1]! in env), `Dockerfile 的 ENV 里 ${m2[1]} 设了两次`)
+      env[m2[1]!] = m2[2]!
     }
   }
   return env
@@ -63,7 +66,10 @@ test('镜像里给 agent 的变量真的会交给 dsh，只给平台的不会', 
 
 test('白名单里没有像凭据的名字（白名单里的变量会进 agent 的工具子进程）', () => {
   const secretish = /KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH|PRIVATE|COOKIE|SESSION/i
-  assert.deepEqual(AGENT_ENV_KEEP.filter(k => secretish.test(k)), [])
+  assert.deepEqual(
+    AGENT_ENV_KEEP.filter(k => secretish.test(k)),
+    [],
+  )
   // 平台持有的凭据都不在白名单里（模型 key 由 agentEnv 单独加给 dsh 进程，见 dsh.ts 的说明）
   for (const k of ['DEEPSEEK_API_KEY', 'EOS_MASTER_KEY', 'GITHUB_TOKEN', 'GH_TOKEN', 'GIT_ASKPASS', 'NPM_TOKEN', 'npm_config__authToken']) {
     assert.equal(agentEnvAllowed(k), false, k)
