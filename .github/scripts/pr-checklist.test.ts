@@ -42,7 +42,6 @@ test('仓库的规则文件：平台代码和构建、依赖、部署需要 E2E�
     '.gitleaksignore',
     '.gitleaks.toml',
     '.trivyignore.yaml',
-    'docs/deploy.md',
     '.claude/settings.json',
     'README.md',
     'CLAUDE.md',
@@ -117,7 +116,7 @@ test('改了检查规则或允许清单：给出提示，提示里列出是哪�
   for (const p of [
     '.gitleaks.toml',
     '.trivyignore.yaml',
-    'docs/deploy.md',
+    '.github/scripts/image-probe-checks.json',
     '.github/e2e-paths.txt',
     '.github/scripts/pr-checklist.ts',
     '.github/lint/eslint.config.mjs',

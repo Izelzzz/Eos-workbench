@@ -1,6 +1,6 @@
 // 镜像的依赖探针（.github/workflows/image.yml 在构建、冒烟之后运行；PR 和发布都跑）。只用 Node 自带的模块。
-// 1. 读 docs/deploy.md「执行器环境」那张表的「检查」一列，在镜像里以 agent 的用户（eos-agent）、断网逐条运行，退出码都必须是 0。
-//    文档是唯一的清单：改表时一起改这一列，探针跟着变。解析不出来（找不到这一节、表、这一列，或某一行没写检查）直接失败。
+// 1. 读 .github/scripts/image-probe-checks.json 的检查，在镜像里以 agent 的用户（eos-agent）、断网逐条运行，退出码都必须是 0。
+//    docs/deploy.md「执行器环境」的表是给人看的同一份清单，tests/image-probe.test.ts 核对两边一致。
 // 2. 核对三个用户的 uid 和组（完全一致）、/data 的属主（ADR-006：平台、检查命令、agent 各一个用户）。
 // 探针用镜像本身的环境，不经过 dsh 的环境白名单和沙箱；那两样另有测试（tests/agent-env-contract.test.ts）和实测。
 // 用法：node .github/scripts/image-probe.ts <镜像>
@@ -10,63 +10,23 @@ import { join } from 'node:path'
 
 export type Row = { item: string; checks: string[] }
 
-/** 表格里转义的 \| 先换成这个占位，按 | 切完列再换回来 */
-const PIPE = '\u{F8FF}'
-
 /**
- * 「### 镜像里有什么」（在「## 执行器环境」下）这一小节里那张表每一行的「检查」：反引号里的命令，表格里的 \| 还原成 |。
- * 这一小节只许有这一张表和普通的说明文字：表外的每一行要么是空行，要么是不带 Markdown 格式的一段话（不以缩进、>、<、-、*、#、
- * 数字加点、反引号或波浪线代码块开头，也不含 |）。这样就没有别的写法（第二张表、引用块里的表、HTML 表格、代码块）能在页面上
- * 显示出一些检查、实际却没被执行。
+ * 检查清单在 .github/scripts/image-probe-checks.json：探针只读它，不解析 Markdown。
+ * 以前从 docs/deploy.md 的表里读，几轮独立审查都找到了让页面显示的检查和实际执行的不一样的 Markdown 写法（注释里的假小节、
+ * 标题变体、HTML 表格……），所以改成机器读的文件；文档里的表给人看，tests/image-probe.test.ts 核对两边一致。
+ * 这里在边界上校验格式：认不出就报错，不跳过。
  */
-export function parseChecks(markdown: string): Row[] {
-  const lines = markdown.split('\n').map(l => l.trimEnd())
-  // 两个标题在整份文件里都只许出现一次：不然可以在 HTML 注释或代码块里放一个假的，让探针去读假的那张表，或者在第二个同名小节里放一张不检查的表
-  for (const h of ['## 执行器环境', '### 镜像里有什么']) {
-    const n = lines.filter(l => l === h).length
-    if (n !== 1) throw new Error(`docs/deploy.md 里「${h}」要正好出现一次，现在是 ${n} 次`)
-  }
-  const top = lines.findIndex(l => l === '## 执行器环境')
-  const start = lines.findIndex((l, i) => i > top && l === '### 镜像里有什么')
-  const topEnd = lines.findIndex((l, i) => i > top && /^## /.test(l))
-  if (start < 0 || (topEnd >= 0 && start > topEnd)) throw new Error('「## 执行器环境」下找不到「### 镜像里有什么」一小节')
-  const end = lines.findIndex((l, i) => i > start && /^#{1,3} /.test(l))
-  const section = lines.slice(start + 1, end < 0 ? undefined : end)
-  const first = section.findIndex(l => l.startsWith('|'))
-  if (first < 0) throw new Error('「镜像里有什么」一小节里找不到表')
-  let last = first
-  while (last + 1 < section.length && section[last + 1] !== '') last++
-  const table = section.slice(first, last + 1)
-  const bad = table.find(l => !l.startsWith('|'))
-  if (bad !== undefined) throw new Error(`「镜像里有什么」的表里这一行要以 | 开头、前面不缩进：${bad}`)
-  // 表外的行还不许有 <：段落中间的 HTML（<table>、<pre>）在页面上也能显示成表格或代码块
-  const plain = (l: string) => l === '' || (!/^[\s>#<`~*+-]|^\d+[.)]\s/.test(l) && !l.includes('|') && !l.includes('<'))
-  const other = [...section.slice(0, first), ...section.slice(last + 1)].find(l => !plain(l))
-  if (other !== undefined) throw new Error(`「镜像里有什么」一小节里表外只能是不带格式的说明文字（这一行不行，把它挪到别的小节）：${other}`)
-  const cells = (l: string) =>
-    l
-      .replaceAll('\\|', PIPE)
-      .replace(/^\||\|$/g, '')
-      .split('|')
-      .map(c => c.trim().replaceAll(PIPE, '|'))
-  const header = cells(table[0]!)
-  const col = header.indexOf('检查')
-  if (col < 0) throw new Error(`「镜像里有什么」的表里没有「检查」一列（表头：${header.join('、')}）`)
-  if (table.length < 3 || !/^\|[-|: ]+\|$/.test(table[1]!)) throw new Error('「镜像里有什么」的表格式不对：第二行要是 |---|')
-  // 分隔行的列数和表头不一样时，GFM 不把它当表，页面上看不到这张表
-  if (cells(table[1]!).length !== header.length) throw new Error('「镜像里有什么」的表格式不对：分隔行的列数要和表头一样')
-  // 表格里检查命令以外的地方也不许有 HTML（反引号里的不算，比如 #include <stdio.h>）
-  const html = table.find(l => l.replace(/`[^`]*`/g, '').includes('<'))
-  if (html !== undefined) throw new Error(`「镜像里有什么」的表里不能有 HTML（反引号里的除外）：${html}`)
-  return table.slice(2).map(l => {
-    const c = cells(l)
-    if (c.length !== header.length) throw new Error(`「镜像里有什么」的表里这一行列数不对：${l}`)
-    // 双反引号写法（``a `b` ``）会被切成几段、每段都不完整，直接报错
-    if (c[col]!.includes('``')) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行的检查不能用双反引号`)
-    const checks = [...c[col]!.matchAll(/`([^`]+)`/g)].map(m => m[1]!.trim())
-    if (checks.length === 0) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行没有写检查命令`)
-    if (checks.some(x => x === '')) throw new Error(`「镜像里有什么」的表里「${c[0]}」这一行有空的检查命令`)
-    return { item: c[0]!, checks }
+export function parseChecks(json: string): Row[] {
+  const data = JSON.parse(json) as unknown
+  const items = (data as { items?: unknown }).items
+  if (!Array.isArray(items) || items.length === 0) throw new Error('image-probe-checks.json 里要有非空的 items 数组')
+  return items.map((x, i) => {
+    const r = x as { item?: unknown; checks?: unknown }
+    if (typeof r.item !== 'string' || r.item.trim() === '') throw new Error(`image-probe-checks.json 第 ${i + 1} 项缺 item`)
+    if (!Array.isArray(r.checks) || r.checks.length === 0 || !r.checks.every(c => typeof c === 'string' && c.trim() !== '')) {
+      throw new Error(`image-probe-checks.json 里「${r.item}」的 checks 要是非空的字符串数组`)
+    }
+    return { item: r.item, checks: r.checks as string[] }
   })
 }
 
@@ -119,7 +79,7 @@ if (import.meta.main) {
     process.exit(1)
   }
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
-  const rows = parseChecks(readFileSync(join(root, 'docs/deploy.md'), 'utf8'))
+  const rows = parseChecks(readFileSync(join(root, '.github/scripts/image-probe-checks.json'), 'utf8'))
   /** 每条检查一个新容器；卡住的命令（比如等标准输入）2 分钟后算失败，不拖到 job 超时 */
   const run = (user: string, script: string): { ok: boolean; detail: string } => {
     const r = spawnSync('docker', ['run', '--rm', '--pull=never', '--network', 'none', '--user', user, '--entrypoint', 'bash', image, '-c', script], {
@@ -143,7 +103,9 @@ if (import.meta.main) {
   console.log(`${u.ok ? '✓' : '✗'} 用户和 /data 属主：${EXPECTED_USERS.map(x => `${x.name}(${x.uid}; ${x.groups.join(',')})`).join('、')}${u.detail}`)
   if (!u.ok) failed++
   if (failed > 0) {
-    console.log(`::error title=依赖探针::镜像里有 ${failed} 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表`)
+    console.log(
+      `::error title=依赖探针::镜像里有 ${failed} 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 .github/scripts/image-probe-checks.json 和 docs/deploy.md「执行器环境」的表`,
+    )
     process.exit(1)
   }
   console.log(`依赖探针通过：${rows.reduce((n, r) => n + r.checks.length, 0)} 条检查，${EXPECTED_USERS.length} 个用户`)

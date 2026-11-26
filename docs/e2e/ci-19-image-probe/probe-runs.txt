@@ -1,4 +1,4 @@
-# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（第三轮独立审查之后的版本：表放在「### 镜像里有什么」小节里）
+# 依赖探针（.github/scripts/image-probe.ts）在本地运行的记录（检查清单改放 .github/scripts/image-probe-checks.json 之后的版本）
 
 ## 1. 当前 Dockerfile 构建的镜像（main 8598c67 的 Dockerfile，本地构建）
 $ node .github/scripts/image-probe.ts eos-di:after
@@ -46,7 +46,7 @@ compilation terminated.
 ✗ 其他：bwrap --version（退出码 127）bash: line 1: bwrap: command not found
 ✗ 用户和 /data 属主：eos(10001; eos,eos-dsh,eos-work)、eos-check(10002; eos-check,eos-work)、eos-agent(10003; eos-agent,eos-dsh,eos-work)（退出码 1）用户 eos-check 的组是 eos-check eos-dsh eos-work，应该是 eos-check eos-work
 /data 的属主不是 eos:eos：root:root
-::error title=依赖探针::镜像里有 6 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表
+::error title=依赖探针::镜像里有 6 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 .github/scripts/image-probe-checks.json 和 docs/deploy.md「执行器环境」的表
 exit=1
 
 ## 3. 反例：第一轮独立审查做的镜像（删掉 /usr/include/c++，npm 换成只会 echo 版本号的假脚本）
@@ -71,5 +71,5 @@ compilation terminated.
 ✓ 其他：test -s /etc/ssl/certs/ca-certificates.crt
 ✓ 其他：bwrap --version
 ✓ 用户和 /data 属主：eos(10001; eos,eos-dsh,eos-work)、eos-check(10002; eos-check,eos-work)、eos-agent(10003; eos-agent,eos-dsh,eos-work)
-::error title=依赖探针::镜像里有 1 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 docs/deploy.md「执行器环境」的表
+::error title=依赖探针::镜像里有 1 项检查没通过（见上面的 ✗）。改了 Dockerfile 的话，要么补上依赖，要么同步改 .github/scripts/image-probe-checks.json 和 docs/deploy.md「执行器环境」的表
 exit=1

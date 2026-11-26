@@ -1,0 +1,51 @@
+{
+  "说明": "依赖探针（image-probe.ts）在镜像里以 eos-agent、断网逐条运行的检查，退出码都必须是 0。docs/deploy.md「执行器环境」的表给人看，tests/image-probe.test.ts 核对两边一致。改这个文件属于重档（在 .github/scripts/ 下）。",
+  "items": [
+    {
+      "item": "系统",
+      "checks": [
+        "grep -qx 'VERSION_ID=\"24.04\"' /etc/os-release"
+      ]
+    },
+    {
+      "item": "Node、npm",
+      "checks": [
+        "node --version | grep -q '^v24\\.'",
+        "npm --version"
+      ]
+    },
+    {
+      "item": "pnpm、yarn",
+      "checks": [
+        "corepack --version",
+        "command -v pnpm",
+        "command -v yarn"
+      ]
+    },
+    {
+      "item": "Python",
+      "checks": [
+        "python3 --version | grep -q '^Python 3\\.12\\.'",
+        "python3 -m pip --version",
+        "python3 -m venv /tmp/probe-venv && /tmp/probe-venv/bin/python -m pip --version"
+      ]
+    },
+    {
+      "item": "编译",
+      "checks": [
+        "printf '#include <stdio.h>\\nint main(void){return puts(\"ok\") < 0;}\\n' | gcc -x c - -o /tmp/probe-c && /tmp/probe-c",
+        "printf '#include <vector>\\nint main(){return std::vector<int>{0}[0];}\\n' | g++ -x c++ - -o /tmp/probe-cxx && /tmp/probe-cxx",
+        "make --version",
+        "pkg-config --version"
+      ]
+    },
+    {
+      "item": "其他",
+      "checks": [
+        "git --version",
+        "test -s /etc/ssl/certs/ca-certificates.crt",
+        "bwrap --version"
+      ]
+    }
+  ]
+}
