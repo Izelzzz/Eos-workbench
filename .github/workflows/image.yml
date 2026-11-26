@@ -41,7 +41,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: node .github/scripts/image-tags.ts "$IMAGE" tag v0.0.0-ci "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
       - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
-      # 依赖探针：docs/deploy.md「执行器环境」表里列的工具、Dockerfile 建的用户和 /data 属主（image-probe.ts）
+      # 依赖探针：.github/scripts/image-probe-checks.json 里列的检查、ADR-006 的三个用户和 /data 属主（image-probe.ts）
       - name: 依赖探针
         run: node .github/scripts/image-probe.ts "$(sed -n 's/^first=//p' "$RUNNER_TEMP/tags")"
       - name: 扫描漏洞
@@ -68,7 +68,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: node .github/scripts/image-tags.ts "$IMAGE" "$REF_TYPE" "$REF_NAME" "$GITHUB_SHA" > "$RUNNER_TEMP/tags"
       - run: bash .github/scripts/image-build.sh "$RUNNER_TEMP/tags"
-      # 依赖探针：docs/deploy.md「执行器环境」表里列的工具、Dockerfile 建的用户和 /data 属主（image-probe.ts）
+      # 依赖探针：.github/scripts/image-probe-checks.json 里列的检查、ADR-006 的三个用户和 /data 属主（image-probe.ts）
       - name: 依赖探针
         run: node .github/scripts/image-probe.ts "$(sed -n 's/^first=//p' "$RUNNER_TEMP/tags")"
       - name: 扫描漏洞
