@@ -173,6 +173,7 @@ export function isGuardFile(path: string): boolean {
   return (
     path === '.gitleaksignore' ||
     path === '.gitleaks.toml' ||
+    path === '.trivyignore.yaml' ||
     path === '.github/e2e-paths.txt' ||
     path.startsWith('.github/workflows/') ||
     path.startsWith('.github/scripts/') ||
