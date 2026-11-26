@@ -1,10 +1,11 @@
 .git
-node_modules
+# 带 **/ 的匹配任意层级：只写 node_modules 只排除根目录那一份，开发机上装过的 .github/lint/node_modules 会被 COPY . . 带进镜像
+**/node_modules
 .eos
 .claude
 web/dist
 docs
 poc/logs
-*.log
-.env
-.env.*
+**/*.log
+**/.env
+**/.env.*
