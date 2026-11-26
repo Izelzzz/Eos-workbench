@@ -27,7 +27,8 @@ function parsePurls(v: string): string[] | undefined {
   const m = /^\[(.*)\]$/.exec(v)
   if (m === null) return undefined
   const items = m[1]!.split(',').map(x => x.trim())
-  if (items.length === 0 || items.some(x => !/^(['"])pkg:[a-z]+\/[^'"\s@]+@[^'"\s@]+\1$/.test(x))) return undefined
+  // 只认单引号（双引号里有转义，例如 \x23 解码后是 #）；版本只认这几种字符：# 后面是 subpath、? 后面是 qualifier，都会让版本失效
+  if (items.length === 0 || items.some(x => !/^'pkg:[a-z]+\/[A-Za-z0-9._~\/-]+@[A-Za-z0-9.+_~-]+'$/.test(x))) return undefined
   return items.map(x => x.slice(1, -1))
 }
 
@@ -43,6 +44,13 @@ export function check(text: string, today: string): Checked {
     if (missing.length > 0) errors.push(`第 ${cur.line} 行的豁免 ${cur.id} 缺少 ${missing.join('、')}`)
     else entries.push({ id: cur.id, purls: cur.purls as string[], statement: cur.statement as string, expiredAt: cur.expired_at as string, line: cur.line })
     cur = undefined
+  }
+  // YAML 还把单独的 \r、U+0085、U+2028、U+2029 当换行，按 \n 切行就看不到：藏在注释或 statement 里的「换行」能偷偷多出一条豁免。
+  // 所以整个文件只允许 \n 换行和可见字符，别的控制字符、这几种换行、BOM 一律拒绝
+  const bad = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\ufeff]/.exec(text)
+  if (bad !== null) {
+    const n = text.slice(0, bad.index).split('\n').length
+    return { entries: [], errors: [`第 ${n} 行有不可见的控制字符（U+${bad[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}）：只允许普通文字和换行（LF）`], warnings: [] }
   }
   text.split('\n').forEach((raw, i) => {
     const n = i + 1
@@ -73,7 +81,10 @@ export function check(text: string, today: string): Checked {
       if (!isDate(value)) return void errors.push(`第 ${n} 行：expired_at 要写成不加引号、真实存在的日期 YYYY-MM-DD（Trivy 解析不了带引号的日期）`)
       cur.expired_at = value
     } else {
-      if (/^[|>'"]/.test(value)) return void errors.push(`第 ${n} 行：statement 写成一行、不加引号`)
+      // 以 YAML 的特殊字符开头、或者含「: 」「 #」时，Trivy 会解析成别的东西或直接报错
+      if (/^[-?:,[\]{}#&*!|>'"%@`]/.test(value) || value.includes(': ') || value.includes(' #')) {
+        return void errors.push(`第 ${n} 行：statement 写成一行普通文字：不以 YAML 的特殊字符开头，不含「: 」和「 #」`)
+      }
       cur.statement = value
     }
   })

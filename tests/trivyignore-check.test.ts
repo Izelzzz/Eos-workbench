@@ -19,8 +19,8 @@ test('仓库里的 .trivyignore.yaml 通过校验，4 条都锁到 undici@8.11.2
   assert.ok(r.entries.every(e => e.purls.join() === 'pkg:npm/undici@8.11.2' && e.statement !== '' && isDate(e.expiredAt)))
 })
 
-test('四项写全的条目通过；多个 purls、双引号都认；行尾空白不影响', () => {
-  const r = check(doc(entry(), entry({ id: 'GHSA-abcd-efgh-ijkl', purls: `["pkg:npm/a@1.0.0", 'pkg:golang/x/y@v0.1.0']` })) + '   \n', TODAY)
+test('四项写全的条目通过；多个 purls、中文理由都认；行尾空白不影响', () => {
+  const r = check(doc(entry(), entry({ id: 'GHSA-abcd-efgh-ijkl', purls: `['pkg:npm/a@1.0.0', 'pkg:golang/x/y@v0.1.0']` })) + '   \n', TODAY)
   assert.deepEqual(r.errors, [])
   assert.deepEqual(r.entries[1]!.purls, ['pkg:npm/a@1.0.0', 'pkg:golang/x/y@v0.1.0'])
 })
@@ -47,6 +47,21 @@ test('会悄悄放宽豁免的写法一律报错（独立审查实测 Trivy 会�
     ['用 paths 代替 purls', doc(entry().replace(/purls: .*/, "paths: ['app/node_modules/undici/package.json']"))],
     ['字段顺序打乱（以 expired_at 开头）', 'vulnerabilities:\n  - expired_at: 2026-12-25\n    id: CVE-2026-1\n'],
     ['Tab 缩进', doc(entry().replace('    purls', '\tpurls'))],
+    // 第三轮独立审查实测：YAML 把下面这几种字符也当换行，按 \n 切行看不到，能藏进一条不限包、不过期的豁免
+    ['注释里夹 CR 藏一条', doc(entry() + '\n  # note\r  - id: CVE-2026-2')],
+    ['statement 里夹 NEL 藏一条', doc(entry({ statement: 'x\u0085  - id: CVE-2026-2' }))],
+    ['statement 里夹 U+2028', doc(entry({ statement: 'x\u2028y' }))],
+    ['BOM', '\ufeff' + doc(entry())],
+    ['整个文件 CRLF', doc(entry()).replace(/\n/g, '\r\n')],
+    // purl 的版本被 # 或 ? 截断后等于不限版本；双引号里的转义（\x23 就是 #）能绕过字符检查
+    ['purl 版本是 #', doc(entry({ purls: "['pkg:npm/undici@#']" }))],
+    ['purl 带 qualifier', doc(entry({ purls: "['pkg:npm/undici@8.11.2?a=b']" }))],
+    ['purl 用双引号', doc(entry({ purls: '["pkg:npm/undici@8.11.2"]' }))],
+    ['purl 双引号转义', doc(entry({ purls: '["pkg:npm/undici@\\x23"]' }))],
+    // statement 会被 YAML 解析成别的东西（Trivy 直接报错，或者变成锚点）
+    ['statement 含「: 」', doc(entry({ statement: 'a: b' }))],
+    ['statement 是锚点', doc(entry({ statement: '&a x' }))],
+    ['statement 以 [ 开头', doc(entry({ statement: '[x]' }))],
   ]
   for (const [name, text] of cases) assert.notDeepEqual(check(text, TODAY).errors, [], name)
 })

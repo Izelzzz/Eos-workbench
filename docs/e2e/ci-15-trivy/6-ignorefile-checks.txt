@@ -1,24 +1,24 @@
-# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（独立审查后改用逐行的严格校验）。
-# 被扫描的是 #87 之后的平台镜像（本地构建）。校验通过才会真的跑 Trivy；校验不通过时在那之前就报错退出。每段先列出用的豁免清单的关键行
+# image-scan.sh 扫描前用 .github/scripts/trivyignore-check.ts 校验 .trivyignore.yaml（逐行严格校验，第三轮独立审查后加了字符和 purl 的限制）。
+# 被扫描的是 #87 之后的平台镜像（本地构建）。校验通过才会真的跑 Trivy；不通过时在那之前就报错退出。每段先列出豁免清单的关键行（不可见字符用 cat -v 显示：^M 是 CR，M-BM-^E 是 NEL）
 
 ## 1-仓库里的原样（会跑完 Trivy）
-#   3:vulnerabilities:
-#   5:  - id: CVE-2026-109383
-#   6:    purls: ['pkg:npm/undici@8.11.2']
-#   7:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   8:    expired_at: 2026-12-25
-#   9:  - id: CVE-2026-109829
-#   10:    purls: ['pkg:npm/undici@8.11.2']
-#   11:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   12:    expired_at: 2026-12-25
-#   13:  - id: CVE-2026-109869
-#   14:    purls: ['pkg:npm/undici@8.11.2']
-#   15:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   16:    expired_at: 2026-12-25
-#   17:  - id: CVE-2026-87018
-#   18:    purls: ['pkg:npm/undici@8.11.2']
-#   19:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   20:    expired_at: 2026-12-25
+#   4:vulnerabilities:
+#   6:  - id: CVE-2026-109383
+#   7:    purls: ['pkg:npm/undici@8.11.2']
+#   8:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   9:    expired_at: 2026-12-25
+#   10:  - id: CVE-2026-109829
+#   11:    purls: ['pkg:npm/undici@8.11.2']
+#   12:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   13:    expired_at: 2026-12-25
+#   14:  - id: CVE-2026-109869
+#   15:    purls: ['pkg:npm/undici@8.11.2']
+#   16:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   17:    expired_at: 2026-12-25
+#   18:  - id: CVE-2026-87018
+#   19:    purls: ['pkg:npm/undici@8.11.2']
+#   20:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   21:    expired_at: 2026-12-25
 .trivyignore.yaml 校验通过：4 条豁免
 Total: 0 (HIGH: 0, CRITICAL: 0)
 Suppressed Vulnerabilities (Total: 4)
@@ -26,97 +26,135 @@ Suppressed Vulnerabilities (Total: 4)
 exit=0
 
 ## 2-3天后到期（提示，并跑完 Trivy）
-#   3:vulnerabilities:
-#   5:  - id: CVE-2026-109383
-#   6:    purls: ['pkg:npm/undici@8.11.2']
-#   7:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   8:    expired_at: 2026-11-29
-#   9:  - id: CVE-2026-109829
-#   10:    purls: ['pkg:npm/undici@8.11.2']
-#   11:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   12:    expired_at: 2026-11-29
-#   13:  - id: CVE-2026-109869
-#   14:    purls: ['pkg:npm/undici@8.11.2']
-#   15:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   16:    expired_at: 2026-11-29
-#   17:  - id: CVE-2026-87018
-#   18:    purls: ['pkg:npm/undici@8.11.2']
-#   19:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   20:    expired_at: 2026-11-29
-::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109383（第 5 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
-::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109829（第 9 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
-::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109869（第 13 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
-::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-87018（第 17 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
+#   4:vulnerabilities:
+#   6:  - id: CVE-2026-109383
+#   7:    purls: ['pkg:npm/undici@8.11.2']
+#   8:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   9:    expired_at: 2026-11-29
+#   10:  - id: CVE-2026-109829
+#   11:    purls: ['pkg:npm/undici@8.11.2']
+#   12:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   13:    expired_at: 2026-11-29
+#   14:  - id: CVE-2026-109869
+#   15:    purls: ['pkg:npm/undici@8.11.2']
+#   16:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   17:    expired_at: 2026-11-29
+#   18:  - id: CVE-2026-87018
+#   19:    purls: ['pkg:npm/undici@8.11.2']
+#   20:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   21:    expired_at: 2026-11-29
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109383（第 6 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109829（第 10 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-109869（第 14 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
+::warning title=镜像漏洞扫描::.trivyignore.yaml：豁免 CVE-2026-87018（第 18 行）2026-11-29 到期（还剩 3 天）：到期后扫描会重新拦下，请提前重新评估
 .trivyignore.yaml 校验通过：4 条豁免
 Total: 0 (HIGH: 0, CRITICAL: 0)
 exit=0
 
-## 3-日期带引号（Trivy 解析不了，校验先拦下）
-#   3:vulnerabilities:
-#   5:  - id: CVE-2026-109383
-#   6:    purls: ['pkg:npm/undici@8.11.2']
-#   7:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   8:    expired_at: '2026-12-25'
-#   9:  - id: CVE-2026-109829
-#   10:    purls: ['pkg:npm/undici@8.11.2']
-#   11:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   12:    expired_at: 2026-12-25
-#   13:  - id: CVE-2026-109869
-#   14:    purls: ['pkg:npm/undici@8.11.2']
-#   15:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   16:    expired_at: 2026-12-25
-#   17:  - id: CVE-2026-87018
-#   18:    purls: ['pkg:npm/undici@8.11.2']
-#   19:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   20:    expired_at: 2026-12-25
-::error title=镜像漏洞扫描::.trivyignore.yaml：第 8 行：expired_at 要写成不加引号、真实存在的日期 YYYY-MM-DD（Trivy 解析不了带引号的日期）
-::error title=镜像漏洞扫描::.trivyignore.yaml：第 5 行的豁免 CVE-2026-109383 缺少 expired_at
+## 3-日期带引号（Trivy 解析不了）
+#   4:vulnerabilities:
+#   6:  - id: CVE-2026-109383
+#   7:    purls: ['pkg:npm/undici@8.11.2']
+#   8:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   9:    expired_at: '2026-12-25'
+#   10:  - id: CVE-2026-109829
+#   11:    purls: ['pkg:npm/undici@8.11.2']
+#   12:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   13:    expired_at: 2026-12-25
+#   14:  - id: CVE-2026-109869
+#   15:    purls: ['pkg:npm/undici@8.11.2']
+#   16:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   17:    expired_at: 2026-12-25
+#   18:  - id: CVE-2026-87018
+#   19:    purls: ['pkg:npm/undici@8.11.2']
+#   20:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   21:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 9 行：expired_at 要写成不加引号、真实存在的日期 YYYY-MM-DD（Trivy 解析不了带引号的日期）
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-109383 缺少 expired_at
 exit=1
 
 ## 4-purls 为空（等于不限包）
-#   3:vulnerabilities:
-#   5:  - id: CVE-2026-109383
-#   6:    purls: []
-#   7:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   8:    expired_at: 2026-12-25
-#   9:  - id: CVE-2026-109829
-#   10:    purls: ['pkg:npm/undici@8.11.2']
-#   11:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   12:    expired_at: 2026-12-25
-#   13:  - id: CVE-2026-109869
-#   14:    purls: ['pkg:npm/undici@8.11.2']
-#   15:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   16:    expired_at: 2026-12-25
-#   17:  - id: CVE-2026-87018
-#   18:    purls: ['pkg:npm/undici@8.11.2']
-#   19:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   20:    expired_at: 2026-12-25
-::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']
-::error title=镜像漏洞扫描::.trivyignore.yaml：第 5 行的豁免 CVE-2026-109383 缺少 purls
+#   4:vulnerabilities:
+#   6:  - id: CVE-2026-109383
+#   7:    purls: []
+#   8:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   9:    expired_at: 2026-12-25
+#   10:  - id: CVE-2026-109829
+#   11:    purls: ['pkg:npm/undici@8.11.2']
+#   12:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   13:    expired_at: 2026-12-25
+#   14:  - id: CVE-2026-109869
+#   15:    purls: ['pkg:npm/undici@8.11.2']
+#   16:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   17:    expired_at: 2026-12-25
+#   18:  - id: CVE-2026-87018
+#   19:    purls: ['pkg:npm/undici@8.11.2']
+#   20:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   21:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 7 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-109383 缺少 purls
 exit=1
 
 ## 5-少一个 expired_at（等于永久豁免）
-#   3:vulnerabilities:
-#   5:  - id: CVE-2026-109383
-#   6:    purls: ['pkg:npm/undici@8.11.2']
-#   7:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   8:  - id: CVE-2026-109829
-#   9:    purls: ['pkg:npm/undici@8.11.2']
-#   10:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   11:    expired_at: 2026-12-25
-#   12:  - id: CVE-2026-109869
-#   13:    purls: ['pkg:npm/undici@8.11.2']
-#   14:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   15:    expired_at: 2026-12-25
-#   16:  - id: CVE-2026-87018
-#   17:    purls: ['pkg:npm/undici@8.11.2']
-#   18:    statement: 间接依赖（dsh），等 dsh 新正式版升级到 8.12.2 以上
-#   19:    expired_at: 2026-12-25
-::error title=镜像漏洞扫描::.trivyignore.yaml：第 5 行的豁免 CVE-2026-109383 缺少 expired_at
+#   4:vulnerabilities:
+#   6:  - id: CVE-2026-109383
+#   7:    purls: ['pkg:npm/undici@8.11.2']
+#   8:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   9:  - id: CVE-2026-109829
+#   10:    purls: ['pkg:npm/undici@8.11.2']
+#   11:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   12:    expired_at: 2026-12-25
+#   13:  - id: CVE-2026-109869
+#   14:    purls: ['pkg:npm/undici@8.11.2']
+#   15:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   16:    expired_at: 2026-12-25
+#   17:  - id: CVE-2026-87018
+#   18:    purls: ['pkg:npm/undici@8.11.2']
+#   19:    statement: M-iM-^WM-4M-fM-^NM-%M-dM->M-^]M-hM-5M-^VM-oM-<M-^HdshM-oM-<M-^IM-oM-<M-^LM-gM--M-^I dsh M-fM-^VM-0M-fM--M-#M-eM-<M-^OM-gM-^IM-^HM-eM-^MM-^GM-gM-:M-'M-eM-^HM-0 8.12.2 M-dM-;M-%M-dM-8M-^J
+#   20:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行的豁免 CVE-2026-109383 缺少 expired_at
 exit=1
 
 ## 6-流式写法
 #   1:vulnerabilities: [{id: CVE-2026-109383}]
 ::error title=镜像漏洞扫描::.trivyignore.yaml：第 1 行：只认 vulnerabilities 一节，按 .trivyignore.yaml 开头注释里的写法写
+exit=1
+
+## 7-注释里夹 CR 藏一条（审查实测 Trivy 会多豁免一条）
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    purls: ['pkg:npm/undici@8.11.2']
+#   4:    statement: x
+#   5:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 6 行有不可见的控制字符（U+000D）：只允许普通文字和换行（LF）
+exit=1
+
+## 8-statement 里夹 NEL 偷走到期日（审查实测）
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    purls: ['pkg:npm/undici@8.11.2']
+#   4:    statement: xM-BM-^E  - id: CVE-2026-1
+#   5:    expired_at: 2020-01-01
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 4 行有不可见的控制字符（U+0085）：只允许普通文字和换行（LF）
+exit=1
+
+## 9-purl 版本是 #（审查实测等于不限版本）
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    purls: ['pkg:npm/undici@#']
+#   4:    statement: x
+#   5:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 3 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 purls
+exit=1
+
+## 10-purl 双引号转义（审查实测）
+#   1:vulnerabilities:
+#   2:  - id: CVE-2026-109383
+#   3:    purls: ["pkg:npm/undici@\x23"]
+#   4:    statement: x
+#   5:    expired_at: 2026-12-25
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 3 行：purls 要写成一行列表，至少一个，每个都锁到版本，例如 ['pkg:npm/undici@8.11.2']
+::error title=镜像漏洞扫描::.trivyignore.yaml：第 2 行的豁免 CVE-2026-109383 缺少 purls
 exit=1
 
