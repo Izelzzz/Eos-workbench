@@ -33,6 +33,13 @@ test('解析不出来就报错，不静默跳过', () => {
   assert.throws(() => parseChecks(doc(`${head}b | x | \`false\` |`)), /以 \| 开头/)
   assert.throws(() => parseChecks(doc(`${head}\n| b | x | \`false\` |`)), /表后面还有表格行/)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ` ` |')), /空的检查命令/)
+  // 第二轮复审：表最后一行下面紧跟一个不含 | 的行（GFM 里也是表格的一行）；空行后另起一张不写前导 | 的表
+  assert.throws(() => parseChecks(doc(`${head}\`false\``)), /以 \| 开头/)
+  assert.throws(() => parseChecks(doc(`${head}\na | b | c\n--|--|--\nx | y | \`false\``)), /表后面还有表格行/)
+  // 不该误报的：表前正文里的 |、表后代码块里以 | 开头的行、行尾空格
+  assert.equal(parseChecks(doc(`用 \`a | b\` 这样的管道：\n\n${head}`)).length, 1)
+  assert.equal(parseChecks(doc(`${head}\n\`\`\`\nfoo\n  | grep x\n\`\`\``)).length, 1)
+  assert.equal(parseChecks(doc(`${head.replace('`true` |', '`true` |   ')}`)).length, 1)
   assert.throws(() => parseChecks(doc('| 内容 | 版本 | 检查 |\n|---|---|---|\n| 系统 | x | ``echo `x` `` |')), /双反引号/)
 })
 

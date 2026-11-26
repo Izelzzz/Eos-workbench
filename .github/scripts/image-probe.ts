@@ -19,20 +19,25 @@ export function parseChecks(markdown: string): Row[] {
   const start = lines.findIndex(l => l.trim() === '## 执行器环境')
   if (start < 0) throw new Error('docs/deploy.md 里找不到「## 执行器环境」一节')
   const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
-  const section = lines.slice(start + 1, end < 0 ? undefined : end)
-  // 这一节里只许有一张表，表的每一行都以 | 开头、前面不缩进：GFM 里行首有空格或不写 | 的行照样算表格的一行，
-  // 但这种行容易被看漏，一律报错，免得某一行的检查被悄悄跳过
-  const isRow = (l: string) => l.includes('|')
-  const first = section.findIndex(isRow)
+  const section = lines.slice(start + 1, end < 0 ? undefined : end).map(l => l.trimEnd())
+  // 这一节里只许有一张表。表从第一条以 | 开头的行起，到第一个空行止（GFM 的表在空行处结束）；
+  // 表里每一行都要以 | 开头、前面不缩进。GFM 里不写 | 或缩进的行照样算表格的一行，但容易被看漏，一律报错
+  const first = section.findIndex(l => /^\s*\|/.test(l))
   if (first < 0) throw new Error('「执行器环境」一节里找不到表')
   const table: string[] = []
   let i = first
-  for (; i < section.length && isRow(section[i]!); i++) {
+  for (; i < section.length && section[i] !== ''; i++) {
     if (!section[i]!.startsWith('|')) throw new Error(`「执行器环境」的表里这一行要以 | 开头、前面不缩进：${section[i]}`)
     table.push(section[i]!)
   }
-  const later = section.slice(i).find(l => /^\s*\|/.test(l))
-  if (later !== undefined) throw new Error(`「执行器环境」一节里表后面还有表格行（表中间不能有空行，这一节只能有一张表）：${later}`)
+  // 表后面（代码块之外）再出现表格行或分隔行（|---|、--|--），说明有第二张表或表被空行断开了
+  let fenced = false
+  for (const l of section.slice(i)) {
+    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced
+    if (!fenced && (/^\s*\|/.test(l) || /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(l))) {
+      throw new Error(`「执行器环境」一节里表后面还有表格行（表中间不能有空行，这一节只能有一张表）：${l}`)
+    }
+  }
   const cells = (l: string) =>
     l
       .replaceAll('\\|', PIPE)
