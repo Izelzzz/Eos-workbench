@@ -193,3 +193,49 @@ test('对话节点的交付物由被评审的节点产出：那个角色只读�
   )
   assert.deepEqual(errors, [{ path: 'nodes[2].deliverables', message: '角色「dev」只读（write: none），写不出交付物文件；把它的 write 改成 worktree' }])
 })
+
+test('卡点：by: human 或 by: agent + role；字段组合不对、验收对象不是排在前面的 agent 节点时报中文原因', () => {
+  const ok = parseWorkflow(`${base}  - { id: accept, kind: gate, with: build, by: human, task: 验收 }\n  - { id: sign, kind: gate, with: build, by: agent, role: rev, task: 签字 }\n`)
+  assert.ok(ok.ok, JSON.stringify(!ok.ok && ok.errors))
+  const [human, agent] = ok.workflow.nodes.slice(2)
+  assert.deepEqual(human?.kind === 'gate' && { by: human.by, maxFixes: human.maxFixes, checks: human.checks }, { by: { kind: 'human' }, maxFixes: 2, checks: [] })
+  assert.deepEqual(agent?.kind === 'gate' && agent.by, { kind: 'agent', role: 'rev', maxRounds: 5 })
+  assert.deepEqual(errorsOf(`${base}  - { id: e, kind: gate, with: build, by: robot, task: t }\n`), [{ path: 'nodes[2].by', message: '只能是 human（人）或 agent（某个角色的 agent，用 role 指定）' }])
+  assert.deepEqual(errorsOf(`${base}  - { id: a, kind: gate, with: build, by: agent, task: t }\n  - { id: b, kind: gate, with: build, by: human, role: rev, maxRounds: 2, task: t }\n`), [
+    { path: 'nodes[2].role', message: 'by: agent 时要用 role 指定由哪个角色的 agent 验收' },
+    { path: 'nodes[3].role', message: 'by: human 时不写 role；要由 agent 验收，把 by 改成 agent' },
+    { path: 'nodes[3].maxRounds', message: '人验收不限打回次数，maxRounds 只用于 by: agent' },
+  ])
+  const semantic = Object.fromEntries(
+    errorsOf(
+      `${base}  - { id: c, kind: gate, with: review, by: human, task: t }\n  - { id: d, kind: gate, with: later, by: human, task: t }\n  - { id: x, kind: gate, with: build, by: agent, role: ghost, task: t }\n`,
+    ).map(e => [e.path, e.message]),
+  )
+  assert.equal(semantic['nodes[2].with'], '「review」必须是 agent 节点：打回时交回它原来的会话修改')
+  assert.equal(semantic['nodes[3].with'], '「later」必须是排在前面的节点')
+  assert.equal(semantic['nodes[4].role'], '没有名为「ghost」的角色')
+})
+
+test('卡点打回后重跑的检查：从被验收节点到卡点之前的交付物和命令检查，去掉重复的，不含平台动作和后面的节点', () => {
+  const r = parseWorkflow(`
+name: demo
+roles:
+  dev: { prompt: 写代码, write: worktree }
+  rev: { prompt: 审代码 }
+nodes:
+  - { id: plan, kind: agent, role: rev, task: 方案, checks: [{ run: [make, plan] }] }
+  - { id: build, kind: agent, role: dev, task: 实现, deliverables: [{ path: NOTES.md, sections: [改动] }] }
+  - { id: test, kind: dialog, with: build, task: 测试, checks: [{ run: [npm, test] }] }
+  - { id: review, kind: dialog, role: rev, with: build, task: 评审, checks: [{ run: [npm, test], timeoutSec: 600 }] }
+  - { id: ship, kind: dialog, with: build, task: 交付, checks: [{ run: [npm, run, lint] }, { platform: push }] }
+  - { id: accept, kind: gate, with: build, by: human, task: 验收 }
+  - { id: after, kind: dialog, with: build, task: 之后, checks: [{ run: [npm, run, e2e] }] }
+`)
+  assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
+  const gate = r.workflow.nodes.find(n => n.id === 'accept')
+  assert.deepEqual(gate?.kind === 'gate' && gate.checks, [
+    { kind: 'file', path: 'NOTES.md', sections: ['改动'] },
+    { kind: 'run', run: ['npm', 'test'], timeoutSec: 600 },
+    { kind: 'run', run: ['npm', 'run', 'lint'], timeoutSec: 600 },
+  ])
+})

@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { MAX_FORMAT_RETRIES, newTask, reduce } from '../src/engine/machine.ts'
 import type { Event, Task } from '../src/engine/types.ts'
 import { isCheck, zeroUsage } from '../src/engine/types.ts'
-import type { AgentNode, DialogNode, Workflow } from '../src/workflow/types.ts'
+import type { AgentNode, DialogNode, GateNode, NodeId, Workflow } from '../src/workflow/types.ts'
 import { ASK, CHANGES, GARBAGE, PASS, REVISE, results, workflow } from './helpers.ts'
 
 /** 一次调用之后被平台撤销的越界路径（可写范围外的改动）。 */
@@ -20,6 +20,8 @@ const replies: Record<string, string[]> = {
   instruct: ['已按指示修改'],
   critique: [PASS, CHANGES, GARBAGE],
   reconfirm: [REVISE, ASK, GARBAGE],
+  accept: [PASS, CHANGES, GARBAGE],
+  amend: ['已按验收意见修改'],
 }
 
 /** 当前状态下所有类别的事件，包括会被拒绝的（过期回复、空回答、非法重试）。 */
@@ -51,6 +53,13 @@ const eventsFor = (t: Task): Event[] => {
     out.push({ kind: 'call_failed', call: 'c0' as never, error: '过期的失败' })
     out.push({ kind: 'asked', call: 'c0' as never, question: { id: 'x', text: '过期的提问' } })
   }
+  // 人在卡点上的结论：通过、带意见打回，以及会被拒绝的（空意见、过期的那一次、别的卡点）。不在等验收时也全部发一遍。
+  const g = t.gate ?? { node: 'accept' as NodeId, round: 1 }
+  out.push({ kind: 'decided', gate: g.node, round: g.round, pass: true, comment: '' })
+  out.push({ kind: 'decided', gate: g.node, round: g.round, pass: false, comment: '缺少负数的测试' })
+  out.push({ kind: 'decided', gate: g.node, round: g.round, pass: false, comment: '  ' })
+  out.push({ kind: 'decided', gate: g.node, round: g.round + 1, pass: true, comment: '' })
+  out.push({ kind: 'decided', gate: 'review' as never, round: g.round, pass: true, comment: '' })
   out.push({ kind: 'answered', questionId: 'q999', text: '回答一个不存在的问题' })
   if (t.question !== undefined) {
     out.push({ kind: 'answered', questionId: t.question.id, text: '用户的回答' })
@@ -66,12 +75,20 @@ const key = (t: Task): string =>
     c: t.cursor,
     f: t.fixes,
     d: t.dialog && { ...t.dialog, lastCritique: undefined },
+    // 人验收不限次数，第几次不影响之后的行为（只出现在说明文字里），不算进状态，否则状态空间无穷。
+    g: t.gate && { ...t.gate, lastComment: undefined, round: gateOf(t.workflow, t.gate.node).by.kind === 'human' ? undefined : t.gate.round },
     p: t.pending && { u: t.pending.purpose, s: isCheck(t.pending) ? undefined : t.pending.session, n: t.pending.node },
     q: t.question?.source,
     sessions: Object.keys(t.sessions).sort(),
     // 有没有待通知的越界撤销会改变下一次调用的提示词，所以算不同的状态。
     notices: Object.keys(t.scopeNotices).sort(),
   })
+
+const gateOf = (wf: Workflow, id: string): GateNode => wf.nodes.find(n => n.id === id) as GateNode
+const gateWith = (wf: Workflow, id: string): string | undefined => {
+  const n = wf.nodes.find(x => x.id === id)
+  return n?.kind === 'gate' ? n.with : undefined
+}
 
 type Check = (before: Task, event: Event, after: Task, accepted: boolean, wf: Workflow) => string | undefined
 
@@ -96,7 +113,14 @@ const INVARIANTS: Record<string, Check> = {
     const p = a.pending
     if (p === undefined || isCheck(p)) return undefined
     const n = wf.nodes.find(x => x.id === p.node)!
-    const expected = p.purpose === 'produce' || p.purpose === 'fix' || p.purpose === 'critique' ? p.node : p.purpose === 'reconfirm' ? (n as DialogNode).escalate : (n as DialogNode).with
+    const expected =
+      p.purpose === 'produce' || p.purpose === 'fix' || p.purpose === 'critique' || p.purpose === 'accept'
+        ? p.node
+        : p.purpose === 'amend'
+          ? gateWith(wf, p.node)
+          : p.purpose === 'reconfirm'
+            ? (n as DialogNode).escalate
+            : (n as DialogNode).with
     return p.session === expected ? undefined : `${p.purpose} sent to ${p.session}`
   },
   '调用 id 唯一且递增': (b, _e, a) => {
@@ -144,6 +168,8 @@ const INVARIANTS: Record<string, Check> = {
     if (a.cursor !== wf.nodes.length) return 'done before the last node'
     const passed = wf.nodes.filter(n => n.kind === 'dialog').every(n => a.log.some(e => e.type === 'note' && e.node === n.id && e.text.endsWith('轮通过')))
     if (!passed) return 'done without every dialog passing'
+    const gates = wf.nodes.filter(n => n.kind === 'gate').every(n => a.log.some(e => e.type === 'decision' && e.node === n.id && e.pass))
+    if (!gates) return 'done without every gate accepted'
     // 有交付物的 agent 节点：最后一次检查必须全部通过（之后不能再有它的产出或补齐）。
     const unchecked = wf.nodes
       .filter((n): n is AgentNode => n.kind === 'agent' && n.checks.length > 0)
@@ -178,6 +204,44 @@ const INVARIANTS: Record<string, Check> = {
     const dropped = Object.keys(b.scopeNotices).filter(s => s !== p.session && a.scopeNotices[s] === undefined)
     return dropped.length === 0 ? undefined : `notice for ${dropped.join(',')} dropped`
   },
+  对话和卡点不会同时进行: (_b, _e, a) => (a.dialog !== undefined && a.gate !== undefined ? 'dialog and gate at once' : undefined),
+  '卡点状态只在卡点上，且属于当前节点': (_b, _e, a, _acc, wf) => {
+    if (a.gate === undefined) return undefined
+    const n = wf.nodes[a.cursor]
+    return n?.kind === 'gate' && n.id === a.gate.node ? undefined : `gate ${a.gate.node} at cursor ${a.cursor}`
+  },
+  '等待验收：只在人验收的卡点上等结论，不挂调用、不挂问题': (_b, _e, a, _acc, wf) => {
+    const waiting = a.status === 'waiting_accept'
+    const shouldWait = a.gate?.phase === 'decide' && gateOf(wf, a.gate.node).by.kind === 'human' && a.status !== 'aborted' && a.status !== 'failed'
+    if (waiting !== shouldWait) return `waiting_accept=${waiting} at phase ${a.gate?.phase}`
+    return waiting && (a.pending ?? a.question) !== undefined ? 'waiting_accept with pending work or a question' : undefined
+  },
+  'agent 验收：等结论时挂着一次发到卡点自己会话的 accept 调用': (_b, _e, a, _acc, wf) => {
+    if (a.gate?.phase !== 'decide' || gateOf(wf, a.gate.node).by.kind !== 'agent' || a.status === 'aborted') return undefined
+    return a.pending?.purpose === 'accept' && !isCheck(a.pending) && a.pending.session === a.gate.node ? undefined : `agent gate deciding with ${a.pending?.purpose}`
+  },
+  '卡点的次数在范围内：agent 验收的第几次不超过 maxRounds，重跑检查的补齐不超过 maxFixes': (_b, _e, a, _acc, wf) => {
+    if (a.gate === undefined) return undefined
+    const g = gateOf(wf, a.gate.node)
+    if (a.gate.round < 1 || (g.by.kind === 'agent' && a.gate.round > g.by.maxRounds)) return `gate round ${a.gate.round}`
+    if (a.gate.fixes > g.maxFixes) return `gate fixes ${a.gate.fixes}`
+    return a.gate.formatRetries > MAX_FORMAT_RETRIES ? 'gate format retries' : undefined
+  },
+  '卡点只因验收人的通过结论放行：人的 decided 或 agent 的 pass': (b, e, a, accepted) => {
+    const passed = a.log.slice(b.log.length).find(x => x.type === 'decision' && x.pass)
+    if (passed === undefined) return undefined
+    if (!accepted) return 'rejected event passed a gate'
+    if (e.kind === 'decided' && e.pass) return undefined
+    return e.kind === 'replied' && b.pending?.purpose === 'accept' && e.text === PASS ? undefined : `gate passed by ${e.kind}`
+  },
+  '打回修改之后，回到卡点之前只重跑程序检查，而且检查都通过': (b, e, a, _acc, wf) => {
+    const back = a.log.slice(b.log.length).find(x => x.type === 'note' && x.text.includes('次验收：等'))
+    if (back?.type !== 'note' || b.gate === undefined) return undefined
+    const g = gateOf(wf, b.gate.node)
+    if (g.checks.length === 0) return e.kind === 'replied' && b.pending?.purpose === 'amend' ? undefined : `back to gate without checks after ${e.kind}`
+    return e.kind === 'checked' && b.gate.phase === 'check' && e.results.every(r => r.passed) ? undefined : `back to gate after ${e.kind} at ${b.gate.phase}`
+  },
+  '卡点打回之后不再请评审 agent': (_b, _e, a) => (a.pending?.purpose === 'critique' && a.log.some(x => x.type === 'decision' && !x.pass) ? 'critique after a gate send-back' : undefined),
   被拒绝的事件不改变任务: (b, _e, a, accepted) => (!accepted && a !== b ? 'rejected event changed the task' : undefined),
   日志只追加: (b, _e, a) => (a.log.length < b.log.length || b.log.some((e, i) => a.log[i] !== e) ? 'log rewritten' : undefined),
   空回答被拒绝: (_b, e, _a, accepted) => (e.kind === 'answered' && e.text.trim() === '' && accepted ? 'empty answer accepted' : undefined),
@@ -187,6 +251,10 @@ const INVARIANTS: Record<string, Check> = {
     if ((e.kind === 'replied' || e.kind === 'asked') && b.pending !== undefined && isCheck(b.pending)) return `${e.kind} accepted for a check`
     if (e.kind === 'checked' && (b.pending === undefined || !isCheck(b.pending) || e.results.length !== b.pending.checks.length)) return 'checked accepted for a call or with wrong results'
     if (e.kind === 'answered' && e.questionId !== b.question?.id) return 'answer to another question accepted'
+    if (e.kind === 'decided') {
+      if (b.status !== 'waiting_accept' || b.gate?.node !== e.gate || b.gate.round !== e.round) return 'decision for another gate or round accepted'
+      if (!e.pass && e.comment.trim() === '') return 'send-back without a comment accepted'
+    }
     return undefined
   },
   失败状态只能通过重试或中止离开: (b, e, a, accepted) =>
@@ -239,12 +307,16 @@ const CONFIGS = [
   { maxRounds: 1, escalate: false, checks: 'review' as const, maxFixes: 2 },
   { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 1 },
   { maxRounds: 1, escalate: false, checks: 'review' as const, ship: 2 },
+  { maxRounds: 1, escalate: false, gate: 'human' as const },
+  { maxRounds: 1, escalate: false, checks: 'review' as const, gate: 'human' as const, gateFixes: 1, ship: 1 },
+  { maxRounds: 1, escalate: true, gate: 'agent' as const, gateRounds: 2 },
+  { maxRounds: 1, escalate: false, checks: 'only' as const, gate: 'agent' as const, gateRounds: 1, gateFixes: 0 },
 ]
 const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试', only: '有交付物、只有测试' }
 
 for (const config of CONFIGS) {
   const result = explore(workflow(config), 200)
-  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}${'ship' in config ? `，评审后交付（${config.ship} 轮）：测试通过再推送` : ''}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
+  test(`状态空间（maxRounds ${config.maxRounds}，${config.escalate ? '有' : '无'}上游，${CHECKS[config.checks ?? 'none']}${config.maxFixes === undefined ? '' : `，maxFixes ${config.maxFixes}`}${'gate' in config ? `，评审后${config.gate === 'human' ? '人' : ` agent（最多打回 ${config.gateRounds} 次）`}验收的卡点` : ''}${'ship' in config ? `，评审后交付（${config.ship} 轮）：测试通过再推送` : ''}）：${result.states} 个抽象状态、${result.transitions} 次转移全部守住不变量`, () => {
     assert.deepEqual(result.violations.slice(0, 5), [])
     assert.ok(result.exhausted, `still unexplored states at depth ${result.depth}`)
     assert.deepEqual(result.stuck.slice(0, 5), [], 'states where only abort moves the task')

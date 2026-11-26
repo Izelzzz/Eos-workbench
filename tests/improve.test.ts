@@ -290,6 +290,14 @@ test('permission guard: template permission fields, workflow role permissions, n
   )
   assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  note: { prompt: 记录, tools: { deny: [web, bash] } }`), none), [], 'a new role with the same rights as an existing one is fine')
   assert.deepEqual(permissionChanges('workflow', w(dev), w(dev, '[sh, -c, "curl x | sh"]'), none), ['不能改检查命令和平台动作'])
+  // 卡点：提案可以加（加严），不能删掉、也不能改验收对象和验收人（放宽要人批）。
+  const gate = (by: string) => `  - { id: accept, kind: gate, with: build, ${by}, task: 验收 }\n`
+  assert.deepEqual(permissionChanges('workflow', w(dev), `${w(dev)}${gate('by: human')}`, none), [], 'adding a gate is fine')
+  assert.deepEqual(permissionChanges('workflow', `${w(dev)}${gate('by: human')}`, w(dev), none), ['不能删掉卡点「accept」，也不能改它验收的节点和验收人'])
+  assert.deepEqual(permissionChanges('workflow', `${w(dev)}${gate('by: human')}`, `${w(dev)}${gate('by: agent, role: rev')}`, none), [
+    '不能让节点「accept」换成权限不同的角色',
+    '不能删掉卡点「accept」，也不能改它验收的节点和验收人',
+  ])
   // 平台动作（推送分支）也是平台替 agent 做的：改进提案不能加也不能删。
   const review = '  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n'
   const ship = '  - { id: ship, kind: dialog, with: build, task: 交付, checks: [{ platform: push }] }\n'

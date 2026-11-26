@@ -26,6 +26,7 @@ export const ago = (t: number): string => {
 export const STATUS: Record<string, string> = {
   running: '运行中',
   waiting_user: '等待回答',
+  waiting_accept: '等待验收',
   done: '已完成',
   failed: '失败',
   aborted: '已中止',
@@ -36,7 +37,8 @@ export const STATUS: Record<string, string> = {
 }
 
 export const statusClass = (s: SpanStatus | string): string =>
-  ({ done: 'ok', ok: 'ok', running: 'running', waiting_user: 'waiting', waiting: 'waiting', failed: 'error', error: 'error', aborted: 'error', pending: 'pending' })[s] ?? 'pending'
+  ({ done: 'ok', ok: 'ok', running: 'running', waiting_user: 'waiting', waiting_accept: 'waiting', waiting: 'waiting', failed: 'error', error: 'error', aborted: 'error', pending: 'pending' })[s] ??
+  'pending'
 
 export const KIND: Record<SpanKind, string> = {
   task: '任务',

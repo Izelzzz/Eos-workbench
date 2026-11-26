@@ -141,7 +141,7 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
     // 正在跑的调用或检查：从它之前最后一条与它无关的记录（它中途的提问和回答不算）到现在，扣掉中途等用户的时间。
     let runningMs = 0
     const p = task.pending
-    if (open && p !== undefined && (task.status === 'running' || task.status === 'waiting_user') && start !== undefined && end !== undefined) {
+    if (open && p !== undefined && (task.status === 'running' || task.status === 'waiting_user' || task.status === 'waiting_accept') && start !== undefined && end !== undefined) {
       const own = new Set(task.log.flatMap(e => (e.type === 'question' && e.question.call === p.id ? [e.question.id] : [])))
       const before = task.log.findLast(e => !(e.type === 'question' && e.question.call === p.id) && !(e.type === 'answer' && own.has(e.questionId)))
       const span = { start: Math.max(start, before?.at ?? start), end }

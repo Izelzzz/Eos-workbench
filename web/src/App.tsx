@@ -25,7 +25,7 @@ const useHash = () => {
   return hash
 }
 
-const LIVE = new Set(['running', 'waiting_user'])
+const LIVE = new Set(['running', 'waiting_user', 'waiting_accept'])
 
 function TaskList() {
   const [tasks, setTasks] = useState<TaskSummary[]>()

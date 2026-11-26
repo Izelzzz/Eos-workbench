@@ -33,7 +33,8 @@ export function Insights() {
     <div className="insights">
       <h1>统计</h1>
       <p className="muted">
-        共 {t.total} 个任务：已完成 {t.done}，进行中 {t.running + t.waiting_user}（其中等回答 {t.waiting_user}），失败 {t.failed}，已中止 {t.aborted}。{''}
+        共 {t.total} 个任务：已完成 {t.done}，进行中 {t.running + t.waiting_user + t.waiting_accept}（其中等回答 {t.waiting_user}，等验收 {t.waiting_accept}），失败 {t.failed}，已中止 {t.aborted}。
+        {''}
         进行中的任务算到现在，失败后还没处理的任务只算到失败那一刻。时长是各阶段时长之和，不含阶段之间的间隔。同名的工作流（包括改过的各个版本）合在一起算。
       </p>
 

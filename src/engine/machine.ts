@@ -1,13 +1,17 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
-import type { AgentNode, DialogNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
+import type { AgentNode, DialogNode, GateNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeCheck, describeFailures } from './checks.ts'
 import {
+  acceptPrompt,
+  amendPrompt,
+  approverOf,
   checksStuckQuestion,
   critiquePrompt,
   fixInstructPrompt,
   fixPrompt,
+  gateStuckQuestion,
   instructPrompt,
   producePrompt,
   reapplyPrompt,
@@ -16,7 +20,7 @@ import {
   scopeNotice,
   stuckQuestion,
 } from './prompts.ts'
-import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, Question, ReviewKind, Step, Task } from './types.ts'
+import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, GateState, Question, ReviewKind, Step, Task } from './types.ts'
 import { isCheck, isTerminal } from './types.ts'
 import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 
@@ -71,18 +75,26 @@ const agentNode = (task: Task): AgentNode => {
   return n
 }
 
+const gateNode = (task: Task): GateNode => {
+  const n = current(task)
+  if (n?.kind !== 'gate' || task.gate?.node !== n.id) throw new Error(`任务 ${task.id} 不在卡点上`)
+  return n
+}
+
 const withDialog = (task: Task, patch: Partial<DialogState>): Task => ({ ...task, dialog: { ...task.dialog!, ...patch } })
+const withGate = (task: Task, patch: Partial<GateState>): Task => ({ ...task, gate: { ...task.gate!, ...patch } })
 
 /** 进入 cursor 指向的节点；走完所有节点就完成。 */
 const enter = (task: Task, at: number): Task => {
   const n = current(task)
-  if (n === undefined) return append({ ...task, status: 'done', pending: undefined, dialog: undefined }, { type: 'note', at, text: '所有节点已完成' })
+  if (n === undefined) return append({ ...task, status: 'done', pending: undefined, dialog: undefined, gate: undefined }, { type: 'note', at, text: '所有节点已完成' })
   if (n.kind === 'agent') return issue(task, { node: n.id, session: n.id, role: n.role, purpose: 'produce', prompt: producePrompt(task, n) })
+  if (n.kind === 'gate') return decide({ ...task, gate: { node: n.id, round: 1, phase: 'decide', fixes: 0, formatRetries: 0 } }, n, at)
   const opened: Task = { ...task, dialog: { node: n.id, round: 1, escalated: false, phase: 'check', formatRetries: 0, review: 'first' } }
   return beginRound(opened, n, 'first')
 }
 
-const advance = (task: Task, at: number): Task => enter({ ...task, cursor: task.cursor + 1, dialog: undefined, fixes: 0 }, at)
+const advance = (task: Task, at: number): Task => enter({ ...task, cursor: task.cursor + 1, dialog: undefined, gate: undefined, fixes: 0 }, at)
 
 /** 对话的一轮：先跑检查，检查通过（或没有检查）再请评审方。 */
 const beginRound = (task: Task, d: DialogNode, review: ReviewKind): Task => {
@@ -156,8 +168,47 @@ const platformFailed = (task: Task, n: WorkflowNode, results: CheckResult[], at:
 /** 交回 agent 的失败说明：平台动作因为前面的检查没通过而跳过时，不算 agent 要处理的问题。 */
 const agentFailures = (results: CheckResult[]): CheckResult[] => results.filter(r => r.check.kind !== 'platform')
 
+/**
+ * 卡点等验收人的结论。人验收：任务停下（waiting_accept），不挂任何工作，等命令行或网页上的结论；
+ * 平台进程重启后状态原样从存储读回，不会重复发起。agent 验收：发一次 accept 调用，在卡点自己的会话里。
+ */
+const decide = (task: Task, g: GateNode, at: number): Task => {
+  const t = withGate(task, { phase: 'decide', fixes: 0 })
+  const noted = append(t, { type: 'note', at, node: g.id, text: `第 ${t.gate!.round} 次验收：等${approverOf(g)}验收「${g.with}」` })
+  if (g.by.kind === 'human') return { ...noted, status: 'waiting_accept', pending: undefined }
+  return issue(noted, { node: g.id, session: g.id, role: g.by.role, purpose: 'accept', prompt: acceptPrompt(t, g, t.sessions[g.id] === undefined ? 'first' : 'again') })
+}
+
+const amend = (task: Task, g: GateNode, prompt: string): Task => issue(withGate(task, { phase: 'amend' }), { node: g.id, session: g.with, role: roleOfAgent(task, g.with), purpose: 'amend', prompt })
+
+/**
+ * 验收人给出了结论（人或 agent）。通过：往下走。打回：记下意见，交回被验收方原来的会话修改；
+ * agent 验收打回次数用完了就问用户。round 在打回时加一：之后挂着的修改和检查都属于下一次验收。
+ */
+const onDecision = (task: Task, g: GateNode, d: { pass: boolean; comment: string; by: 'human' | RoleId }, at: number): Task => {
+  const round = task.gate!.round
+  const t = append(task, { type: 'decision', at, node: g.id, round, by: d.by, pass: d.pass, comment: d.comment })
+  if (d.pass) return advance(append(t, { type: 'note', at, node: g.id, text: `第 ${round} 次验收通过` }), at)
+  const rejected = withGate(t, { lastComment: d.comment, formatRetries: 0 })
+  if (g.by.kind === 'agent' && round >= g.by.maxRounds) return ask(withGate(rejected, { phase: 'ask' }), { source: 'loop', text: gateStuckQuestion(rejected, g, 'rounds') }, at)
+  return amend(withGate(rejected, { round: round + 1 }), g, amendPrompt(rejected, g, { comment: d.comment, round }))
+}
+
+/** 被验收方改完：只重跑程序检查（不再请评审 agent），通过了（或没有检查）回到卡点。 */
+const afterAmend = (task: Task, g: GateNode, at: number): Task => (g.checks.length > 0 ? runChecks(withGate(task, { phase: 'check' }), g) : decide(task, g, at))
+
+/** 卡点上重跑的检查：通过回到卡点；没通过交回被验收方修，次数用完问用户。 */
+const gateChecked = (task: Task, g: GateNode, results: CheckResult[], at: number): Task => {
+  if (allPassed(results)) return decide(task, g, at)
+  const failures = agentFailures(results)
+  const t = withGate(task, { lastComment: describeFailures(failures) })
+  if (t.gate!.fixes < g.maxFixes) return amend(withGate(t, { fixes: t.gate!.fixes + 1 }), g, amendPrompt(t, g, { failures }))
+  return ask(withGate(t, { phase: 'ask' }), { source: 'loop', text: gateStuckQuestion(t, g, 'checks') }, at)
+}
+
 const onChecked = (task: Task, run: CheckRun, results: CheckResult[], at: number): Task => {
   const n = current(task)!
+  if (n.kind === 'gate') return gateChecked(task, gateNode(task), results, at)
   const blocked = platformFailed(task, n, results, at)
   if (blocked !== undefined) return blocked
   const passed = allPassed(results)
@@ -170,10 +221,14 @@ const onChecked = (task: Task, run: CheckRun, results: CheckResult[], at: number
   return notPassed(task, d, describeFailures(agentFailures(results)), at)
 }
 
-/** 回复格式不对：在同一会话里重新要求；次数用完则失败，pending 保留成一个新的要求，人工重试时直接接着跑。 */
-const reformat = (task: Task, d: DialogNode, at: number, again: (t: Task) => Task): Task => {
-  const retries = task.dialog!.formatRetries
-  const next = again(withDialog(task, { formatRetries: retries >= MAX_FORMAT_RETRIES ? 0 : retries + 1 }))
+/**
+ * 回复格式不对：在同一会话里重新要求；次数用完则失败，pending 保留成一个新的要求，人工重试时直接接着跑。
+ * 重试次数记在对话或卡点的状态里（只会有其中一个）。
+ */
+const reformat = (task: Task, d: DialogNode | GateNode, at: number, again: (t: Task) => Task): Task => {
+  const retries = (task.gate ?? task.dialog)!.formatRetries
+  const set = (formatRetries: number) => (task.gate === undefined ? withDialog(task, { formatRetries }) : withGate(task, { formatRetries }))
+  const next = again(set(retries >= MAX_FORMAT_RETRIES ? 0 : retries + 1))
   if (retries < MAX_FORMAT_RETRIES) return next
   return append(
     {
@@ -244,6 +299,18 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
       return beginRound(t, d, call.purpose === 'reapply' ? 'revised' : 'reply')
     }
 
+    case 'accept': {
+      const g = gateNode(task)
+      const v = parseVerdict(text)
+      if (v === undefined) return reformat(task, g, at, t => issue(t, { node: g.id, session: g.id, role: call.role, purpose: 'accept', prompt: acceptPrompt(t, g, 'format') }))
+      return onDecision(withGate(task, { formatRetries: 0 }), g, { pass: v.verdict === 'pass', comment: describeVerdict(v), by: call.role }, at)
+    }
+
+    case 'amend': {
+      const g = gateNode(task)
+      return afterAmend({ ...task, outputs: { ...task.outputs, [g.with]: text } }, g, at)
+    }
+
     case 'reconfirm': {
       const d = dialogNode(task)
       const decision = parseDecision(text)
@@ -263,6 +330,10 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
 const onLoopAnswer = (task: Task, text: string): Task => {
   const n = current(task)
   if (n?.kind === 'agent') return issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })
+  if (n?.kind === 'gate') {
+    const g = gateNode(task)
+    return amend(withGate(task, { round: 1, fixes: 0 }), g, amendPrompt(task, g, { instruction: text }))
+  }
   const d = dialogNode(task)
   return d.escalate !== undefined ? toUpstream(task, d, reconfirmPrompt(task, d, { instruction: text })) : toTarget(task, d, 'instruct', instructPrompt(text))
 }
@@ -283,7 +354,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
           node: call.node,
           role: call.role,
           purpose: call.purpose,
-          ...(task.dialog === undefined ? {} : { round: task.dialog.round }),
+          ...((task.gate ?? task.dialog) === undefined ? {} : { round: (task.gate ?? task.dialog)!.round }),
           prompt: call.prompt,
           reply: event.text,
           usage: event.usage,
@@ -301,7 +372,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       if (event.results.length !== run.checks.length) return ignore(task, `检查结果有 ${event.results.length} 条，应该是 ${run.checks.length} 条`)
       const recorded = append(
         { ...task, pending: undefined, status: 'running' },
-        { type: 'check', at, call: run.id, node: run.node, ...(task.dialog === undefined ? {} : { round: task.dialog.round }), results: event.results, ms: event.ms },
+        { type: 'check', at, call: run.id, node: run.node, ...((task.gate ?? task.dialog) === undefined ? {} : { round: (task.gate ?? task.dialog)!.round }), results: event.results, ms: event.ms },
       )
       return ok(onChecked(recorded, run, event.results, at))
     }
@@ -330,6 +401,14 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       return ok(q.source === 'agent' ? answered : onLoopAnswer(answered, text))
     }
 
+    case 'decided': {
+      const g = task.gate
+      if (task.status !== 'waiting_accept' || g === undefined || g.node !== event.gate || g.round !== event.round) return ignore(task, '这个卡点现在不在等这次验收（可能已经有人决定过）')
+      const comment = event.comment.trim()
+      if (!event.pass && comment === '') return ignore(task, '打回时要写明意见')
+      return ok(onDecision({ ...task, status: 'running' }, gateNode(task), { pass: event.pass, comment, by: 'human' }, at))
+    }
+
     case 'retry':
       if (task.status !== 'failed') return ignore(task, '只有失败的任务可以重试')
       return ok(append({ ...task, status: 'running', failure: undefined }, { type: 'note', at, text: '人工重试' }))
@@ -342,6 +421,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
 /** 一次调用发到了哪个会话：完成工作和评审在节点自己的会话里，回应和调整在被评审方的会话里，重新确认在上游的会话里。 */
 export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['purpose'] }): string => {
   const n = wf.nodes.find(x => x.id === call.node)
+  if (n?.kind === 'gate') return call.purpose === 'amend' ? n.with : call.node
   if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'fix' || call.purpose === 'critique') return call.node
   return call.purpose === 'reconfirm' ? (n.escalate ?? call.node) : n.with
 }
@@ -350,6 +430,11 @@ export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['pur
 export const describePosition = (task: Task): string => {
   const n = current(task)
   if (n === undefined) return '已完成'
+  if (n.kind === 'gate' && task.gate !== undefined) {
+    const g = task.gate
+    const phase = { decide: `等待验收（${approverOf(n)}）`, amend: `「${n.with}」按意见修改`, check: '修改后重跑检查', ask: '等用户指示' }[g.phase]
+    return `${n.id} 第 ${g.round} 次验收 · ${phase}`
+  }
   if (task.dialog === undefined) return task.pending?.purpose === 'check' ? `${n.id} · 检查` : task.fixes > 0 ? `${n.id} · 补齐 ${task.fixes}/${(n as AgentNode).maxFixes}` : `${n.id}`
   const d = task.dialog
   return `${n.id} 第 ${d.round}/${(n as DialogNode).maxRounds} 轮 · ${d.phase}${d.escalated ? ' · 已重新确认' : ''}`

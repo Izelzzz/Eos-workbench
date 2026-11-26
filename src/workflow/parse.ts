@@ -4,7 +4,7 @@ import { matchesAny } from './glob.ts'
 import { z } from 'zod'
 import type { FieldError } from './agent.ts'
 import { agentErrors, agentFields, DEFAULT_MODEL, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
-import { PLATFORM_ACTIONS, type Check, type NodeId, type Role, type RoleId, type TemplateLookup, type Workflow, type WorkflowNode } from './types.ts'
+import { PLATFORM_ACTIONS, roleOfNode, type Check, type GateNode, type NodeId, type Role, type RoleId, type TemplateLookup, type Workflow, type WorkflowNode } from './types.ts'
 
 export type WorkflowError = FieldError
 export type ParseResult = { ok: true; workflow: Workflow } | { ok: false; errors: WorkflowError[] }
@@ -76,6 +76,9 @@ const checkFields = {
 
 const common = { id, task: text, inputs: z.array(id, { error: '必须是列表' }).default([]) }
 
+const maxFixes = z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(0, { error: '不能小于 0' }).max(10, { error: '最多 10 次' }).default(DEFAULT_MAX_FIXES)
+const maxRounds = z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 轮' }).max(20, { error: '最多 20 轮' })
+
 const nodeSchema = z.discriminatedUnion(
   'kind',
   [
@@ -85,7 +88,7 @@ const nodeSchema = z.discriminatedUnion(
         ...common,
         role: id,
         ...checkFields,
-        maxFixes: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(0, { error: '不能小于 0' }).max(10, { error: '最多 10 次' }).default(DEFAULT_MAX_FIXES),
+        maxFixes,
       })
       .strict(),
     z
@@ -96,11 +99,23 @@ const nodeSchema = z.discriminatedUnion(
         ...checkFields,
         with: id,
         escalate: id.optional(),
-        maxRounds: z.number({ error: '必须是数字' }).int({ error: '必须是整数' }).min(1, { error: '至少 1 轮' }).max(20, { error: '最多 20 轮' }).default(DEFAULT_MAX_ROUNDS),
+        maxRounds: maxRounds.default(DEFAULT_MAX_ROUNDS),
+      })
+      .strict(),
+    // 卡点：by 是 human（能访问平台的任何人）或 agent（role 角色的 agent，最多打回 maxRounds 次）。
+    z
+      .object({
+        kind: z.literal('gate'),
+        ...common,
+        with: id,
+        by: z.enum(['human', 'agent'], { error: '只能是 human（人）或 agent（某个角色的 agent，用 role 指定）' }),
+        role: id.optional(),
+        maxRounds: maxRounds.optional(),
+        maxFixes,
       })
       .strict(),
   ],
-  { error: 'kind 只能是 agent 或 dialog' },
+  { error: 'kind 只能是 agent、dialog 或 gate' },
 )
 
 const workflowSchema = z
@@ -116,6 +131,53 @@ const workflowSchema = z
   )
   .strict()
 
+type ParsedNode = z.infer<typeof nodeSchema>
+
+const checksOf = (n: Exclude<ParsedNode, { kind: 'gate' }>): Check[] => [
+  ...n.deliverables.map(d => ({ kind: 'file' as const, path: d.path, sections: d.sections })),
+  ...n.checks.map(r => ('platform' in r ? { kind: 'platform' as const, action: r.platform } : { kind: 'run' as const, run: r.run, timeoutSec: r.timeoutSec })),
+]
+
+/** 卡点的 by 和 role、maxRounds 要对得上：这几个字段组合不对时在这里报，类型里只留合法的组合。 */
+const gateErrors = (nodes: ParsedNode[]): WorkflowError[] =>
+  nodes.flatMap((n, i) => {
+    if (n.kind !== 'gate') return []
+    const at = (field: string) => `nodes[${i}].${field}`
+    if (n.by === 'agent') return n.role === undefined ? [{ path: at('role'), message: 'by: agent 时要用 role 指定由哪个角色的 agent 验收' }] : []
+    return [
+      ...(n.role === undefined ? [] : [{ path: at('role'), message: 'by: human 时不写 role；要由 agent 验收，把 by 改成 agent' }]),
+      ...(n.maxRounds === undefined ? [] : [{ path: at('maxRounds'), message: '人验收不限打回次数，maxRounds 只用于 by: agent' }]),
+    ]
+  })
+
+/**
+ * 卡点打回、修改之后重跑的检查：被验收节点和它之后、卡点之前各节点的交付物和命令检查。
+ * 平台动作不重跑（它们会改到远程）；同样的检查只跑一次（例如测试和评审两个节点都跑 npm test）。
+ */
+const gateNode = (n: Extract<ParsedNode, { kind: 'gate' }>, before: ParsedNode[]): GateNode => {
+  const from = before.findIndex(x => x.id === n.with)
+  const seen = new Set<string>()
+  const checks = (from < 0 ? [] : before.slice(from))
+    .flatMap(x => (x.kind === 'gate' ? [] : checksOf(x)))
+    .filter(c => {
+      if (c.kind === 'platform') return false
+      const k = JSON.stringify(c)
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+  return {
+    kind: 'gate',
+    id: n.id as NodeId,
+    with: n.with as NodeId,
+    by: n.by === 'agent' ? { kind: 'agent', role: n.role! as RoleId, maxRounds: n.maxRounds ?? DEFAULT_MAX_ROUNDS } : { kind: 'human' },
+    task: n.task,
+    inputs: n.inputs as NodeId[],
+    checks,
+    maxFixes: n.maxFixes,
+  }
+}
+
 /** 结构正确之后的引用检查：角色存在、只引用前面的节点、对话和重新确认的对象是 agent 节点。 */
 const semantic = (wf: Workflow): WorkflowError[] => {
   const errors: WorkflowError[] = []
@@ -123,7 +185,18 @@ const semantic = (wf: Workflow): WorkflowError[] => {
   wf.nodes.forEach((n, i) => {
     const at = (field: string) => `nodes[${i}].${field}`
     if (seen.has(n.id)) errors.push({ path: at('id'), message: `节点 id「${n.id}」重复` })
-    if (n.role !== undefined && wf.roles[n.role] === undefined) errors.push({ path: at('role'), message: `没有名为「${n.role}」的角色` })
+    const r = roleOfNode(n)
+    if (r !== undefined && wf.roles[r] === undefined) errors.push({ path: at('role'), message: `没有名为「${r}」的角色` })
+    if (n.kind === 'gate') {
+      const target = seen.get(n.with)
+      if (target === undefined) errors.push({ path: at('with'), message: `「${n.with}」必须是排在前面的节点` })
+      else if (target.kind !== 'agent') errors.push({ path: at('with'), message: `「${n.with}」必须是 agent 节点：打回时交回它原来的会话修改` })
+      n.inputs.forEach((input, j) => {
+        if (!seen.has(input)) errors.push({ path: `${at('inputs')}[${j}]`, message: `「${input}」必须是排在前面的节点` })
+      })
+      seen.set(n.id, n)
+      return
+    }
     // 交付物由写文件的那个角色产出：agent 节点是它自己，对话节点是被评审的节点。交付物在它的可写范围外时，
     // 写了会被撤销、检查永远过不了，所以在这里就报错，不留到任务里卡住。
     const writer =
@@ -198,17 +271,18 @@ export const parseWorkflow = (source: string, lookup: TemplateLookup = () => und
   const structural = [...(parsed.success ? [] : parsed.error.issues.map(i => ({ path: pathOf(i.path), message: zodMessage(i) }))), ...roleResults.flatMap(([, r]) => r.errors)]
   if (!parsed.success || structural.length > 0) return { ok: false, errors: structural }
   const p = parsed.data
+  // by 和 role、maxRounds 的组合不对时先报：组合不对就没有合法的卡点可以往下校验。
+  const combos = gateErrors(p.nodes)
+  if (combos.length > 0) return { ok: false, errors: combos }
   const workflow: Workflow = {
     name: p.name,
     ...(p.description === undefined ? {} : { description: p.description }),
     roles: Object.fromEntries(roleResults.map(([k, r]) => [k, r.role!])),
     docs: p.docs,
-    nodes: p.nodes.map(n => {
-      const { deliverables, checks: runs, ...rest } = n
-      const checks: Check[] = [
-        ...deliverables.map(d => ({ kind: 'file' as const, path: d.path, sections: d.sections })),
-        ...runs.map(r => ('platform' in r ? { kind: 'platform' as const, action: r.platform } : { kind: 'run' as const, run: r.run, timeoutSec: r.timeoutSec })),
-      ]
+    nodes: p.nodes.map((n, i) => {
+      if (n.kind === 'gate') return gateNode(n, p.nodes.slice(0, i))
+      const { deliverables: _deliverables, checks: _checks, ...rest } = n
+      const checks = checksOf(n)
       return {
         ...rest,
         checks,
