@@ -7,12 +7,9 @@ import { check, isDate } from '../.github/scripts/trivyignore-check.ts'
 const ROOT = join(import.meta.dirname, '..')
 const TODAY = '2026-11-26'
 const entry = (o: { id?: string; purls?: string; statement?: string; expired?: string } = {}) =>
-  [
-    `  - id: ${o.id ?? 'CVE-2026-1'}`,
-    `    purls: ${o.purls ?? "['pkg:npm/undici@8.11.2']"}`,
-    `    statement: ${o.statement ?? '等上游升级'}`,
-    `    expired_at: ${o.expired ?? '2026-12-25'}`,
-  ].join('\n')
+  [`  - id: ${o.id ?? 'CVE-2026-1'}`, `    purls: ${o.purls ?? "['pkg:npm/undici@8.11.2']"}`, `    statement: ${o.statement ?? '等上游升级'}`, `    expired_at: ${o.expired ?? '2026-12-25'}`].join(
+    '\n',
+  )
 const doc = (...entries: string[]) => `# 注释\nvulnerabilities:\n${entries.join('\n')}\n`
 
 test('仓库里的 .trivyignore.yaml 通过校验，4 条都锁到 undici@8.11.2', () => {
@@ -37,7 +34,15 @@ test('会悄悄放宽豁免的写法一律报错（独立审查实测 Trivy 会�
     ['purls 不带版本', doc(entry({ purls: "['pkg:npm/undici']" }))],
     ['多行 statement 里藏 expired_at', doc(`  - id: CVE-2026-1\n    purls: ['pkg:npm/a@1']\n    statement: |\n      expired_at: 2099-01-01`)],
     ['少 expired_at', doc(entry().split('\n').slice(0, 3).join('\n'))],
-    ['少 purls', doc(entry().split('\n').filter(l => !l.includes('purls')).join('\n'))],
+    [
+      '少 purls',
+      doc(
+        entry()
+          .split('\n')
+          .filter(l => !l.includes('purls'))
+          .join('\n'),
+      ),
+    ],
     ['字段写两次', doc(entry() + "\n    purls: ['pkg:npm/b@1']")],
     ['用 paths 代替 purls', doc(entry().replace(/purls: .*/, "paths: ['app/node_modules/undici/package.json']"))],
     ['字段顺序打乱（以 expired_at 开头）', 'vulnerabilities:\n  - expired_at: 2026-12-25\n    id: CVE-2026-1\n'],
