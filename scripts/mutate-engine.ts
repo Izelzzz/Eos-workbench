@@ -99,40 +99,72 @@ for (const dir of ['src', 'tests', 'vendor']) cpSync(join(ROOT, dir), join(work,
 for (const f of ['package.json', 'tsconfig.json']) cpSync(join(ROOT, f), join(work, f))
 symlinkSync(join(ROOT, 'node_modules'), join(work, 'node_modules'))
 
-const run = (): { failed: boolean; summary: string } => {
+type Outcome = { kind: 'pass' } | { kind: 'caught'; tests: string[]; fileError?: string } | { kind: 'error'; reason: string }
+
+/** 跑一遍引擎测试。有具名的测试失败才算抓住；超时、崩溃、测试文件没能加载等只在测试之外出错的，算出错，不算抓住。 */
+const run = (): Outcome => {
   try {
-    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], { cwd: work, stdio: 'pipe', timeout: 600_000, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
-    return { failed: false, summary: '全部通过' }
+    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], {
+      cwd: work,
+      stdio: 'pipe',
+      timeout: 600_000,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+    })
+    return { kind: 'pass' }
   } catch (e) {
     const out = String((e as { stdout?: string }).stdout ?? '')
-    // 输出不是终端时 node:test 用 TAP 报告（「# fail N」），是终端时用 spec 报告（「ℹ fail N」）。
-    const fail = /^(?:ℹ|#) fail (\d+)/m.exec(out)?.[1]
     const err = String((e as { stderr?: string }).stderr ?? '')
-    const crashed = /heap out of memory|ERR_CHILD_PROCESS_STDIO_MAXBUFFER|RangeError/.exec(err + String((e as Error).message))?.[0]
+    if ((e as { signal?: string }).signal === 'SIGTERM')
+      return {
+        kind: 'error',
+        reason: '超时（10 分钟内没跑完，可能是状态空间不收敛）',
+      }
+    // 输出不是终端时 node:test 用 TAP 报告：「# fail N」和每个失败的测试一行「not ok N - 名字」。
+    const fail = Number(/^# fail (\d+)/m.exec(out)?.[1] ?? 0)
+    const tests = [...new Set([...out.matchAll(/^\s*not ok \d+ - (.+)$/gm)].map(m => m[1]!.trim()))]
+    // 测试之外出的错（文件没能加载、测试结束后才抛出的异常）记在测试文件本身上，不是哪个测试抓住的。
+    const files = tests.filter(t => TESTS.includes(t))
+    const named = tests.filter(t => !TESTS.includes(t))
+    const fileError = files.length === 0 ? undefined : `${files.join('、')}（${/^# (\w*Error.*)$/m.exec(out)?.[1]?.slice(0, 120) ?? '原因见测试输出'}）`
+    if (fail > 0 && named.length > 0) return { kind: 'caught', tests: named, fileError }
+    if (fileError !== undefined)
+      return {
+        kind: 'error',
+        reason: `测试文件出了测试以外的错：${fileError}`,
+      }
+    const last = (err.trim() || String((e as Error).message).trim()).split('\n').at(-1) ?? ''
     return {
-      failed: true,
-      summary:
-        (e as { signal?: string }).signal === 'SIGTERM'
-          ? '超时（状态空间不收敛）'
-          : fail !== undefined
-            ? `${fail} 个测试失败`
-            : `测试进程异常退出（${crashed ?? err.trim().split('\n').at(-1)?.slice(0, 80) ?? '无输出'}）`,
+      kind: 'error',
+      reason: `测试进程退出但没有报出失败的测试：${last.slice(0, 120) || '无输出'}`,
     }
   }
 }
 
 const baseline = run()
-console.log(`基线（未改动）：${baseline.summary}`)
-if (baseline.failed) throw new Error('未改动的代码测试就不通过，先修好再跑变异测试')
-let escaped = 0
+if (baseline.kind !== 'pass') throw new Error(`未改动的代码测试就不通过，先修好再跑变异测试：${JSON.stringify(baseline)}`)
+console.log('基线（未改动）：全部通过\n')
+const tally = { caught: 0, escaped: [] as string[], errored: [] as string[] }
 for (const [name, from, to] of MUTATIONS) {
   if (source.split(from).length !== 2) throw new Error(`变异「${name}」的原文没有恰好出现一次，需要更新脚本`)
   writeFileSync(join(work, 'src/engine/machine.ts'), source.replace(from, to))
   const r = run()
-  if (!r.failed) escaped++
-  console.log(`${r.failed ? '抓住' : '漏网'}  ${name}：${r.summary}`)
+  if (r.kind === 'caught') {
+    tally.caught++
+    console.log(`抓住  ${name}：${r.tests.length} 个测试失败`)
+    for (const t of r.tests) console.log(`      - ${t}`)
+    if (r.fileError !== undefined) console.log(`      另外，测试文件出了测试以外的错（不算抓住的依据）：${r.fileError}`)
+  } else if (r.kind === 'pass') {
+    tally.escaped.push(name)
+    console.log(`漏网  ${name}：测试全部通过`)
+  } else {
+    tally.errored.push(name)
+    console.log(`出错  ${name}：${r.reason}`)
+  }
 }
 writeFileSync(join(work, 'src/engine/machine.ts'), source)
 rmSync(work, { recursive: true, force: true })
-console.log(`\n${MUTATIONS.length} 个变异，抓住 ${MUTATIONS.length - escaped} 个，漏网 ${escaped} 个`)
-process.exit(escaped === 0 ? 0 : 1)
+console.log(`\n${MUTATIONS.length} 个变异：抓住 ${tally.caught} 个，漏网 ${tally.escaped.length} 个，出错 ${tally.errored.length} 个`)
+for (const n of tally.escaped) console.log(`漏网：${n}`)
+for (const n of tally.errored) console.log(`出错：${n}`)
+process.exit(tally.escaped.length === 0 && tally.errored.length === 0 ? 0 : 1)
