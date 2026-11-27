@@ -352,12 +352,20 @@ test('permission guard: template permission fields, workflow role permissions, n
     '删掉评审',
   )
   assert.deepEqual(permissionChanges('workflow', flow('', test + tweak), flow('', tweak + test), none), [reviewed('顺序')], '只调换顺序也拦下')
-  // 合法的提案不拦：改工作说明、改角色的提示词、在评审前面加节点、加人验收的卡点。
+  // 合法的提案不拦：改工作说明、改角色的提示词、在评审前面加 agent 节点、加人验收的卡点。
   assert.deepEqual(permissionChanges('workflow', flow('', tweak), flow('', tweak.replace('再改一点', '再改好一点')).replace('task: 评审', 'task: 认真评审'), none), [])
   assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '').replace('写文档', '写清楚的文档'), none), [])
-  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow(tweak, ''), none), [], '评审前面加节点不在这一段里')
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow(tweak, ''), none), [], '评审前面加 agent 节点不在这一段里')
+  // 两个交付节点之间加节点（没有卡点）：pull-request 也会推送，一样拦下。
+  const pr2 = '  - { id: pr, kind: dialog, with: build, task: 开 PR, checks: [{ platform: pull-request }] }\n'
+  assert.deepEqual(permissionChanges('workflow', flow('', '') + pr2, flow('', '') + tweak + pr2, none), [reviewed('tweak')])
+  // 卡点的检查是从别的节点算出来的：给 build 加交付物，不记到 agent 验收的卡点头上。
+  const signed = (extra: string) => flow('', '  - { id: sign, kind: gate, with: build, by: agent, role: rev, task: 签字 }\n').replace('task: 实现', `task: 实现${extra}`)
+  assert.deepEqual(permissionChanges('workflow', signed(''), signed(', deliverables: [{ path: NOTES.md }]'), none), [])
   assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '  - { id: ok, kind: gate, with: build, by: human, task: 验收 }\n'), none), [])
-  // 误拦（失败就关，交给人在团队约定页改）：这一段里加严的改动，例如给交付节点加 maxRounds: 1。
+  // 误拦（失败就关，交给人在团队约定页改）：这一段里加严的改动，例如给交付节点加 maxRounds: 1；
+  // 在评审前面再加一个评审或测试的对话节点（这一段从第一个对话节点算起，起点往前挪了）。
+  assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('  - { id: pre, kind: dialog, role: rev, with: build, task: 预审 }\n', ''), none), ['不能改检查命令和平台动作', reviewed('pre')])
   assert.deepEqual(permissionChanges('workflow', flow('', ''), flow('', '').replace('task: 交付,', 'task: 交付, maxRounds: 1,'), none), [reviewed('ship')])
   assert.deepEqual(permissionChanges('workflow', withPush(dev), withPush(dev.replace('写代码', '写好代码')), none), [])
   // 节点换成别的角色、新增节点

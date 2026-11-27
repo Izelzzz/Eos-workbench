@@ -8,7 +8,8 @@ M = [
     ('只算到第一个交付节点', "const last = w.nodes.findLastIndex(n => n.checks.some(c => c.kind === 'platform'))", "const last = w.nodes.findIndex(n => n.checks.some(c => c.kind === 'platform'))"),
     ('不看顺序（只比较有哪些节点）', 'JSON.stringify(x) !== JSON.stringify(y)', 'JSON.stringify([...x].sort()) !== JSON.stringify([...y].sort())'),
     ('所有卡点都不算（agent 验收的卡点也能加）', ".filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))\n    .map(shape)\n}\n\n/**\n * 新内容", ".filter(n => n.kind !== 'gate')\n    .map(shape)\n}\n\n/**\n * 新内容"),
-    ('只比较节点 id（换 with 也放过）', "const shape = ({ task: _task, inputs: _inputs, ...n }: Workflow['nodes'][number]): string => JSON.stringify(n)", "const shape = (n: Workflow['nodes'][number]): string => JSON.stringify({ id: n.id })"),
+    ('只比较节点 id（换 with 也放过）', "JSON.stringify(n.kind === 'gate' ? { ...n, checks: undefined } : n)", "JSON.stringify({ id: n.id })"),
+    ('卡点的检查也算（上游加交付物记到卡点头上）', "JSON.stringify(n.kind === 'gate' ? { ...n, checks: undefined } : n)", "JSON.stringify(n)"),
     ('人验收的卡点也算（加人验收的卡点被误拦）', ".filter(n => !(n.kind === 'gate' && n.by.kind === 'human'))\n    .map(shape)\n}\n\n/**\n * 新内容", ".map(shape)\n}\n\n/**\n * 新内容"),
 ]
 src = open(P).read()

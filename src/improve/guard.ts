@@ -58,8 +58,11 @@ const afterGate = (w: Workflow, gate: string): string[] => {
     .map(shape)
 }
 
-/** 比较用的节点内容：工作说明和输入不算（改它们不改变谁能动代码、推送前经过哪些关）。 */
-const shape = ({ task: _task, inputs: _inputs, ...n }: Workflow['nodes'][number]): string => JSON.stringify(n)
+/**
+ * 比较用的节点内容：工作说明和输入不算（改它们不改变谁能动代码、推送前经过哪些关）。
+ * 卡点的检查是从别的节点算出来的，也不算：那些节点自己的改动另有核对，算进来会把原因记到卡点头上。
+ */
+const shape = ({ task: _task, inputs: _inputs, ...n }: Workflow['nodes'][number]): string => JSON.stringify(n.kind === 'gate' ? { ...n, checks: undefined } : n)
 const idOf = (shaped: string): string => (JSON.parse(shaped) as { id: string }).id
 
 /**
