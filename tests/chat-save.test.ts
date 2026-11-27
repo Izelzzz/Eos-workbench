@@ -6,7 +6,7 @@ import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
 import { chatCommand } from '../src/chat/cli.ts'
 import { PROPOSE_TOOL } from '../src/chat/proposals.ts'
-import { saveProposal } from '../src/chat/save.ts'
+import { confirmationCode, currentPermissions, saveProposal } from '../src/chat/save.ts'
 import { ChatStore } from '../src/chat/store.ts'
 import type { DataSource } from '../src/chat/tools.ts'
 import { TOOLS } from '../src/chat/tools.ts'
@@ -35,8 +35,12 @@ const platform = () => {
   const chats = new ChatStore(store.db)
   const redact = (s: string) => redactText(s, [SECRET])
   const opts = (executor: McpExecutor): ChatOptions => ({ chats, data, conventions, executor, dataDir: dir, redact, now: () => 100 })
-  const save = (id: number, allowPermissions = false, note?: string) =>
-    saveProposal({ store, chats, conventions, redact, id, actor: 'cli', allowPermissions, ...(note === undefined ? {} : { note }), now: () => 200 })
+  /** allowPermissions：带上「按现在的状态算出的」确认码，等于人看过 show 之后确认。 */
+  const save = (id: number, allowPermissions = false, note?: string, confirm?: string) => {
+    const prop = chats.proposal(id)
+    const code = allowPermissions && prop !== undefined ? confirmationCode(currentPermissions(prop, store, conventions)) : confirm
+    return saveProposal({ store, chats, conventions, redact, id, actor: 'cli', ...(code === undefined ? {} : { confirm: code }), ...(note === undefined ? {} : { note }), now: () => 200 })
+  }
   const dump = () => JSON.stringify(store.db.prepare('SELECT * FROM conventions ORDER BY kind, name, version').all())
   return { dir, store, conventions, chats, data, redact, opts, save, dump }
 }
@@ -104,7 +108,7 @@ test('a proposal that changes permissions is refused without the explicit confir
   const id = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replaceAll('timeoutSec: 600', 'timeoutSec: 60'), rationale: '缩短超时' })
   const refused = p.save(id)
   assert.equal(refused.ok, false)
-  assert.match((refused as { error: string }).error, /涉及权限改动，要确认之后才能保存（命令行加 --allow-permissions）/)
+  assert.match((refused as { error: string }).error, /涉及权限改动，要确认之后才能保存（命令行加 --allow-permissions [0-9a-f]{8}）/)
   assert.ok((refused as { permissions?: string[] }).permissions?.includes('改了检查命令和平台动作'))
   assert.equal(p.dump(), before, 'nothing saved without the confirmation')
   const ok = p.save(id, true)
@@ -175,7 +179,7 @@ test('eos chat show prints each proposal with its state, the diff against the cu
   const changed = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replaceAll('timeoutSec: 600', 'timeoutSec: 60'), rationale: '缩短超时' })
   const chatId = p.chats.proposal(changed)!.chatId
   const out: string[] = []
-  const run = (args: string[], extra: { allowPermissions?: boolean } = {}) =>
+  const run = (args: string[], extra: { confirm?: string } = {}) =>
     chatCommand(args, {
       chats: p.chats,
       data: p.data,
@@ -194,15 +198,17 @@ test('eos chat show prints each proposal with its state, the diff against the cu
   const text = out.join('\n')
   assert.match(text, /#\d+ {2}工作流「standard」（修改，基于第 1 版）/)
   assert.match(text, /状态：待确认，还没有保存/)
-  assert.match(text, /⚠⚠ 涉及权限改动，保存时必须加 --allow-permissions/)
+  const code = /--allow-permissions ([0-9a-f]{8})/.exec(text)?.[1] ?? ''
+  assert.match(text, /⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions [0-9a-f]{8}/)
   assert.match(text, /- .*timeoutSec: 600/)
   assert.match(text, /\+ .*timeoutSec: 60\b/)
   assert.match(text, /… 省略 \d+ 行/)
-  assert.match(text, new RegExp(`chat save ${changed} --allow-permissions`))
+  assert.match(text, new RegExp(`chat save ${changed} --allow-permissions ${code}`))
   await assert.rejects(run(['save', String(changed)]), /--allow-permissions/)
   out.length = 0
-  await run(['save', String(changed)], { allowPermissions: true })
-  assert.match(out.join('\n'), /已保存：工作流「standard」第 2 版（来自对话 .* 的提议 #\d+，确认了权限改动）/)
+  await assert.rejects(run(['save', String(changed)], { confirm: '00000000' }), /对不上/)
+  await run(['save', String(changed)], { confirm: code })
+  assert.match(out.join('\n'), /已保存：工作流「standard」第 2 版（来自对话 .* 的提议 #\d+，确认了权限改动）\n {2}已确认：改了检查命令和平台动作/)
   out.length = 0
   await run(['show', chatId])
   assert.match(out.join('\n'), /状态：已保存为第 2 版（cli，/)
@@ -218,4 +224,53 @@ test('the modules the agent can trigger never import the save path', () => {
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'chat', f), 'utf8')
     assert.ok(!/(from|import\()\s*['"]\.\/save(\.ts)?['"]/.test(src), `src/chat/${f} imports the save path`)
   }
+})
+
+test('the confirmation is bound to the permission list the person saw: if the list changes after show, the old code is refused and the new list shown', async () => {
+  const p = platform()
+  const dev = p.store.convention('template', 'developer')!.content
+  // 提议去掉 developer 模板的技能：涉及权限（技能）。
+  const id = await propose(p, { kind: 'template', name: 'developer', content: dev.replace(/^skills: .*$/m, 'skills: []'), rationale: '去掉技能' })
+  const prop = p.chats.proposal(id)!
+  const seen = confirmationCode(currentPermissions(prop, p.store, p.conventions))
+  // 看过之后，提议的内容按现在的平台状态多出一项权限改动（模拟：存下的内容被改成也放宽写入范围）。
+  p.store.db.prepare('UPDATE chat_proposals SET content = ? WHERE id = ?').run(prop.content.replace(/^writePaths: .*$/m, 'writePaths: ["**"]'), id)
+  const before = p.dump()
+  const r = p.save(id, false, undefined, seen)
+  assert.equal(r.ok, false)
+  assert.match((r as { error: string }).error, /和确认码对不上/)
+  assert.ok((r as { permissions?: string[] }).permissions?.includes('改了模板的 writePaths'))
+  assert.notEqual((r as { code?: string }).code, seen)
+  assert.equal(p.dump(), before)
+})
+
+test('the new version and the proposal’s saved mark are written in one transaction: if marking fails, the version is rolled back', async () => {
+  const p = platform()
+  const id = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replace(/^description: .*$/m, 'description: 新说明'), rationale: '改说明' })
+  const before = p.dump()
+  // 模拟另一个进程在这一刻已经把提议记成保存过（但约定还没写）：标记失败，约定也不该写。
+  const mark = p.chats.markSaved.bind(p.chats)
+  p.chats.markSaved = () => false
+  const r = p.save(id)
+  assert.equal(r.ok, false)
+  assert.match((r as { error: string }).error, /刚刚被别处保存过了/)
+  assert.equal(p.dump(), before, 'the convention write was rolled back')
+  p.chats.markSaved = mark
+  assert.ok(p.save(id).ok)
+})
+
+test('a database whose chat_proposals table predates the saved columns is upgraded in place', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eos-save-old-'))
+  dirs.push(dir)
+  const store = new Store(join(dir, 'eos.db'))
+  store.db.exec(`CREATE TABLE chats (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, title TEXT NOT NULL, actor TEXT NOT NULL);
+CREATE TABLE chat_proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL REFERENCES chats(id), call_id TEXT NOT NULL, created_at INTEGER NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, base_version INTEGER, content TEXT NOT NULL, rationale TEXT NOT NULL, permissions TEXT NOT NULL, voided TEXT);
+INSERT INTO chats VALUES ('c1', 1, 1, 't', 'cli');
+INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, content, rationale, permissions) VALUES ('c1', 'x', 1, 'workflow', 'w', 'y', 'r', '[]');`)
+  const chats = new ChatStore(store.db)
+  const old = chats.proposals('c1')[0]!
+  assert.equal(old.saved, undefined, 'an old proposal is not mistaken for a saved one')
+  assert.ok(chats.markSaved(old.id, { version: 1, actor: 'cli', at: 5 }))
+  assert.deepEqual(chats.proposal(old.id)!.saved, { version: 1, actor: 'cli', at: 5 })
+  new ChatStore(store.db) // 再开一次不重复加列
 })

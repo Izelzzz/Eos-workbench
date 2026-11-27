@@ -57,6 +57,14 @@ type NewMessage = ChatMessage extends infer M ? (M extends ChatMessage ? Omit<M,
 export class ChatStore {
   constructor(private readonly db: DatabaseSync) {
     db.exec(SCHEMA)
+    // 早先建的 chat_proposals 没有保存记录的几列：补上（CREATE TABLE IF NOT EXISTS 不会改已有的表）。
+    const columns = new Set((db.prepare('PRAGMA table_info(chat_proposals)').all() as { name: string }[]).map(c => c.name))
+    for (const [name, type] of [
+      ['saved_version', 'INTEGER'],
+      ['saved_actor', 'TEXT'],
+      ['saved_at', 'INTEGER'],
+    ] as const)
+      if (!columns.has(name)) db.exec(`ALTER TABLE chat_proposals ADD COLUMN ${name} ${type}`)
   }
 
   private tx<T>(fn: () => T): T {

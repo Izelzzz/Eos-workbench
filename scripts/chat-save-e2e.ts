@@ -1,8 +1,8 @@
 // 对话 agent 的提议经人确认保存的端到端验证（人侧）：真实的 dsh、平台 MCP 端点；经命令行请 agent 新建一个工作流，再用 eos chat show 看差异、eos chat save 保存。
 // 核对：
 // - agent 提了至少一条通过检查、没有作废的提议；在保存之前约定表一行都没变；
-// - eos chat show 显示了提议的全文（新建）、涉及权限的警告和保存命令；
-// - 不带 --allow-permissions 保存被拒绝，约定表不变；带上之后保存成第 1 版，操作人是 cli，备注写明来自哪个对话、哪个提议；
+// - eos chat show 显示了提议的全文（新建）、涉及权限的警告和带确认码的保存命令；
+// - 不带 --allow-permissions 保存被拒绝，约定表不变；带上 show 给的确认码之后保存成第 1 版，操作人是 cli，备注写明来自哪个对话、哪个提议；
 // - 同一条提议不能再保存一次；保存后 eos chat show 显示「已保存为第 1 版」；
 // - 平台持有的模型 key 不在对话记录、提议、对话 trace 和命令输出里。
 // 用法：node --import tsx scripts/chat-save-e2e.ts [--fake]
@@ -94,12 +94,26 @@ const show = id === undefined ? { code: 1, out: '' } : await eos('chat', 'show',
 await model?.close()
 const beforeSave = conventionsDump()
 // 保存第一条通过检查、没有作废的提议：先不带确认参数（新建的工作流涉及权限，应被拒），再带上。
-const pending = (new DatabaseSync(join(DATA, 'eos.db')).prepare('SELECT id FROM chat_proposals WHERE chat_id = ? AND voided IS NULL ORDER BY id').all(id ?? '') as { id: number }[]).map(r => r.id)
-const target = pending[0]
+// 要保存的：通过检查、没作废的 review-only 提议（模型可能先提别的）；没有就取第一条通过检查的。
+const checkStore = new Store(join(DATA, 'eos.db'))
+const checker = new Conventions(checkStore)
+const candidates = (
+  new DatabaseSync(join(DATA, 'eos.db')).prepare('SELECT id, kind, name, content FROM chat_proposals WHERE chat_id = ? AND voided IS NULL ORDER BY id').all(id ?? '') as {
+    id: number
+    kind: 'workflow' | 'template'
+    name: string
+    content: string
+  }[]
+).filter(p => checker.validate(p.kind, p.name, p.content).length === 0)
+checkStore.close()
+const chosen = candidates.find(p => p.kind === 'workflow' && p.name === 'review-only') ?? candidates[0]
+const target = chosen?.id
+// 确认码从 eos chat show 的输出里取：人看到的就是这份。
+const code = new RegExp(`chat save ${target} --allow-permissions ([0-9a-f]{8})`).exec(show.out)?.[1]
 const refused = target === undefined ? { code: 0, out: '' } : await eos('chat', 'save', String(target))
 const afterRefused = conventionsDump()
-const saved = target === undefined ? { code: 1, out: '' } : await eos('chat', 'save', String(target), '--allow-permissions', '--note', 'E2E 确认')
-const again = target === undefined ? { code: 0, out: '' } : await eos('chat', 'save', String(target), '--allow-permissions')
+const saved = target === undefined || code === undefined ? { code: 1, out: '没有确认码' } : await eos('chat', 'save', String(target), '--allow-permissions', code, '--note', 'E2E 确认')
+const again = target === undefined ? { code: 0, out: '' } : await eos('chat', 'save', String(target), '--allow-permissions', code ?? '00000000')
 const showAfter = id === undefined ? { code: 1, out: '' } : await eos('chat', 'show', id)
 
 const db = new DatabaseSync(join(DATA, 'eos.db'))
@@ -112,16 +126,31 @@ const conventions = new Conventions(store)
 const valid = proposals.filter(p => p.voided === null && conventions.validate(p.kind as 'workflow', p.name, p.content).length === 0)
 const offered = id === undefined ? [] : new DshExecutor({ dshHome: join(DATA, 'dsh'), dshBin: dshInstall(ROOT)!.bin, modelKey: () => KEY }).toolsOffered(`chat/${id}`)
 
-const row = store.convention('workflow', 'review-only')
+const row = chosen === undefined ? undefined : store.convention(chosen.kind, chosen.name)
 const checks: [string, boolean, unknown][] = [
   ['命令成功，有回复', first.code === 0 && messages.map(m => m.role).join(',') === 'user,assistant', first.out.slice(-1500)],
-  ['发给模型的工具表：8 个只读工具和提议工具，全是平台工具', offered.length === TOOLS.length + 1 && offered.includes(`mcp__eos__${PROPOSE_TOOL}`) && offered.every(t => t.startsWith('mcp__eos__')), offered],
+  [
+    '发给模型的工具表：8 个只读工具和提议工具，全是平台工具',
+    offered.length === TOOLS.length + 1 && offered.includes(`mcp__eos__${PROPOSE_TOOL}`) && offered.every(t => t.startsWith('mcp__eos__')),
+    offered,
+  ],
   ['agent 用了提议工具', reads.some(r => r.tool === PROPOSE_TOOL), reads],
   ['至少一条提议通过保存时的检查、没有作废', valid.length > 0, proposals.map(p => ({ id: p.id, kind: p.kind, name: p.name, voided: p.voided }))],
   ['保存之前约定表一行都没变', beforeSave === before, undefined],
-  ['eos chat show 显示了全文、权限警告和保存命令', show.out.includes('全文（新建）') && show.out.includes('⚠⚠ 涉及权限改动') && show.out.includes(`chat save ${target} --allow-permissions`), show.out.split('\n').filter(l => l.includes('#') || l.includes('⚠') || l.includes('save')).slice(0, 8)],
+  [
+    'eos chat show 显示了全文、权限警告和带确认码的保存命令',
+    show.out.includes('全文（新建）') && show.out.includes('⚠⚠ 涉及权限改动') && code !== undefined,
+    show.out
+      .split('\n')
+      .filter(l => l.includes('#') || l.includes('⚠') || l.includes('save'))
+      .slice(0, 8),
+  ],
   ['不带 --allow-permissions 保存被拒绝，约定表不变', refused.code !== 0 && refused.out.includes('--allow-permissions') && afterRefused === before, refused.out.slice(-600)],
-  ['带上之后保存成第 1 版，操作人 cli，备注写明对话和提议', saved.code === 0 && row?.version === 1 && row.actor === 'cli' && row.note === `来自对话 ${id} 的提议 #${target}（确认了权限改动）：E2E 确认`, { out: saved.out.slice(-400), version: row?.version, actor: row?.actor, note: row?.note }],
+  [
+    '带上确认码之后保存成第 1 版，操作人 cli，备注写明对话和提议，列出确认了的权限',
+    saved.code === 0 && saved.out.includes('已确认：') && row?.version === 1 && row.actor === 'cli' && row.note === `来自对话 ${id} 的提议 #${target}（确认了权限改动）：E2E 确认`,
+    { out: saved.out.slice(-400), version: row?.version, actor: row?.actor, note: row?.note },
+  ],
   ['保存的内容就是提议的内容', row?.content === proposals.find(p => p.id === target)?.content, undefined],
   ['同一条提议不能再保存一次', again.code !== 0 && again.out.includes('已经保存过'), again.out.slice(-300)],
   ['保存后 eos chat show 显示已保存', showAfter.out.includes('已保存为第 1 版（cli，'), undefined],

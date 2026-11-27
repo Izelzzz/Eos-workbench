@@ -68,7 +68,7 @@ const { values, positionals } = parseArgs({
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', short: 'h' },
     tasks: { type: 'string' },
-    'allow-permissions': { type: 'boolean', default: false },
+    'allow-permissions': { type: 'string' },
     note: { type: 'string' },
   },
 })
@@ -420,7 +420,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const conventions = new Conventions(store)
     conventions.seed(Date.now())
     await chatCommand(positionals.slice(1), {
-      allowPermissions: values['allow-permissions'] === true,
+      ...(values['allow-permissions'] === undefined ? {} : { confirm: values['allow-permissions'] }),
       ...(values.note === undefined ? {} : { note: values.note }),
       chats: new ChatStore(store.db),
       data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
