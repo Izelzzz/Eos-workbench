@@ -5,6 +5,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 /** 请求体的上限：模型请求带着整段对话，正常远小于这个值。 */
 const MAX_BODY_BYTES = 64 * 1024 * 1024
@@ -93,7 +94,12 @@ export class Upstream {
     }
     const key = this.key(req)
     if (key === undefined) return fail(401, '这个令牌不是平台登记的，或者那次调用已经结束')
-    if (!(req.url ?? '').startsWith('/v1/')) return fail(404, '只转发 /v1/ 下的模型接口')
+    // 先规范化路径（去掉 ..、多余的斜杠）再核对：fetch 拼地址时会解析 ..，原样转发能跳出 /v1/
+    const u = new URL(req.url ?? '/', 'http://upstream')
+    if (!u.pathname.startsWith('/v1/') || /(^|\/)\.\.?(\/|$)|%2e/i.test(req.url ?? '')) return fail(404, '只转发 /v1/ 下的模型接口')
+    // Claude Code 断开（调用被中止）时取消发往模型接口的请求，不再接着读、接着花 token
+    const ac = new AbortController()
+    res.on('close', () => ac.abort())
     const chunks: Buffer[] = []
     let size = 0
     try {
@@ -106,15 +112,18 @@ export class Upstream {
       for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string' && !DROP_REQUEST.test(k)) headers[k] = v
       headers['x-api-key'] = key()
       const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : new Uint8Array(Buffer.concat(chunks))
-      const r = await fetch(`${this.target}${req.url}`, { method: req.method ?? 'POST', headers, ...(body === undefined ? {} : { body }) })
+      const r = await fetch(`${this.target}${u.pathname}${u.search}`, { method: req.method ?? 'POST', headers, signal: ac.signal, ...(body === undefined ? {} : { body }) })
       const out: Record<string, string> = {}
       r.headers.forEach((v, k) => {
         if (!DROP_RESPONSE.test(k)) out[k] = v
       })
       res.writeHead(r.status, out)
+      // 流到一半出错（模型接口断开、调用被中止）时 pipeline 关掉两端，错误落到下面的 catch，不会成为未处理的异常
       if (r.body === null) res.end()
-      else Readable.fromWeb(r.body as never).pipe(res)
+      else await pipeline(Readable.fromWeb(r.body as never), res)
     } catch (e) {
+      // 已经开始回复时只能断开（Claude Code 会把这一轮当成出错）；被中止时也是
+      if (ac.signal.aborted || res.headersSent) return void res.destroy()
       // 报错里不带 key：取 key 失败（例如凭据读不出来）的原因本身不含 key
       fail(502, `转发到模型接口失败：${(e as Error).message}`)
     }

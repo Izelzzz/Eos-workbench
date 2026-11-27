@@ -6,9 +6,10 @@
 // - 模型 key 不进 Claude Code 进程：它的 ANTHROPIC_BASE_URL 指向平台在本机起的上游（claude-code-upstream.ts），
 //   拿到的只是这次调用的一次性令牌。
 // - 会话日志是 <会话目录>/.claude/projects/<cwd>/<id>.jsonl：findReply、traceOf 读它。
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, sep } from 'node:path'
 import { query, type CanUseTool, type HookCallback, type Options, type SDKMessage, type SpawnOptions } from '@anthropic-ai/claude-agent-sdk'
@@ -235,13 +236,15 @@ export class TraceStream {
     if (this.pending.length === 0) return
     const bs = this.pending.flatMap(blocks)
     const first = this.pending[0]!
+    // 实时的消息里 usage 取自流开始时，输出 token 不是最终值（最终值只在这一轮的 result 和会话日志里）：取这一步最后一条的
+    const last = this.pending.at(-1)!
     const calls = bs.filter(b => b.type === 'tool_use').map(b => ({ id: String(b.id), name: String(b.name), args: JSON.stringify(b.input ?? {}) }))
     this.pending = []
     this.emit({
       kind: 'model',
       t,
       step: this.step,
-      usage: usageOf([first]),
+      usage: usageOf([last]),
       ...(first.message?.model === undefined ? {} : { model: first.message.model }),
       reasoning: bs
         .filter(b => b.type === 'thinking')
@@ -308,11 +311,21 @@ export const replyFromResult = (r: SDKMessage | undefined, sessionId: string, mo
     text: r.result,
     usage: { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 },
     ms: r.duration_ms,
-    model: Object.keys(r.modelUsage ?? {})[0] ?? model,
+    // modelUsage 里还有 Claude Code 内部用的模型（例如 WebFetch 摘要用的小模型）：角色的模型在里面时就是它
+    model: Object.keys(r.modelUsage ?? {}).includes(model) ? model : (Object.keys(r.modelUsage ?? {})[0] ?? model),
   }
 }
 
 // ---- 执行器 ----
+
+/** 解析链接后的路径；不存在时原样返回（比较时就对不上）。 */
+const real = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
 
 const isLink = (p: string): boolean => {
   try {
@@ -347,8 +360,8 @@ export type ClaudeCodeOptions = {
 
 export class ClaudeCodeExecutor implements Executor {
   private readonly upstream: Upstream
-  /** 正在跑的调用：按工作目录，release 时中止。 */
-  private readonly running = new Map<string, Set<AbortController>>()
+  /** 正在跑的调用：按工作目录。release 时中止它们，并等它们（连同 Claude Code 进程）结束。 */
+  private readonly running = new Map<string, Set<{ ac: AbortController; done: Promise<void> }>>()
   private enforcement: LandlockEnforcement | undefined
 
   constructor(private readonly o: ClaudeCodeOptions) {
@@ -369,39 +382,54 @@ export class ClaudeCodeExecutor implements Executor {
     return this.enforcement
   }
 
-  /** 以 agent 的用户（设置了时）运行一个短命令。 */
-  private run(argv: string[]): ReturnType<typeof spawnSync> {
+  /**
+   * 以 agent 的用户（设置了时）运行一个短命令。异步：读大的会话日志、扫 /proc 时不卡住平台进程
+   * （Web 服务和上游转发别的调用的模型回复都在这个进程里）。
+   */
+  private run(argv: string[]): Promise<{ status: number | null; stdout: Buffer; error: string }> {
     const [cmd, ...args] = this.o.agentUser === undefined ? withoutCaps(argv) : asUser(this.o.agentUser, argv)
-    return spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
+    return new Promise(done => {
+      const out: Buffer[] = []
+      let err = ''
+      const p = spawn(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'pipe'] })
+      const timer = setTimeout(() => p.kill('SIGKILL'), 30_000)
+      p.stdout.on('data', (c: Buffer) => out.push(c))
+      p.stderr.on('data', (c: Buffer) => (err = (err + c.toString()).slice(-2000)))
+      p.on('error', e => (err = e.message))
+      p.on('close', status => {
+        clearTimeout(timer)
+        done({ status, stdout: Buffer.concat(out), error: err.trim() || `退出码 ${status ?? '（被信号终止）'}` })
+      })
+    })
   }
 
   /** 建会话目录。部署镜像里由 agent 的用户建（属于它，0700）；Claude Code 进程以它运行，要能写。 */
-  private ensureHome(id: string): string {
+  private async ensureHome(id: string): Promise<string> {
     const home = this.sessionHome(id)
     if (this.o.agentUser === undefined) {
       mkdirSync(tmpDir(home), { recursive: true, mode: 0o700 })
       return home
     }
-    const r = this.run(['sh', '-c', 'umask 077 && mkdir -p "$1/tmp"', 'sh', home])
-    if (r.status !== 0) throw new Error(`以 ${this.o.agentUser.name} 建会话目录失败：${r.error?.message ?? r.stderr?.toString().trim()}`)
+    const r = await this.run(['sh', '-c', 'umask 077 && mkdir -p "$1/tmp"', 'sh', home])
+    if (r.status !== 0) throw new Error(`以 ${this.o.agentUser.name} 建会话目录失败：${r.error}`)
     return home
   }
 
   /** 读会话日志：没有时 undefined，读不出来时抛错（不能当成新会话）。 */
-  readLog(id: string): Entry[] | undefined {
+  async readLog(id: string): Promise<Entry[] | undefined> {
     const home = this.sessionHome(id)
     if (this.o.agentUser === undefined) {
       const dir = join(configDir(home), 'projects')
       if (!existsSync(dir)) return undefined
       for (const p of readdirSync(dir)) {
         const f = join(dir, p, `${id}.jsonl`)
-        if (existsSync(f)) return parseLog(readFileSync(f, 'utf8'))
+        if (existsSync(f)) return parseLog(await readFile(f, 'utf8'))
       }
       return undefined
     }
-    const r = this.run(['sh', '-c', CAT_LOG, 'sh', home, id])
+    const r = await this.run(['sh', '-c', CAT_LOG, 'sh', home, id])
     if (r.status === 3) return undefined
-    if (r.status !== 0) throw new Error(`以 ${this.o.agentUser.name} 读会话日志 ${id} 失败：${r.error?.message ?? r.stderr?.toString().trim()}`)
+    if (r.status !== 0) throw new Error(`以 ${this.o.agentUser.name} 读会话日志 ${id} 失败：${r.error}`)
     return parseLog(r.stdout.toString())
   }
 
@@ -440,8 +468,11 @@ export class ClaudeCodeExecutor implements Executor {
     return [home, '/tmp', ...(spec.write === 'worktree' ? [spec.cwd] : []), '/dev/null', ...(existsSync('/dev/tty') ? ['/dev/tty'] : [])]
   }
 
-  /** 起 Claude Code 进程：清掉能力（或切换到 agent 的用户），再套上 Landlock。stderr 留最后一段，进程异常退出时放进报错。 */
-  private spawner(writable: string[], stderr: { tail: string }) {
+  /**
+   * 起 Claude Code 进程：清掉能力（或切换到 agent 的用户），再套上 Landlock。stderr 留最后一段，进程异常退出时放进报错。
+   * exited 记下进程退出：调用要等它真的退出才算结束（release 之后不能还有它在写会话）。
+   */
+  private spawner(writable: string[], stderr: { tail: string }, exited: Promise<void>[]) {
     return (s: SpawnOptions) => {
       const inner = confined(writable, [s.command, ...s.args])
       const argv = this.o.agentUser === undefined ? withoutCaps(inner) : asUser(this.o.agentUser, inner)
@@ -449,6 +480,7 @@ export class ClaudeCodeExecutor implements Executor {
       child.stderr.on('data', (d: Buffer) => {
         stderr.tail = (stderr.tail + d.toString()).slice(-2000)
       })
+      exited.push(new Promise(ok => child.once('close', () => ok())))
       return child
     }
   }
@@ -457,8 +489,8 @@ export class ClaudeCodeExecutor implements Executor {
    * 同一个会话的进程如果还活着（平台崩溃留下的孤儿，ppid 是 1），先结束它：它会和这次调用同时写同一个会话。
    * 命令行里带会话 id（--session-id、--resume）的就是。按 /proc 找，不依赖 pkill（部署镜像里没有 procps）。
    */
-  private killStale(id: string): void {
-    this.run(['sh', '-c', KILL_SESSION, 'sh', id])
+  private async killStale(id: string): Promise<void> {
+    await this.run(['sh', '-c', KILL_SESSION, 'sh', id])
   }
 
   private mcpServers(mcp: AgentMcp[]): Options['mcpServers'] {
@@ -474,19 +506,23 @@ export class ClaudeCodeExecutor implements Executor {
     // 没有 key 时不起进程：先取一次，取不到就报错（转发时还会每次重新取）
     this.o.modelKey()
     const id = sessionIdFor(p.key)
-    const log = this.readLog(id)
+    const log = await this.readLog(id)
     if (log !== undefined) {
+      // Claude Code 记的是解析过链接的路径（getcwd），平台给的可能没有解析：两边都解析后再比
       const cwd = log.find(e => typeof e.cwd === 'string')?.cwd
-      if (cwd !== undefined && cwd !== spec.cwd) throw new Error(`这个 agent 会话的工作目录是 ${cwd}，不是任务的 worktree ${spec.cwd}：为了安全不再续接。请中止这个任务后重新发起。`)
+      if (cwd !== undefined && real(cwd) !== real(spec.cwd)) throw new Error(`这个 agent 会话的工作目录是 ${cwd}，不是任务的 worktree ${spec.cwd}：为了安全不再续接。请中止这个任务后重新发起。`)
     }
-    const home = this.ensureHome(id)
-    this.killStale(id)
+    const home = await this.ensureHome(id)
+    await this.killStale(id)
     const ac = new AbortController()
+    let finish!: () => void
+    const entry = { ac, done: new Promise<void>(ok => (finish = ok)) }
     const set = this.running.get(spec.cwd) ?? new Set()
-    set.add(ac)
+    set.add(entry)
     this.running.set(spec.cwd, set)
     const grant = this.upstream.grant(this.o.modelKey)
     const stderr = { tail: '' }
+    const exited: Promise<void>[] = []
     try {
       const baseUrl = await this.upstream.url()
       const model = spec.model ?? DEFAULT_MODEL
@@ -508,7 +544,7 @@ export class ClaudeCodeExecutor implements Executor {
         hooks: { PreToolUse: [{ hooks: [gate(tools, mcpNames, spec.profile.background)] }] },
         canUseTool: answer(p.ask),
         abortController: ac,
-        spawnClaudeCodeProcess: this.spawner(this.grants(home, spec), stderr),
+        spawnClaudeCodeProcess: this.spawner(this.grants(home, spec), stderr, exited),
       }
       let result: SDKMessage | undefined
       const trace = new TraceStream(e => p.onEvent?.(e))
@@ -527,29 +563,39 @@ export class ClaudeCodeExecutor implements Executor {
       return replyFromResult(result, id, model)
     } finally {
       grant.revoke()
-      set.delete(ac)
+      // SDK 在 query 结束时关掉进程（先关 stdin，约 2 秒后强制结束）：等它真的退出
+      await Promise.all(exited)
+      set.delete(entry)
       if (set.size === 0) this.running.delete(spec.cwd)
+      finish()
     }
   }
 
   async findReply(key: string, nonce: string): Promise<Reply | undefined> {
     const id = sessionIdFor(key)
-    const log = this.readLog(id)
+    const log = await this.readLog(id)
     return log === undefined ? undefined : replyAfter(log, nonce, id)
   }
 
   async traceOf(key: string, nonce: string): Promise<TraceEvent[]> {
-    const log = this.readLog(sessionIdFor(key))
+    const log = await this.readLog(sessionIdFor(key))
     return log === undefined ? [] : traceAfter(log, nonce)
   }
 
-  /** 中止这个工作目录里正在跑的调用（Claude Code 进程连同它起的命令一起结束）。之后的调用照常可用，会话从日志续接。 */
+  /**
+   * 中止这个工作目录里正在跑的调用，等它们结束（SDK 在 query 结束前关掉 Claude Code 进程，连同它起的命令）：
+   * runner 在这之后放开任务锁，下一个 runner 续接会话时旧进程已经不在。之后的调用照常可用，会话从日志续接。
+   */
   async release(cwd: string): Promise<void> {
-    for (const ac of this.running.get(cwd) ?? []) ac.abort()
+    const calls = [...(this.running.get(cwd) ?? [])]
+    for (const c of calls) c.ac.abort()
+    await Promise.allSettled(calls.map(c => c.done))
   }
 
   async close(): Promise<void> {
-    for (const set of this.running.values()) for (const ac of set) ac.abort()
+    const calls = [...this.running.values()].flatMap(set => [...set])
+    for (const c of calls) c.ac.abort()
+    await Promise.allSettled(calls.map(c => c.done))
     await this.upstream.close()
   }
 }

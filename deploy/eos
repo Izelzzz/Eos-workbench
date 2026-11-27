@@ -43,17 +43,22 @@ as_agent() {
   # 主组按 passwd 里的 gid（和 deploy/dsh-launch.mjs 一样），不假定有同名的组。
   setpriv --reuid="$EOS_AGENT_USER" --regid="$(id -g "$EOS_AGENT_USER")" --init-groups --inh-caps=-all --ambient-caps=-all -- "$@"
 }
-# dsh home 的权限：组内可写（dsh 在里面建自己的目录）加 sticky 位（eos-agent 改不了名、删不掉平台的目录），
-# 平台自己的目录（eos-*）先建好、组内不可写：eos-agent 不能在里面放链接，让平台顺着链接写到别处（src/executor/dsh.ts 的 platformDir）。
-own_dsh() {
-  mkdir -p "$1" && chgrp eos-dsh "$1" && chmod 3770 "$1" || return 1
-  for d in eos-profiles eos-process-cwd; do
-    if [ -L "$1/$d" ] || { [ -e "$1/$d" ] && [ "$(stat -c %U "$1/$d")" != eos ]; }; then
-      echo "eos：$1/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写。删掉它后重启：docker compose run --rm -u eos-agent eos rm -rf $1/$d" >&2
+# 执行器数据目录（dsh、Claude Code）的权限：组内可写（执行器在里面建自己的目录）加 sticky 位（eos-agent 改不了名、删不掉平台的目录），
+# 平台自己的目录（$1 之后的参数，eos-*）先建好、组内不可写：eos-agent 不能在里面放链接，让平台顺着链接写到别处
+# （src/executor/dsh.ts 的 platformDir、src/executor/claude-code.ts 的 plugin）。
+own_executor_dir() {
+  dir="$1"; shift
+  mkdir -p "$dir" && chgrp eos-dsh "$dir" && chmod 3770 "$dir" || return 1
+  for d in "$@"; do
+    if [ -L "$dir/$d" ] || { [ -e "$dir/$d" ] && [ "$(stat -c %U "$dir/$d")" != eos ]; }; then
+      echo "eos：$dir/$d 不是平台自己的目录（链接，或者属于别的用户），平台不会往里写。删掉它后重启：docker compose run --rm -u eos-agent eos rm -rf $dir/$d" >&2
       continue
     fi
-    mkdir -p "$1/$d" && chmod 2755 "$1/$d" || return 1
+    mkdir -p "$dir/$d" && chmod 2755 "$dir/$d" || return 1
   done
+}
+own_dsh() {
+  own_executor_dir "$1" eos-profiles eos-process-cwd || return 1
   # MCP 服务的工作目录：MCP 服务以 eos-agent 运行，要能在里面写缓存、日志。平台只把它当 cwd 传给 dsh，不往里写，
   # 所以交给 eos-agent（src/executor/dsh.ts 的 mcpCwd）。
   if [ -L "$1/mcp-cwd" ]; then
@@ -106,9 +111,9 @@ if [ -n "${EOS_AGENT_USER:-}" ]; then
   # 迁移停在中间（返回 2）时，除了 doctor 都不运行：会启动 dsh 的命令（web、run、resume……）会建出 dsh 目录，
   # 下一次启动平台就会把它当成旧数据再迁移，删掉复制好的数据。
   prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" != doctor ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
-  # Claude Code 执行器的数据目录和 dsh 的一样：Claude Code 以 eos-agent 运行，在 sessions/ 下建自己的会话目录（0700）；
+  # Claude Code 执行器的数据目录：Claude Code 以 eos-agent 运行，在 sessions/ 下建自己的会话目录（0700）；
   # 平台往 eos-profiles/ 写技能，并以 eos-agent 的身份读会话日志（src/executor/claude-code.ts）。没有旧数据要迁移。
-  own_dsh "$data/claude-code" || echo "eos：没能把 $data/claude-code 准备成 $EOS_AGENT_USER 能用的，用 Claude Code 执行器的任务可能失败" >&2
+  own_executor_dir "$data/claude-code" eos-profiles || echo "eos：没能把 $data/claude-code 准备成 $EOS_AGENT_USER 能用的，用 Claude Code 执行器的任务可能失败" >&2
 fi
 
 cd /app

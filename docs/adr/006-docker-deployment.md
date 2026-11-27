@@ -199,7 +199,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。上一级 `/data/dsh` 的 sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
 | `/data/dsh/mcp-cwd/` | 属于 `eos-agent` | MCP 服务在里面写缓存和日志；平台不往里写 |
 | dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/executor/dsh.ts` 的 `readSessionLogAs`） |
-| `/data/claude-code` | 和 `/data/dsh` 一样（`deploy/eos` 用同一个函数准备）；平台往 `eos-profiles/` 写技能 | Claude Code 以 `eos-agent` 运行 |
+| `/data/claude-code` | 和 `/data/dsh` 一样：`eos`、组 `eos-dsh`、3770；`eos-profiles/` 由平台启动时创建，2755 | Claude Code 以 `eos-agent` 运行；平台往 `eos-profiles/` 写技能，写入前核对它是平台自己的真目录 |
 | `/data/claude-code/sessions/` 和其中每个会话的目录 | `eos-agent` 创建，2700（setgid 从上一级继承） | 会话的 HOME、配置和会话日志。Claude Code 在 Landlock 下只能写自己这个会话的目录、`/tmp`，可写的角色还能写 worktree。平台以 `eos-agent` 的身份建目录、读日志 |
 | `/data/worktrees` | 2755，带 setgid，组 `eos-work` | 目录本身组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接 |
 | 各任务的 worktree | 组 `eos-work`，平台的 umask 是 002 | 检查命令能写 agent 改过的文件 |
@@ -417,7 +417,7 @@ GitHub Actions 把镜像发布到 ghcr（`.github/workflows/image.yml`）。目�
 | 范围 | 文件 |
 |---|---|
 | 镜像和 compose | `Dockerfile`、`.dockerignore`、`compose.yaml` |
-| 启动和降权 | `deploy/eos`（降权入口，准备和迁移 `/data/dsh`）、`deploy/dsh-launch.mjs`（清掉能力并切换到 `eos-agent`）、`deploy/git`（清掉能力） |
+| 启动和降权 | `deploy/eos`（降权入口，准备和迁移 `/data/dsh`，准备 `/data/claude-code`）、`deploy/dsh-launch.mjs`（清掉能力并切换到 `eos-agent`）、`deploy/git`（清掉能力） |
 | 平台代码 | `src/cli.ts`、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`、`src/runner/git.ts`（清掉能力、撤销时核对路径）、`src/runner/supervisor.ts`、`src/runner/runner.ts`、`src/runner/mirror.ts`、`src/executor/dsh.ts`、`src/credentials/model-key.ts` |
 | 镜像发布 | `.github/workflows/image.yml`、`.github/scripts/` 下的 `image-tags.ts`、`image-build.sh`、`image-push.sh`、`image-probe.ts`、`image-probe-checks.json`、`image-scan.sh`，以及 `.trivyignore.yaml` |
 | 文档和验证 | `docs/deploy.md`、`scripts/deploy-e2e.ts` |

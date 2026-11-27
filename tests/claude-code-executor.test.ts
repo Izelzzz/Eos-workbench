@@ -2,7 +2,8 @@
 // 以及真的启动 Claude Code（套着 Landlock，模型接口是本机的假接口）核对 key 隔离、写入范围、工具表、技能、提问、后台作业。
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 import { answer, BUILTIN_TOOLS, ClaudeCodeExecutor, claudeCodeHealth, gate, installFact, processEnv, replyAfter, sessionIdFor, toolsFor, traceAfter, type Entry } from '../src/executor/claude-code.ts'
@@ -113,6 +114,28 @@ describe('上游', () => {
     assert.equal((await post(g.token)).status, 401, '调用结束后令牌没用了')
     assert.equal(up.active, 0)
     await up.close()
+  })
+  test('路径先规范化再核对：.. 跳不出 /v1/；模型接口流到一半断开时平台不崩，回复被断开', async () => {
+    const broken = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('event: message_start\ndata: {}\n\n')
+      setTimeout(() => res.socket?.destroy(), 50)
+    })
+    await new Promise<void>(ok => broken.listen(0, '127.0.0.1', ok))
+    const port = (broken.address() as { port: number }).port
+    const up = new Upstream(`http://127.0.0.1:${port}`)
+    const url = await up.url()
+    const g = up.grant(() => 'k')
+    for (const path of ['/v1/../admin', '/v1/%2e%2e/admin', '/v1/./../x']) {
+      assert.equal((await fetch(`${url}${path}`, { method: 'POST', headers: { 'x-api-key': g.token } })).status, 404, path)
+    }
+    const r = await fetch(`${url}/v1/messages`, { method: 'POST', headers: { 'x-api-key': g.token }, body: '{}' })
+    assert.equal(r.status, 200)
+    await assert.rejects(r.text(), '流断开时回复也断开')
+    // 平台进程还在，上游照常服务
+    assert.equal((await fetch(`${url}/v1/messages`, { method: 'POST', headers: { 'x-api-key': 'bad' } })).status, 401)
+    await up.close()
+    await new Promise(ok => broken.close(ok))
   })
   test('模型接口地址：默认官方；只接受 https 或本机 http，不带用户名和密码', () => {
     assert.equal(anthropicBaseUrl({}), 'https://api.anthropic.com')
@@ -316,6 +339,29 @@ describe('真的启动 Claude Code', () => {
     assert.equal(mine.signalCode, 'SIGKILL')
     assert.equal(other.exitCode, null, '别的会话的进程还在')
     other.kill()
+    await ex.close()
+  })
+
+  test('release 中止这个 worktree 里正在跑的调用，等 Claude Code 进程结束后才返回；经过链接的同一个 worktree 照常续接', async () => {
+    const { root, ws, ex } = make()
+    let started!: () => void
+    const running = new Promise<void>(ok => (started = ok))
+    fake.reply = script(() => (started(), [{ tool: 'Bash', input: { command: 'node -e "setTimeout(() => {}, 30000)" eos-release-probe' } }]))
+    const call = ex.send({ key: 'k/rel', spec: spec(ws), prompt: '一', nonce: 'n1', ask: async () => '' })
+    await running
+    await new Promise(ok => setTimeout(ok, 1500))
+    const t0 = Date.now()
+    await ex.release(ws)
+    await assert.rejects(call, /中止/)
+    assert.ok(Date.now() - t0 < 15_000)
+    // Claude Code 进程已经退出；它起的命令在它退出时被结束，几秒内消失
+    const alive = async () => new Promise(ok => spawn('pgrep', ['-f', 'eos-release-probe']).on('exit', code => ok(code === 0)))
+    for (let i = 0; i < 50 && (await alive()); i++) await new Promise(ok => setTimeout(ok, 100))
+    assert.equal(await alive(), false, 'agent 起的命令也不在了')
+    // 同一个 worktree 经过一个链接给出：续接，不当成别的目录
+    symlinkSync(ws, join(root, 'link'))
+    fake.reply = r => [{ text: `claude-code：${stepOf(r)}` }]
+    await ex.send({ key: 'k/rel', spec: spec(join(root, 'link')), prompt: '二', nonce: 'n2', ask: async () => '' })
     await ex.close()
   })
 
