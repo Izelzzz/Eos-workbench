@@ -60,7 +60,8 @@ export const saveProposal = (o: {
     }
   }
   const userNote = o.note?.trim() ?? ''
-  const note = `来自对话 ${p.chatId} 的提议 #${p.id}${permissions.length > 0 ? '（确认了权限改动）' : ''}${userNote === '' ? '' : `：${userNote}`}`
+  // 确认了哪些权限改动也写进备注：以后在约定的历史里查得到是谁、批了什么。
+  const note = `来自对话 ${p.chatId} 的提议 #${p.id}${permissions.length > 0 ? `（确认了权限改动：${permissions.join('；')}）` : ''}${userNote === '' ? '' : `：${userNote}`}`
   const at = o.now()
   let row
   try {

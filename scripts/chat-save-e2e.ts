@@ -148,7 +148,12 @@ const checks: [string, boolean, unknown][] = [
   ['不带 --allow-permissions 保存被拒绝，约定表不变', refused.code !== 0 && refused.out.includes('--allow-permissions') && afterRefused === before, refused.out.slice(-600)],
   [
     '带上确认码之后保存成第 1 版，操作人 cli，备注写明对话和提议，列出确认了的权限',
-    saved.code === 0 && saved.out.includes('已确认：') && row?.version === 1 && row.actor === 'cli' && row.note === `来自对话 ${id} 的提议 #${target}（确认了权限改动）：E2E 确认`,
+    saved.code === 0 &&
+      saved.out.includes('已确认：') &&
+      row?.version === 1 &&
+      row.actor === 'cli' &&
+      row.note.startsWith(`来自对话 ${id} 的提议 #${target}（确认了权限改动：`) &&
+      row.note.endsWith('）：E2E 确认'),
     { out: saved.out.slice(-400), version: row?.version, actor: row?.actor, note: row?.note },
   ],
   ['保存的内容就是提议的内容', row?.content === proposals.find(p => p.id === target)?.content, undefined],

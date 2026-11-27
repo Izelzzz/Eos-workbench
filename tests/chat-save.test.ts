@@ -113,7 +113,7 @@ test('a proposal that changes permissions is refused without the explicit confir
   assert.equal(p.dump(), before, 'nothing saved without the confirmation')
   const ok = p.save(id, true)
   assert.ok(ok.ok)
-  assert.match(p.store.convention('workflow', 'standard')!.note, /（确认了权限改动）/)
+  assert.match(p.store.convention('workflow', 'standard')!.note, /（确认了权限改动：改了检查命令和平台动作；改了评审到交付之间的节点/)
   // 新建的约定总要确认（整份权限都要人看）。
   const fresh = await propose(p, { kind: 'workflow', name: 'standard-lite', content: standard(p).replace(/^name: .*$/m, 'name: standard-lite'), rationale: '新工作流' })
   assert.equal(p.save(fresh).ok, false)
@@ -273,4 +273,21 @@ INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, content, r
   assert.ok(chats.markSaved(old.id, { version: 1, actor: 'cli', at: 5 }))
   assert.deepEqual(chats.proposal(old.id)!.saved, { version: 1, actor: 'cli', at: 5 })
   new ChatStore(store.db) // 再开一次不重复加列
+})
+
+test('two proposals based on the same version: the first save wins, the second is refused as stale, and only one version is added', async () => {
+  const p = platform()
+  const a = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replace(/^description: .*$/m, 'description: A'), rationale: 'A' })
+  const b = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replace(/^description: .*$/m, 'description: B'), rationale: 'B' })
+  assert.equal(p.chats.proposal(a)!.baseVersion, 1)
+  assert.equal(p.chats.proposal(b)!.baseVersion, 1)
+  assert.ok(p.save(a).ok)
+  const second = p.save(b)
+  assert.equal(second.ok, false)
+  assert.match((second as { error: string }).error, /基于第 1 版，「standard」现在是第 2 版/)
+  assert.deepEqual(
+    p.store.conventionHistory('workflow', 'standard').map(r => r.version),
+    [2, 1],
+  )
+  assert.equal(p.chats.proposal(b)!.saved, undefined)
 })
