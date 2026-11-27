@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS chat_proposals (
   base_version INTEGER,
   content TEXT NOT NULL,
   rationale TEXT NOT NULL,
+  permissions TEXT NOT NULL,
   voided TEXT
 );`
 
@@ -141,10 +142,10 @@ export class ChatStore {
   }
 
   /** 记下一条提议（只追加）。提议不改任何约定。 */
-  addProposal(p: Omit<ChatProposal, 'id' | 'at'>, at: number): ChatProposal {
+  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided'>, at: number): ChatProposal {
     const r = this.db
-      .prepare('INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, base_version, content, rationale) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(p.chatId, p.call, at, p.kind, p.name, p.baseVersion ?? null, p.content, p.rationale)
+      .prepare('INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, base_version, content, rationale, permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(p.chatId, p.call, at, p.kind, p.name, p.baseVersion ?? null, p.content, p.rationale, JSON.stringify(p.permissions))
     return this.proposal(Number(r.lastInsertRowid))!
   }
 
@@ -188,5 +189,6 @@ const proposalRow = (r: Record<string, unknown>): ChatProposal => ({
   ...(r.base_version === null ? {} : { baseVersion: Number(r.base_version) }),
   content: String(r.content),
   rationale: String(r.rationale),
+  permissions: JSON.parse(String(r.permissions)) as string[],
   ...(r.voided === null ? {} : { voided: String(r.voided) }),
 })

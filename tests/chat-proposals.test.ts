@@ -174,7 +174,39 @@ test('proposals from a turn that got no reply (the call failed, or could not be 
   // 平台重启：这一句的提议已经记下，但调用没做完、也认领不到回复。
   const id = p.chats.create({ id: 'c7', firstMessage: '你好', actor: 'cli' }, 1).id
   const seq = p.chats.append(id, { at: 1, role: 'user', text: '设计一个工作流', actor: 'cli' })
-  p.chats.addProposal({ chatId: id, call: `chat/${id}/${seq}`, kind: 'workflow', name: 'standard-lite', content: yaml, rationale: 'x' }, 1)
+  p.chats.addProposal({ chatId: id, call: `chat/${id}/${seq}`, kind: 'workflow', name: 'standard-lite', content: yaml, rationale: 'x', permissions: [] }, 1)
   assert.ok((await new Chats(p.opts(new McpExecutor(() => ({ reply: '好' })))).send(id, '还在吗', 'cli')).ok)
   assert.match(p.chats.proposals(id)[0]!.voided ?? '', /没有得到回复/)
+})
+
+test('the permission changes of a proposal are computed when it is recorded (the improvement-proposal guard, plus template skills), and told to the agent', async () => {
+  const p = platform()
+  const wf = standard(p)
+  const dev = p.store.convention('template', 'developer')!.content
+  const ex = new McpExecutor(
+    steps([
+      // 改检查命令：改进提案的核对会拦的那一类。
+      { tool, args: { kind: 'workflow', name: 'standard', content: wf.replaceAll('timeoutSec: 600', 'timeoutSec: 60'), rationale: '缩短超时' } },
+      // 只改说明：不涉及权限。
+      { tool, args: { kind: 'workflow', name: 'standard', content: wf.replace(/^description: .*$/m, 'description: 新说明'), rationale: '改说明' } },
+      // 模板：放宽写入范围、去掉技能。
+      { tool, args: { kind: 'template', name: 'developer', content: dev.replace(/^writePaths: .*$/m, 'writePaths: ["**"]').replace(/^skills: .*$/m, 'skills: []'), rationale: '放开' } },
+      // 新建的模板和工作流：整份权限都要看。
+      { tool, args: { kind: 'template', name: 'helper', content: dev.replace(/^name: .*$/m, 'name: helper'), rationale: '新角色' } },
+      { tool, args: { kind: 'workflow', name: 'standard-lite', content: renamed(wf, 'standard-lite'), rationale: '新工作流' } },
+    ]),
+  )
+  const r = await new Chats(p.opts(ex)).start('改一下', 'cli')
+  assert.ok(r.ok)
+  const [checks, desc, tpl, newTpl, newWf] = p.chats.proposals(r.chat.id).map(x => x.permissions)
+  assert.ok(checks!.includes('不能改检查命令和平台动作'), JSON.stringify(checks))
+  assert.deepEqual(desc, [])
+  assert.ok(tpl!.includes('不能改模板的 writePaths'), JSON.stringify(tpl))
+  assert.ok(
+    tpl!.some(x => x.startsWith('模板的技能从 write-changes 改成 无')),
+    JSON.stringify(tpl),
+  )
+  assert.match(newTpl![0]!, /^新建的 Agent 模板：模型 .*写入 worktree（src\/\*\*/)
+  assert.match(newWf![0]!, /^新建的工作流/)
+  assert.match(r.reply, /这条提议涉及权限，用户确认时会单独看到/)
 })
