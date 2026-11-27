@@ -3,6 +3,7 @@ import type { Entry, Purpose, Task, Usage } from '../engine/types.ts'
 import { addUsage, isCheck, zeroUsage } from '../engine/types.ts'
 import { describeCheck, describeRequirements } from '../engine/checks.ts'
 import type { Span, SpanStatus, TraceEvent } from './types.ts'
+import { roleOfNode } from '../workflow/types.ts'
 
 export const PURPOSE: Record<Purpose, string> = {
   produce: '完成工作',
@@ -12,6 +13,8 @@ export const PURPOSE: Record<Purpose, string> = {
   reconfirm: '重新确认',
   reapply: '按新方案调整',
   instruct: '按用户指示调整',
+  accept: '验收',
+  amend: '按验收意见修改',
 }
 
 const ended = (spans: Span[]) => spans.every(s => s.end !== undefined)
@@ -204,6 +207,10 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const loopQuestions = new Set<string>()
     for (const [k, e] of task.log.entries()) {
       if (e.type === 'note' && e.node === n.id) children.push(instant(`${n.id}.note${k}`, 'note', e.text, e.at))
+      if (e.type === 'decision' && e.node === n.id)
+        children.push(
+          instant(`${n.id}.decision${k}`, 'note', `第 ${e.round} 次验收${e.pass ? '通过' : '打回'}（${e.by === 'human' ? '人' : e.by}）`, e.at, e.comment === '' ? {} : { output: e.comment }),
+        )
       if (e.type === 'question' && e.question.source === 'loop' && e.question.node === n.id) {
         loopQuestions.add(e.question.id)
         children.push(instant(`${n.id}.${e.question.id}`, 'question', `提问 ${e.question.id}`, e.at, { output: e.question.text }))
@@ -212,7 +219,17 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     }
     children.sort(byStart)
     const status: SpanStatus =
-      i < task.cursor ? 'ok' : i > task.cursor ? 'pending' : task.status === 'waiting_user' ? 'waiting' : task.status === 'failed' ? 'error' : task.status === 'aborted' ? 'error' : 'running'
+      i < task.cursor
+        ? 'ok'
+        : i > task.cursor
+          ? 'pending'
+          : task.status === 'waiting_user' || task.status === 'waiting_accept'
+            ? 'waiting'
+            : task.status === 'failed'
+              ? 'error'
+              : task.status === 'aborted'
+                ? 'error'
+                : 'running'
     const start = startOf(children)
     const end = status === 'ok' ? endOf(children) : undefined
     return {
@@ -224,8 +241,9 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
       status,
       usage: sumUsage(children.filter(c => c.kind === 'call')),
       meta: {
-        类型: n.kind === 'agent' ? 'agent 节点' : '对话节点',
-        ...(n.role === undefined ? {} : { 角色: n.role }),
+        类型: n.kind === 'agent' ? 'agent 节点' : n.kind === 'dialog' ? '对话节点' : '卡点',
+        ...(roleOfNode(n) === undefined ? {} : { 角色: roleOfNode(n)! }),
+        ...(n.kind === 'gate' ? { 验收对象: n.with, 验收人: n.by.kind === 'human' ? '人' : `${n.by.role}（最多打回 ${n.by.maxRounds} 次）` } : {}),
         ...(n.kind === 'dialog' ? { 评审对象: n.with, 最多轮数: String(n.maxRounds), ...(n.escalate ? { 重新确认: n.escalate } : {}) } : {}),
         ...(n.checks.length === 0 ? {} : { 验收检查: describeRequirements(n.checks) }),
         ...(n.kind === 'agent' && n.checks.length > 0 ? { 最多自动补齐: `${n.maxFixes} 次` } : {}),
@@ -237,7 +255,7 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
   const reached = nodes.filter(n => n.status !== 'pending')
   const finished = task.status === 'done' || task.status === 'aborted'
   const lastNote = task.log.filter(e => e.type === 'note').at(-1)
-  const taskStatus: SpanStatus = task.status === 'done' ? 'ok' : task.status === 'waiting_user' ? 'waiting' : task.status === 'running' ? 'running' : 'error'
+  const taskStatus: SpanStatus = task.status === 'done' ? 'ok' : task.status === 'waiting_user' || task.status === 'waiting_accept' ? 'waiting' : task.status === 'running' ? 'running' : 'error'
   return {
     id: task.id,
     kind: 'task',

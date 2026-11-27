@@ -92,7 +92,7 @@ const groupBy = <T>(xs: T[], key: (x: T) => string): Map<string, T[]> => {
 const byWall = <T extends { wallMs: number }>(a: T, b: T) => b.wallMs - a.wallMs
 
 export const insights = (samples: Sample[]): Insights => {
-  const statuses: TaskStatus[] = ['running', 'waiting_user', 'done', 'failed', 'aborted']
+  const statuses: TaskStatus[] = ['running', 'waiting_user', 'waiting_accept', 'done', 'failed', 'aborted']
   const tasks = { total: samples.length, ...Object.fromEntries(statuses.map(s => [s, samples.filter(x => x.task.status === s).length])) } as Insights['tasks']
 
   const byWorkflow = [...groupBy(samples, s => s.task.workflow.name)]

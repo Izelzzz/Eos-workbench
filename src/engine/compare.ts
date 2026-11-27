@@ -112,7 +112,7 @@ export const compare = (samples: CompareSample[], target: { kind: TargetKind; na
   const failed: string[] = []
   for (const s of samples) {
     const v = versionUsed(s, target.kind, target.name)
-    if (v === null || s.task.status === 'running' || s.task.status === 'waiting_user') continue
+    if (v === null || s.task.status === 'running' || s.task.status === 'waiting_user' || s.task.status === 'waiting_accept') continue
     if (v === undefined) {
       unknown.push(s.task.id)
       continue

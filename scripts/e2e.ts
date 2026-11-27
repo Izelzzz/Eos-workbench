@@ -5,6 +5,8 @@
 // 4. 跑完后从存储里逐条检查，结果写到 .eos/e2e/report.json，完整输出在 .eos/e2e/run.log。
 // 设置 EOS_E2E_REPO=https://github.com/<owner>/<repo> 时不建本地示例仓库，在这个远程仓库上跑（它要有同样的 package.json 和 src/math.js）：
 // 先把 EOS_E2E_GIT_TOKEN 存进凭据存储（名字是主机名，需要 EOS_MASTER_KEY）。工作流用 feature-pr：feature 加一个交付节点，平台推送任务分支并开 PR。
+// 卡点（路线图第 5 项）：feature 后面加两个卡点。sign-off 由评审角色的 agent 验收；accept 由人验收：
+// 第一次停在卡点时 SIGKILL runner，续跑后确认不重复发起验收，再用 `eos send-back` 打回一次、改完回到卡点后 `eos accept` 通过。
 // 跑完多核对任务记下了远程仓库、数据目录里找不到令牌、远程的任务分支和本地一致、开了 PR 且再开一次会复用同一个。
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -67,10 +69,19 @@ const setupRepo = () => {
 
 const cli = (args: string[]) => spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env })
 
-const answer = (id: string, text: string) => execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), 'answer', id, text, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
+const cliSync = (...args: string[]) => execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
+const answer = (id: string, text: string) => cliSync('answer', id, text)
 
-/** 运行一个 CLI 进程，遇到提问就回答；killAfter 匹配到某一行时 SIGKILL。返回任务 id 与是否被杀。 */
-const drive = (args: string[], opts: { killAfter?: RegExp } = {}) =>
+/** 人在卡点 accept 上的意见：第一次打回，之后通过。 */
+const SEND_BACK = '请在 src/math.js 的 sum 上方补一段 JSDoc 注释，写明参数、返回值和会抛出的错误。'
+/** 人验收的卡点上发生过什么：第几次停下、怎么处理的（杀进程、打回、通过）。 */
+const gateLog: string[] = []
+
+/**
+ * 运行一个 CLI 进程，遇到提问就回答；killAfter 匹配到某一行时 SIGKILL。返回任务 id 与是否被杀。
+ * 停在人验收的卡点上时：killAtGate 就 SIGKILL（验证重启后不重复发起），否则第一次打回、之后通过。
+ */
+const drive = (args: string[], opts: { killAfter?: RegExp; killAtGate?: boolean } = {}) =>
   new Promise<{ id: string; killed: boolean }>((resolve, reject) => {
     const child = cli(args)
     let id = args[0] === 'resume' ? args[1]! : ''
@@ -89,6 +100,20 @@ const drive = (args: string[], opts: { killAfter?: RegExp } = {}) =>
       if (line.startsWith('待回答')) {
         const out = answer(id, '按评审意见改，保留 sum 这个名字')
         record(`[e2e] 用户回答对话尽头的问题：${out}`)
+      }
+      const gate = /^⏸ 等待验收（(\S+) 第 (\d+) 次）/.exec(line)
+      if (gate !== null) {
+        if (opts.killAtGate && !killed) {
+          killed = true
+          gateLog.push(`${gate[1]}#${gate[2]} SIGKILL`)
+          record(`\n[e2e] 停在卡点 ${gate[1]} 第 ${gate[2]} 次，SIGKILL runner（pid ${child.pid}）\n\n`)
+          child.kill('SIGKILL')
+          return
+        }
+        const pass = gateLog.some(g => g.endsWith('send-back'))
+        const out = pass ? cliSync('accept', id, '可以了') : cliSync('send-back', id, SEND_BACK)
+        gateLog.push(`${gate[1]}#${gate[2]} ${pass ? 'accept' : 'send-back'}`)
+        record(`[e2e] 卡点 ${gate[1]} 第 ${gate[2]} 次：${pass ? '通过' : '打回'}：${out}`)
       }
       if (!killed && opts.killAfter?.test(line)) {
         killed = true
@@ -123,15 +148,35 @@ else {
     c.close()
     if (!put.ok) throw new Error(put.error)
   }
-  // feature 加一个交付节点：平台推送任务分支并开 PR。
+}
+/** feature 加两个卡点（agent 签字、人验收）；远程仓库再加一个交付节点：平台推送任务分支并开 PR。 */
+const WORKFLOW = remote === undefined ? 'feature-gate' : 'feature-pr'
+{
   const feature = readFileSync(join(ROOT, 'src', 'workflow', 'templates', 'feature.yaml'), 'utf8')
-  const push = `${feature.replace(/^name: feature$/m, 'name: feature-pr').trimEnd()}\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n`
+  const gates = [
+    '  - id: sign-off',
+    '    kind: gate',
+    '    with: build',
+    '    by: agent',
+    '    role: reviewer',
+    '    maxRounds: 2',
+    '    inputs: [plan]',
+    '    task: 最后签字：确认实现满足方案的验收标准、测试覆盖了边界情况。',
+    '  - id: accept',
+    '    kind: gate',
+    '    with: build',
+    '    by: human',
+    '    task: 人验收开发的改动。',
+  ].join('\n')
+  const deliver = '  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n'
+  const content = `${feature.replace(/^name: feature$/m, `name: ${WORKFLOW}`).trimEnd()}\n${gates}\n${remote === undefined ? '' : deliver}`
+  mkdirSync(DATA, { recursive: true })
   const seedStore = new Store(join(DATA, 'eos.db'))
   const conventions = new Conventions(seedStore)
   conventions.seed(Date.now())
-  const saved = conventions.save({ kind: 'workflow', name: 'feature-pr', content: push, actor: 'e2e' }, Date.now())
+  const saved = conventions.save({ kind: 'workflow', name: WORKFLOW, content, actor: 'e2e' }, Date.now())
   seedStore.close()
-  if (!saved.ok) throw new Error(`保存 feature-pr 失败：${JSON.stringify(saved)}`)
+  if (!saved.ok) throw new Error(`保存 ${WORKFLOW} 失败：${JSON.stringify(saved)}`)
 }
 /**
  * 跑的是哪份代码：Eos 仓库的提交，以及没提交的改动（pr-checklist 用它们核对证据对得上 PR 的最终代码）。
@@ -151,8 +196,21 @@ function codeState(): { commit?: string; uncommitted?: string[] } {
 }
 const atStart = codeState()
 writeFileSync(LOG, `# M1 E2E ${new Date().toISOString()}\n# 需求：\n${REQUEST}\n\n`)
-const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', remote === undefined ? 'feature' : 'feature-pr', REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
+const first = await drive(['run', '--repo', REMOTE ?? REPO, '--workflow', WORKFLOW, REQUEST], { killAfter: /^✓ \[build\] dev|^✓ \[build\] developer/ })
 if (!first.killed) record('\n[e2e] 警告：没有在开发完成后杀掉进程\n')
+const second = await drive(['resume', first.id], { killAtGate: true })
+/** 停在人验收的卡点上、runner 被杀之后，存储里的任务（重启后读回的就是它）。 */
+const atGate = (() => {
+  const s = new Store(join(DATA, 'eos.db'))
+  const t = s.get(first.id)!
+  s.close()
+  return { status: t.status, gate: t.gate, pending: t.pending?.purpose, calls: t.log.filter(e => e.type === 'call').length }
+})()
+record(`\n[e2e] 卡点上被杀后存储里的任务：${JSON.stringify(atGate)}\n`)
+/** 命令行列出等验收的任务（runner 已被杀，任务停在卡点上）。 */
+const gatesOut = cliSync('gates')
+record(`[e2e] eos gates：\n${gatesOut}\n`)
+if (!second.killed) record('\n[e2e] 警告：没有在卡点上杀掉进程\n')
 await drive(['resume', first.id])
 
 const store = new Store(join(DATA, 'eos.db'))
@@ -235,7 +293,10 @@ const sessionLog = (session: string) => {
   const asks = events.filter(e => e.type === 'tool/call' && e.data?.name === 'ask_user_question').length
   return { sid, calls, presets, asks }
 }
-const sessions = Object.fromEntries(['plan', 'build', 'review'].map(s => [s, sessionLog(s)]))
+const sessions = Object.fromEntries(['plan', 'build', 'review', 'sign-off'].map(s => [s, sessionLog(s)]))
+const decisions = task.log.flatMap(e => (e.type === 'decision' ? [e] : []))
+const gateNotes = task.log.flatMap(e => (e.type === 'note' && e.node === 'accept' && e.text.includes('次验收：等') ? [e.text] : []))
+const firstDecision = task.log.findIndex(e => e.type === 'decision')
 const devCalls = calls.filter(c => c.role === 'developer').map(c => c.call)
 const checks = {
   任务完成: task.status === 'done',
@@ -247,6 +308,14 @@ const checks = {
   '杀进程后续跑：没有重复记录同一个调用': new Set(ids).size === ids.length,
   '耗时和 token 都有记录': calls.every(c => c.ms > 0 && c.usage.input + c.usage.cacheRead > 0),
   'worktree 里 npm test 通过': testRun.ok,
+  'agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位':
+    decisions.some(d => d.node === 'sign-off' && d.by === 'reviewer' && d.pass) && sessions['sign-off']!.presets.at(-1) === 'read-only',
+  '停在人验收的卡点上：状态是等待验收，不挂任何工作': atGate.status === 'waiting_accept' && atGate.gate?.node === 'accept' && atGate.pending === undefined,
+  '卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）': JSON.stringify(gateNotes.map(n => /第 (\d+) 次/.exec(n)?.[1])) === '["1","2"]',
+  命令行列出等验收的任务: gatesOut.includes(first.id) && gatesOut.includes('等待验收'),
+  '人打回一次（带意见）、改完回到卡点后通过': JSON.stringify(decisions.filter(d => d.node === 'accept').map(d => [d.round, d.pass, d.comment === SEND_BACK])) === '[[1,false,true],[2,true,false]]',
+  打回后交回开发原来的会话修改: calls.some(c => c.purpose === 'amend' && c.node === 'accept' && c.role === 'developer' && sessions.build!.calls.includes(c.call)),
+  '卡点打回之后没有再请评审 agent': !task.log.slice(firstDecision).some(e => e.type === 'call' && e.purpose === 'critique'),
   ...(remote === undefined ? {} : remoteChecks()),
 }
 const resent = store.events(first.id).filter(e => e.event.kind === 'replied' && !e.accepted).length
@@ -257,6 +326,9 @@ const result = {
   ...(atEnd.commit !== atStart.commit ? { commitAtEnd: atEnd.commit } : {}),
   task: first.id,
   killed: first.killed,
+  killedAtGate: second.killed,
+  gateLog,
+  atGate,
   checks,
   sessions,
   rejectedReplies: resent,

@@ -95,7 +95,38 @@ export type DialogNode = {
   inputs: NodeId[]
 }
 
-export type WorkflowNode = AgentNode | DialogNode
+/**
+ * 验收人。human：能访问平台的任何人（平台还没有登录），在命令行或网页上通过或打回；
+ * agent：某个角色的 agent，结论按评审的格式（verdict）解析，最多打回 maxRounds 次，之后问用户。
+ */
+export type Approver = { kind: 'human' } | { kind: 'agent'; role: RoleId; maxRounds: number }
+
+/**
+ * 卡点：任务停在这里，等验收人验收 with 节点的产出和改动。通过就往下走；打回时附意见，
+ * 交回 with 节点原来的会话修改，改完重跑 checks（只重跑程序检查，不再请评审 agent），通过后回到卡点。
+ */
+export type GateNode = {
+  kind: 'gate'
+  id: NodeId
+  /** 被验收的 agent 节点。 */
+  with: NodeId
+  by: Approver
+  /** 验收说明：验收什么、按什么标准。 */
+  task: string
+  inputs: NodeId[]
+  /**
+   * 打回修改后重跑的程序检查：被验收节点自己的，和卡点之前评审或测试它（with 是它）的对话节点的交付物和命令检查（去掉重复的，不含平台动作）。
+   * 解析时算好，模板里不写。
+   */
+  checks: Check[]
+  /** 重跑检查不通过时自动交回修改的次数；用完了问用户。 */
+  maxFixes: number
+}
+
+export type WorkflowNode = AgentNode | DialogNode | GateNode
+
+/** 节点由哪个角色的 agent 来做：agent 节点、有评审方的对话节点、由 agent 验收的卡点；没有就是 undefined。 */
+export const roleOfNode = (n: WorkflowNode): RoleId | undefined => (n.kind === 'gate' ? (n.by.kind === 'agent' ? n.by.role : undefined) : n.role)
 
 export type Workflow = {
   name: string

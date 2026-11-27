@@ -1,6 +1,6 @@
 // 每种调用用途的提示词。纯函数：只读任务状态，不做 IO。
-import type { AgentNode, DialogNode, NodeId, Workflow, WorkflowNode } from '../workflow/types.ts'
-import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
+import type { AgentNode, DialogNode, GateNode, NodeId, Workflow, WorkflowNode } from '../workflow/types.ts'
+import { node as nodeOf, role as roleOf, roleOfNode } from '../workflow/types.ts'
 import { describeCheck, describeFailures, describeRequirements } from './checks.ts'
 import type { CheckResult, ReviewKind, Task } from './types.ts'
 
@@ -40,8 +40,9 @@ export const writeScope = (write: 'none' | 'worktree', writePaths: string[]): st
 
 /** 会话的第一条消息带上团队约定、角色说明和可写范围；之后同一会话里不再重复。 */
 const intro = (task: Task, session: NodeId, wf: Workflow, n: WorkflowNode): string => {
-  if (task.sessions[session] !== undefined || n.role === undefined) return ''
-  const r = roleOf(wf, n.role)
+  const id = roleOfNode(n)
+  if (task.sessions[session] !== undefined || id === undefined) return ''
+  const r = roleOf(wf, id)
   return conventions(task) + section('你的角色', r.prompt) + section('你的可写范围', writeScope(r.write, r.writePaths))
 }
 
@@ -111,4 +112,45 @@ export const instructPrompt = (instruction: string): string => `${section('用�
 export const stuckQuestion = (task: Task, d: DialogNode): string => {
   const tail = task.dialog?.escalated ? `，「${d.escalate}」已重新确认过一次` : ''
   return `「${d.id}」和「${d.with}」对话 ${d.maxRounds} 轮仍未通过${tail}。最近一轮没通过的原因：\n${task.dialog?.lastCritique ?? '（无）'}\n\n请告诉我接下来怎么做。`
+}
+
+/** 卡点上等谁验收，给提示词、状态说明和命令行用。 */
+export const approverOf = (g: GateNode): string => (g.by.kind === 'human' ? '任何能访问平台的人' : `角色「${g.by.role}」的 agent`)
+
+/** 卡点打回后重跑的检查（如果有），告诉验收的 agent 这些已经由平台验证过。 */
+const rechecked = (g: GateNode): string => section('平台检查（修改后已重跑并通过）', g.checks.length === 0 ? undefined : g.checks.map(c => `- ${describeCheck(c)}`).join('\n'))
+
+/**
+ * agent 验收：第一次给完整的任务、需求、上游产出和被验收的产出；之后（打回、修改之后）在同一会话里只给修改后的回复。
+ * 结论和评审一样按 VERDICT_FORMAT 解析。
+ */
+export const acceptPrompt = (task: Task, g: GateNode, kind: 'first' | 'again' | 'format'): string => {
+  const head = intro(task, g.id, task.workflow, g)
+  const round = task.gate?.round ?? 1
+  switch (kind) {
+    case 'first':
+      return `${head}${section('验收', g.task)}${context(task, g)}${section(`待验收：${g.with} 的产出`, task.outputs[g.with])}请查看改动（git diff，方法见环境说明）后给出验收结论。\n\n${VERDICT_FORMAT}`
+    case 'again':
+      return `${head}${rechecked(g)}${section(`第 ${round} 次验收：${g.with} 修改后的回复`, task.outputs[g.with])}请复核最新改动（git diff）后重新给出验收结论。\n\n${VERDICT_FORMAT}`
+    case 'format':
+      return `${head}你上一条回复无法解析成验收结论。\n\n${VERDICT_FORMAT}`
+  }
+}
+
+/** 被验收方修改：按打回意见、重跑检查的失败，或用户的指示。在它原来的会话里说话。 */
+export const amendPrompt = (task: Task, g: GateNode, input: { comment: string; round: number } | { failures: CheckResult[] } | { instruction: string }): string => {
+  const target = nodeOf(task.workflow, g.with)
+  const head = intro(task, g.with, task.workflow, target)
+  if ('instruction' in input) return `${head}${section('用户的指示', input.instruction)}请据此修改。最后简要说明你做了什么。`
+  if ('failures' in input) return `${head}${section('按验收意见修改之后，重跑检查没有通过', describeFailures(input.failures))}请在原来的工作上修好。最后简要说明你改了什么。`
+  return `${head}${section(`验收没有通过（第 ${input.round} 次验收，验收人：${approverOf(g)}）`, input.comment)}请在原来的工作上按意见修改，不要从头重来；意见不对时带着理由说明。最后简要说明你做了什么。`
+}
+
+/** 卡点上自动处理用完了，问用户：agent 验收打回次数用完，或修改后重跑检查补齐次数用完。 */
+export const gateStuckQuestion = (task: Task, g: GateNode, why: 'rounds' | 'checks'): string => {
+  const head =
+    why === 'rounds' && g.by.kind === 'agent'
+      ? `「${g.id}」由${approverOf(g)}验收，打回 ${g.by.maxRounds} 次后仍没有通过。最近一次的意见：`
+      : `「${g.id}」打回修改之后，重跑检查自动交回修改 ${g.maxFixes} 次仍没有通过：`
+  return `${head}\n${task.gate?.lastComment ?? '（无）'}\n\n请告诉我接下来怎么做。`
 }
