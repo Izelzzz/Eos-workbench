@@ -167,6 +167,7 @@ const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandbo
   name,
   capabilities: { ...ALL, ...o.capabilities },
   modelKey: { credential: name, env: `${name.toUpperCase()}_API_KEY`, label: `${name} key` },
+  failureHints: [{ test: /401/, fix: `${name} 的 key 无效` }],
   create: () => {
     if (o.fails) throw new Error(`${name} 没装好`)
     const ex = new MemoryExecutor(name)
@@ -201,6 +202,23 @@ test('注册表按 spec.executor 分派，不写时用第一个（默认）；�
   )
   await reg.close()
   assert.ok(made.every(m => m.closed))
+})
+
+test('失败的修法按那次调用用的执行器给；不写名字时是默认执行器，认不出时 undefined；不用为此建执行器', () => {
+  const made: MemoryExecutor[] = []
+  const reg = new Executors(ctxFor, [kind('a', made), kind('b', made)])
+  assert.equal(reg.failureHint('HTTP 401', 'b'), 'b 的 key 无效')
+  assert.equal(reg.failureHint('HTTP 401'), 'a 的 key 无效')
+  assert.equal(reg.failureHint('奇怪的错误', 'b'), undefined)
+  assert.equal(made.length, 0)
+})
+
+test('每个登记的执行器的修法都说得出它自己的 key：401 时指向它的凭据名和环境变量', () => {
+  const reg = new Executors(ctxFor)
+  for (const k of EXECUTORS) {
+    const fix = reg.failureHint('Request failed with status 401 Unauthorized', k.name) ?? ''
+    assert.ok(fix.includes(k.modelKey.credential) && fix.includes(k.modelKey.env), `${k.name}：${fix}`)
+  }
 })
 
 test('两个执行器里有同名的会话和 nonce 时，找回走调用用的那个执行器，不会认错', async () => {

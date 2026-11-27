@@ -16,7 +16,7 @@
 | Eos 没有登录，能打开地址的人权限相同 | 不要把端口暴露到网络上，按「访问」一节的两种方式访问 |
 | 主密钥丢失后，存过的凭据只能重新录入 | 把 `.env` 里的 `EOS_MASTER_KEY` 另外备份一份 |
 | 能使用 docker 的宿主机用户能看到主密钥 | 只让可信的人加入 docker 组 |
-| 配置了 MCP 服务时，MCP 服务读得到 DeepSeek 的模型 key；沙箱失效时 agent 也读得到 | 使用额度受限的模型 key |
+| 配置了 MCP 服务时，MCP 服务读得到 DeepSeek 的模型 key；沙箱失效时 agent 也读得到。用 Claude Code 的 agent 在调用期间能经平台调模型 | 使用额度受限的模型 key |
 | 一个任务的 agent 能读服务器上所有仓库和所有任务的记录 | 只放入对全体使用者都可见的仓库 |
 | agent 访问网络不受限制 | 需要限制时在宿主机或 Docker 网络一层配置 |
 
@@ -192,16 +192,16 @@ agent 运行任务时使用的就是这个镜像。
    - 在 `.env` 里加一行 `ANTHROPIC_API_KEY=<你的 key>`，执行 `docker compose up -d`；
    - 在 Web 的凭据页添加名为 `anthropic`、类型为「模型 API key」的凭据。两处都有时用凭据页的。
 2. 在角色里写 `executor: claude-code`。不写 `model` 时用 `claude-sonnet-5-5`。
-3. 运行 `docker compose exec eos eos doctor`，Claude Code 的几项应为 ✓。这几项只在 `eos doctor` 里列出，没有准备好时平台照常启动，用 Claude Code 的角色在调用时报错。
+3. 运行 `docker compose exec eos eos doctor`，「Claude Code」「Anthropic API key」「Claude Code 沙箱」三项应为 ✓。它们没有准备好时只在 `eos doctor` 里显示 ⚠，平台照常启动，用 Claude Code 的角色在调用时报错。
 
 使用前要知道的：
 
 | 事项 | 说明 |
 |---|---|
 | 模型 key | 只在平台进程里。Claude Code 进程和 agent 拿到的是一次调用有效的令牌，调用结束后作废 |
-| 沙箱 | 整个 Claude Code 进程在 Landlock 下运行：只能写自己的会话目录和 `/tmp`，可写的角色还能写自己的 worktree。宿主机不支持 Landlock 时拒绝调用 |
+| 沙箱 | 整个 Claude Code 进程在 Landlock 下运行：只能写自己的会话目录和 `/tmp`，可写的角色还能写自己的 worktree。宿主机不支持 Landlock 时拒绝调用；内核的 Landlock 版本较旧时只能限制一部分写操作，`eos doctor` 显示 ⚠ |
 | 网络 | Claude Code 只经平台访问模型接口，关掉了遥测、错误报告和自动更新。agent 的命令访问网络不受限制，和 dsh 一样 |
-| 模型接口地址 | 默认 `https://api.anthropic.com`。经网关访问时设置 `EOS_ANTHROPIC_BASE_URL`（https，或本机的 http）；模型请求和 key 都会发到那里 |
+| 模型接口地址 | 默认 `https://api.anthropic.com`。经网关访问时在 `compose.yaml` 的 `environment` 下加 `EOS_ANTHROPIC_BASE_URL`（https，或本机的 http）；模型请求和 key 都会发到那里，`eos doctor` 显示 ⚠。地址不合法时为 ✗，平台不启动 |
 | 许可 | Claude Agent SDK 和它带的 Claude Code 按 Anthropic 的条款使用（见 `node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md`） |
 
 ### 安装项目依赖

@@ -102,6 +102,8 @@ describe('上游', () => {
     assert.equal((await post(undefined)).status, 401)
     assert.equal((await post('sk-ant-eos-guess')).status, 401)
     assert.equal((await post(g.token, '/other')).status, 404)
+    assert.equal((await post(g.token, '/v1/models')).status, 404, '只转发 /v1/messages')
+    assert.equal((await fetch(`${url}/v1/messages`, { headers: { 'x-api-key': g.token } })).status, 405, '只转发 POST')
     const ok = await post(g.token)
     assert.equal(ok.status, 200)
     assert.match(await ok.text(), /claude-code：上游/)
@@ -135,7 +137,27 @@ describe('上游', () => {
     // 平台进程还在，上游照常服务
     assert.equal((await fetch(`${url}/v1/messages`, { method: 'POST', headers: { 'x-api-key': 'bad' } })).status, 401)
     await up.close()
+    broken.closeAllConnections()
     await new Promise(ok => broken.close(ok))
+  })
+  test('请求体和回复都有上限：超过时拒绝或断开', async () => {
+    const big = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end('x'.repeat(10_000))
+    })
+    await new Promise<void>(ok => big.listen(0, '127.0.0.1', ok))
+    const up = new Upstream(`http://127.0.0.1:${(big.address() as { port: number }).port}`, { body: 1000, response: 5000 })
+    const url = await up.url()
+    const g = up.grant(() => 'k')
+    assert.equal((await fetch(`${url}/v1/messages`, { method: 'POST', headers: { 'x-api-key': g.token }, body: 'y'.repeat(2000) })).status, 413)
+    // 断开可能发生在回复头发出之前或之后：两种情况客户端都拿不到完整的回复
+    await assert.rejects(
+      fetch(`${url}/v1/messages`, { method: 'POST', headers: { 'x-api-key': g.token }, body: '{}' }).then(r => r.text()),
+      '回复超过上限时断开',
+    )
+    await up.close()
+    big.closeAllConnections()
+    await new Promise(ok => big.close(ok))
   })
   test('模型接口地址：默认官方；只接受 https 或本机 http，不带用户名和密码', () => {
     assert.equal(anthropicBaseUrl({}), 'https://api.anthropic.com')

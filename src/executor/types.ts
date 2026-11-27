@@ -86,6 +86,9 @@ export const unmet = (name: string, c: Capabilities, n: AgentNeeds): string[] =>
 /** 核对一个 agent 能不能交给某个执行器（不写名字时是默认执行器）：能时 undefined，不能时是原因（没登记，或者做不到的要求）。 */
 export type ExecutorCheck = (executor: string | undefined, needs: AgentNeeds) => string | undefined
 
+/** 执行器认得的错误：错误文字 → 怎么修（具体到这个执行器的 key、模型接口、日志）。 */
+export type FailureHint = { test: RegExp; fix: string }
+
 export type Reply = { sessionId: string; text: string; usage: Usage; ms: number; model?: string }
 
 export type AgentQuestion = { id: string; text: string; options?: string[] }
@@ -104,6 +107,8 @@ export interface Executor {
    * executor：这次调用 send 时 spec.executor 的值（不写是默认执行器）。注册表据此交给那个执行器；单个执行器不用它。
    */
   findReply(key: string, nonce: string, executor?: string): Promise<Reply | undefined>
+  /** 调用失败时这个执行器给出的修法（认不出时 undefined，由平台按通用的表给）。executor 同 findReply。 */
+  failureHint?(error: string, executor?: string): string | undefined
   /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。executor 同 findReply。 */
   traceOf(key: string, nonce: string, executor?: string): Promise<TraceEvent[]>
   /** 释放这个工作目录占用的资源（例如 agent 进程）。任务的 runner 结束时调用；之后的调用照常可用。 */
@@ -143,11 +148,12 @@ export type ExecutorContext = {
   agentUser?: CheckUser
 }
 
-/** 注册表里的一种执行器：名字、能做到的能力面、要的模型 key、怎么建、怎么自检。 */
+/** 注册表里的一种执行器：名字、能做到的能力面、要的模型 key、认得的错误、怎么建、怎么自检。 */
 export type ExecutorKind = {
   name: string
   capabilities: Capabilities
   modelKey: ModelKeySpec
+  failureHints: FailureHint[]
   create(ctx: ExecutorContext): Executor
   health(ctx: ExecutorContext): Health
 }

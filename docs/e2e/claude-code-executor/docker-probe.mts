@@ -1,7 +1,8 @@
 // 在部署镜像里实测 Claude Code 执行器的沙箱（不调真模型：模型接口是本机的假接口）。
 // 由 docker-probe.sh 在容器里以平台用户 eos 运行（和 deploy/eos 一样带着 SETUID、SETGID、KILL），Docker 默认的 seccomp。
 // 每条结论一行 PASS / FAIL，最后一行是失败数。
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ClaudeCodeExecutor, sessionIdFor } from '/app/src/executor/claude-code.ts'
@@ -106,6 +107,79 @@ fake.reply = script(
 )
 await ex.send({ key: 'probe/skill', spec: { write: 'worktree', cwd: ws, profile }, prompt: '用技能', nonce: 'n1', ask })
 check('平台给的技能在镜像里能用（插件目录 agent 只读）', sent.includes('SK-DOCK'), sent.includes('SK-DOCK'))
+
+// ---- 上游只认这次调用的令牌：别的任务的 agent、检查命令（eos-check）都用不了 ----
+const checkUser = checkUserFrom(process.env, undefined, 'EOS_CHECK_USER')!
+const base = /^ANTHROPIC_BASE_URL=(.+)$/m.exec(env)![1]!
+const expired = /sk-ant-eos-[0-9a-f]+/.exec(env)![0]
+/** 以 user 运行一段 node 脚本（对上游发请求），输出它打印的一行。异步：上游就在这个进程里，同步等会卡死它。 */
+const asNode = async (user: NonNullable<typeof checkUser>, code: string): Promise<string> => {
+  const [c, ...a] = asUser(user, [process.execPath, '-e', code])
+  return (await promisify(execFile)(c!, a, { encoding: 'utf8', env: { PATH: process.env.PATH ?? '/usr/bin:/bin' } })).stdout.trim()
+}
+const tryUpstream = (token: string) =>
+  `fetch(${JSON.stringify(`${base}/v1/messages`)}, { method: 'POST', headers: { 'content-type': 'application/json'${token === '' ? '' : `, 'x-api-key': ${JSON.stringify(token)}`} }, body: '{}' }).then(r => r.status, e => 'ERR ' + e.message)`
+// 任务 A 的调用一直在跑（它的令牌有效）；同时任务 B 的 agent 在自己的调用里找别人的令牌、拿过期的令牌和不带令牌去连上游
+const wsB = join(data, 'worktrees', `probe-b-${process.pid}`)
+mkdirSync(wsB, { recursive: true })
+execFileSync('chgrp', ['eos-work', wsB])
+execFileSync('chmod', ['2775', wsB])
+let releaseA!: () => void
+const holdA = new Promise<void>(ok => (releaseA = ok))
+let aStarted!: () => void
+const aRunning = new Promise<void>(ok => (aStarted = ok))
+const scanB = [
+  `own=$ANTHROPIC_API_KEY`,
+  `for p in /proc/[0-9]*; do tr '\\0' '\\n' < $p/environ 2>/dev/null | grep -o 'sk-ant-eos-[0-9a-f]*'; done | sort -u | grep -v "^$own$" > ${wsB}/others.txt`,
+  `node -e '${'const t=require("fs").readFileSync(process.argv[1],"utf8").trim().split("\\n").filter(Boolean); const go=k=>fetch(process.argv[2],{method:"POST",headers:{"content-type":"application/json",...(k?{"x-api-key":k}:{})},body:"{}"}).then(r=>r.status,e=>"ERR "+e.message); Promise.all([go(""),go(process.argv[3]),...t.map(go)]).then(s=>console.log(JSON.stringify({others:t.length,statuses:s})))'}' ${wsB}/others.txt ${base}/v1/messages ${expired} > ${wsB}/b.json 2>&1`,
+  'echo done',
+].join('; ')
+fake.reply = (q: Req): Block[] => {
+  const prompt = JSON.stringify(q.body.messages)
+  const step = stepOf(q)
+  if (prompt.includes('任务A')) {
+    if (step === 0) {
+      aStarted()
+      return [{ tool: 'Bash', input: { command: `node -e "setTimeout(() => {}, 60000)"` } }]
+    }
+    return [{ text: '完成' }]
+  }
+  return step === 0 ? [{ tool: 'Bash', input: { command: scanB } }] : [{ text: '完成' }]
+}
+const callA = ex.send({ key: 'probe/a', spec: { write: 'worktree', cwd: ws, profile }, prompt: '任务A', nonce: 'n1', ask }).catch(e => (e as Error).message)
+await aRunning
+await new Promise(ok => setTimeout(ok, 1500))
+await ex.send({ key: 'probe/b', spec: { write: 'worktree', cwd: wsB, profile }, prompt: '任务B', nonce: 'n1', ask })
+const b = JSON.parse(readFileSync(join(wsB, 'b.json'), 'utf8')) as { others: number; statuses: unknown[] }
+check('别的任务的 agent 读不到正在跑的任务的令牌（别的 Claude Code 进程的环境）', b.others === 0, b)
+check('别的任务的 agent：不带令牌、带过期的令牌连上游都被拒（401）', b.statuses.length === 2 && b.statuses.every(x => x === 401), b.statuses)
+// 检查命令（eos-check）：A 的调用还在跑时，不带令牌、带过期的令牌都被拒；也读不到 Claude Code 进程的环境
+const viaCheck = [await asNode(checkUser, `${tryUpstream('')}.then(console.log)`), await asNode(checkUser, `${tryUpstream(expired)}.then(console.log)`)]
+check(
+  '检查命令（eos-check）：不带令牌、带过期的令牌连上游都被拒（401）',
+  viaCheck.every(x => x === '401'),
+  viaCheck,
+)
+const ccPids = execFileSync('sh', ['-c', 'for p in /proc/[0-9]*; do tr "\\000" " " < $p/cmdline 2>/dev/null | grep -q "claude-agent-sdk-linux" && echo ${p#/proc/}; done; exit 0'], {
+  encoding: 'utf8',
+})
+  .trim()
+  .split('\n')
+  .filter(Boolean)
+const readable = await asNode(
+  checkUser,
+  `const fs=require('fs'); console.log(JSON.stringify(${JSON.stringify(ccPids)}.map(p => { try { return /sk-ant-eos/.test(fs.readFileSync('/proc/'+p+'/environ','utf8')) ? 'token' : 'no-token' } catch (e) { return e.code } })))`,
+)
+// ENOENT：列出之后已经退出的进程（例如任务 B 的）
+check(
+  '检查命令读不到正在跑的 Claude Code 进程的环境',
+  ccPids.length > 0 && (JSON.parse(readable) as string[]).includes('EACCES') && (JSON.parse(readable) as string[]).every(x => x === 'EACCES' || x === 'ENOENT'),
+  { pids: ccPids.length, readable },
+)
+await ex.release(ws)
+releaseA()
+await holdA
+await callA
 
 await ex.close()
 await fake.close()

@@ -72,6 +72,12 @@ export class Executors implements Executor {
     return this.get(executor ?? this.default).findReply(key, nonce)
   }
 
+  /** 那次调用用的执行器认得这个错误时给出修法；不用为此建执行器。 */
+  failureHint(error: string, executor?: string): string | undefined {
+    const kind = this.kinds.find(k => k.name === (executor ?? this.default))
+    return kind?.failureHints.find(h => h.test.test(error))?.fix
+  }
+
   async traceOf(key: string, nonce: string, executor?: string): Promise<TraceEvent[]> {
     return this.get(executor ?? this.default).traceOf(key, nonce)
   }

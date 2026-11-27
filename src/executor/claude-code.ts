@@ -21,7 +21,7 @@ import type { TraceEvent } from '../trace/types.ts'
 import type { ToolGroup } from '../workflow/types.ts'
 import { anthropicBaseUrl, Upstream } from './claude-code-upstream.ts'
 import { confined, landlockProbe, type LandlockEnforcement } from './landlock.ts'
-import type { AgentMcp, AgentProfile, AgentSpec, AskHandler, Capabilities, Executor, ExecutorContext, ExecutorKind, Health, HealthItem, ModelKeySpec, Reply } from './types.ts'
+import type { AgentMcp, AgentProfile, AgentSpec, AskHandler, Capabilities, Executor, ExecutorContext, ExecutorKind, FailureHint, Health, HealthItem, ModelKeySpec, Reply } from './types.ts'
 import { isHttpMcp } from './types.ts'
 
 export const NAME = 'claude-code'
@@ -734,10 +734,26 @@ const currentKey = (ctx: ExecutorContext): string => {
   throw new Error(k.source === 'error' ? `Anthropic API key 读不出来：${k.error}` : `没有可用的 Anthropic API key：凭据存储里没有 ${MODEL_KEY.credential}，也没有设置 ${MODEL_KEY.env}`)
 }
 
+/** Claude Code 的错误怎么修：key 在哪设置、模型接口是哪个主机。 */
+export const FAILURE_HINTS: FailureHint[] = [
+  {
+    test: /\b401\b|unauthori[sz]ed|invalid[ _-]?(x-)?api[ _-]?key|authentication/i,
+    fix: `Anthropic API key 无效或过期：在 Web 的「凭据」页更新 ${MODEL_KEY.credential}，或改启动平台的环境变量 ${MODEL_KEY.env} 后重启平台`,
+  },
+  { test: /credit balance|billing|\b402\b/i, fix: 'Anthropic 账户余额不足：充值后重试' },
+  {
+    test: /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|network|(connection|socket|other side) closed|转发到模型接口失败/i,
+    fix: `连不上模型服务：检查平台所在机器的网络和代理设置（能否访问 ${OFFICIAL_HOST}，或 EOS_ANTHROPIC_BASE_URL 指向的地址）`,
+  },
+  { test: /Landlock 用不了/, fix: '这台机器上 Landlock 用不了：换用启用了 Landlock 的 Linux 内核（5.13 以上），或者让这个角色改用别的执行器' },
+  { test: /Claude Code 出错|没有给出这一轮的结果就退出/, fix: 'Claude Code 进程意外退出：直接重试；反复出现时看日志里 Claude Code 的报错' },
+]
+
 export const claudeCode: ExecutorKind = {
   name: NAME,
   capabilities: CAPABILITIES,
   modelKey: MODEL_KEY,
+  failureHints: FAILURE_HINTS,
   create: ctx =>
     new ClaudeCodeExecutor({
       home: join(ctx.dataDir, NAME),
