@@ -87,8 +87,8 @@ export const proposer = (o: {
  * 新建的约定没有可比的旧版本：整份权限都要人看，列出它的权限面（模板）或一句总的说明（工作流）。
  */
 export const permissionsOf = (kind: ProposalKind, name: string, before: string | undefined, after: string, lookup: TemplateLookup): string[] => {
-  // 对话 agent 自己的模板：它的权限不从模板读（平台定死），但模型和指令从这里来，改了会改变对话 agent 本身。
-  const self = kind === 'template' && name === ASSISTANT_TEMPLATE ? ['改的是对话 agent 自己的模板：会改变它用的模型和它的指令'] : []
+  // 对话 agent 自己的模板：它的权限不从模板读（平台定死），但执行器、模型和指令从这里来，改了会改变对话 agent 本身。
+  const self = kind === 'template' && name === ASSISTANT_TEMPLATE ? ['改的是对话 agent 自己的模板：会改变它用的执行器、模型和它的指令'] : []
   return [...self, ...changesOf(kind, before, after, lookup)]
 }
 

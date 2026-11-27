@@ -141,7 +141,8 @@ const agentUserItem = (f: Facts): Item[] => {
  */
 const isolationItem = (f: Facts): Item[] => {
   if (f.masterKey.kind !== 'ok') return []
-  const sandboxed = f.executors.every(e => e.health.sandboxed)
+  // 没有任何执行器报告时不能说有沙箱
+  const sandboxed = f.executors.length > 0 && f.executors.every(e => e.health.sandboxed)
   const checks = f.checkUser.kind === 'ok' ? `检查命令以 ${f.checkUser.name} 运行，主密钥和模型 key 都读不到` : '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到'
   const agentMaster =
     f.agentUser.kind === 'ok'

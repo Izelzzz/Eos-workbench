@@ -515,3 +515,19 @@ test('candidates are taken from conventions on the platform before the limit: ma
     ['team'],
   )
 })
+
+test('improver 模板写了 executor 时，生成用那个执行器（不写时用默认的）', async () => {
+  const s = setup()
+  try {
+    s.task('a', ['方案', '实现', CHANGES, '改了', PASS])
+    const ex = new Recorder(() => json([]))
+    assert.equal((await s.run(ex)).ok, true)
+    assert.equal(ex.calls[0]!.spec.executor, undefined)
+    const content = s.store.convention('template', 'improver')!.content.replace(/^name: improver$/m, 'name: improver\nexecutor: other')
+    assert.ok(s.conventions.save({ kind: 'template', name: 'improver', content, actor: 'web' }, 2).ok)
+    assert.equal((await s.run(ex)).ok, true)
+    assert.equal(ex.calls[1]!.spec.executor, 'other')
+  } finally {
+    s.cleanup()
+  }
+})

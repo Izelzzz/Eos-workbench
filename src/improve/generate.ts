@@ -128,6 +128,7 @@ const callAndStore = async (
       nonce: `improve/${run}`,
       prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
       spec: {
+        ...(t.template.executor === undefined ? {} : { executor: t.template.executor }),
         model: t.template.model,
         ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
         write: 'none',

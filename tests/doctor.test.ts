@@ -122,6 +122,8 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
   assert.equal(sandbox({ backend: 'platform', platform: 'darwin' }).status, 'ok', 'macOS and Windows are not probed and must not block startup')
 })
 
+const isolationOf = (f: Facts) => formatItems(evaluate(f).filter(i => i.name === '凭据隔离'))
+
 test('设置了主密钥时如实说明谁能读到；没有独立用户时是 ⚠；没设置主密钥时不提示', () => {
   const isolation = (s: DshFacts['sandbox']) => formatItems(evaluate(withDsh({ sandbox: s }, platform)).filter(i => i.name === '凭据隔离'))
   for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
@@ -132,6 +134,7 @@ test('设置了主密钥时如实说明谁能读到；没有独立用户时是 �
   }
   assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥；没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key；检查命令/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
+  assert.match(isolationOf({ ...good, executors: [] }), /没有可用的沙箱/, '没有执行器报告时不当作有沙箱')
 })
 
 test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓；只换了检查命令时仍是 ⚠；用户设置错了或切换不过去是 ✗，拦下启动', () => {

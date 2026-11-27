@@ -1,6 +1,6 @@
 // 对话 agent：不绑定任务，可以多轮对话。只认 Executor 接口和 AgentProfile，不依赖某一个执行器。
 // - 能力面由平台定死：没有执行器自带的任何工具（builtinTools: 'none'），只读平台数据的工具经这次调用的 MCP 端点（mcp.ts）交给它；
-//   模板（内置的 assistant，团队可以改）只提供模型、effort 和提示词，改模板放不开权限。
+//   模板（内置的 assistant，团队可以改）只提供执行器、模型、effort 和提示词，改模板放不开权限。
 // - 每说一句话是一次调用：开一个新的 MCP 端点（新端口、新令牌），调用结束就关掉，并让执行器释放资源。
 // - 对话记录、trace、用量存在自己的表里（store.ts），平台重启后接着聊；执行器那一侧的会话按对话 id 续接。
 // - 平台重启时一句话的调用可能没做完：下次说话前先向执行器认领那次调用的回复，认领不到记一条「没有得到回复」。
@@ -105,7 +105,11 @@ export class Chats {
       const seq = this.o.chats.append(id, { at: this.o.now(), role: 'user', text: this.o.redact(text), actor })
       // 还没有回复过的对话（第一句，或者之前每一句都失败了）带上角色说明；之后执行器按 key 续接同一个会话，不再重复。
       const prompt = first ? `${t.template.prompt.trimEnd()}\n\n# 用户说\n\n${text}` : text
-      return await this.call(id, seq, prompt, { model: t.template.model, ...(t.template.effort === undefined ? {} : { effort: t.template.effort }) })
+      return await this.call(id, seq, prompt, {
+        ...(t.template.executor === undefined ? {} : { executor: t.template.executor }),
+        model: t.template.model,
+        ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
+      })
     } finally {
       lock.release()
     }
@@ -117,7 +121,7 @@ export class Chats {
     return undefined
   }
 
-  private async call(id: string, seq: number, prompt: string, route: { model: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
+  private async call(id: string, seq: number, prompt: string, route: { executor?: string; model: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
     const { chats, redact } = this.o
     const nonce = nonceOf(id, seq)
     const cwd = join(this.o.dataDir, 'chat', id)

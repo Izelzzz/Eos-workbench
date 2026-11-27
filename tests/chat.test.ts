@@ -292,3 +292,13 @@ test('the MCP endpoint refuses requests without the right token, from browsers o
   await ep.close()
   await assert.rejects(client.tools())
 })
+
+test('assistant 模板写了 executor 时，对话 agent 用那个执行器', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '好' }))
+  const content = p.store.convention('template', 'assistant')!.content.replace(/^name: assistant$/m, 'name: assistant\nexecutor: other')
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content, actor: 'web' }, 2).ok)
+  const r = await new Chats(p.opts(ex)).start('你好', 'cli')
+  assert.ok(r.ok, JSON.stringify(r))
+  assert.equal(ex.specs[0]!.executor, 'other')
+})
