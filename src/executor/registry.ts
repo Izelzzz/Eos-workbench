@@ -2,12 +2,13 @@
 // 注册表本身实现 Executor：send 按 spec.executor、findReply 和 traceOf 按调用方给的执行器名字交给对应的执行器，
 // release、close 交给建出来的每个执行器。所以 runner、对话 agent、改进提案都只认 Executor 接口，角色换执行器时它们不用改。
 import type { TraceEvent } from '../trace/types.ts'
+import { claudeCode } from './claude-code.ts'
 import { dsh } from './dsh.ts'
 import type { AgentNeeds, AgentSpec, AskHandler, Executor, ExecutorContext, ExecutorKind, Health, ModelKeySpec, Reply } from './types.ts'
 import { needsOf, unmet } from './types.ts'
 
 /** 登记的执行器。第一个是默认执行器：角色没有写 executor 时用它。 */
-export const EXECUTORS: readonly ExecutorKind[] = [dsh]
+export const EXECUTORS: readonly ExecutorKind[] = [dsh, claudeCode]
 
 /** 平台给每种执行器的环境：每种执行器要的模型 key 不一样（ExecutorKind.modelKey）。 */
 export type ContextFor = (kind: ExecutorKind) => ExecutorContext
