@@ -91,11 +91,11 @@ export const openEndpoint = async (o: { name: string; tools: McpTool[]; call: (n
         if (typeof name !== 'string') return err(-32602, 'tools/call 需要 name')
         const args = r.params?.arguments
         if (reads.length >= max) {
-          reads.push({ tool: name, args: JSON.stringify(args ?? {}).slice(0, 500), isError: true })
+          reads.push({ tool: name, args: JSON.stringify(args ?? {}), isError: true })
           return ok({ content: [{ type: 'text', text: `这一轮读取数据的次数已经到上限（${max} 次），不能再读：请根据已经读到的内容回答。` }], isError: true })
         }
         const out = o.call(name, args)
-        reads.push({ tool: name, args: JSON.stringify(args ?? {}).slice(0, 500), isError: out.isError })
+        reads.push({ tool: name, args: JSON.stringify(args ?? {}), isError: out.isError })
         return ok({ content: [{ type: 'text', text: out.text }], isError: out.isError })
       }
       default:

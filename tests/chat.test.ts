@@ -185,10 +185,13 @@ test('a turn in which the agent used any tool other than the platform’s read-o
 
 test('tool arguments the model copied from the user (for example a pasted key) are redacted before they are stored', async () => {
   const p = platform()
-  const ex = new McpExecutor(({ results }) => (results.length === 0 ? { tool: `mcp__${MCP_NAME}__get_convention`, args: { kind: 'doc', name: SECRET } } : { reply: '没有这个约定' }))
+  const ex = new McpExecutor(({ results }) =>
+    results.length === 0 ? { tool: `mcp__${MCP_NAME}__get_convention`, args: { kind: 'doc', name: `${'x'.repeat(467)}${SECRET}` } } : { reply: '没有这个约定' },
+  )
   const r = await new Chats(p.opts(ex)).start(`读一下 ${SECRET}`, 'cli')
   assert.ok(r.ok)
-  assert.ok(!JSON.stringify(p.chats.log(r.chat.id)).includes(SECRET))
+  // 秘密跨过 500 字的截断处：先遮蔽再截断，前半截也不留。
+  assert.ok(!JSON.stringify(p.chats.log(r.chat.id)).includes(SECRET.slice(0, 8)))
 })
 
 test('a claimed reply whose trace shows a non-platform tool is discarded too', async () => {

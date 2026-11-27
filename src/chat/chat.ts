@@ -51,10 +51,13 @@ const ours = (name: string): string | undefined => OURS.find(t => name === t || 
 /** 这次调用执行了的工具里，不是平台只读工具的那些（只看真正执行了的 tool_start；模型要了但执行器没有的工具不算）。 */
 const foreignIn = (events: TraceEvent[]): string[] => [...new Set(events.flatMap(e => (e.kind === 'tool_start' && ours(e.name) === undefined ? [e.name] : [])))]
 
+/** 记下的工具参数最多 500 字。调用方先遮蔽再截断：截断处的半截凭据遮蔽认不出来。 */
+const cutArgs = (args: string): string => args.slice(0, 500)
+
 /** trace 里的工具调用 → agent 读了哪些数据（认领回来的调用没有端点的记录，从 trace 里还原；工具名和端点记的一样，不带前缀）。 */
 const readsIn = (events: TraceEvent[]): ChatRead[] => {
   const failed = new Set(events.flatMap(e => (e.kind === 'tool_end' && e.isError ? [e.id] : [])))
-  return events.flatMap(e => (e.kind === 'tool_start' ? [{ tool: ours(e.name) ?? e.name, args: e.args.slice(0, 500), isError: failed.has(e.id) }] : []))
+  return events.flatMap(e => (e.kind === 'tool_start' ? [{ tool: ours(e.name) ?? e.name, args: cutArgs(e.args), isError: failed.has(e.id) }] : []))
 }
 
 export class Chats {
@@ -147,7 +150,7 @@ export class Chats {
 
   private succeeded(id: string, reply: Reply, reads: ChatRead[]): SendResult {
     // 工具参数是模型给的原文（可能抄了用户贴进来的 key），存下来之前遮蔽。
-    const call: ChatCall = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reads: redactDeep(reads, this.o.redact) }
+    const call: ChatCall = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reads: reads.map(r => ({ ...r, args: cutArgs(this.o.redact(r.args)) })) }
     const text = this.o.redact(reply.text)
     this.o.chats.append(id, { at: this.o.now(), role: 'assistant', text, call })
     return { ok: true, chat: this.o.chats.summary(id)!, reply: text, call }
