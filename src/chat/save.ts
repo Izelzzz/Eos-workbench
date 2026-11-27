@@ -4,9 +4,11 @@
 // - 作废的、已经保存过的不保存；
 // - 目标约定的最新版本不是提议基于的版本（新建的：已经有人建了）就拒绝；
 // - 按保存约定时的规则重新检查；内容里有已知凭据值就拒绝；和当前版本一样就不保存；
-// - 按现在的状态重算涉及的权限改动。有改动时要带确认码：它是这份改动清单的摘要（eos chat show 显示），
-//   清单在看过之后又变了，确认码就对不上，保存被拒绝并列出新的清单。人确认的就是他看到的那份。
+// - 按现在的状态重算涉及的权限改动。有改动时要带确认码（eos chat show 显示）：它是这条提议（号、目标、基于的版本、内容）
+//   加这份改动清单，再加只存在平台数据库里的随机值的摘要。清单在看过之后又变了，确认码就对不上；
+//   别的提议的确认码也对不上；agent 看不到随机值，算不出确认码。
 // 写入新版本和记下提议已保存在同一个事务里，核对版本也在这个事务里：要么都写，要么都不写。
+// 这要求 chats 和 store 用同一个数据库连接（命令行是 new ChatStore(store.db)）：换了连接，记下这一步会因为库被锁而失败、整个回滚。
 import { createHash } from 'node:crypto'
 import type { Conventions } from '../conventions/conventions.ts'
 import type { Store } from '../store/store.ts'
@@ -21,8 +23,12 @@ export type SaveOutcome =
 
 const KIND_NAMES = { workflow: '工作流', template: 'Agent 模板' } as const
 
-/** 一份权限改动清单的确认码：清单变了，确认码就变。 */
-export const confirmationCode = (permissions: string[]): string => createHash('sha256').update(JSON.stringify(permissions)).digest('hex').slice(0, 8)
+/** 一条提议加一份权限改动清单的确认码：提议或清单变了，确认码就变。salt 来自 ChatStore.confirmSalt。 */
+export const confirmationCode = (salt: string, p: ChatProposal, permissions: string[]): string =>
+  createHash('sha256')
+    .update(JSON.stringify([salt, p.id, p.kind, p.name, p.baseVersion ?? null, p.content, permissions]))
+    .digest('hex')
+    .slice(0, 8)
 
 /** 按现在的平台状态，这条提议涉及的权限改动（eos chat show 和保存用同一个算法、同一个时刻的状态）。 */
 export const currentPermissions = (p: ChatProposal, store: Store, conventions: Conventions): string[] =>
@@ -53,7 +59,7 @@ export const saveProposal = (o: {
   if (errors.length > 0) return { ok: false, error: `${what}按现在的平台状态没有通过检查，不能保存：\n${errors.map(e => `- ${e.path}：${e.message}`).join('\n')}` }
   const permissions = currentPermissions(p, o.store, o.conventions)
   if (permissions.length > 0) {
-    const code = confirmationCode(permissions)
+    const code = confirmationCode(o.chats.confirmSalt(p.id), p, permissions)
     if (o.confirm !== code) {
       const why = o.confirm === undefined ? '涉及权限改动，要确认之后才能保存' : '涉及的权限改动和确认码对不上（你看过之后平台状态变了），请看过下面这份再确认'
       return { ok: false, error: `提议 #${p.id} ${why}（命令行加 --allow-permissions ${code}）：\n${permissions.map(x => `- ${x}`).join('\n')}`, permissions, code }
@@ -70,7 +76,7 @@ export const saveProposal = (o: {
       if (!o.chats.markSaved(p.id, { version: saved.version, actor: o.actor, at })) throw new AlreadySaved()
     })
   } catch (e) {
-    if (e instanceof AlreadySaved) return { ok: false, error: `提议 #${p.id} 刚刚被别处保存过了` }
+    if (e instanceof AlreadySaved) return { ok: false, error: `提议 #${p.id} 刚刚被别处保存过或作废了，没有保存` }
     throw e
   }
   if ('stale' in row) return { ok: false, error: stale(p, row.latest) }

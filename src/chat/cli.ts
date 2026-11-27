@@ -6,6 +6,7 @@ import type { Conventions } from '../conventions/conventions.ts'
 import type { Store } from '../store/store.ts'
 import { diffLines, fold } from '../workflow/diff.ts'
 import { confirmationCode, currentPermissions, saveProposal } from './save.ts'
+import type { ChatStore } from './store.ts'
 import type { ChatMessage, ChatProposal } from './types.ts'
 
 export const CHAT_HELP = `  eos chat new "<话>"                                     新建一个对话（对话 agent 能读平台的工作流、约定和任务，不能改）
@@ -26,11 +27,11 @@ const line = (m: ChatMessage): string => {
 const KIND = { workflow: '工作流', template: 'Agent 模板' } as const
 
 /** 一条提议：状态、理由、涉及的权限、和当前版本的差异（新建的显示全文）、怎么保存。 */
-const proposalView = (p: ChatProposal, store: Store, conventions: Conventions): string => {
+const proposalView = (p: ChatProposal, store: Store, conventions: Conventions, chats: ChatStore): string => {
   const current = store.convention(p.kind, p.name)
   // 按现在的状态重算（和保存时同一个算法）：提议记下之后平台状态可能变了。
   const permissions = p.saved === undefined && p.voided === undefined ? currentPermissions(p, store, conventions) : []
-  const code = confirmationCode(permissions)
+  const code = permissions.length > 0 ? confirmationCode(chats.confirmSalt(p.id), p, permissions) : ''
   const head = `  #${p.id}  ${KIND[p.kind]}「${p.name}」${p.baseVersion === undefined ? '（新建）' : `（修改，基于第 ${p.baseVersion} 版）`}`
   const state =
     p.saved !== undefined
@@ -74,7 +75,8 @@ export const chatCommand = async (
     for (const m of d.log) o.say(line(m))
     const proposals = o.chats.proposals(d.id)
     if (proposals.length > 0) o.say(`\n提议（agent 提的；只有用 eos chat save 确认之后才会保存）：`)
-    for (const p of proposals) o.say(`\n${proposalView(p, o.data.store, o.conventions)}`)
+    // 经过 redact：提议记下之后平台才有的凭据值不会被打印出来（保存时也会被拒）。
+    for (const p of proposals) o.say(`\n${o.redact(proposalView(p, o.data.store, o.conventions, o.chats))}`)
     const m = o.chats.metrics(d.id)
     return o.say(`\n用途 ${m.purpose}：${m.calls} 次调用（${m.failed} 次没有回复），读数据 ${m.reads} 次，输入 ${m.usage.input} 输出 ${m.usage.output}，agent ${(m.agentMs / 1000).toFixed(1)}s`)
   }

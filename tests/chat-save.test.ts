@@ -38,7 +38,7 @@ const platform = () => {
   /** allowPermissions：带上「按现在的状态算出的」确认码，等于人看过 show 之后确认。 */
   const save = (id: number, allowPermissions = false, note?: string, confirm?: string) => {
     const prop = chats.proposal(id)
-    const code = allowPermissions && prop !== undefined ? confirmationCode(currentPermissions(prop, store, conventions)) : confirm
+    const code = allowPermissions && prop !== undefined ? confirmationCode(chats.confirmSalt(prop.id), prop, currentPermissions(prop, store, conventions)) : confirm
     return saveProposal({ store, chats, conventions, redact, id, actor: 'cli', ...(code === undefined ? {} : { confirm: code }), ...(note === undefined ? {} : { note }), now: () => 200 })
   }
   const dump = () => JSON.stringify(store.db.prepare('SELECT * FROM conventions ORDER BY kind, name, version').all())
@@ -232,7 +232,7 @@ test('the confirmation is bound to the permission list the person saw: if the li
   // 提议去掉 developer 模板的技能：涉及权限（技能）。
   const id = await propose(p, { kind: 'template', name: 'developer', content: dev.replace(/^skills: .*$/m, 'skills: []'), rationale: '去掉技能' })
   const prop = p.chats.proposal(id)!
-  const seen = confirmationCode(currentPermissions(prop, p.store, p.conventions))
+  const seen = confirmationCode(p.chats.confirmSalt(id), prop, currentPermissions(prop, p.store, p.conventions))
   // 看过之后，提议的内容按现在的平台状态多出一项权限改动（模拟：存下的内容被改成也放宽写入范围）。
   p.store.db.prepare('UPDATE chat_proposals SET content = ? WHERE id = ?').run(prop.content.replace(/^writePaths: .*$/m, 'writePaths: ["**"]'), id)
   const before = p.dump()
@@ -253,7 +253,7 @@ test('the new version and the proposal’s saved mark are written in one transac
   p.chats.markSaved = () => false
   const r = p.save(id)
   assert.equal(r.ok, false)
-  assert.match((r as { error: string }).error, /刚刚被别处保存过了/)
+  assert.match((r as { error: string }).error, /刚刚被别处保存过或作废了，没有保存/)
   assert.equal(p.dump(), before, 'the convention write was rolled back')
   p.chats.markSaved = mark
   assert.ok(p.save(id).ok)
@@ -272,6 +272,7 @@ INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, content, r
   assert.equal(old.saved, undefined, 'an old proposal is not mistaken for a saved one')
   assert.ok(chats.markSaved(old.id, { version: 1, actor: 'cli', at: 5 }))
   assert.deepEqual(chats.proposal(old.id)!.saved, { version: 1, actor: 'cli', at: 5 })
+  assert.match(chats.confirmSalt(old.id), /^[0-9a-f]{32}$/)
   new ChatStore(store.db) // 再开一次不重复加列
 })
 
@@ -290,4 +291,42 @@ test('two proposals based on the same version: the first save wins, the second i
     [2, 1],
   )
   assert.equal(p.chats.proposal(b)!.saved, undefined)
+})
+
+test('a confirmation code belongs to one proposal: two proposals with the same permission list get different codes, and one’s code does not save the other', async () => {
+  const p = platform()
+  const a = await propose(p, { kind: 'workflow', name: 'one', content: standard(p).replace(/^name: .*$/m, 'name: one'), rationale: 'A' })
+  const b = await propose(p, { kind: 'workflow', name: 'two', content: standard(p).replace(/^name: .*$/m, 'name: two'), rationale: 'B' })
+  const pa = p.chats.proposal(a)!
+  const pb = p.chats.proposal(b)!
+  const perms = currentPermissions(pa, p.store, p.conventions)
+  assert.ok(perms.length > 0)
+  assert.deepEqual(currentPermissions(pb, p.store, p.conventions), perms, 'same list')
+  const codeA = confirmationCode(p.chats.confirmSalt(a), pa, perms)
+  assert.notEqual(confirmationCode(p.chats.confirmSalt(b), pb, perms), codeA)
+  const before = p.dump()
+  const r = p.save(b, false, undefined, codeA)
+  assert.equal(r.ok, false)
+  assert.match((r as { error: string }).error, /和确认码对不上/)
+  assert.equal(p.dump(), before)
+  // 随机值只生成一次：show 和 save 看到的是同一个；agent 看到的提议里没有它。
+  assert.equal(p.chats.confirmSalt(a), p.chats.confirmSalt(a))
+  assert.ok(!JSON.stringify(pa).includes(p.chats.confirmSalt(a)))
+  assert.ok(p.save(a, true).ok)
+})
+
+test('a proposal voided after the save checks but before the write is not marked saved, and the write is rolled back', async () => {
+  const p = platform()
+  const id = await propose(p, { kind: 'workflow', name: 'standard', content: standard(p).replace(/^description: .*$/m, 'description: 新说明'), rationale: '改说明' })
+  const before = p.dump()
+  // 模拟：检查已经过了，进入事务时这一轮刚被作废。
+  const mark = p.chats.markSaved.bind(p.chats)
+  p.chats.markSaved = (pid, saved) => {
+    p.chats.voidProposals(p.chats.proposal(pid)!.call, '那一轮作废了')
+    return mark(pid, saved)
+  }
+  const r = p.save(id)
+  assert.equal(r.ok, false)
+  assert.equal(p.dump(), before)
+  assert.equal(p.chats.proposal(id)!.saved, undefined)
 })

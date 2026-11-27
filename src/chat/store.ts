@@ -1,5 +1,6 @@
 // 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace），只追加。
 // 平台重启后从这里读出对话记录接着聊；agent 那一侧的会话由执行器按对话 id 续接。
+import { randomBytes } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
@@ -46,7 +47,8 @@ CREATE TABLE IF NOT EXISTS chat_proposals (
   voided TEXT,
   saved_version INTEGER,
   saved_actor TEXT,
-  saved_at INTEGER
+  saved_at INTEGER,
+  confirm_salt TEXT
 );`
 
 /** 标题取第一条消息的开头。 */
@@ -58,13 +60,20 @@ export class ChatStore {
   constructor(private readonly db: DatabaseSync) {
     db.exec(SCHEMA)
     // 早先建的 chat_proposals 没有保存记录的几列：补上（CREATE TABLE IF NOT EXISTS 不会改已有的表）。
+    // 两个进程同时打开旧库时，后补的那个会碰到「列已存在」：别人补上了，忽略。
     const columns = new Set((db.prepare('PRAGMA table_info(chat_proposals)').all() as { name: string }[]).map(c => c.name))
     for (const [name, type] of [
       ['saved_version', 'INTEGER'],
       ['saved_actor', 'TEXT'],
       ['saved_at', 'INTEGER'],
+      ['confirm_salt', 'TEXT'],
     ] as const)
-      if (!columns.has(name)) db.exec(`ALTER TABLE chat_proposals ADD COLUMN ${name} ${type}`)
+      if (!columns.has(name))
+        try {
+          db.exec(`ALTER TABLE chat_proposals ADD COLUMN ${name} ${type}`)
+        } catch (e) {
+          if (!/duplicate column/i.test(String(e))) throw e
+        }
   }
 
   private tx<T>(fn: () => T): T {
@@ -160,11 +169,24 @@ export class ChatStore {
     return this.proposal(Number(r.lastInsertRowid))!
   }
 
-  /** 记下提议已经保存成了哪个版本（只在人确认保存之后由 save.ts 调用）。已经记过的不改，返回是否记下。 */
+  /**
+   * 一条提议的确认码用的随机值（只由 save.ts 用）：第一次要时生成并记下。
+   * 不在 ChatProposal 里、不进 agent 能看到的任何结果，所以 agent 算不出确认码。
+   */
+  confirmSalt(id: number): string {
+    this.db.prepare('UPDATE chat_proposals SET confirm_salt = ? WHERE id = ? AND confirm_salt IS NULL').run(randomBytes(16).toString('hex'), id)
+    const r = this.db.prepare('SELECT confirm_salt FROM chat_proposals WHERE id = ?').get(id) as { confirm_salt: string } | undefined
+    if (r === undefined) throw new Error(`没有提议 #${id}`)
+    return r.confirm_salt
+  }
+
+  /** 记下提议已经保存成了哪个版本（只在人确认保存之后由 save.ts 调用）。已经记过的、已作废的不改，返回是否记下。 */
   markSaved(id: number, saved: ProposalSaved): boolean {
     return (
       Number(
-        this.db.prepare('UPDATE chat_proposals SET saved_version = ?, saved_actor = ?, saved_at = ? WHERE id = ? AND saved_version IS NULL').run(saved.version, saved.actor, saved.at, id).changes,
+        this.db
+          .prepare('UPDATE chat_proposals SET saved_version = ?, saved_actor = ?, saved_at = ? WHERE id = ? AND saved_version IS NULL AND voided IS NULL')
+          .run(saved.version, saved.actor, saved.at, id).changes,
       ) === 1
     )
   }
