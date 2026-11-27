@@ -171,7 +171,7 @@ export const listenPlan = (host: string, port: number, publicUrl: URL | undefine
 
 /** 监听失败时的说明。端口被占时多半是已经有一个 eos web 在运行。 */
 export const listenFailure = (host: string, port: number, e: { code?: string; message: string }): string =>
-  e.code === 'EADDRINUSE' ? `端口 ${port} 已被占用，可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口` : `Web 服务没能监听 ${host}:${port}：${e.code ?? e.message}`
+  e.code === 'EADDRINUSE' ? `端口 ${port} 已被占用（${host}:${port}），可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口` : `Web 服务没能监听 ${host}:${port}：${e.code ?? e.message}`
 
 /** 托管平台注册完 App 跳回的路径。 */
 export const APP_CALLBACK = '/api/forge-apps/callback'

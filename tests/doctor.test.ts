@@ -91,12 +91,12 @@ test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项�
   // 没有主密钥时凭据存储存不进凭据：说清楚为什么里面没有
   assert.match(
     formatItems(evaluate(withDsh({ modelKey: { source: 'missing' }, credentialsUsable: false }, platform))),
-    /✗ DeepSeek API key：凭据存储里没有 deepseek：没有设置主密钥 EOS_MASTER_KEY，凭据存储存不进凭据；也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/,
+    /✗ DeepSeek API key：凭据存储里没有 deepseek：主密钥 EOS_MASTER_KEY 没有设置或无效（见「凭据主密钥」一项），凭据存储存不进凭据；也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/,
   )
   assert.equal(dshFacts({ ...ctx({ source: 'missing' }), credentialsUsable: false }).credentialsUsable, false)
   assert.match(
     text,
-    /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>（本机运行时写进 ~\/\.zshrc.*③ 另外备份这个值/,
+    /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 只给启动平台的命令设置 EOS_MASTER_KEY=<生成的值>.*不要写进 ~\/\.zshrc.*③ 另外备份这个值/,
   )
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
@@ -266,7 +266,8 @@ test('gather：读 package.json 的 engines；执行器的自检原样带上；�
 const KEY = Buffer.alloc(32, 7).toString('base64')
 
 const cli = (args: string[], env: NodeJS.ProcessEnv) =>
-  spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH, ...env } })
+  // 超时：命令没有按预期失败退出（例如 eos web 真的监听上了）时让测试失败，而不是一直挂着
+  spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH, ...env }, timeout: 60_000 })
 
 test('eos doctor 逐项列出结果，有 ✗ 时退出码不为 0', () => {
   const data = join(tmp(), 'data')
@@ -375,7 +376,7 @@ test('eos web 的端口被占时说清楚：可能已经有一个 eos web 在运
   try {
     const r = cli(['web', '--port', String(port), '--data', join(tmp(), 'data')], { DEEPSEEK_API_KEY: 'k' })
     assert.equal(r.status, 1)
-    assert.match(r.stderr, new RegExp(`端口 ${port} 已被占用，可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口`))
+    assert.match(r.stderr, new RegExp(`端口 ${port} 已被占用（127\\.0\\.0\\.1:${port}），可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口`))
   } finally {
     busy.close()
   }

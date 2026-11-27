@@ -976,10 +976,10 @@ const modelKeyItem = (f: DshFacts): HealthItem => {
       return {
         name,
         status: 'fail',
-        // 没有主密钥时凭据存储存不进凭据：说清楚为什么里面没有，免得以为是存了没读到
+        // 主密钥没设置或无效时凭据存储存不进凭据：说清楚为什么里面没有，免得以为是存了没读到
         detail: f.credentialsUsable
           ? `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`
-          : `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}：没有设置主密钥 ${MASTER_KEY_ENV}，凭据存储存不进凭据；也没有设置环境变量 ${MODEL_KEY_ENV}`,
+          : `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}：主密钥 ${MASTER_KEY_ENV} 没有设置或无效（见「凭据主密钥」一项），凭据存储存不进凭据；也没有设置环境变量 ${MODEL_KEY_ENV}`,
         fix: MODEL_KEY_FIX,
       }
     case 'error':
