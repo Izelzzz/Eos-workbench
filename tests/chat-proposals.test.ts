@@ -211,7 +211,7 @@ test('a proposal to change the chat agent’s own template is flagged even when 
   )
   const r = await new Chats(p.opts(ex)).start('让你自己回答短一点', 'cli')
   assert.ok(r.ok)
-  assert.deepEqual(p.chats.proposals(r.chat.id)[0]!.permissions, ['改的是对话 agent 自己的模板：会改变它用的模型和它的指令'])
+  assert.deepEqual(p.chats.proposals(r.chat.id)[0]!.permissions, ['改的是对话 agent 自己的模板：会改变它用的执行器、模型和它的指令'])
 })
 
 test('a reply claimed after a restart whose trace shows a non-platform tool voids that call’s proposals', async () => {

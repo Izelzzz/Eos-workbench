@@ -292,3 +292,55 @@ test('the MCP endpoint refuses requests without the right token, from browsers o
   await ep.close()
   await assert.rejects(client.tools())
 })
+
+test('对话的执行器在建对话时按 assistant 模板定下，之后每一句和找回都用它；改了模板不影响已有的对话', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '好' }))
+  const recovered: (string | undefined)[] = []
+  const find = ex.findReply.bind(ex)
+  ex.findReply = async (key, nonce, executor) => (recovered.push(executor), find(key, nonce))
+  const old = await new Chats(p.opts(ex)).start('之前的对话', 'cli')
+  assert.ok(old.ok)
+  const template = p.store.convention('template', 'assistant')!.content
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template.replace(/^name: assistant$/m, 'name: assistant\nexecutor: other'), actor: 'web' }, 2).ok)
+  const r = await new Chats(p.opts(ex)).start('你好', 'cli')
+  assert.ok(r.ok, JSON.stringify(r))
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template, actor: 'web' }, 3).ok)
+  assert.ok((await new Chats(p.opts(ex)).send(r.chat.id, '接着说', 'cli')).ok)
+  assert.ok((await new Chats(p.opts(ex)).send(old.chat.id, '旧对话接着说', 'cli')).ok)
+  assert.deepEqual(
+    ex.specs.map(s => s.executor),
+    [undefined, 'other', 'other', undefined],
+    '新对话一直用建对话时的执行器；旧对话一直用默认的',
+  )
+  // 平台重启后找回：最后一句是用户的话
+  p.chats.append(r.chat.id, { at: 200, role: 'user', text: '没回完的一句', actor: 'cli' })
+  await new Chats(p.opts(ex)).send(r.chat.id, '再说一句', 'cli')
+  assert.equal(recovered.at(-1), 'other', '找回交给同一个执行器')
+})
+
+test('assistant 模板写了没登记的执行器时，建对话就报错、不建对话；找回回复时执行器出错不当成"没有回复"，修好后还能认领', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '好' }))
+  const template = p.store.convention('template', 'assistant')!.content
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template.replace(/^name: assistant$/m, 'name: assistant\nexecutor: nope'), actor: 'web' }, 2).ok)
+  const opts = { ...p.opts(ex), unknownExecutor: (n: string) => (n === 'nope' ? `没有名为「${n}」的执行器` : undefined) }
+  const bad = await new Chats(opts).start('你好', 'cli')
+  assert.equal(bad.ok, false)
+  assert.match(!bad.ok ? bad.error : '', /Agent 模板「assistant」：没有名为「nope」的执行器/)
+  assert.deepEqual(p.chats.list(), [])
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template, actor: 'web' }, 3).ok)
+  const r = await new Chats(opts).start('你好', 'cli')
+  assert.ok(r.ok)
+  p.chats.append(r.chat.id, { at: 200, role: 'user', text: '没回完的一句', actor: 'cli' })
+  const find = ex.findReply.bind(ex)
+  ex.findReply = async () => {
+    throw new Error('执行器没装好')
+  }
+  const failed = await new Chats(opts).send(r.chat.id, '再说一句', 'cli')
+  assert.equal(failed.ok, false)
+  assert.match(!failed.ok ? failed.error : '', /上一句的回复认领不了：执行器没装好/)
+  assert.equal(p.chats.log(r.chat.id).at(-1)?.role, 'user', '没有记「没有回复」，也没有记新的一句')
+  ex.findReply = find
+  assert.ok((await new Chats(opts).send(r.chat.id, '再说一句', 'cli')).ok, '修好后照常认领、接着说')
+})

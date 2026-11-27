@@ -24,6 +24,8 @@ export type McpServer = { name: string; command: string; args: string[]; env: Re
 
 /** agent 的配置：模板和工作流里直接写的角色共用。 */
 export type AgentConfig = {
+  /** 用哪个执行器跑这个 agent（平台登记的执行器名字）；不写时用平台的默认执行器。 */
+  executor?: string
   model: string
   effort?: Effort
   /** 角色的职责说明，作为该角色每个会话的第一段内容。 */

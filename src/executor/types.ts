@@ -1,5 +1,8 @@
-// 执行器接口：引擎和 runner 只认这个接口。dsh 原生 agent 是第一个实现，外部 agent（M4）按同一接口接入。
+// 执行器接口：引擎、runner、对话 agent 只认这个接口。每种执行器在 src/executor/ 下自己的文件里实现它，
+// 在 registry.ts 里按名字登记；别的模块不知道有哪些执行器。
+import type { ModelKey } from '../credentials/model-key.ts'
 import type { Usage } from '../engine/types.ts'
+import type { CheckUser } from '../runner/check-user.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { Effort, McpServer, ToolGroup, WriteScope } from '../workflow/types.ts'
 
@@ -33,7 +36,8 @@ export const isHttpMcp = (m: AgentMcp): m is HttpMcp => 'url' in m
  */
 export type AgentProfile = { builtinTools: 'standard' | 'none'; denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: AgentMcp[]; background: boolean }
 
-export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
+/** executor：用哪个执行器（注册表里的名字）；不写时用注册表的默认执行器。 */
+export type AgentSpec = { executor?: string; model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
 
 export type Reply = { sessionId: string; text: string; usage: Usage; ms: number; model?: string }
 
@@ -48,11 +52,41 @@ export interface Executor {
    * nonce 写进消息里，供 findReply 认领。
    */
   send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply>
-  /** 会话里带这个 nonce 的消息如果已经有完整的回复，返回它；否则返回 undefined（需要重发）。 */
-  findReply(key: string, nonce: string): Promise<Reply | undefined>
-  /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。 */
-  traceOf(key: string, nonce: string): Promise<TraceEvent[]>
+  /**
+   * 会话里带这个 nonce 的消息如果已经有完整的回复，返回它；否则返回 undefined（需要重发）。
+   * executor：这次调用 send 时 spec.executor 的值（不写是默认执行器）。注册表据此交给那个执行器；单个执行器不用它。
+   */
+  findReply(key: string, nonce: string, executor?: string): Promise<Reply | undefined>
+  /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。executor 同 findReply。 */
+  traceOf(key: string, nonce: string, executor?: string): Promise<TraceEvent[]>
   /** 释放这个工作目录占用的资源（例如 agent 进程）。任务的 runner 结束时调用；之后的调用照常可用。 */
   release(cwd: string): Promise<void>
   close(): Promise<void>
+}
+
+/** 启动检查（eos doctor）的一项。ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
+export type HealthStatus = 'ok' | 'warn' | 'fail'
+/** doctorOnly：只在 eos doctor 里列出，启动前检查不提示（总会出现的 ⚠ 会让人习惯性忽略真正的提示）。 */
+export type HealthItem = { name: string; status: HealthStatus; detail: string; fix?: string; doctorOnly?: true }
+
+/** 执行器的自检：装没装、版本、沙箱、凭据是否就绪。sandboxed：agent 在沙箱里（平台的「凭据隔离」一项要用）。 */
+export type Health = { items: HealthItem[]; sandboxed: boolean }
+
+/** 平台交给执行器的环境：建执行器和自检都只用这些。 */
+export type ExecutorContext = {
+  /** Eos 的安装目录（package.json、node_modules 所在）。 */
+  root: string
+  dataDir: string
+  env: NodeJS.ProcessEnv
+  /** 模型 key 现在的来源和值（凭据存储优先，环境变量其次）：每次取都重新读，在 Web 上换了 key 之后取到的是新的。 */
+  modelKey: () => ModelKey
+  /** agent 用的系统用户（部署镜像里设置）；没有设置时 undefined。 */
+  agentUser?: CheckUser
+}
+
+/** 注册表里的一种执行器：名字、怎么建、怎么自检。 */
+export type ExecutorKind = {
+  name: string
+  create(ctx: ExecutorContext): Executor
+  health(ctx: ExecutorContext): Health
 }

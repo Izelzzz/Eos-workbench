@@ -1,6 +1,6 @@
 // 对话 agent：不绑定任务，可以多轮对话。只认 Executor 接口和 AgentProfile，不依赖某一个执行器。
 // - 能力面由平台定死：没有执行器自带的任何工具（builtinTools: 'none'），只读平台数据的工具经这次调用的 MCP 端点（mcp.ts）交给它；
-//   模板（内置的 assistant，团队可以改）只提供模型、effort 和提示词，改模板放不开权限。
+//   模板（内置的 assistant，团队可以改）只提供执行器（建对话时定下）、模型、effort 和提示词，改模板放不开权限。
 // - 每说一句话是一次调用：开一个新的 MCP 端点（新端口、新令牌），调用结束就关掉，并让执行器释放资源。
 // - 对话记录、trace、用量存在自己的表里（store.ts），平台重启后接着聊；执行器那一侧的会话按对话 id 续接。
 // - 平台重启时一句话的调用可能没做完：下次说话前先向执行器认领那次调用的回复，认领不到记一条「没有得到回复」。
@@ -38,6 +38,8 @@ export type ChatOptions = {
   now: () => number
   /** 每个 trace 事件到达时（已遮蔽）：命令行用它显示进度，网页用它边生成边显示。 */
   onEvent?: (chatId: string, e: TraceEvent) => void
+  /** 模板写的执行器没有登记时返回原因：建对话时核对，没登记的名字不记进对话。不给时不核对。 */
+  unknownExecutor?: (name: string) => string | undefined
 }
 
 const keyOf = (id: string) => `chat/${id}`
@@ -83,8 +85,12 @@ export class Chats {
   async start(text: string, actor: ChatActor): Promise<SendResult> {
     const bad = this.invalid(text)
     if (bad !== undefined) return { ok: false, cause: 'input', error: bad }
+    // 执行器在建对话时定下：会话在那个执行器里，之后改了模板的 executor 也不换（换了就续接不上，也找不回回复）。
+    const executor = this.o.conventions.lookup()(ASSISTANT)?.template.executor
+    const unknown = executor === undefined ? undefined : this.o.unknownExecutor?.(executor)
+    if (unknown !== undefined) return { ok: false, cause: 'config', error: `Agent 模板「${ASSISTANT}」：${unknown}` }
     const id = `c${this.o.now().toString(36)}${randomBytes(4).toString('hex')}`
-    this.o.chats.create({ id, firstMessage: this.o.redact(text), actor }, this.o.now())
+    this.o.chats.create({ id, firstMessage: this.o.redact(text), actor, ...(executor === undefined ? {} : { executor }) }, this.o.now())
     return this.send(id, text, actor)
   }
 
@@ -99,13 +105,19 @@ export class Chats {
     const lock = acquire(join(this.o.dataDir, 'locks'), `chat-${id}`)
     if ('heldBy' in lock) return { ok: false, cause: 'busy', error: `这个对话正在回复上一句（进程 ${lock.heldBy}），等它结束再发`, chat }
     try {
-      await this.recover(id)
+      const unclaimed = await this.recover(id)
+      if (unclaimed !== undefined) return { ok: false, cause: 'upstream', error: unclaimed, chat }
       const log = this.o.chats.log(id)
       const first = !log.some(m => m.role === 'assistant')
       const seq = this.o.chats.append(id, { at: this.o.now(), role: 'user', text: this.o.redact(text), actor })
       // 还没有回复过的对话（第一句，或者之前每一句都失败了）带上角色说明；之后执行器按 key 续接同一个会话，不再重复。
       const prompt = first ? `${t.template.prompt.trimEnd()}\n\n# 用户说\n\n${text}` : text
-      return await this.call(id, seq, prompt, { model: t.template.model, ...(t.template.effort === undefined ? {} : { effort: t.template.effort }) })
+      const executor = this.o.chats.executorOf(id)
+      return await this.call(id, seq, prompt, {
+        ...(executor === undefined ? {} : { executor }),
+        model: t.template.model,
+        ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
+      })
     } finally {
       lock.release()
     }
@@ -117,7 +129,7 @@ export class Chats {
     return undefined
   }
 
-  private async call(id: string, seq: number, prompt: string, route: { model: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
+  private async call(id: string, seq: number, prompt: string, route: { executor?: string; model: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
     const { chats, redact } = this.o
     const nonce = nonceOf(id, seq)
     const cwd = join(this.o.dataDir, 'chat', id)
@@ -189,19 +201,28 @@ export class Chats {
     return { ok: false, cause: 'upstream', error, chat: this.o.chats.summary(id)! }
   }
 
-  /** 最后一条是用户的话、后面没有结果：那次调用没做完（平台重启或进程被杀）。向执行器认领回复，认领不到就记下来。 */
-  private async recover(id: string): Promise<void> {
+  /**
+   * 最后一条是用户的话、后面没有结果：那次调用没做完（平台重启或进程被杀）。向执行器认领回复，认领不到就记下来。
+   * 执行器出错（例如建不起来）时什么都不记、返回原因：不是"没有回复"，修好之后下一句还能认领。
+   */
+  private async recover(id: string): Promise<string | undefined> {
     const last = this.o.chats.log(id).at(-1)
     if (last?.role !== 'user') return
     const nonce = nonceOf(id, last.seq)
-    const found = await this.o.executor.findReply(keyOf(id), nonce).catch(() => undefined)
+    const executor = this.o.chats.executorOf(id)
+    let found: Reply | undefined
+    try {
+      found = await this.o.executor.findReply(keyOf(id), nonce, executor)
+    } catch (e) {
+      return `上一句的回复认领不了：${this.o.redact((e as Error).message)}`
+    }
     if (found === undefined) {
       const reason = '这一句没有得到回复：调用没有做完（可能是平台重启了），可以再说一次'
       this.o.chats.voidProposals(nonce, reason)
       this.o.chats.append(id, { at: this.o.now(), role: 'error', text: reason })
       return
     }
-    const events = redactDeep(await this.o.executor.traceOf(keyOf(id), nonce).catch(() => []), this.o.redact)
+    const events = redactDeep(await this.o.executor.traceOf(keyOf(id), nonce, executor).catch(() => []), this.o.redact)
     // 运行时已经记下的事件不重复写（进程是在调用中途死的，事件流可能已经记了一部分；只在一条都没有时补上回放的）。
     if (!this.o.chats.trace(id).some(r => r.call === nonce && r.event.kind !== 'call_start')) this.o.chats.appendTrace(id, nonce, events)
     const foreign = foreignIn(events)

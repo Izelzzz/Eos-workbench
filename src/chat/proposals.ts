@@ -87,8 +87,8 @@ export const proposer = (o: {
  * 新建的约定没有可比的旧版本：整份权限都要人看，列出它的权限面（模板）或一句总的说明（工作流）。
  */
 export const permissionsOf = (kind: ProposalKind, name: string, before: string | undefined, after: string, lookup: TemplateLookup): string[] => {
-  // 对话 agent 自己的模板：它的权限不从模板读（平台定死），但模型和指令从这里来，改了会改变对话 agent 本身。
-  const self = kind === 'template' && name === ASSISTANT_TEMPLATE ? ['改的是对话 agent 自己的模板：会改变它用的模型和它的指令'] : []
+  // 对话 agent 自己的模板：它的权限不从模板读（平台定死），但执行器、模型和指令从这里来，改了会改变对话 agent 本身。
+  const self = kind === 'template' && name === ASSISTANT_TEMPLATE ? ['改的是对话 agent 自己的模板：会改变它用的执行器、模型和它的指令'] : []
   return [...self, ...changesOf(kind, before, after, lookup)]
 }
 
@@ -108,12 +108,12 @@ export const describe = (s: string): string =>
 
 const changesOf = (kind: ProposalKind, before: string | undefined, after: string, lookup: TemplateLookup): string[] => {
   if (before === undefined) {
-    if (kind === 'workflow') return ['新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认']
+    if (kind === 'workflow') return ['新建的工作流：其中角色的执行器、模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认']
     const t = parseTemplate(after)
     if (!t.ok) return []
     const a = t.template
     return [
-      `新建的 Agent 模板：模型 ${a.model}，写入 ${a.write}${a.writePaths === undefined ? '' : `（${a.writePaths.join('、')}）`}，去掉的工具组 ${a.denyTools.join('、') || '无'}，技能 ${a.skills.join('、') || '无'}，MCP ${a.mcp.map(m => m.name).join('、') || '无'}`,
+      `新建的 Agent 模板：${a.executor === undefined ? '' : `执行器 ${a.executor}，`}模型 ${a.model}，写入 ${a.write}${a.writePaths === undefined ? '' : `（${a.writePaths.join('、')}）`}，去掉的工具组 ${a.denyTools.join('、') || '无'}，技能 ${a.skills.join('、') || '无'}，MCP ${a.mcp.map(m => m.name).join('、') || '无'}`,
     ]
   }
   const out = permissionChanges(kind, before, after, lookup).map(describe)

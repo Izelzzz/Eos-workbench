@@ -57,10 +57,11 @@ flowchart TD
 
 | 类型 | 格式 | 字段 |
 |---|---|---|
-| 模板 | YAML | `name`、`description`、`model`、`effort`、`prompt`、`write`（`none` 或 `worktree`）、`writePaths`（worktree 内的 glob）、`tools.deny`（工具组）、`skills`（技能名）、`mcp`（stdio 服务） |
+| 模板 | YAML | `name`、`description`、`executor`（执行器的名字）、`model`、`effort`、`prompt`、`write`（`none` 或 `worktree`）、`writePaths`（worktree 内的 glob）、`tools.deny`（工具组）、`skills`（技能名）、`mcp`（stdio 服务） |
 | 技能 | Markdown | dsh 的 `SKILL.md` 格式，开头 `---` 之间是 `name` 和 `description` |
 
-- 默认值：`write` 是 `none`；`model` 是 `deepseek-flash`；`write: worktree` 并且省略 `writePaths` 时，可写范围是整个 worktree。只读的角色不能写 `writePaths`。
+- 默认值：`executor` 省略时用平台的默认执行器（dsh）；`write` 是 `none`；`model` 是 `deepseek-flash`；`write: worktree` 并且省略 `writePaths` 时，可写范围是整个 worktree。只读的角色不能写 `writePaths`。
+- `executor` 写的名字没有登记时，解析照常通过，创建任务时报错。
 - 内置的模板：`spec-writer`、`developer`、`reviewer`、`improver`。内置的技能：`write-changes`。内置的 `standard` 工作流引用前三个模板。
 - 模板和技能的名字只能用小写字母、数字和连字符，以字母开头，最长 32 个字符，不能用中文。技能名的规则来自 dsh；模板名沿用工作流名的规则。
 - 模板的错误分三步报告：字段格式 → 字段之间的约束 → 引用的技能是否存在。前一步有错时看不到后一步的错。

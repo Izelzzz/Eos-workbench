@@ -43,7 +43,11 @@ const serve = async (improve?: Executor, publicUrl?: URL, masterKey?: MasterKey)
     execFileSync('git', a, { cwd: mainRepo })
   const worktree = join(dir, 'wt')
   execFileSync('git', ['worktree', 'add', '-q', '-b', 'eos/t1', worktree], { cwd: mainRepo })
-  store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { repo: mainRepo, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
+  // 规划的角色用另一个执行器：回放要交给它（见下面的 replayed）
+  const wf = workflow({ maxRounds: 1, escalate: false })
+  const planner = wf.nodes[0]!.kind === 'agent' ? wf.nodes[0]!.role : undefined
+  if (planner !== undefined) wf.roles[planner] = { ...wf.roles[planner]!, executor: 'other' }
+  store.create({ id: 't1', request: '需求', workflow: wf, workflowSource: 'y', meta: { repo: mainRepo, worktree, branch: 'eos/t1', baseSha: 'abc' } }, 1000)
   const replayed: string[] = []
   // c1 跑在事件流之前（只能回放），c2 运行时记录了事件流。
   store.dispatch('t1', { kind: 'replied', call: 'c1' as never, sessionId: 's', text: '方案', usage: zero, ms: 100 }, 1100, 'executor')
@@ -52,8 +56,8 @@ const serve = async (improve?: Executor, publicUrl?: URL, masterKey?: MasterKey)
     { kind: 'step_start', t: 1201, step: 1 },
   ])
   const replay = {
-    traceOf: async (key: string, nonce: string): Promise<TraceEvent[]> => {
-      replayed.push(`${key} ${nonce}`)
+    traceOf: async (key: string, nonce: string, executor?: string): Promise<TraceEvent[]> => {
+      replayed.push(`${key} ${nonce} ${executor ?? '（默认）'}`)
       return [
         { kind: 'call_start', t: 1000 },
         { kind: 'step_start', t: 1001, step: 1 },
@@ -108,7 +112,7 @@ test('lists tasks and returns a detail with the trace tree, replaying calls reco
     assert.equal(plan!.children[0]!.id, 'c1')
     assert.equal(plan!.children[0]!.children.length, 1, 'c1 step replayed from the session log')
     assert.equal(build!.children[0]!.status, 'running', 'c2 is in flight with its streamed step')
-    assert.deepEqual(s.replayed, ['t1/plan t1/c1'], 'only the call without a stored trace is replayed')
+    assert.deepEqual(s.replayed, ['t1/plan t1/c1 other'], 'only the call without a stored trace is replayed, by the executor of its role')
     await fetch(`${s.base}/api/tasks/t1`)
     assert.equal(s.replayed.length, 1, 'replay of a finished call is cached')
   } finally {

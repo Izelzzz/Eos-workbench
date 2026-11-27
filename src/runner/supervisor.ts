@@ -68,6 +68,8 @@ export class Supervisor {
       checkUser?: CheckUser
       /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
       agentUser?: CheckUser
+      /** 角色写的执行器没有登记时返回原因：创建任务时核对，免得跑到这个角色才失败。不给时不核对。 */
+      unknownExecutor?: (name: string) => string | undefined
     },
   ) {
     this.locksDir = join(o.dataDir, 'locks')
@@ -101,6 +103,10 @@ export class Supervisor {
     // 先校验工作流，再访问网络。
     const resolved = this.conventions.resolve(input.workflow.trim())
     if (!resolved.ok) return resolved
+    for (const [key, r] of Object.entries(resolved.workflow.roles)) {
+      const unknown = r.executor === undefined ? undefined : this.o.unknownExecutor?.(r.executor)
+      if (unknown !== undefined) return { ok: false, error: `工作流 ${resolved.workflow.name} 的角色 ${key}：${unknown}` }
+    }
     const id = newId()
     let w: Worktree
     let baseBranch: string | undefined

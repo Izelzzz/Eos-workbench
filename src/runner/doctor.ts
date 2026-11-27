@@ -1,20 +1,18 @@
 // 启动检查：平台进程所在的机器能不能跑任务。eos doctor 列出全部检查；会调用模型的命令启动前跑同样的检查：
-// 有 ✗（缺了就一定跑不起来：API key、git、数据目录、dsh）就不启动；只有 ⚠（Node 版本低于声明的要求，实际可能能跑）时提示后照常启动。
-// 检查的是平台进程自己（Node、环境变量、git、数据目录、dsh），部署到服务器上时检查的就是服务器。
+// 有 ✗（缺了就一定跑不起来：git、数据目录、执行器报告的问题）就不启动；只有 ⚠（Node 版本低于声明的要求，实际可能能跑）时提示后照常启动。
+// 检查的是平台进程自己（Node、环境变量、git、数据目录）和每个执行器的自检（装没装、沙箱、凭据，见 Executor 的 health），
+// 部署到服务器上时检查的就是服务器。
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { GENERATE_HINT, MASTER_KEY_ENV, type MasterKeyState } from '../credentials/key.ts'
-import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
-import { dshInstall, dshSandbox, modelBaseUrl, type DshSandbox } from '../executor/dsh.ts'
+import type { Health, HealthItem, HealthStatus } from '../executor/types.ts'
 import { AGENT_USER_ENV, CHECK_USER_ENV, probeSwitch, type CheckUserState } from './check-user.ts'
 import { droppedProxies } from './checks.ts'
 
-/** ok：满足；warn：不满足但可能还能跑，只提示；fail：缺了一定跑不起来，启动前拦下。 */
-export type Status = 'ok' | 'warn' | 'fail'
-/** doctorOnly：只在 eos doctor 里列出，启动前检查不提示（总会出现的 ⚠ 会让人习惯性忽略真正的提示）。 */
-export type Item = { name: string; status: Status; detail: string; fix?: string; doctorOnly?: true }
+export type Status = HealthStatus
+export type Item = HealthItem
 
 /** 一个独立用户：没有设置、能切换过去、设置错了或切换不过去（原因）。 */
 export type UserFact = { kind: 'none' } | { kind: 'ok'; name: string } | { kind: 'fail'; error: string }
@@ -24,8 +22,6 @@ export type Facts = {
   node: string
   /** Eos 的 package.json 里 engines.node，例如 ">=24.9.0"；读不出来时是 undefined。 */
   nodeRequired?: string
-  /** 模型 API key 的来源：只有来源，没有 key 本身。 */
-  modelKey: { source: 'credentials' | 'env' | 'missing' } | { source: 'error'; error: string }
   /** 凭据主密钥：只有状态和指纹，没有密钥本身。 */
   masterKey: { kind: 'ok'; id: string } | { kind: 'missing' } | { kind: 'invalid'; error: string }
   /** git 的版本号，或者 git 找不到、运行失败的原因。 */
@@ -33,18 +29,14 @@ export type Facts = {
   dataDir: string
   /** 数据目录建不出来或不可写时的错误。 */
   dataDirError?: string
-  /** dsh 实际会用的沙箱（探测得出，不是只看装没装）。 */
-  sandbox: DshSandbox
-  /** dsh 的版本；没装时是 undefined。 */
-  dsh?: string
+  /** 每个执行器的自检，按注册表登记的顺序。 */
+  executors: { name: string; health: Health }[]
   /** 检查命令用的系统用户：没有设置、能切换过去、设置错了或切换不过去（原因）。 */
   checkUser: UserFact
   /** dsh 和 agent 用的系统用户，同上。 */
   agentUser: UserFact
   /** 带账号密码、所以没有传给检查命令的代理变量。 */
   droppedProxies: string[]
-  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
-  modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
 }
 
 const parts = (v: string): number[] =>
@@ -82,41 +74,6 @@ const masterKeyItem = (f: Facts): Item =>
     : f.masterKey.kind === 'missing'
       ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT, doctorOnly: true }
       : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
-
-/**
- * dsh 会用哪个沙箱。都不能用时 dsh 拒绝执行命令，任务一定失败，所以是 ✗。
- * Landlock 和 bwrap 都限制 agent 只能写自己的 worktree，也都挡住 agent 读别的进程的环境（/proc/<pid>/environ）；
- * Landlock 不隔离进程号空间和 /tmp（agent 看得到进程列表，各任务共用 /tmp）。
- */
-const sandboxItem = (f: Facts): Item => {
-  const name = '沙箱'
-  switch (f.sandbox.backend) {
-    case 'bwrap':
-      return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
-    case 'landlock':
-      return f.sandbox.enforcement === 'full'
-        ? {
-            name,
-            status: 'ok',
-            detail: 'Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp',
-          }
-        : {
-            name,
-            status: 'warn',
-            detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）',
-            fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）',
-          }
-    case 'none':
-      return {
-        name,
-        status: 'fail',
-        detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来',
-        fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）',
-      }
-    case 'platform':
-      return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
-  }
-}
 
 /**
  * 检查命令用哪个用户运行。设置了却切换不过去时 ✗：检查命令一定跑不起来，也不能退回到用平台的用户运行。
@@ -184,7 +141,8 @@ const agentUserItem = (f: Facts): Item[] => {
  */
 const isolationItem = (f: Facts): Item[] => {
   if (f.masterKey.kind !== 'ok') return []
-  const sandboxed = f.sandbox.backend !== 'none'
+  // 没有任何执行器报告时不能说有沙箱
+  const sandboxed = f.executors.length > 0 && f.executors.every(e => e.health.sandboxed)
   const checks = f.checkUser.kind === 'ok' ? `检查命令以 ${f.checkUser.name} 运行，主密钥和模型 key 都读不到` : '检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到'
   const agentMaster =
     f.agentUser.kind === 'ok'
@@ -207,66 +165,14 @@ const isolationItem = (f: Facts): Item[] => {
   ]
 }
 
-const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
-
-/** 凭据存储优先；里面没有才用环境变量。只检查有没有，不检查是否有效。 */
-const modelKeyItem = (f: Facts): Item => {
-  const name = 'DeepSeek API key'
-  switch (f.modelKey.source) {
-    case 'credentials':
-      return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
-    case 'env':
-      return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
-    case 'missing':
-      return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
-    case 'error':
-      return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
-  }
-}
-
-/** 官方的模型接口主机：EOS_MODEL_BASE_URL 指向它时不用提示 */
-const OFFICIAL_MODEL_HOST = 'api.deepseek.com'
-
-/** 模型接口地址：设成别的主机时，模型请求和模型 key 都会发到那里，部署时误设或被人改了要能马上看到。 */
-const modelBaseUrlItem = (f: Facts): Item[] => {
-  const name = '模型接口地址'
-  if (f.modelBaseUrl === undefined) return []
-  if (f.modelBaseUrl.kind === 'invalid') {
-    return [{ name, status: 'fail', detail: f.modelBaseUrl.error, fix: '改正环境变量 EOS_MODEL_BASE_URL（https 地址，或本机的 http 地址，不带用户名和密码）；用官方接口时删掉它' }]
-  }
-  const u = f.modelBaseUrl
-  if (u.host === OFFICIAL_MODEL_HOST) return [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${u.host}${u.path}` }]
-  // 本机地址（例如 CI 的假模型、本机的网关）：key 不出这台机器，只在 eos doctor 里提示，免得每次启动都打印、让人习惯忽略提示
-  return u.loopback
-    ? [
-        {
-          name,
-          status: 'warn',
-          detail: `EOS_MODEL_BASE_URL 指向本机的 ${u.host}${u.path}：模型请求和模型 key 会发给本机上的这个服务`,
-          fix: '确认它是你在本机运行的模型网关或测试服务',
-          doctorOnly: true,
-        },
-      ]
-    : [
-        {
-          name,
-          status: 'warn',
-          detail: `EOS_MODEL_BASE_URL 指向 ${u.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
-          fix: '确认这是你信任的模型网关；不需要时删掉 EOS_MODEL_BASE_URL，改用官方接口',
-        },
-      ]
-}
-
 export const evaluate = (f: Facts): Item[] => [
   nodeItem(f),
-  modelKeyItem(f),
+  ...f.executors.flatMap(e => e.health.items),
   masterKeyItem(f),
-  sandboxItem(f),
   ...checkUserItem(f),
   ...agentUserItem(f),
   ...proxyItem(f),
   ...isolationItem(f),
-  ...modelBaseUrlItem(f),
   'version' in f.git
     ? { name: 'git', status: 'ok', detail: f.git.version }
     : 'missing' in f.git
@@ -275,7 +181,6 @@ export const evaluate = (f: Facts): Item[] => [
   f.dataDirError === undefined
     ? { name: '数据目录', status: 'ok', detail: `${f.dataDir} 可写` }
     : { name: '数据目录', status: 'fail', detail: `${f.dataDir}：${f.dataDirError}`, fix: '用 --data <目录> 或环境变量 EOS_HOME 换一个平台进程能写的目录，或修改这个目录的权限' },
-  f.dsh === undefined ? { name: 'dsh', status: 'fail', detail: '没有安装，或安装不完整', fix: '在仓库目录运行 npm install' } : { name: 'dsh', status: 'ok', detail: f.dsh },
 ]
 
 /** 数据目录建不出来、不可写时，常见的错误码给中文说明，原始错误码放在括号里。 */
@@ -336,11 +241,10 @@ const hasCapKill = (): boolean => {
 
 /** 收集事实。root 是仓库目录（package.json 和 node_modules 所在）。会建出数据目录（和别的命令一样）。 */
 export const gather = (
-  o: { root: string; dataDir: string; modelKey: ModelKey; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState },
+  o: { root: string; dataDir: string; executors: Facts['executors']; masterKey: MasterKeyState; checkUser: CheckUserState; agentUser: CheckUserState },
   env: NodeJS.ProcessEnv = process.env,
 ): Facts => {
   const required = nodeRequired(o.root)
-  const dsh = dshInstall(o.root)?.version
   const error = dataDirError(o.dataDir)
   const userFact = (u: CheckUserState): UserFact => {
     if (u.kind !== 'ok') return u.kind === 'none' ? u : { kind: 'fail', error: u.error }
@@ -358,30 +262,14 @@ export const gather = (
   return {
     node: process.versions.node,
     ...(required === undefined ? {} : { nodeRequired: required }),
-    modelKey: o.modelKey.source === 'credentials' || o.modelKey.source === 'env' ? { source: o.modelKey.source } : o.modelKey,
     masterKey: o.masterKey.kind === 'ok' ? { kind: 'ok', id: o.masterKey.key.id } : o.masterKey,
     git: gitState(),
-    sandbox: dshSandbox(),
+    executors: o.executors,
     dataDir: o.dataDir,
     ...(error === undefined ? {} : { dataDirError: error }),
-    ...(dsh === undefined ? {} : { dsh }),
     checkUser: userFact(o.checkUser),
     agentUser: agentFact(o.agentUser),
     droppedProxies: droppedProxies(env),
-    ...modelBaseUrlFact(env),
-  }
-}
-
-const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]']
-
-const modelBaseUrlFact = (env: NodeJS.ProcessEnv): Pick<Facts, 'modelBaseUrl'> => {
-  try {
-    const url = modelBaseUrl(env)
-    if (url === undefined) return {}
-    const u = new URL(url)
-    return { modelBaseUrl: { kind: 'ok', host: u.host, path: u.pathname, loopback: LOOPBACK.includes(u.hostname) } }
-  } catch (e) {
-    return { modelBaseUrl: { kind: 'invalid', error: (e as Error).message } }
   }
 }
 

@@ -3,6 +3,9 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import type { ModelKey } from '../src/credentials/model-key.ts'
+import { dshFacts, dshHealth, type DshFacts } from '../src/executor/dsh.ts'
+import type { ExecutorContext } from '../src/executor/types.ts'
 import { atLeast, evaluate, formatItems, gather, type Facts } from '../src/runner/doctor.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -15,19 +18,23 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const good: Facts = {
+const goodDsh: DshFacts = { install: { version: '0.2.2-rc.5' }, sandbox: { backend: 'bwrap' }, modelKey: { source: 'credentials' } }
+/** 平台的事实加上 dsh 的自检（dsh 的事实改掉其中几项）。 */
+const withDsh = (d: Partial<DshFacts>, f: Omit<Facts, 'executors'>): Facts => ({ ...f, executors: [{ name: 'dsh', health: dshHealth({ ...goodDsh, ...d }) }] })
+const platform: Omit<Facts, 'executors'> = {
   node: '24.10.0',
   nodeRequired: '>=24.9.0',
-  modelKey: { source: 'credentials' },
   masterKey: { kind: 'ok', id: '0123456789abcdef' },
   git: { version: '2.43.0' },
-  sandbox: { backend: 'bwrap' },
   dataDir: '/srv/eos',
-  dsh: '0.2.2-rc.5',
   checkUser: { kind: 'none' },
   agentUser: { kind: 'none' },
   droppedProxies: [],
 }
+const good: Facts = withDsh({}, platform)
+/** 只测平台那几项时，gather 不带执行器的自检。 */
+const noExecutors: Facts['executors'] = []
+const ctx = (modelKey: ModelKey, env: NodeJS.ProcessEnv = {}): ExecutorContext => ({ root: ROOT, dataDir: tmp(), env, modelKey: () => modelKey })
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -44,30 +51,31 @@ test('环境都满足时每项都通过', () => {
     [
       ['Node', 'ok'],
       ['DeepSeek API key', 'ok'],
-      ['凭据主密钥', 'ok'],
       ['沙箱', 'ok'],
+      ['dsh', 'ok'],
+      ['凭据主密钥', 'ok'],
       ['凭据隔离', 'warn'],
       ['git', 'ok'],
       ['数据目录', 'ok'],
-      ['dsh', 'ok'],
     ],
   )
 })
 
 test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项都写清怎么修', () => {
-  const bad: Facts = {
-    node: '22.23.5',
-    nodeRequired: '>=24.9.0',
-    modelKey: { source: 'missing' },
-    masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' },
-    git: { missing: true },
-    sandbox: { backend: 'none' },
-    dataDir: '/srv/eos',
-    dataDirError: '没有写权限（EACCES）',
-    checkUser: { kind: 'fail', error: 'EOS_CHECK_USER=eos-check，但系统里没有这个用户' },
-    agentUser: { kind: 'none' },
-    droppedProxies: [],
-  }
+  const bad: Facts = withDsh(
+    { modelKey: { source: 'missing' }, sandbox: { backend: 'none' }, install: { missing: true } },
+    {
+      node: '22.23.5',
+      nodeRequired: '>=24.9.0',
+      masterKey: { kind: 'invalid', error: 'EOS_MASTER_KEY 不是 base64 编码' },
+      git: { missing: true },
+      dataDir: '/srv/eos',
+      dataDirError: '没有写权限（EACCES）',
+      checkUser: { kind: 'fail', error: 'EOS_CHECK_USER=eos-check，但系统里没有这个用户' },
+      agentUser: { kind: 'none' },
+      droppedProxies: [],
+    },
+  )
   const items = evaluate(bad)
   assert.deepEqual(
     items.map(i => i.status),
@@ -101,7 +109,7 @@ test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显�
 })
 
 test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分）、都不可用、非 Linux', () => {
-  const sandbox = (s: Facts['sandbox']) => evaluate({ ...good, sandbox: s }).find(i => i.name === '沙箱')!
+  const sandbox = (s: DshFacts['sandbox']) => evaluate(withDsh({ sandbox: s }, platform)).find(i => i.name === '沙箱')!
   assert.equal(sandbox({ backend: 'bwrap' }).status, 'ok')
   assert.match(sandbox({ backend: 'bwrap' }).detail, /^bwrap：.*单独的进程号空间里；能写的 agent 有私有的 \/tmp，只读的 agent 看到的是共用的 \/tmp/)
   assert.equal(sandbox({ backend: 'landlock', enforcement: 'full' }).status, 'ok')
@@ -114,8 +122,10 @@ test('沙箱按实际生效的后端报告：bwrap、Landlock（完整 / 部分�
   assert.equal(sandbox({ backend: 'platform', platform: 'darwin' }).status, 'ok', 'macOS and Windows are not probed and must not block startup')
 })
 
+const isolationOf = (f: Facts) => formatItems(evaluate(f).filter(i => i.name === '凭据隔离'))
+
 test('设置了主密钥时如实说明谁能读到；没有独立用户时是 ⚠；没设置主密钥时不提示', () => {
-  const isolation = (s: Facts['sandbox']) => formatItems(evaluate({ ...good, sandbox: s }).filter(i => i.name === '凭据隔离'))
+  const isolation = (s: DshFacts['sandbox']) => formatItems(evaluate(withDsh({ sandbox: s }, platform)).filter(i => i.name === '凭据隔离'))
   for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
     assert.match(
       isolation(s),
@@ -124,10 +134,12 @@ test('设置了主密钥时如实说明谁能读到；没有独立用户时是 �
   }
   assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥；没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key；检查命令/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
+  assert.match(isolationOf({ ...good, executors: [] }), /没有可用的沙箱/, '没有执行器报告时不当作有沙箱')
 })
 
 test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓；只换了检查命令时仍是 ⚠；用户设置错了或切换不过去是 ✗，拦下启动', () => {
-  const both: Facts = { ...good, sandbox: { backend: 'landlock', enforcement: 'full' }, checkUser: { kind: 'ok', name: 'eos-check' }, agentUser: { kind: 'ok', name: 'eos-agent' } }
+  const users: Omit<Facts, 'executors'> = { ...platform, checkUser: { kind: 'ok', name: 'eos-check' }, agentUser: { kind: 'ok', name: 'eos-agent' } }
+  const both: Facts = withDsh({ sandbox: { backend: 'landlock', enforcement: 'full' } }, users)
   const text = formatItems(evaluate(both))
   assert.match(text, /✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境/)
   assert.match(text, /✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境/)
@@ -137,7 +149,7 @@ test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓
   )
   const checkOnly = evaluate({ ...both, agentUser: { kind: 'none' } }).find(i => i.name === '凭据隔离')
   assert.equal(checkOnly?.status, 'warn')
-  assert.equal(evaluate({ ...both, sandbox: { backend: 'none' } }).find(i => i.name === '凭据隔离')?.status, 'warn', '没有沙箱时 agent 能读到 dsh 的模型 key')
+  assert.equal(evaluate(withDsh({ sandbox: { backend: 'none' } }, users)).find(i => i.name === '凭据隔离')?.status, 'warn', '没有沙箱时 agent 能读到 dsh 的模型 key')
   for (const [field, name, caps] of [
     ['checkUser', '检查命令的用户', /SETUID、SETGID/],
     ['agentUser', 'agent 的用户', /SETUID、SETGID、KILL/],
@@ -156,7 +168,7 @@ test('gather：设置了 agent 的用户但没有设置 dsh 的入口时是 ✗�
     const f = gather({
       root: ROOT,
       dataDir: join(tmp(), 'data'),
-      modelKey: { source: 'missing' },
+      executors: noExecutors,
       masterKey: { kind: 'missing' },
       checkUser: { kind: 'none' },
       agentUser: { kind: 'ok', user: { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' } },
@@ -180,7 +192,7 @@ test('gather：设置了检查命令的用户时真的切换一次；系统里�
   const f = gather({
     root: ROOT,
     dataDir: join(tmp(), 'data'),
-    modelKey: { source: 'missing' },
+    executors: noExecutors,
     masterKey: { kind: 'missing' },
     checkUser: { kind: 'invalid', error: 'EOS_CHECK_USER=nobody-here，但系统里没有这个用户' },
     agentUser: { kind: 'none' },
@@ -191,7 +203,7 @@ test('gather：设置了检查命令的用户时真的切换一次；系统里�
     const g = gather({
       root: ROOT,
       dataDir: join(tmp(), 'data'),
-      modelKey: { source: 'missing' },
+      executors: noExecutors,
       masterKey: { kind: 'missing' },
       checkUser: { kind: 'ok', user: { name: 'nobody', gid: 65534, home: '/nonexistent' } },
       agentUser: { kind: 'none' },
@@ -202,34 +214,43 @@ test('gather：设置了检查命令的用户时真的切换一次；系统里�
 
 test('模型 key 显示来源：凭据存储、环境变量；读不出来时是 ✗，不悄悄改用环境变量', () => {
   assert.match(formatItems(evaluate(good)), /✓ DeepSeek API key：来自凭据存储（凭据 deepseek）/)
-  assert.match(formatItems(evaluate({ ...good, modelKey: { source: 'env' } })), /✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）/)
+  assert.match(formatItems(evaluate(withDsh({ modelKey: { source: 'env' } }, platform))), /✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）/)
   assert.match(
-    formatItems(evaluate({ ...good, modelKey: { source: 'error', error: '凭据 deepseek 解密失败' } })),
+    formatItems(evaluate(withDsh({ modelKey: { source: 'error', error: '凭据 deepseek 解密失败' } }, platform))),
     /✗ DeepSeek API key：凭据存储里的 deepseek 读不出来：凭据 deepseek 解密失败\n  怎么修：/,
   )
 })
 
-test('gather：读 package.json 的 engines 和 dsh 版本；只记 key 的来源，不带值；数据目录建不出来时记下原因', () => {
+test('dsh 的自检：读 dsh 版本；只记 key 的来源，不带值；入口配置错了时是 ✗', () => {
+  const d = dshFacts(ctx({ source: 'credentials', value: 'sk-secret-value' }))
+  assert.deepEqual(d.modelKey, { source: 'credentials' })
+  assert.ok(!JSON.stringify(d).includes('sk-secret-value'))
+  assert.match('version' in d.install ? d.install.version : '', /^0\.2\.2/)
+  assert.deepEqual(dshFacts(ctx({ source: 'missing' })).modelKey, { source: 'missing' })
+  const launcher = dshFacts(ctx({ source: 'missing' }, { EOS_DSH_LAUNCHER: join(tmp(), 'no-such-launcher') }))
+  assert.match('error' in launcher.install ? launcher.install.error : '', /EOS_DSH_LAUNCHER=.*这个文件不存在/)
+  assert.equal(dshHealth(launcher).items.find(i => i.name === 'dsh')?.status, 'fail', '启动前拦下，而不是等到第一次调用才失败')
+})
+
+test('gather：读 package.json 的 engines；执行器的自检原样带上；数据目录建不出来时记下原因', () => {
+  const executors = [{ name: 'dsh', health: dshHealth(goodDsh) }]
   const f = gather({
     root: ROOT,
     dataDir: join(tmp(), 'data'),
-    modelKey: { source: 'credentials', value: 'sk-secret-value' },
+    executors,
     masterKey: { kind: 'missing' },
     checkUser: { kind: 'none' },
     agentUser: { kind: 'none' },
   })
   assert.equal(f.nodeRequired, '>=24.9.0')
   assert.equal(f.node, process.versions.node)
-  assert.deepEqual(f.modelKey, { source: 'credentials' })
-  assert.ok(!JSON.stringify(f).includes('sk-secret-value'))
-  assert.match(f.dsh ?? '', /^0\.2\.2/)
+  assert.deepEqual(f.executors, executors)
   assert.match('version' in f.git ? f.git.version : '', /^\d+\.\d+/)
   assert.equal(f.dataDirError, undefined)
   assert.ok(existsSync(f.dataDir), '和别的命令一样会建出数据目录')
   const file = join(tmp(), 'a-file')
   writeFileSync(file, '')
-  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } })
-  assert.deepEqual(blocked.modelKey, { source: 'missing' })
+  const blocked = gather({ root: ROOT, dataDir: join(file, 'data'), executors: noExecutors, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } })
   assert.equal(blocked.dataDirError, '路径里有一段不是目录（是普通文件）（ENOTDIR）')
 })
 
@@ -301,7 +322,7 @@ test('凭据主密钥没设置、凭据隔离的 ⚠ 只在 doctor 里列出，�
 })
 
 test('模型接口地址：没设置时不显示；官方接口通过并显示路径；本机地址只在 doctor 里提示；别的主机提示 key 会发过去；格式不对时拦下', () => {
-  const item = (f: Partial<Facts>) => evaluate({ ...good, ...f }).find(i => i.name === '模型接口地址')
+  const item = (f: Partial<DshFacts>) => evaluate(withDsh(f, platform)).find(i => i.name === '模型接口地址')
   assert.equal(item({}), undefined)
   const official = item({ modelBaseUrl: { kind: 'ok', host: 'api.deepseek.com', path: '/anthropic', loopback: false } })!
   assert.equal(official.status, 'ok')
@@ -314,13 +335,12 @@ test('模型接口地址：没设置时不显示；官方接口通过并显示�
   assert.equal(item({ modelBaseUrl: { kind: 'invalid', error: 'EOS_MODEL_BASE_URL 里不能带用户名和密码' } })?.status, 'fail')
 })
 
-test('gather 按 EOS_MODEL_BASE_URL 收集解析后的主机，官方主机的判断不被大小写、端口、相似的主机名骗过；错误里不带原始地址', () => {
-  const run = (value: string | undefined) =>
-    gather(
-      { root: ROOT, dataDir: tmp(), modelKey: { source: 'missing' }, masterKey: { kind: 'missing' }, checkUser: { kind: 'none' }, agentUser: { kind: 'none' } },
-      value === undefined ? {} : { EOS_MODEL_BASE_URL: value },
-    ).modelBaseUrl
-  const status = (value: string) => evaluate({ ...good, modelBaseUrl: run(value) }).find(i => i.name === '模型接口地址')!.status
+test('dsh 的自检按 EOS_MODEL_BASE_URL 收集解析后的主机，官方主机的判断不被大小写、端口、相似的主机名骗过；错误里不带原始地址', () => {
+  const run = (value: string | undefined) => dshFacts(ctx({ source: 'missing' }, value === undefined ? {} : { EOS_MODEL_BASE_URL: value })).modelBaseUrl
+  const status = (value: string) => {
+    const u = run(value)
+    return evaluate(withDsh(u === undefined ? {} : { modelBaseUrl: u }, platform)).find(i => i.name === '模型接口地址')!.status
+  }
   assert.equal(run(undefined), undefined)
   assert.deepEqual(run('https://gateway.example:8443/anthropic'), { kind: 'ok', host: 'gateway.example:8443', path: '/anthropic', loopback: false })
   assert.deepEqual(run('http://127.0.0.1:12345/anthropic'), { kind: 'ok', host: '127.0.0.1:12345', path: '/anthropic', loopback: true })

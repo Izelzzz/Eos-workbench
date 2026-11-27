@@ -75,7 +75,7 @@ export class McpExecutor implements Executor {
       results.push(out.text)
     }
   }
-  async findReply(_key: string, nonce: string) {
+  async findReply(_key: string, nonce: string, _executor?: string) {
     return this.completed.get(nonce)
   }
   async traceOf(_key?: string, _nonce?: string): Promise<TraceEvent[]> {

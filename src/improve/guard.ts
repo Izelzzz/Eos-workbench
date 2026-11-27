@@ -1,4 +1,4 @@
-// 改进提案不能动权限：模板的模型、写入范围、工具组、MCP，工作流里角色的这些字段和检查命令。
+// 改进提案不能动权限：模板的执行器、模型、写入范围、工具组、MCP，工作流里角色的这些字段和检查命令。
 // 这些决定"agent 能做什么、平台替它执行什么"，只能由人在团队约定页手动改（ADR-004）。纯函数。
 import { parseTemplate } from '../workflow/agent.ts'
 import { parseWorkflow } from '../workflow/parse.ts'
@@ -7,6 +7,7 @@ import type { TargetKind } from '../engine/evidence.ts'
 
 /** 权限相关的字段，键是 YAML 里的写法。 */
 const permissionFields = (a: AgentConfig): Record<string, string> => ({
+  executor: a.executor ?? '',
   model: a.model,
   write: a.write,
   writePaths: JSON.stringify(a.writePaths),
@@ -108,8 +109,8 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
     for (const [id, role] of Object.entries(b.workflow.roles)) {
       const old = a.workflow.roles[id]
       if (old === undefined) {
-        if (!existing.has(permissionOf(role))) out.push(`新增的角色「${id}」的模型、写入范围、工具或 MCP 必须和已有的某个角色完全相同`)
-      } else if (permissionOf(old) !== permissionOf(role)) out.push(`不能改角色「${id}」的模型、写入范围、工具或 MCP（包括换成别的模板）`)
+        if (!existing.has(permissionOf(role))) out.push(`新增的角色「${id}」的执行器、模型、写入范围、工具或 MCP 必须和已有的某个角色完全相同`)
+      } else if (permissionOf(old) !== permissionOf(role)) out.push(`不能改角色「${id}」的执行器、模型、写入范围、工具或 MCP（包括换成别的模板）`)
     }
     const perm = (w: Workflow, role: string | undefined) => (role === undefined ? 'none' : permissionOf(w.roles[role]!))
     const oldAt = rolesAt(a.workflow)

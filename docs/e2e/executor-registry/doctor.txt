@@ -1,0 +1,10 @@
+Eos 环境检查（数据目录 /home/user/Eos-workbench/node_modules/.eos-doc-UMse）
+⚠ Node：22.23.5，低于 Eos 要求的 >=24.9.0（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题
+  怎么修：安装 Node 24.9.0 或更新的版本，再用它启动平台
+✓ DeepSeek API key：来自环境变量 DEEPSEEK_API_KEY（凭据存储里没有 deepseek）
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ dsh：0.2.2-rc.5
+⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据
+  怎么修：生成一个主密钥：openssl rand -base64 32（或 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），在启动平台的环境里设置 EOS_MASTER_KEY=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入
+✓ git：2.43.0
+✓ 数据目录：/home/user/Eos-workbench/node_modules/.eos-doc-UMse 可写

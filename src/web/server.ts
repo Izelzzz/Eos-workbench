@@ -223,9 +223,9 @@ export const createWebServer = (o: {
     const have = new Set(rows.map(r => r.call))
     for (const e of task.log) {
       if (e.type !== 'call' || have.has(e.call)) continue
-      // 引入事件流之前跑完的调用：从 dsh 会话日志回放。
+      // 引入事件流之前跑完的调用：从执行器的会话日志回放，交给这次调用的角色用的执行器。
       const k = `${task.id}/${e.call}`
-      if (!replayed.has(k)) replayed.set(k, await o.replay.traceOf(keyOf(task.id, sessionOf(task.workflow, e)), nonceOf(task.id, { id: e.call } as never)))
+      if (!replayed.has(k)) replayed.set(k, await o.replay.traceOf(keyOf(task.id, sessionOf(task.workflow, e)), nonceOf(task.id, { id: e.call } as never), task.workflow.roles[e.role]?.executor))
       for (const event of replayed.get(k)!) rows.push({ call: e.call, event })
     }
     return rows
