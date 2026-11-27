@@ -84,9 +84,9 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 
 ### 端点
 
-- 只接受 `POST /mcp`，只回 JSON，不开 SSE 流。
+- 只接受 `POST /mcp`、`application/json` 的请求，只回 JSON，不开 SSE 流。
 - 请求体最多 64 KiB，不接受批量请求。
-- 一次调用最多 30 次工具调用，到上限后的调用都返回错误。
+- 一次调用最多 30 次工具调用，到上限后的调用都返回错误（也记进「读了哪些数据」）。
 - Host 必须是 `127.0.0.1:<端口>`；带 Origin 的请求一律拒绝。
 - 令牌按定长比较：两边各算 sha256，再用 `timingSafeEqual`。
 
@@ -98,8 +98,8 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 
 | 处理 | 做法 |
 |---|---|
-| 权限 | 目录 0750、文件 0640。部署镜像里属于平台用户 eos、组 eos-dsh，dsh 靠组权限读 |
-| 调用结束 | dsh 进程关掉时删掉整个目录 |
+| 权限 | 目录 2750、文件 0640，属于平台用户 eos、组 eos-dsh。`eos-profiles` 带 setgid，新目录继承组；文件显式改成目录的组。dsh（eos-agent）靠组 eos-dsh 读 |
+| 调用结束 | dsh 进程关掉时删掉整个目录；dsh 进程没起来时马上删掉 |
 | 崩溃留下的 | 平台进程第一次写配置时，删掉超过一小时没改过的目录 |
 | 端点关闭后 | 令牌没有用处：端口上已经没有服务 |
 
@@ -108,7 +108,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 ### 对话的存储和续接
 
 - `chats`：每个对话一行。`chat_messages`：只追加，角色是 user、assistant、error。`chat_trace`：已遮蔽的事件流。
-- assistant 记录带用量、耗时，以及读了哪些数据（工具名和参数）。
+- assistant 记录带用量、耗时，以及读了哪些数据（工具名和参数，参数存之前遮蔽）。
 - 执行器的会话按 key `chat/<对话 id>` 续接。还没有回复过的对话带上模板的提示词，之后只发用户的话。
 - 平台重启时一句话的调用可能没做完。下一句之前先向执行器认领回复（`findReply`），认领不到就记一条「没有回复」。
 - 同一个对话同一时间只有一次调用（锁 `chat-<id>`）。
@@ -159,6 +159,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 结论 | 证据 |
 |---|---|
 | 真实 dsh 发给模型的工具表里只有 8 个 `mcp__eos__*` 工具；两轮对话跨进程续接；trace 里的凭据值被遮蔽；调用结束后配置里没有令牌 | `docs/e2e/chat-a/report.json` |
-| 部署镜像里 eos-check、eos-agent 不带令牌和带错令牌都被拒；eos-check 读不到配置里的令牌，eos-agent 读得到 | `docs/e2e/chat-a/docker-probe.json` |
+| 部署镜像里 eos-check、eos-agent 不带令牌和带错令牌都被拒；容器里跑通一次 `eos chat`，配置是 2750/0640、组 eos-dsh，eos-check 读不到，eos-agent 读得到，调用结束后删掉 | `docs/e2e/chat-a/docker-probe.json` |
+| 最终代码上真实 dsh 的工具表、遮蔽、令牌清理（假模型） | `docs/e2e/chat-a/fake-model-report.json` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
-| 配置的权限、删除、崩溃后清理 | `tests/executor.test.ts` |
+| 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |

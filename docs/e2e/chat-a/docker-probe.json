@@ -1,5 +1,5 @@
 {
-  "commit": "0c9e7219908c5c8e872d716b143f2048abfdaa56",
+  "commit": "cfb8cb89e4b1bee40375bca7a28624487db8cfc6",
   "image": "eos-workbench:chat-probe",
   "results": {
     "eos-check: 不带令牌": "401",
@@ -7,10 +7,16 @@
     "eos-agent: 不带令牌": "401",
     "eos-agent: 错的令牌": "401",
     "eos-check: 对的令牌（令牌泄露时）": "200",
-    "eos-check: 读 dsh 配置里的令牌": "读不到",
-    "eos-agent: 读 dsh 配置里的令牌": "读得到",
-    "dsh home 的权限": "drwxrws--T eos:eos-dsh",
-    "端点关闭后 eos-agent 带对的令牌": "ERR fetch failed"
+    "端点关闭后 eos-agent 带对的令牌": "ERR fetch failed",
+    "eos chat new 的回复": "有回复",
+    "调用期间带令牌的配置": {
+      "dir": "2750 eos:eos-dsh",
+      "file": "640 eos:eos-dsh",
+      "eos-check": "读不到",
+      "eos-agent": "读得到"
+    },
+    "调用结束后 ephemeral 里剩下的": [],
+    "dsh home 的权限": "drwxrws--T eos:eos-dsh"
   },
   "checks": [
     {
@@ -38,9 +44,33 @@
       "ok": true
     },
     {
-      "name": "eos-check: 读 dsh 配置里的令牌",
+      "name": "端点关闭后带对的令牌连不上",
+      "expected": true,
+      "actual": true,
+      "ok": true
+    },
+    {
+      "name": "容器里 eos chat new 有回复（dsh 以 eos-agent 读到了配置）",
+      "expected": "有回复",
+      "actual": "有回复",
+      "ok": true
+    },
+    {
+      "name": "带令牌的配置：目录 2750、文件 640，组 eos-dsh",
+      "expected": "2750 eos:eos-dsh / 640 eos:eos-dsh",
+      "actual": "2750 eos:eos-dsh / 640 eos:eos-dsh",
+      "ok": true
+    },
+    {
+      "name": "eos-check 读不到配置里的令牌",
       "expected": "读不到",
       "actual": "读不到",
+      "ok": true
+    },
+    {
+      "name": "调用结束后配置删掉了",
+      "expected": "[]",
+      "actual": "[]",
       "ok": true
     }
   ]
