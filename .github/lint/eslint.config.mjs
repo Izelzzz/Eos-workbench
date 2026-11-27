@@ -192,7 +192,16 @@ export default tseslint.config(
           ],
         },
       ],
-      'no-restricted-syntax': ['error', ...executorNameSyntax],
+      'no-restricted-syntax': [
+        'error',
+        // 动态 import() 绕得过 no-restricted-imports
+        {
+          selector: 'ImportExpression[source.value=/(^|\\/)executor\\/(?!(types|registry)(\\.[cm]?[jt]s)?$)/]',
+          message: 'src/cli.ts 只建执行器注册表（src/executor/registry.ts），不直接引用某个执行器（CLAUDE.md 代码约定）',
+        },
+        { selector: 'ImportExpression[source.value=/^@deepseek-ai\\//]', message: executorImports.patterns[0].message },
+        ...executorNameSyntax,
+      ],
     },
   },
 

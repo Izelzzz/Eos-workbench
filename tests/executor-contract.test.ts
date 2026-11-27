@@ -1,6 +1,6 @@
 // 跨执行器的接口测试：同一套用例对每个登记的执行器各跑一遍（不调模型：dsh 用假的 dsh 进程，它像 dsh 一样把会话写进会话日志）。
 // 新登记一个执行器（src/executor/registry.ts 的 EXECUTORS）时，要在 FACTORIES 里给它一个不调模型的构造，否则第一个用例失败。
-// 后面是注册表本身的用例：按角色的 executor 分派、找回复时问每个执行器、没登记的名字报错。
+// 后面是注册表本身的用例：按 executor 分派、找回时只交给调用用的执行器、没登记的名字报错。
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

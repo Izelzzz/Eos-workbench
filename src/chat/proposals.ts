@@ -108,7 +108,7 @@ export const describe = (s: string): string =>
 
 const changesOf = (kind: ProposalKind, before: string | undefined, after: string, lookup: TemplateLookup): string[] => {
   if (before === undefined) {
-    if (kind === 'workflow') return ['新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认']
+    if (kind === 'workflow') return ['新建的工作流：其中角色的执行器、模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认']
     const t = parseTemplate(after)
     if (!t.ok) return []
     const a = t.template
