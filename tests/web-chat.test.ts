@@ -38,7 +38,15 @@ const serve = async (make: (std: () => string) => McpScript, withChat = true) =>
   const supervisor = new Supervisor({ store, executor: new FakeExecutor(async () => 'x'), dataDir: dir, pollMs: 5 })
   const credentials = new Credentials(join(dir, 'eos.db'), undefined)
   const redact = (s: string) => redactText(s, [SECRET])
-  const chat = new WebChats({ store, conventions: supervisor.conventions, executor: new McpExecutor(make(() => store.convention('workflow', 'standard')!.content)), dataDir: dir, redact, changes: () => ({ base: 'b', head: 'h', files: [], omitted: 0 }), now: Date.now })
+  const chat = new WebChats({
+    store,
+    conventions: supervisor.conventions,
+    executor: new McpExecutor(make(() => store.convention('workflow', 'standard')!.content)),
+    dataDir: dir,
+    redact,
+    changes: () => ({ base: 'b', head: 'h', files: [], omitted: 0 }),
+    now: Date.now,
+  })
   const server = createWebServer({ store, supervisor, replay: { traceOf: async () => [] }, staticDir: join(dir, 'static'), credentials, ...(withChat ? { chat } : {}) })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -164,6 +172,13 @@ test('the web save writes the convention and the proposal mark through the store
   try {
     const done = (await s.say({ text: '改说明' })).at(-1) as Extract<ChatStreamLine, { type: 'done'; ok: true }>
     const id = (await s.view(done.chat)).proposals[0]!.proposal.id
+    // 同一个连接：在 store.db 开的写事务里，网页服务的 ChatStore 能写，store.db 读得到这笔还没提交的写入；回滚之后就没了。
+    s.store.db.exec('BEGIN IMMEDIATE')
+    const salt = s.chat.chats.confirmSalt(id)
+    const seen = s.store.db.prepare('SELECT confirm_salt FROM chat_proposals WHERE id = ?').get(id) as { confirm_salt: string | null }
+    s.store.db.exec('ROLLBACK')
+    assert.equal(seen.confirm_salt, salt)
+    assert.equal((s.store.db.prepare('SELECT confirm_salt FROM chat_proposals WHERE id = ?').get(id) as { confirm_salt: string | null }).confirm_salt, null)
     // 对照：提议表换一个连接，保存在事务里碰到库被锁，整笔回滚。这就是 WebChats 自己从 store.db 建 ChatStore 的原因。
     const other = new ChatStore(new DatabaseSync(join(s.dir, 'eos.db')))
     assert.throws(() => saveProposal({ store: s.store, chats: other, conventions: s.conventions, redact: x => x, id, actor: 'web', now: Date.now }))
