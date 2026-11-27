@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { parseMasterKey } from '../src/credentials/key.ts'
 import type { ModelKey } from '../src/credentials/model-key.ts'
+import { Credentials } from '../src/credentials/store.ts'
+import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { dshFacts, dshHealth, type DshFacts } from '../src/executor/dsh.ts'
 import type { ExecutorContext } from '../src/executor/types.ts'
 import { atLeast, evaluate, formatItems, gather, type Facts } from '../src/runner/doctor.ts'
@@ -386,4 +389,17 @@ test('eos web 的端口被占时说清楚：可能已经有一个 eos web 在运
   } finally {
     busy.close()
   }
+})
+
+test('现有部署不用迁移：凭据存储里叫 deepseek 的凭据照常被用上，比环境变量 DEEPSEEK_API_KEY 优先', () => {
+  const data = join(tmp(), 'data')
+  mkdirSync(data, { recursive: true })
+  const master = parseMasterKey(KEY)
+  assert.equal(master.kind, 'ok')
+  const c = new Credentials(join(data, 'eos.db'), master.kind === 'ok' ? master.key : undefined)
+  assert.ok(c.put(LOCAL_OWNER, 'deepseek', 'api-key', 'sk-stored-key-0000').ok)
+  c.close()
+  const r = cli(['doctor', '--data', data], { EOS_MASTER_KEY: KEY, DEEPSEEK_API_KEY: 'sk-env-key-1111' })
+  assert.match(r.stdout, /✓ DeepSeek API key：来自凭据存储（凭据 deepseek）/)
+  assert.ok(!r.stdout.includes('sk-stored-key-0000') && !r.stdout.includes('sk-env-key-1111'))
 })

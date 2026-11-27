@@ -95,9 +95,11 @@ export const permissionChanges = (kind: TargetKind, before: string, after: strin
     if (!b.ok) return []
     const x = permissionFields(a.template)
     const y = permissionFields(b.template)
+    // 模型写明前后的值：不写时用执行器的默认模型，从「写了」到「不写」也是改动，要让人看到最后用的是什么
+    const model = (v: string | undefined) => (v === undefined || v === '' ? '执行器默认' : v)
     return Object.keys(x)
       .filter(k => x[k] !== y[k])
-      .map(k => `不能改模板的 ${k}`)
+      .map(k => (k === 'model' ? `不能改模板的 model（${model(a.template.model)} → ${model(b.template.model)}）` : `不能改模板的 ${k}`))
   }
   if (kind === 'workflow') {
     const a = parseWorkflow(before, lookup)

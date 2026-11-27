@@ -283,3 +283,12 @@ test('每个执行器的上下文按它自己声明的模型 key 给（ctxFor �
   healthOf(k => (seen.push(k.modelKey.credential), ctx), [kind('a', []), kind('b', [])])
   assert.deepEqual(seen, ['a', 'b'])
 })
+
+test('dsh 声明的模型 key 就是现有部署用的那条：凭据 deepseek、环境变量 DEEPSEEK_API_KEY，不需要迁移', () => {
+  const dsh = EXECUTORS.find(k => k.name === 'dsh')!
+  assert.deepEqual(dsh.modelKey, { credential: 'deepseek', env: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key' })
+  assert.deepEqual(
+    modelKeySpecs().map(s => s.env),
+    ['DEEPSEEK_API_KEY'],
+  )
+})
