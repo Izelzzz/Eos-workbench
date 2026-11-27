@@ -9,7 +9,7 @@
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
@@ -279,6 +279,9 @@ const httpMcpConfig = (m: Extract<AgentMcp, { url: string }>) => ({
 })
 
 export type LogEvent = { type: string; time: number; data?: Record<string, any> }
+
+/** 带令牌的配置目录多久没改过就算崩溃留下的（一次对话调用远短于这个时间）。 */
+export const EPHEMERAL_STALE_MS = 60 * 60 * 1000
 
 const ZSTD_MAGIC = 0xfd2fb528
 
@@ -661,9 +664,32 @@ export class DshExecutor implements Executor {
     return join(this.opts.dshHome, 'mcp-cwd')
   }
 
-  /** 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。 */
+  /**
+   * 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。
+   * 带 HTTP MCP 的能力面（配置里有一次调用的令牌）放在 ephemeral/ 下：进程关掉时删掉，崩溃留下的由 sweepEphemeral 清理。
+   */
   profileDir(profile: AgentProfile): string {
-    return join(this.opts.dshHome, 'eos-profiles', profileHash(profile))
+    return profile.mcp.some(isHttpMcp) ? join(this.ephemeralRoot, profileHash(profile)) : join(this.opts.dshHome, 'eos-profiles', profileHash(profile))
+  }
+
+  get ephemeralRoot(): string {
+    return join(this.opts.dshHome, 'eos-profiles', 'ephemeral')
+  }
+
+  private swept = false
+
+  /**
+   * 清掉崩溃留下的、带令牌的配置目录（本进程第一次写配置时做一次）。只删超过 EPHEMERAL_STALE_MS 没改过的：
+   * 同一个数据目录可能有别的平台进程（网页和命令行）正在用自己的那份。令牌只在那次调用的端点上有效，端点早已关掉，删它是为了不在磁盘上留令牌。
+   */
+  private sweepEphemeral(now = Date.now()): void {
+    if (this.swept) return
+    this.swept = true
+    if (!existsSync(this.ephemeralRoot) || isLink(this.ephemeralRoot)) return
+    for (const name of readdirSync(this.ephemeralRoot)) {
+      const dir = join(this.ephemeralRoot, name)
+      if (now - lstatSync(dir).mtimeMs > EPHEMERAL_STALE_MS) rmSync(dir, { recursive: true, force: true })
+    }
   }
 
   /**
@@ -685,9 +711,13 @@ export class DshExecutor implements Executor {
 
   /** 写出这个能力面的 profile 补丁和技能目录，返回补丁文件路径。文件和目录组内不可写：dsh 只读它们。 */
   private materialize(profile: AgentProfile): string {
+    this.sweepEphemeral()
     const dir = this.profileDir(profile)
     const skillsDir = join(dir, 'skills')
     this.platformDir(skillsDir)
+    // 带令牌的配置：其他用户不可读（部署镜像里目录属于平台、组是 dsh 的组，dsh 靠组权限读）。
+    const secret = profile.mcp.some(isHttpMcp)
+    if (secret) chmodSync(dir, 0o750)
     if (!existsSync(this.mcpCwd)) mkdirSync(this.mcpCwd, { recursive: true })
     // 没有自带工具的能力面不写技能（技能要靠自带的技能工具加载）。
     for (const s of profile.builtinTools === 'none' ? [] : profile.skills) {
@@ -696,7 +726,8 @@ export class DshExecutor implements Executor {
       writeFileSync(join(skillsDir, s.name, 'SKILL.md'), s.content, { mode: 0o644 })
     }
     const file = join(dir, 'cordis.patch.yml')
-    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: 0o644 })
+    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: secret ? 0o640 : 0o644 })
+    if (secret) chmodSync(file, 0o640)
     return file
   }
 

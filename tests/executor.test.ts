@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { after, test } from 'node:test'
@@ -12,6 +12,7 @@ import {
   BUILTIN_TOOL_ROWS,
   DshExecutor,
   dshEntry,
+  EPHEMERAL_STALE_MS,
   dshInstall,
   dshSandbox,
   GROUP_ROWS,
@@ -743,12 +744,32 @@ test('an agent with no built-in tools gets every tool row disabled, no skills, a
     failOnStartupError: true,
     reconnect: { enabled: false },
   })
-  // 令牌在补丁文件里：进程关掉时整个配置目录删掉。
+  // 令牌在补丁文件里：其他用户不可读，进程关掉时整个配置目录删掉。
   assert.ok(readFileSync(patch, 'utf8').includes('tok-1234567890'))
+  assert.equal(statSync(patch).mode & 0o777, 0o640)
+  assert.equal(statSync(ex.profileDir(profile)).mode & 0o777, 0o750)
+  assert.ok(ex.profileDir(profile).startsWith(ex.ephemeralRoot))
   await ex.release('/data/worktrees/t1')
   assert.ok(!existsSync(ex.profileDir(profile)), 'the profile dir holding the call’s token is removed when its process is released')
   const kept = await launch(ex, created, 't1/plan', bare)
   await ex.close()
   assert.ok(existsSync(kept), 'profiles without an HTTP endpoint (no token) stay, as before')
   assert.notEqual(profileHash(profile), profileHash({ ...profile, builtinTools: 'standard' }))
+})
+
+test('token-bearing profile dirs left behind by a crash are swept on the next start; fresh ones (another platform process’s live call) are kept', async () => {
+  const home = tmpHome()
+  const root = join(home, 'eos-profiles', 'ephemeral')
+  for (const name of ['old', 'fresh']) {
+    mkdirSync(join(root, name), { recursive: true })
+    writeFileSync(join(root, name, 'cordis.patch.yml'), 'headers: {Authorization: Bearer leftover}')
+  }
+  const past = (Date.now() - EPHEMERAL_STALE_MS - 60_000) / 1000
+  utimesSync(join(root, 'old'), past, past)
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', modelKey: () => 'k', createHarness })
+  await launch(ex, created, 't1/plan', bare)
+  assert.ok(!existsSync(join(root, 'old')), 'a stale token dir is removed')
+  assert.ok(existsSync(join(root, 'fresh')), 'a recent one may belong to a call in progress elsewhere')
+  await ex.close()
 })
