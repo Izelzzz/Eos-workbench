@@ -3,13 +3,37 @@ import type { CredentialInfo, CredentialKind } from '../credentials/types.ts'
 import type { RemoteRepo } from '../forge/types.ts'
 import type { TaskMetrics } from '../engine/metrics.ts'
 import type { Report } from '../engine/report.ts'
-import type { CheckLink, Question, TaskStatus } from '../engine/types.ts'
+import type { CheckLink, GatePhase, Question, TaskStatus } from '../engine/types.ts'
 import type { ConventionKind, ConventionRow, ConventionsUsed, ConventionSummary, ProposalRow } from '../store/types.ts'
 import type { Span } from '../trace/types.ts'
 import type { Comparison } from '../engine/compare.ts'
 import type { Signal } from '../engine/evidence.ts'
 import type { Usage } from '../engine/types.ts'
 import type { Refused } from '../improve/parse.ts'
+
+/** 卡点上的一次验收结论。by：human 是人，否则是验收的角色。 */
+export type GateDecision = { round: number; by: string; pass: boolean; comment: string; at: number }
+
+/** 任务停在卡点上时，任务页要显示的内容。 */
+export type GateInfo = {
+  node: string
+  /** 被验收的节点。 */
+  with: string
+  /** 验收人：human 是能访问平台的任何人，agent 是 role 角色的 agent。 */
+  by: { kind: 'human' } | { kind: 'agent'; role: string }
+  /** 验收人的说明（「任何能访问平台的人」「角色「rev」的 agent」）。 */
+  approver: string
+  /** 验收说明（模板里卡点的 task）。 */
+  task: string
+  round: number
+  phase: GatePhase
+  /** 正在等人验收：页面上可以通过或打回。 */
+  waiting: boolean
+  /** 被验收节点最新的产出。 */
+  output?: string
+  /** 这个卡点上已有的结论，按先后。 */
+  decisions: GateDecision[]
+}
 
 export type TaskDetail = {
   id: string
@@ -18,6 +42,8 @@ export type TaskDetail = {
   request: string
   position: string
   question?: Question
+  /** 停在卡点上时才有。 */
+  gate?: GateInfo
   failure?: string
   /** 这个任务的日志文件（平台所在机器上的路径，只用来显示；内容用 /api/tasks/:id/log 看）。 */
   logPath: string
@@ -44,6 +70,11 @@ export type { FileChange, FileDiff, TaskChanges } from '../runner/changes.ts'
 
 export type AnswerRequest = { questionId: string; text: string }
 export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }
+
+/** 人在卡点上的结论：gate、round 指明验收的是哪一次（页面上看到的那一次），过期的被拒绝；打回时 comment 不能为空。 */
+export type GateRequest = { gate: string; round: number; pass: boolean; comment: string }
+/** resumeNeeded：结论记下了，但没有 runner 接着做（起不来），要点「继续」。 */
+export type GateResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }
 
 export type CreateResponse = { ok: true; id: string } | { ok: false; error: string }
 export type ActionResponse = { ok: true } | { ok: false; error: string }

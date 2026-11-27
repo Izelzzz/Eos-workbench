@@ -900,3 +900,61 @@ test('凭据：github-app. 开头的名字只能是 GitHub App 凭据；已有�
     await s.close()
   }
 })
+
+test('卡点：任务页带上卡点信息；页面上打回（写意见）、改完回到卡点后通过，结论记成 web；过期或空意见的结论被拒绝', async () => {
+  const s = await serve()
+  try {
+    const meta = s.store.meta('t1')
+    s.store.create({ id: 't2', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false, gate: 'human' }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 2000)
+    for (const [i, text] of ['方案', '实现 v1', PASS].entries())
+      assert.ok(s.store.dispatch('t2', { kind: 'replied', call: `c${i + 1}` as never, sessionId: 's', text, usage: zero, ms: 1 }, 2001 + i, 'executor').accepted)
+    const get = async () => (await (await fetch(`${s.base}/api/tasks/t2`)).json()) as TaskDetail
+    let d = await get()
+    assert.equal(d.status, 'waiting_accept')
+    assert.deepEqual(
+      { ...d.gate, decisions: d.gate?.decisions.length },
+      { node: 'accept', with: 'build', by: { kind: 'human' }, approver: '任何能访问平台的人', task: '验收', round: 1, phase: 'decide', waiting: true, output: '实现 v1', decisions: 0 },
+    )
+    const list = (await (await fetch(`${s.base}/api/tasks`)).json()) as { id: string; status: string }[]
+    assert.equal(list.find(t => t.id === 't2')?.status, 'waiting_accept', '任务列表能看出在等验收')
+    const gate = (body: unknown) => postTo(s.base, '/api/tasks/t2/gate', body)
+    assert.equal((await gate({ gate: 'accept', round: 1, pass: false, comment: ' ' })).status, 409, '打回要写意见')
+    assert.equal((await gate({ gate: 'accept', round: 2, pass: true, comment: '' })).status, 409, '过期或不存在的那一次')
+    assert.equal((await gate({ gate: 'accept', round: 1 })).status, 400)
+    assert.equal((await fetch(`${s.base}/api/tasks/t2/gate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 403, '只接受本页面的请求')
+    const back = await gate({ gate: 'accept', round: 1, pass: false, comment: '补注释' })
+    assert.deepEqual(await back.json(), { ok: true, resumeNeeded: false })
+    // 没有 runner 在跑：接口起一个，交回开发修改，改完回到卡点（第 2 次）。
+    for (let i = 0; i < 200 && (d = await get()).gate?.round !== 2; i++) await new Promise(r => setTimeout(r, 10))
+    for (let i = 0; i < 200 && (d = await get()).status !== 'waiting_accept'; i++) await new Promise(r => setTimeout(r, 10))
+    assert.equal(d.status, 'waiting_accept')
+    assert.deepEqual(
+      d.gate?.decisions.map(x => [x.round, x.by, x.pass, x.comment]),
+      [[1, 'human', false, '补注释']],
+    )
+    assert.equal(d.gate?.output, '回复', '显示修改后的产出')
+    assert.deepEqual(await (await gate({ gate: 'accept', round: 2, pass: true, comment: '可以' })).json(), { ok: true, resumeNeeded: false })
+    for (let i = 0; i < 200 && (d = await get()).status !== 'done'; i++) await new Promise(r => setTimeout(r, 10))
+    assert.equal(d.status, 'done')
+    assert.equal(d.gate, undefined)
+    // 中止或失败的任务不再显示卡点（卡点状态还留在任务里）。
+    s.store.create({ id: 't3', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false, gate: 'human' }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 3000)
+    for (const [i, text] of ['方案', '实现 v1', PASS].entries()) s.store.dispatch('t3', { kind: 'replied', call: `c${i + 1}` as never, sessionId: 's', text, usage: zero, ms: 1 }, 3001 + i, 'executor')
+    assert.ok(s.store.dispatch('t3', { kind: 'abort' }, 3010, 'web').accepted)
+    const aborted = (await (await fetch(`${s.base}/api/tasks/t3`)).json()) as TaskDetail
+    assert.deepEqual([aborted.status, aborted.gate], ['aborted', undefined])
+    const decided = s.store.events('t2').filter(e => e.event.kind === 'decided')
+    assert.deepEqual(
+      decided.map(e => [e.actor, e.accepted]),
+      [
+        ['web', false],
+        ['web', false],
+        ['web', true],
+        ['web', true],
+      ],
+    )
+    await s.supervisor.idle()
+  } finally {
+    await s.close()
+  }
+})
