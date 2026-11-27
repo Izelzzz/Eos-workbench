@@ -43,7 +43,13 @@ const MODEL_KEY = EXECUTOR === 'dsh' ? DSH_KEY : CLAUDE_CODE_KEY
 // 设置了 EOS_E2E_STORE_KEY 时，模型 key 只放进凭据存储（用 EOS_MASTER_KEY 加密），平台进程的环境里没有那个执行器的 key 变量。
 // 没有设置 key 时用占位值：这个环境里模型接口的 key 由代理注入。
 const storeKey = process.env.EOS_E2E_STORE_KEY
-const env: NodeJS.ProcessEnv = { ...process.env, NODE_USE_ENV_PROXY: '1', [MODEL_KEY.env]: process.env[MODEL_KEY.env] ?? 'proxy-injected' }
+// 平台启动前检查要默认执行器（dsh）的 key，即使所有角色都用别的执行器：也给它一个（这个环境里由代理注入）。
+const env: NodeJS.ProcessEnv = {
+  ...process.env,
+  NODE_USE_ENV_PROXY: '1',
+  [DSH_KEY.env]: process.env[DSH_KEY.env] ?? 'proxy-injected',
+  [MODEL_KEY.env]: process.env[MODEL_KEY.env] ?? 'proxy-injected',
+}
 delete env.EOS_E2E_EXECUTOR
 delete env.EOS_E2E_STORE_KEY
 if (storeKey !== undefined) delete env[MODEL_KEY.env]
