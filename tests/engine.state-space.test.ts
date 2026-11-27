@@ -138,7 +138,7 @@ const INVARIANTS: Record<string, Check> = {
   检查跑的是当前节点声明的检查: (_b, _e, a, _acc, wf) => {
     const p = a.pending
     if (p === undefined || !isCheck(p)) return undefined
-    // 修正时：被修正节点和评审、测试它的节点的程序检查，加上平台动作。
+    // 修正时：工作流里全部节点的程序检查，加上平台动作（correctionChecks 算出的那一组）。
     if (a.correction !== undefined)
       return p.node === a.correction.node && JSON.stringify(p.checks) === JSON.stringify(correctionChecks(wf, a.correction.node)) && p.checks.length > 0 ? undefined : `correction check for ${p.node}`
     const n = wf.nodes[a.cursor]
