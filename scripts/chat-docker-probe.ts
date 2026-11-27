@@ -30,16 +30,21 @@ const out = execFileSync(
   ],
   { encoding: 'utf8' },
 )
-const results = JSON.parse(out.slice(out.indexOf('{'))) as Record<string, string>
+const results = JSON.parse(out.slice(out.lastIndexOf('\n{') + 1)) as Record<string, unknown>
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-const expect: Record<string, string> = {
-  'eos-check: 不带令牌': '401',
-  'eos-check: 错的令牌': '401',
-  'eos-agent: 不带令牌': '401',
-  'eos-agent: 错的令牌': '401',
-  'eos-check: 读 dsh 配置里的令牌': '读不到',
+const during = results['调用期间带令牌的配置'] as Record<string, string> | string
+const expect: Record<string, [unknown, unknown]> = {
+  'eos-check: 不带令牌': [results['eos-check: 不带令牌'], '401'],
+  'eos-check: 错的令牌': [results['eos-check: 错的令牌'], '401'],
+  'eos-agent: 不带令牌': [results['eos-agent: 不带令牌'], '401'],
+  'eos-agent: 错的令牌': [results['eos-agent: 错的令牌'], '401'],
+  端点关闭后带对的令牌连不上: [String(results['端点关闭后 eos-agent 带对的令牌']).startsWith('ERR'), true],
+  '容器里 eos chat new 有回复（dsh 以 eos-agent 读到了配置）': [results['eos chat new 的回复'], '有回复'],
+  '带令牌的配置：目录 2750、文件 640，组 eos-dsh': [typeof during === 'object' ? `${during.dir} / ${during.file}` : during, '2750 eos:eos-dsh / 640 eos:eos-dsh'],
+  'eos-check 读不到配置里的令牌': [typeof during === 'object' ? during['eos-check'] : during, '读不到'],
+  调用结束后配置删掉了: [JSON.stringify(results['调用结束后 ephemeral 里剩下的']), '[]'],
 }
-const checks = Object.entries(expect).map(([k, v]) => ({ name: k, expected: v, actual: results[k], ok: results[k] === v }))
+const checks = Object.entries(expect).map(([name, [actual, expected]]) => ({ name, expected, actual, ok: actual === expected }))
 const dir = join(ROOT, 'docs', 'e2e', 'chat-a')
 mkdirSync(dir, { recursive: true })
 writeFileSync(join(dir, 'docker-probe.json'), JSON.stringify({ commit, image, results, checks }, null, 2))

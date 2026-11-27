@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { request } from 'node:http'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
@@ -182,6 +183,28 @@ test('a turn in which the agent used any tool other than the platform’s read-o
   )
 })
 
+test('tool arguments the model copied from the user (for example a pasted key) are redacted before they are stored', async () => {
+  const p = platform()
+  const ex = new McpExecutor(({ results }) => (results.length === 0 ? { tool: `mcp__${MCP_NAME}__get_convention`, args: { kind: 'doc', name: SECRET } } : { reply: '没有这个约定' }))
+  const r = await new Chats(p.opts(ex)).start(`读一下 ${SECRET}`, 'cli')
+  assert.ok(r.ok)
+  assert.ok(!JSON.stringify(p.chats.log(r.chat.id)).includes(SECRET))
+})
+
+test('a claimed reply whose trace shows a non-platform tool is discarded too', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '新的' }))
+  ex.traceOf = async () => [{ kind: 'tool_start', t: 1, step: 1, id: 'x', name: 'read', args: '{}' }]
+  const id = p.chats.create({ id: 'c9', firstMessage: '你好', actor: 'cli' }, 1).id
+  const seq = p.chats.append(id, { at: 1, role: 'user', text: '你好', actor: 'cli' })
+  ex.completed.set(`chat/${id}/${seq}`, { sessionId: 's', text: '读了文件', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1 })
+  assert.ok((await new Chats(p.opts(ex)).send(id, '还在吗', 'cli')).ok)
+  assert.deepEqual(
+    p.chats.log(id).map(m => m.role),
+    ['user', 'error', 'user', 'assistant'],
+  )
+})
+
 test('a call that did not finish (platform restarted) is claimed from the executor before the next message, or recorded as unanswered', async () => {
   const p = platform()
   const ex = new McpExecutor(() => ({ reply: '新的一句' }))
@@ -241,6 +264,15 @@ test('the MCP endpoint refuses requests without the right token, from browsers o
   assert.equal((await post({ Authorization: `${ep.mcp.headers.Authorization}x` })).status, 401, 'token with a suffix')
   assert.equal((await post({ ...ep.mcp.headers, Origin: 'https://evil.example' })).status, 403, 'browser request')
   assert.equal((await post({ ...ep.mcp.headers }, body, 'GET')).status, 405)
+  // 别的 Host（DNS rebinding）：fetch 改不了 Host，用 http.request。
+  const port = new URL(url).port
+  const rebind = await new Promise<number>(resolve => {
+    const req = request({ host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: { host: `evil.example:${port}`, 'content-type': 'application/json', ...ep.mcp.headers } }, res =>
+      resolve(res.statusCode ?? 0),
+    )
+    req.end(body)
+  })
+  assert.equal(rebind, 403)
   assert.equal((await post({ ...ep.mcp.headers }, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'x', params: { p: 'a'.repeat(MAX_BODY_BYTES) } }))).status, 413)
   assert.equal((await post({ ...ep.mcp.headers }, '[1,2]')).status, 400, 'batches are not accepted')
   const client = new McpClient(ep.mcp)

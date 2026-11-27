@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { after, test } from 'node:test'
@@ -772,4 +773,39 @@ test('token-bearing profile dirs left behind by a crash are swept on the next st
   assert.ok(!existsSync(join(root, 'old')), 'a stale token dir is removed')
   assert.ok(existsSync(join(root, 'fresh')), 'a recent one may belong to a call in progress elsewhere')
   await ex.close()
+})
+
+test('a token-bearing profile dir keeps the setgid bit of eos-profiles, and its patch file takes the dir’s group (dsh reads it through that group in the image)', async () => {
+  const home = tmpHome()
+  mkdirSync(join(home, 'eos-profiles'), { recursive: true })
+  chmodSync(join(home, 'eos-profiles'), 0o2755)
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: home, dshBin: 'dsh', modelKey: () => 'k', createHarness })
+  const profile: AgentProfile = { builtinTools: 'none', denyTools: [], skills: [], mcp: [{ name: 'eos', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer t' } }], background: false }
+  const patch = await launch(ex, created, 'chat/c2', profile)
+  const dir = ex.profileDir(profile)
+  assert.equal(statSync(dir).mode & 0o7777, 0o2750, 'setgid survives the chmod, so new files inherit the dsh group')
+  assert.equal(statSync(patch).gid, statSync(dir).gid)
+  await ex.close()
+})
+
+test('a failed dsh start removes the token-bearing profile right away; standard profiles keep their fingerprint', async () => {
+  const home = tmpHome()
+  const ex = new DshExecutor({
+    dshHome: home,
+    dshBin: 'dsh',
+    modelKey: () => 'k',
+    createHarness: () => {
+      throw new Error('起不来')
+    },
+  })
+  const profile: AgentProfile = { builtinTools: 'none', denyTools: [], skills: [], mcp: [{ name: 'eos', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer t' } }], background: false }
+  await assert.rejects(ex.send({ key: 'chat/c3', nonce: 'n', prompt: 'x', ask: async () => '', spec: { model: 'm', write: 'none', cwd: '/w', profile } }), /起不来/)
+  assert.ok(!existsSync(ex.profileDir(profile)))
+  // 任务角色的指纹和加 builtinTools 之前一样（同样的内容算出同样的哈希）：升级后不留下旧的配置目录。
+  const legacy = createHash('sha256')
+    .update(JSON.stringify([[], [], [], true]))
+    .digest('hex')
+    .slice(0, 16)
+  assert.equal(profileHash(bare), legacy)
 })

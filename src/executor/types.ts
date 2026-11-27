@@ -29,8 +29,8 @@ export const isHttpMcp = (m: AgentMcp): m is HttpMcp => 'url' in m
  * builtinTools：执行器自带的工具。
  * - 'standard'：执行器自带的文件读写、搜索、技能、向用户提问等工具照常可用，denyTools 去掉其中的整组（任务里的角色）；
  * - 'none'：一个自带工具都没有，agent 只能用 mcp 里平台交给它的工具（例如对话 agent 读平台数据）。denyTools、skills、background 不起作用。
+ * 执行器不支持其中某一项（例如没有办法去掉自带工具，或者接不了 HTTP MCP）时，send 必须抛错，不能悄悄忽略。
  */
-/** 执行器不支持其中某一项（例如没有办法去掉自带工具，或者接不了 HTTP MCP）时，send 必须抛错，不能悄悄忽略。 */
 export type AgentProfile = { builtinTools: 'standard' | 'none'; denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: AgentMcp[]; background: boolean }
 
 export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }

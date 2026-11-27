@@ -9,7 +9,7 @@
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
@@ -210,7 +210,8 @@ export const profileHash = (p: AgentProfile): string =>
   createHash('sha256')
     .update(
       JSON.stringify([
-        p.builtinTools,
+        // 只有 'none' 进指纹：任务角色（'standard'）的指纹和配置目录和加这个字段之前一样。
+        ...(p.builtinTools === 'none' ? ['no-builtin-tools'] : []),
         [...p.denyTools].sort(),
         [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
         p.mcp.map(m => (isHttpMcp(m) ? [m.name, m.url, Object.entries(m.headers).sort()] : [m.name, m.command, m.args, Object.entries(m.env).sort()])),
@@ -624,29 +625,36 @@ export class DshExecutor implements Executor {
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
       const patch = this.materialize(spec.profile)
+      const ephemeral = spec.profile.mcp.some(isHttpMcp) ? this.profileDir(spec.profile) : undefined
       const create =
         this.opts.createHarness ??
         (o => {
           this.platformDir(o.processCwd!)
           return new DeepSeekHarness(o)
         })
-      h = create({
-        // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
-        cwd: spec.cwd,
-        processCwd: this.processCwd,
-        patches: [patch],
-        profile: 'sdk',
-        dshHome: this.opts.dshHome,
-        dshBin: this.opts.dshBin,
-        provider: PROVIDER,
-        model: spec.model,
-        ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        env: agentEnv(this.opts.env ?? process.env, modelKey),
-        initializeTimeoutMs: 60_000,
-        onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
-      })
+      try {
+        h = create({
+          // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
+          cwd: spec.cwd,
+          processCwd: this.processCwd,
+          patches: [patch],
+          profile: 'sdk',
+          dshHome: this.opts.dshHome,
+          dshBin: this.opts.dshBin,
+          provider: PROVIDER,
+          model: spec.model,
+          ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
+          env: agentEnv(this.opts.env ?? process.env, modelKey),
+          initializeTimeoutMs: 60_000,
+          onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
+        })
+      } catch (e) {
+        // 进程没起来：带令牌的配置马上删掉，不等清理。
+        this.forget(ephemeral)
+        throw e
+      }
       // 带 HTTP MCP 的能力面（配置里有这次调用的令牌）：进程关掉时把配置目录一起删掉，令牌不留在磁盘上。
-      this.harnesses.set(route, { cwd: spec.cwd, h, keyId, ...(spec.profile.mcp.some(isHttpMcp) ? { ephemeral: this.profileDir(spec.profile) } : {}) })
+      this.harnesses.set(route, { cwd: spec.cwd, h, keyId, ...(ephemeral === undefined ? {} : { ephemeral }) })
     }
     return h
   }
@@ -688,7 +696,12 @@ export class DshExecutor implements Executor {
     if (!existsSync(this.ephemeralRoot) || isLink(this.ephemeralRoot)) return
     for (const name of readdirSync(this.ephemeralRoot)) {
       const dir = join(this.ephemeralRoot, name)
-      if (now - lstatSync(dir).mtimeMs > EPHEMERAL_STALE_MS) rmSync(dir, { recursive: true, force: true })
+      try {
+        if (now - lstatSync(dir).mtimeMs > EPHEMERAL_STALE_MS) rmSync(dir, { recursive: true, force: true })
+      } catch (e) {
+        // 别的平台进程刚好删掉了它（调用结束）：不算错。
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+      }
     }
   }
 
@@ -715,9 +728,10 @@ export class DshExecutor implements Executor {
     const dir = this.profileDir(profile)
     const skillsDir = join(dir, 'skills')
     this.platformDir(skillsDir)
-    // 带令牌的配置：其他用户不可读（部署镜像里目录属于平台、组是 dsh 的组，dsh 靠组权限读）。
+    // 带令牌的配置：其他用户不可读。部署镜像里 dsh 的用户靠组 eos-dsh 读：eos-profiles 带 setgid，新目录继承组；
+    // chmod 时保留 setgid 位，文件再显式改成目录的组（不依赖平台进程的主组）。
     const secret = profile.mcp.some(isHttpMcp)
-    if (secret) chmodSync(dir, 0o750)
+    if (secret) chmodSync(dir, (statSync(dir).mode & 0o2000) | 0o750)
     if (!existsSync(this.mcpCwd)) mkdirSync(this.mcpCwd, { recursive: true })
     // 没有自带工具的能力面不写技能（技能要靠自带的技能工具加载）。
     for (const s of profile.builtinTools === 'none' ? [] : profile.skills) {
@@ -727,7 +741,11 @@ export class DshExecutor implements Executor {
     }
     const file = join(dir, 'cordis.patch.yml')
     writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: secret ? 0o640 : 0o644 })
-    if (secret) chmodSync(file, 0o640)
+    if (secret) {
+      chmodSync(file, 0o640)
+      const gid = statSync(dir).gid
+      if (statSync(file).gid !== gid) chownSync(file, -1, gid)
+    }
     return file
   }
 

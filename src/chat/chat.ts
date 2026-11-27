@@ -146,7 +146,8 @@ export class Chats {
   }
 
   private succeeded(id: string, reply: Reply, reads: ChatRead[]): SendResult {
-    const call: ChatCall = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reads }
+    // 工具参数是模型给的原文（可能抄了用户贴进来的 key），存下来之前遮蔽。
+    const call: ChatCall = { ...(reply.model === undefined ? {} : { model: reply.model }), usage: reply.usage, ms: reply.ms, reads: redactDeep(reads, this.o.redact) }
     const text = this.o.redact(reply.text)
     this.o.chats.append(id, { at: this.o.now(), role: 'assistant', text, call })
     return { ok: true, chat: this.o.chats.summary(id)!, reply: text, call }
