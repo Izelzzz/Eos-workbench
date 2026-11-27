@@ -20,14 +20,35 @@ import type { DeepSeekHarness as Harness, HarnessSession } from '../../vendor/ds
 import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
 import type { DeepSeekHarnessOptions } from '../../vendor/dsh-sdk-client/types.ts'
 import { MASTER_KEY_ENV } from '../credentials/key.ts'
-import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
-import { readSessionLogAs } from '../runner/check-user.ts'
+import type { ModelKey } from '../credentials/model-key.ts'
+import { AGENT_USER_ENV, asUser, type CheckUser } from '../runner/check-user.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ToolGroup } from '../workflow/types.ts'
-import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, ExecutorContext, ExecutorKind, Health, HealthItem, Reply } from './types.ts'
+import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Capabilities, Executor, ExecutorContext, ExecutorKind, Health, HealthItem, ModelKeySpec, Reply } from './types.ts'
 import { isHttpMcp } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
+
+/** 角色没写 model 时用的模型。 */
+export const DEFAULT_MODEL = 'deepseek-flash'
+
+/** dsh 要的模型 key：凭据存储里叫 deepseek，或者平台启动时的 DEEPSEEK_API_KEY；交给 dsh 进程的也是这个环境变量（见 agentEnv）。 */
+export const MODEL_KEY: ModelKeySpec = { credential: 'deepseek', env: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key' }
+const MODEL_KEY_CREDENTIAL = MODEL_KEY.credential
+const MODEL_KEY_ENV = MODEL_KEY.env
+
+/**
+ * dsh 能做到的能力面：每个工具组都能按插件行整组关掉（GROUP_ROWS），能关掉全部自带工具（BUILTIN_TOOL_ROWS）
+ * 和后台作业，接得了 HTTP 和 stdio 的 MCP，支持技能（patchRows）。
+ */
+export const CAPABILITIES: Capabilities = {
+  toolGroups: { web: 'removable', subagent: 'removable', bash: 'removable', schedule: 'removable', todo: 'removable', goal: 'removable' },
+  noBuiltinTools: true,
+  noBackground: true,
+  httpMcp: true,
+  stdioMcp: true,
+  skills: true,
+}
 
 /**
  * 装在 root/node_modules 里的 dsh：启动文件和版本。没装好（启动文件或 package.json 缺失、读不出版本）时返回 undefined。
@@ -96,11 +117,29 @@ const isLink = (p: string): boolean => {
 /** 会话日志放在 <sessions>/<按工作目录命名的目录>/<会话 id>/ 下。 */
 export const SESSION_LOG_FILE = 'session.v4.jsonl.zstd'
 
+/** 在 $1 下找 $2 这个会话的日志，找到就原样输出（以 agent 的用户运行：dsh 以它运行，会话目录是 0700，只有它能读）。 */
+const CAT_SESSION_LOG = 'for f in "$1"/*/"$2"/"$3"; do if [ -f "$f" ]; then exec cat "$f"; fi; done; exit 3'
+
+/**
+ * 以 user 读一个 dsh 会话的日志：找到时返回原始字节，没有这个会话时 undefined，读不出来（切换失败、超时、太大）时抛错。
+ * 和直接读文件（readSessionLogFile）找的是同一个位置。同步：读日志的地方本来就是同步的。
+ */
+export const readSessionLogAs =
+  (user: CheckUser, file: string) =>
+  (sessionsRoot: string, sessionId: string): Buffer | undefined => {
+    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return undefined
+    const [cmd, ...args] = asUser(user, ['sh', '-c', CAT_SESSION_LOG, 'sh', sessionsRoot, sessionId, file])
+    const r = spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
+    if (r.status === 0) return r.stdout
+    if (r.status === 3) return undefined
+    throw new Error(`以 ${user.name} 读会话日志 ${sessionId} 失败：${r.error?.message ?? (r.stderr?.toString().trim() || `退出码 ${r.status ?? '（被信号终止）'}`)}`)
+  }
+
 const readSessionLogFile = (root: string, sessionId: string): Buffer | undefined => {
   if (!existsSync(root)) return undefined
   for (const dir of readdirSync(root)) {
     const file = join(root, dir, sessionId, SESSION_LOG_FILE)
-    // 和以别的用户读的实现（check-user.ts 的 readSessionLogAs，用 [ -f ]）一致：只认普通文件。
+    // 和以别的用户读的实现（readSessionLogAs，用 [ -f ]）一致：只认普通文件。
     if (existsSync(file) && statSync(file).isFile()) return readFileSync(file)
   }
   return undefined
@@ -424,7 +463,7 @@ export const agentEnv = (env: NodeJS.ProcessEnv, modelKey: string): NodeJS.Proce
   return {
     ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && agentEnvAllowed(k))),
     ...(base === undefined ? {} : { DEEPSEEK_BASE_URL: base }),
-    DEEPSEEK_API_KEY: modelKey,
+    [MODEL_KEY_ENV]: modelKey,
   }
 }
 
@@ -624,7 +663,7 @@ export class DshExecutor implements Executor {
   ) {}
 
   private harness(spec: AgentSpec, modelKey: string, keyId: string): Harness {
-    const route = `${spec.cwd}|${spec.model}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
+    const route = `${spec.cwd}|${spec.model ?? DEFAULT_MODEL}|${spec.effort ?? ''}|${profileHash(spec.profile)}`
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
       const patch = this.materialize(spec.profile)
@@ -645,7 +684,7 @@ export class DshExecutor implements Executor {
           dshHome: this.opts.dshHome,
           dshBin: this.opts.dshBin,
           provider: PROVIDER,
-          model: spec.model,
+          model: spec.model ?? DEFAULT_MODEL,
           ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
           env: agentEnv(this.opts.env ?? process.env, modelKey),
           initializeTimeoutMs: 60_000,
@@ -925,6 +964,8 @@ export type DshFacts = {
   credentialsUsable: boolean
   /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
   modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
+  /** 设置了 agent 的用户时：dsh 的入口（EOS_DSH_LAUNCHER）设没设。切换用户由入口做，没有入口时 dsh 还是平台的用户。 */
+  agentUser?: { name: string; launcher: boolean }
 }
 
 /**
@@ -1030,6 +1071,7 @@ const installItem = (f: DshFacts): HealthItem =>
 export const dshHealth = (f: DshFacts): Health => ({
   items: [modelKeyItem(f), sandboxItem(f), ...modelBaseUrlItem(f), installItem(f)],
   sandboxed: f.sandbox.backend !== 'none',
+  ...(f.agentUser === undefined || f.agentUser.launcher ? {} : { agentUser: `设置了 ${AGENT_USER_ENV}，但没有设置 EOS_DSH_LAUNCHER：dsh 不会切换到 ${f.agentUser.name}，还是平台的用户` }),
 })
 
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]']
@@ -1064,6 +1106,7 @@ export const dshFacts = (ctx: ExecutorContext): DshFacts => {
     modelKey: k.source === 'credentials' || k.source === 'env' ? { source: k.source } : k,
     credentialsUsable: ctx.credentialsUsable,
     ...modelBaseUrlFact(ctx.env),
+    ...(ctx.agentUser === undefined ? {} : { agentUser: { name: ctx.agentUser.name, launcher: (ctx.env.EOS_DSH_LAUNCHER ?? '') !== '' } }),
   }
 }
 
@@ -1076,6 +1119,8 @@ const currentKey = (ctx: ExecutorContext): string => {
 
 export const dsh: ExecutorKind = {
   name: 'dsh',
+  capabilities: CAPABILITIES,
+  modelKey: MODEL_KEY,
   create: ctx => {
     const bin = dshEntry(ctx.env, ctx.root)
     if (bin === undefined) throw new Error('找不到 dsh，先在仓库目录运行 npm install')

@@ -1,6 +1,5 @@
 name: reviewer
 description: 评审：独立核对改动是否满足规格，只读。
-model: deepseek-flash
 effort: high
 write: none
 tools:

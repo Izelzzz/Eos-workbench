@@ -9,8 +9,8 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DshExecutor, dshEntry, SESSION_LOG_FILE, sessionIdFor } from '../src/executor/dsh.ts'
-import { AGENT_USER_ENV, asUser, killUserProcessesIn, readSessionLogAs, resolveCheckUser } from '../src/runner/check-user.ts'
+import { DshExecutor, dshEntry, readSessionLogAs, SESSION_LOG_FILE, sessionIdFor } from '../src/executor/dsh.ts'
+import { AGENT_USER_ENV, asUser, killUserProcessesIn, resolveCheckUser } from '../src/runner/check-user.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const SCAN = join(import.meta.dirname, 'check-user-scan.mjs')

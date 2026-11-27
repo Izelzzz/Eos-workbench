@@ -1,6 +1,5 @@
 name: improver
 description: 改进：从任务里程序归纳的证据出发，提出团队约定（模板、技能、约定文档、工作流）的修改提案，只读、不用工具。
-model: deepseek-flash
 effort: high
 write: none
 tools:

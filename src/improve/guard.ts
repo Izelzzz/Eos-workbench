@@ -8,7 +8,7 @@ import type { TargetKind } from '../engine/evidence.ts'
 /** 权限相关的字段，键是 YAML 里的写法。 */
 const permissionFields = (a: AgentConfig): Record<string, string> => ({
   executor: a.executor ?? '',
-  model: a.model,
+  model: a.model ?? '',
   write: a.write,
   writePaths: JSON.stringify(a.writePaths),
   tools: JSON.stringify([...a.denyTools].sort()),

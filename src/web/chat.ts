@@ -6,7 +6,7 @@ import { ChatStore } from '../chat/store.ts'
 import type { DataSource } from '../chat/tools.ts'
 import type { Conventions } from '../conventions/conventions.ts'
 import { redactDeep } from '../credentials/redact.ts'
-import type { Executor } from '../executor/types.ts'
+import type { Executor, ExecutorCheck } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ChatStreamLine, ChatView } from './types.ts'
@@ -26,7 +26,7 @@ export class WebChats {
       store: Store
       conventions: Conventions
       executor: Executor
-      unknownExecutor?: (name: string) => string | undefined
+      checkExecutor?: ExecutorCheck
       dataDir: string
       redact: (s: string) => string
       changes: DataSource['changes']

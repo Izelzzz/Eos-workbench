@@ -198,7 +198,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | `/data/dsh` | `eos`、组 `eos-dsh`、3770（带 sticky 位） | dsh 在里面写会话日志等目录；检查命令不在 `eos-dsh` 组里，进不去 |
 | `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。上一级 `/data/dsh` 的 sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
 | `/data/dsh/mcp-cwd/` | 属于 `eos-agent` | MCP 服务在里面写缓存和日志；平台不往里写 |
-| dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/runner/check-user.ts` 的 `readSessionLogAs`） |
+| dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/executor/dsh.ts` 的 `readSessionLogAs`） |
 | `/data/worktrees` | 2755，带 setgid，组 `eos-work` | 目录本身组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接 |
 | 各任务的 worktree | 组 `eos-work`，平台的 umask 是 002 | 检查命令能写 agent 改过的文件 |
 

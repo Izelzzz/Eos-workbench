@@ -1,6 +1,5 @@
 name: spec-writer
 description: 规格作者：把需求整理成可执行、可验证的规格，只写 docs/ 下的规格文件。
-model: deepseek-flash
 write: worktree
 writePaths: [docs/**]
 tools:

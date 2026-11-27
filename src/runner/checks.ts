@@ -3,7 +3,7 @@
 //
 // 命令检查在 worktree 里执行仓库代码（例如 npm test 会跑 agent 改过的 package.json），和 CI runner 一样不在 agent 的沙箱里。
 // 所以只给它最小的环境变量，不传模型密钥等其它变量；部署镜像里还换成独立的用户运行（check-user.ts），
-// 读不到平台和 dsh 进程环境里的主密钥和模型 key。
+// 读不到平台和执行器进程环境里的主密钥和模型 key。
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'

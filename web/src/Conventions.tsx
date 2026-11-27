@@ -29,7 +29,8 @@ const NEW_DOC = `# 约定名称
 
 const NEW_TEMPLATE = `name: my-agent
 description: 一句话说明这个 agent 负责什么
-model: deepseek-flash
+# executor 可选：用哪个执行器，不写用平台的默认执行器。
+# model 可选：模型名，不写用执行器的默认模型。
 # effort 可选，只能是 low、high、max；不写用模型的默认档位。
 effort: high
 # write: none 只读；worktree 可以改任务 worktree 里的文件。

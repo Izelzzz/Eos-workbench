@@ -324,7 +324,7 @@ test('assistant 模板写了没登记的执行器时，建对话就报错、不�
   const ex = new McpExecutor(() => ({ reply: '好' }))
   const template = p.store.convention('template', 'assistant')!.content
   assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template.replace(/^name: assistant$/m, 'name: assistant\nexecutor: nope'), actor: 'web' }, 2).ok)
-  const opts = { ...p.opts(ex), unknownExecutor: (n: string) => (n === 'nope' ? `没有名为「${n}」的执行器` : undefined) }
+  const opts = { ...p.opts(ex), checkExecutor: (n: string | undefined) => (n === 'nope' ? `没有名为「${n}」的执行器` : undefined) }
   const bad = await new Chats(opts).start('你好', 'cli')
   assert.equal(bad.ok, false)
   assert.match(!bad.ok ? bad.error : '', /Agent 模板「assistant」：没有名为「nope」的执行器/)
@@ -343,4 +343,16 @@ test('assistant 模板写了没登记的执行器时，建对话就报错、不�
   assert.equal(p.chats.log(r.chat.id).at(-1)?.role, 'user', '没有记「没有回复」，也没有记新的一句')
   ex.findReply = find
   assert.ok((await new Chats(opts).send(r.chat.id, '再说一句', 'cli')).ok, '修好后照常认领、接着说')
+})
+
+test('执行器做不到对话 agent 要的能力面（没有自带工具、接平台的 HTTP MCP）时不建对话', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '好' }))
+  const seen: unknown[] = []
+  const opts = { ...p.opts(ex), checkExecutor: (n: string | undefined, needs: unknown) => (seen.push([n, needs]), '执行器「x」关不掉自带的工具') }
+  const r = await new Chats(opts).start('你好', 'cli')
+  assert.equal(r.ok, false)
+  assert.match(!r.ok ? r.error : '', /Agent 模板「assistant」：执行器「x」关不掉自带的工具/)
+  assert.deepEqual(p.chats.list(), [])
+  assert.deepEqual(seen, [[undefined, { builtinTools: 'none', denyTools: [], background: false, httpMcp: true, stdioMcp: false, skills: false }]])
 })

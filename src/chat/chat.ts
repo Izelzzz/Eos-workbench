@@ -9,7 +9,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Conventions } from '../conventions/conventions.ts'
 import { redactDeep } from '../credentials/redact.ts'
-import type { Executor, Reply } from '../executor/types.ts'
+import type { AgentNeeds, Executor, ExecutorCheck, Reply } from '../executor/types.ts'
 import { acquire } from '../runner/lock.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import { TOOL_GROUPS } from '../workflow/types.ts'
@@ -39,10 +39,14 @@ export type ChatOptions = {
   /** 每个 trace 事件到达时（已遮蔽）：命令行用它显示进度，网页用它边生成边显示。 */
   onEvent?: (chatId: string, e: TraceEvent) => void
   /** 模板写的执行器没有登记时返回原因：建对话时核对，没登记的名字不记进对话。不给时不核对。 */
-  unknownExecutor?: (name: string) => string | undefined
+  /** 建对话时核对模板写的执行器：没登记、或者做不到对话 agent 要的能力面（没有自带工具、接平台的 HTTP MCP）时返回原因。不给时不核对。 */
+  checkExecutor?: ExecutorCheck
 }
 
 const keyOf = (id: string) => `chat/${id}`
+
+/** 对话 agent 要执行器做到的：一个自带工具都没有，只用平台经 HTTP MCP 交给它的工具（见 call 里的 profile）。 */
+const CHAT_NEEDS: AgentNeeds = { builtinTools: 'none', denyTools: [], background: false, httpMcp: true, stdioMcp: false, skills: false }
 const nonceOf = (id: string, seq: number) => `chat/${id}/${seq}`
 
 /** 一次调用是对话里哪一句用户的话引起的（nonceOf 的反过来）：save.ts 用它核对那一轮已经有了回复。 */
@@ -87,8 +91,8 @@ export class Chats {
     if (bad !== undefined) return { ok: false, cause: 'input', error: bad }
     // 执行器在建对话时定下：会话在那个执行器里，之后改了模板的 executor 也不换（换了就续接不上，也找不回回复）。
     const executor = this.o.conventions.lookup()(ASSISTANT)?.template.executor
-    const unknown = executor === undefined ? undefined : this.o.unknownExecutor?.(executor)
-    if (unknown !== undefined) return { ok: false, cause: 'config', error: `Agent 模板「${ASSISTANT}」：${unknown}` }
+    const problem = this.o.checkExecutor?.(executor, CHAT_NEEDS)
+    if (problem !== undefined) return { ok: false, cause: 'config', error: `Agent 模板「${ASSISTANT}」：${problem}` }
     const id = `c${this.o.now().toString(36)}${randomBytes(4).toString('hex')}`
     this.o.chats.create({ id, firstMessage: this.o.redact(text), actor, ...(executor === undefined ? {} : { executor }) }, this.o.now())
     return this.send(id, text, actor)
@@ -115,7 +119,7 @@ export class Chats {
       const executor = this.o.chats.executorOf(id)
       return await this.call(id, seq, prompt, {
         ...(executor === undefined ? {} : { executor }),
-        model: t.template.model,
+        ...(t.template.model === undefined ? {} : { model: t.template.model }),
         ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
       })
     } finally {
@@ -129,7 +133,7 @@ export class Chats {
     return undefined
   }
 
-  private async call(id: string, seq: number, prompt: string, route: { executor?: string; model: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
+  private async call(id: string, seq: number, prompt: string, route: { executor?: string; model?: string; effort?: 'low' | 'high' | 'max' }): Promise<SendResult> {
     const { chats, redact } = this.o
     const nonce = nonceOf(id, seq)
     const cwd = join(this.o.dataDir, 'chat', id)

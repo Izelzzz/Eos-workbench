@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
-import { MODEL_KEY_ENV, resolveModelKey, takeModelKeyEnv } from '../src/credentials/model-key.ts'
+import { resolveModelKey, takeKeyEnv } from '../src/credentials/model-key.ts'
 import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText, rememberSecret } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
@@ -184,23 +184,28 @@ test('model key: the credential wins over the env var; env is the fallback; an u
   const key = newKey()
   const path = db()
   const c = new Credentials(path, key)
-  assert.deepEqual(resolveModelKey(c, undefined), { source: 'missing' })
-  assert.deepEqual(resolveModelKey(c, 'from-env'), { source: 'env', value: 'from-env' })
-  assert.deepEqual(resolveModelKey(undefined, 'from-env'), { source: 'env', value: 'from-env' })
+  assert.deepEqual(resolveModelKey(c, 'deepseek', undefined), { source: 'missing' })
+  assert.deepEqual(resolveModelKey(c, 'deepseek', 'from-env'), { source: 'env', value: 'from-env' })
+  assert.deepEqual(resolveModelKey(undefined, 'deepseek', 'from-env'), { source: 'env', value: 'from-env' })
   c.put(LOCAL_OWNER, 'deepseek', 'api-key', KEY)
-  assert.deepEqual(resolveModelKey(c, 'from-env'), { source: 'credentials', value: KEY })
+  assert.deepEqual(resolveModelKey(c, 'deepseek', 'from-env'), { source: 'credentials', value: KEY })
   const otherKey = new Credentials(path, newKey())
-  const r = resolveModelKey(otherKey, 'from-env')
+  const r = resolveModelKey(otherKey, 'deepseek', 'from-env')
   assert.equal(r.source, 'error')
   assert.match((r as { error: string }).error, /另一个主密钥/)
-  assert.equal(resolveModelKey(new Credentials(path, undefined), 'from-env').source, 'error')
+  assert.equal(resolveModelKey(new Credentials(path, undefined), 'deepseek', 'from-env').source, 'error')
 })
 
-test('takeModelKeyEnv reads the env key and removes it from the environment; blank counts as unset', () => {
-  const env: NodeJS.ProcessEnv = { [MODEL_KEY_ENV]: ' k-from-env ', PATH: '/bin' }
-  assert.equal(takeModelKeyEnv(env), 'k-from-env')
+test('takeKeyEnv reads the named env key and removes it from the environment; blank counts as unset', () => {
+  const env: NodeJS.ProcessEnv = { SOME_API_KEY: ' k-from-env ', PATH: '/bin' }
+  assert.equal(takeKeyEnv(env, 'SOME_API_KEY'), 'k-from-env')
   assert.deepEqual(env, { PATH: '/bin' })
-  assert.equal(takeModelKeyEnv({ [MODEL_KEY_ENV]: '  ' }), undefined)
+  assert.equal(takeKeyEnv({ SOME_API_KEY: '  ' }, 'SOME_API_KEY'), undefined)
+  // 凭据名是调用方给的：别的名字的凭据不算
+  const c = new Credentials(db(), newKey())
+  c.put(LOCAL_OWNER, 'other', 'api-key', KEY)
+  assert.deepEqual(resolveModelKey(c, 'deepseek', undefined), { source: 'missing' })
+  assert.deepEqual(resolveModelKey(c, 'other', undefined), { source: 'credentials', value: KEY })
 })
 
 test('knownSecrets：JSON 凭据里的机密字段（例如 GitHub App 的私钥）单独出现也遮住，slug、App id 不遮；运行时登记的短期令牌也遮住', () => {

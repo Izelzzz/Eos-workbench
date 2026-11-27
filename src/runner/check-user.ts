@@ -1,11 +1,11 @@
-// 检查命令和 agent 用哪个系统用户运行（路线图第 3 项，ADR-006）。部署镜像里检查命令是 eos-check、dsh 和 agent 是 eos-agent：
-// 它们和平台不是同一个用户，读不到平台进程环境（/proc/<pid>/environ）里的主密钥；检查命令也读不到 dsh 进程环境里的模型 key。
+// 检查命令和 agent 用哪个系统用户运行（路线图第 3 项，ADR-006）。部署镜像里检查命令是 eos-check、执行器进程和 agent 是 eos-agent：
+// 它们和平台不是同一个用户，读不到平台进程环境（/proc/<pid>/environ）里的主密钥；检查命令也读不到执行器进程环境里的模型 key。
 // 没有设置时它们和平台是同一个用户（本机开发时就是这样）。
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 
 export const CHECK_USER_ENV = 'EOS_CHECK_USER'
-/** dsh 和 agent 的用户。平台用它结束 agent 留下的进程、读 dsh 的会话日志；切换由 dsh 的入口（deploy/dsh-launch.mjs）做。 */
+/** 执行器进程和 agent 的用户。平台用它结束 agent 留下的进程，执行器用它读自己的会话日志；切换由执行器做（dsh 是它的入口 deploy/dsh-launch.mjs）。 */
 export const AGENT_USER_ENV = 'EOS_AGENT_USER'
 
 /** 检查命令用的系统用户：名字、主组的 gid 和家目录（检查命令的 HOME，npm 等的缓存放在这里）。 */
@@ -166,21 +166,3 @@ export const shareWithGroup = async (user: CheckUser, dir: string): Promise<stri
     })
   })
 }
-
-/** 在 $1 下找 $2 这个会话的日志，找到就原样输出（以 dsh 的用户运行：会话目录是 0700，只有它能读）。 */
-const CAT_SESSION_LOG = 'for f in "$1"/*/"$2"/"$3"; do if [ -f "$f" ]; then exec cat "$f"; fi; done; exit 3'
-
-/**
- * 以 user 读一个 dsh 会话的日志：找到时返回原始字节，没有这个会话时 undefined，读不出来（切换失败、超时、太大）时抛错。
- * 和直接读文件（dsh.ts 的默认实现）找的是同一个位置。同步：dsh.ts 读日志的地方本来就是同步的。
- */
-export const readSessionLogAs =
-  (user: CheckUser, file: string) =>
-  (sessionsRoot: string, sessionId: string): Buffer | undefined => {
-    if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return undefined
-    const [cmd, ...args] = asUser(user, ['sh', '-c', CAT_SESSION_LOG, 'sh', sessionsRoot, sessionId, file])
-    const r = spawnSync(cmd!, args, { cwd: '/', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 * 1024, timeout: 30_000 })
-    if (r.status === 0) return r.stdout
-    if (r.status === 3) return undefined
-    throw new Error(`以 ${user.name} 读会话日志 ${sessionId} 失败：${r.error?.message ?? (r.stderr?.toString().trim() || `退出码 ${r.status ?? '（被信号终止）'}`)}`)
-  }

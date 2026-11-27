@@ -6,7 +6,8 @@ import { join, resolve } from 'node:path'
 import { Conventions } from '../conventions/conventions.ts'
 import { redactDeep, rememberSecret } from '../credentials/redact.ts'
 import type { CheckResult, Task } from '../engine/types.ts'
-import type { Executor } from '../executor/types.ts'
+import type { Executor, ExecutorCheck } from '../executor/types.ts'
+import { needsOf } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
@@ -20,7 +21,7 @@ import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, 
 import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
-import { runTask } from './runner.ts'
+import { backgroundFor, runTask } from './runner.ts'
 
 export type CreateInput = { repo: string; workflow: string; request: string }
 export type Created = { ok: true; id: string } | { ok: false; error: string }
@@ -66,10 +67,10 @@ export class Supervisor {
       forges?: Forge[]
       /** 检查命令用的系统用户；不给时和平台是同一个用户。 */
       checkUser?: CheckUser
-      /** dsh 和 agent 用的系统用户；不给时和平台是同一个用户。 */
+      /** 执行器进程和 agent 用的系统用户；不给时和平台是同一个用户。 */
       agentUser?: CheckUser
-      /** 角色写的执行器没有登记时返回原因：创建任务时核对，免得跑到这个角色才失败。不给时不核对。 */
-      unknownExecutor?: (name: string) => string | undefined
+      /** 角色交给执行器之前核对：执行器没登记、或者做不到角色的能力面时返回原因。创建任务时核对，免得跑到这个角色才失败。不给时不核对。 */
+      checkExecutor?: ExecutorCheck
     },
   ) {
     this.locksDir = join(o.dataDir, 'locks')
@@ -104,8 +105,8 @@ export class Supervisor {
     const resolved = this.conventions.resolve(input.workflow.trim())
     if (!resolved.ok) return resolved
     for (const [key, r] of Object.entries(resolved.workflow.roles)) {
-      const unknown = r.executor === undefined ? undefined : this.o.unknownExecutor?.(r.executor)
-      if (unknown !== undefined) return { ok: false, error: `工作流 ${resolved.workflow.name} 的角色 ${key}：${unknown}` }
+      const problem = this.o.checkExecutor?.(r.executor, needsOf({ builtinTools: 'standard', denyTools: r.denyTools, mcp: r.mcp, skills: r.skills, background: backgroundFor(r) }))
+      if (problem !== undefined) return { ok: false, error: `工作流 ${resolved.workflow.name} 的角色 ${key}：${problem}` }
     }
     const id = newId()
     let w: Worktree
@@ -418,7 +419,7 @@ export class Supervisor {
       redact,
       ...(this.o.pollMs === undefined ? {} : { pollMs: this.o.pollMs }),
       // 撤销越界改动之前：关掉这个 worktree 的 agent 进程（连同它的作业），再杀掉工作目录还在 worktree 里的残留进程
-      // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动 dsh、从会话日志续接。
+      // （Izelzzz/Eos-workbench#28）。下一次调用会重新启动执行器进程、从会话日志续接。
       beforeRevert: async t => {
         const worktree = this.o.store.meta(t.id).worktree
         await this.o.executor.release(worktree)

@@ -60,7 +60,7 @@ flowchart TD
 | 模板 | YAML | `name`、`description`、`executor`（执行器的名字）、`model`、`effort`、`prompt`、`write`（`none` 或 `worktree`）、`writePaths`（worktree 内的 glob）、`tools.deny`（工具组）、`skills`（技能名）、`mcp`（stdio 服务） |
 | 技能 | Markdown | dsh 的 `SKILL.md` 格式，开头 `---` 之间是 `name` 和 `description` |
 
-- 默认值：`executor` 省略时用平台的默认执行器（dsh）；`write` 是 `none`；`model` 是 `deepseek-flash`；`write: worktree` 并且省略 `writePaths` 时，可写范围是整个 worktree。只读的角色不能写 `writePaths`。
+- 默认值：`executor` 省略时用平台的默认执行器（dsh）；`model` 省略时用执行器自己的默认模型（dsh 是 `deepseek-flash`）；`write` 是 `none`；`write: worktree` 并且省略 `writePaths` 时，可写范围是整个 worktree。只读的角色不能写 `writePaths`。
 - `executor` 写的名字没有登记时，解析照常通过，创建任务时报错。
 - 内置的模板：`spec-writer`、`developer`、`reviewer`、`improver`。内置的技能：`write-changes`。内置的 `standard` 工作流引用前三个模板。
 - 模板和技能的名字只能用小写字母、数字和连字符，以字母开头，最长 32 个字符，不能用中文。技能名的规则来自 dsh；模板名沿用工作流名的规则。
@@ -97,7 +97,8 @@ flowchart TD
 | `goal` | 目标 |
 
 - 读写文件和向用户提问的工具不属于任何组，始终保留。
-- 工具组到 dsh 插件行的映射由平台维护（`src/executor/dsh.ts` 的 `GROUP_ROWS`）。每一组都用真实的 dsh 验证过：去掉后 dsh 正常启动，这一组工具从发给模型的工具表里消失，其余组不受影响。
+- 工具组和执行器无关。每个执行器声明自己对每一组的支持（`src/executor/types.ts` 的 `Capabilities`）：能去掉、本来就没有、有但去不掉。角色要去掉一组「有但去不掉」的工具时，创建任务就报错；执行器本来就没有的组算已经去掉。
+- 工具组到 dsh 插件行的映射在 `src/executor/dsh.ts` 的 `GROUP_ROWS`。每一组都用真实的 dsh 验证过：去掉后 dsh 正常启动，这一组工具从发给模型的工具表里消失，其余组不受影响。
 
 **为什么按组而不是按单个工具名**：dsh 只能整行关闭工具。让使用者写单个工具名，会造成「写了但关不掉」的假象。
 

@@ -9,10 +9,10 @@ import type { NodeId } from './workflow/types.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { Executors, healthOf, unknownExecutor } from './executor/registry.ts'
-import type { ExecutorContext } from './executor/types.ts'
+import { checkExecutor, Executors, healthOf, modelKeySpecs } from './executor/registry.ts'
+import type { ExecutorContext, ExecutorKind, ModelKeySpec } from './executor/types.ts'
 import { takeMasterKey } from './credentials/key.ts'
-import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
+import { resolveModelKey, takeKeyEnv, type ModelKey } from './credentials/model-key.ts'
 import { knownSecrets, redacting, redactText } from './credentials/redact.ts'
 import { Credentials } from './credentials/store.ts'
 import { AGENT_USER_ENV, resolveCheckUser } from './runner/check-user.ts'
@@ -75,10 +75,10 @@ const { values, positionals } = parseArgs({
   },
 })
 
-// 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（dsh、git、检查命令）都继承不到它。
+// 主密钥最先读出并从 process.env 删掉：之后起的任何子进程（执行器、git、检查命令）都继承不到它。
 const masterKey = takeMasterKey(process.env)
-// 环境变量里的模型 key 也一样：读出后删掉，只交给 dsh 进程，git 和检查命令都拿不到。
-const envModelKey = takeModelKeyEnv(process.env)
+// 环境变量里的模型 key 也一样（每个执行器声明自己的变量）：读出后删掉，只交给那个执行器，git 和检查命令都拿不到。
+const envModelKeys = new Map(modelKeySpecs().map(s => [s.env, takeKeyEnv(process.env, s.env)]))
 const dataDir = resolve(values.data ?? process.env.EOS_HOME ?? join(homedir(), '.eos'))
 const dbPath = join(dataDir, 'eos.db')
 const openCredentials = () => new Credentials(dbPath, masterKey.kind === 'ok' ? masterKey.key : undefined)
@@ -86,18 +86,19 @@ const openCredentials = () => new Credentials(dbPath, masterKey.kind === 'ok' ? 
  * 启动时的模型 key（给启动检查和 doctor 看）。凭据存储先于环境变量；数据库还不存在时（第一次运行）凭据存储一定是空的，不为此建数据目录。
  * 数据库打不开（损坏、没有权限）时记成读不出来，由检查项报出，而不是直接崩溃。
  */
-const startupModelKey = ((): ModelKey => {
-  if (!existsSync(dbPath)) return resolveModelKey(undefined, envModelKey)
+const startupModelKey = (spec: ModelKeySpec): ModelKey => {
+  const fromEnv = envModelKeys.get(spec.env)
+  if (!existsSync(dbPath)) return resolveModelKey(undefined, spec.credential, fromEnv)
   let c: Credentials | undefined
   try {
     c = openCredentials()
-    return resolveModelKey(c, envModelKey)
+    return resolveModelKey(c, spec.credential, fromEnv)
   } catch (e) {
     return { source: 'error', error: `打不开凭据存储（${dbPath}）：${(e as Error).message}` }
   } finally {
     c?.close()
   }
-})()
+}
 const say = (s: string): void => void process.stdout.write(`${s}\n`)
 const fail = (s: string): never => {
   process.stderr.write(`${s}\n`)
@@ -110,18 +111,20 @@ const ROOT = join(import.meta.dirname, '..')
 const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'correct', 'improve', 'web'])
 /** 检查命令用的系统用户（部署镜像里设置 EOS_CHECK_USER）。设置错了由启动检查拦下。 */
 const checkUser = resolveCheckUser(process.env)
-/** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */
+/** 执行器进程和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由执行器切换过去）。设置错了由启动检查拦下。 */
 const agentUser = resolveCheckUser(process.env, undefined, AGENT_USER_ENV)
-/** 交给执行器的环境。modelKey 由调用方给：启动检查看启动时的状态，运行时每次重新读凭据存储。 */
-const executorContext = (modelKey: ExecutorContext['modelKey']): ExecutorContext => ({
-  root: ROOT,
-  dataDir,
-  env: process.env,
-  modelKey,
-  credentialsUsable: masterKey.kind === 'ok',
-  ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
-})
-const startupChecks = () => evaluate(gather({ root: ROOT, dataDir, executors: healthOf(executorContext(() => startupModelKey)), masterKey, checkUser, agentUser }))
+/** 交给执行器的环境。modelKey 按执行器声明的那条取，由调用方给：启动检查看启动时的状态，运行时每次重新读凭据存储。 */
+const executorContext =
+  (modelKey: (spec: ModelKeySpec) => ModelKey) =>
+  (kind: ExecutorKind): ExecutorContext => ({
+    root: ROOT,
+    dataDir,
+    env: process.env,
+    modelKey: () => modelKey(kind.modelKey),
+    credentialsUsable: masterKey.kind === 'ok',
+    ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
+  })
+const startupChecks = () => evaluate(gather({ root: ROOT, dataDir, executors: healthOf(executorContext(startupModelKey)), masterKey, checkUser, agentUser }))
 if (positionals[0] === 'doctor' && !values.help) {
   const items = startupChecks()
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
@@ -143,7 +146,8 @@ const credentials = openCredentials()
 const redact = (() => {
   // 主密钥两种写法都算：部署方可能省略了末尾的 =，泄露出来的是原文。
   const master = masterKey.kind === 'ok' ? masterKey.key.key.toString('base64') : undefined
-  const extra = [...(envModelKey === undefined ? [] : [envModelKey]), ...(master === undefined ? [] : [master, master.replace(/=+$/, '')])]
+  const fromEnv = [...envModelKeys.values()].filter((v): v is string => v !== undefined)
+  const extra = [...fromEnv, ...(master === undefined ? [] : [master, master.replace(/=+$/, '')])]
   const secrets = knownSecrets(credentials, extra, Date.now, e => process.stderr.write(`读不到凭据列表，遮蔽暂时沿用上次的凭据值：${(e as Error).message}\n`))
   return (text: string) => redactText(text, secrets())
 })()
@@ -191,7 +195,7 @@ const decide = (pass: boolean) => {
 const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
 
 /** 注册表里的执行器：角色按 executor 选，用到时才建。模型 key 每次取都重新读凭据存储（Web 上换了 key 之后起的进程就用新的）。 */
-const executor = () => redacting(new Executors(executorContext(() => resolveModelKey(credentials, envModelKey))), redact)
+const executor = () => redacting(new Executors(executorContext(spec => resolveModelKey(credentials, spec.credential, envModelKeys.get(spec.env)))), redact)
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
 const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
@@ -205,7 +209,7 @@ const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
     const sup = new Supervisor({
       store,
       executor: ex,
-      unknownExecutor,
+      checkExecutor,
       dataDir,
       credentials,
       actor: 'cli',
@@ -356,7 +360,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const sup = new Supervisor({
       store,
       executor: ex,
-      unknownExecutor,
+      checkExecutor,
       dataDir,
       credentials,
       actor: 'web',
@@ -372,7 +376,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
       credentials,
       improve: { executor: ex, dataDir },
-      chat: new WebChats({ store, conventions: sup.conventions, executor: ex, unknownExecutor, dataDir, redact, changes: id => committedChanges(store.meta(id)), now: Date.now }),
+      chat: new WebChats({ store, conventions: sup.conventions, executor: ex, checkExecutor, dataDir, redact, changes: id => committedChanges(store.meta(id)), now: Date.now }),
       ...(publicUrl === undefined ? {} : { publicUrl }),
     })
     const plan = listenPlan(values.host, port, publicUrl)
@@ -396,7 +400,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const resumed = sup.resumeAll()
     if (resumed.length > 0) note(`接着运行上次没跑完的任务：${resumed.join('、')}`)
     const shutdown = () => {
-      // 凭据存储最后关：执行器关闭期间，任务还可能要取模型 key（新起 dsh）、写遮蔽过的日志。
+      // 凭据存储最后关：执行器关闭期间，任务还可能要取模型 key（新起执行器进程）、写遮蔽过的日志。
       server.close()
       void ex.close().finally(() => {
         credentials.close()
@@ -417,7 +421,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
       conventions,
       executor,
-      unknownExecutor,
+      checkExecutor,
       dataDir,
       redact,
       now: Date.now,
