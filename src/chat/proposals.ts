@@ -3,6 +3,8 @@
 // 检查和保存约定时一样（Conventions.validate：格式、名字、引用的模板、技能和文档）；不通过就把错误退给 agent，让它改了再提。
 import { z } from 'zod'
 import type { Conventions } from '../conventions/conventions.ts'
+import { permissionChanges } from '../improve/guard.ts'
+import { parseTemplate } from '../workflow/agent.ts'
 import type { Store } from '../store/store.ts'
 import type { ChatStore } from './store.ts'
 import type { ToolOutcome } from './tools.ts'
@@ -50,13 +52,40 @@ export const proposer = (o: { chats: ChatStore; store: Store; conventions: Conve
     const current = o.store.convention(p.kind, p.name)
     if (current?.content === p.content) return fail(`和${KIND_NAMES[p.kind]}「${p.name}」当前的第 ${current.version} 版完全一样，不需要提议`)
     count++
+    const permissions = permissionsOf(p.kind, current?.content, p.content, o.conventions)
     const row = o.chats.addProposal(
-      { chatId: o.chatId, call: o.call, kind: p.kind, name: p.name, ...(current === undefined ? {} : { baseVersion: current.version }), content: p.content, rationale: p.rationale },
+      { chatId: o.chatId, call: o.call, kind: p.kind, name: p.name, ...(current === undefined ? {} : { baseVersion: current.version }), content: p.content, rationale: p.rationale, permissions },
       o.now(),
     )
+    const note = permissions.length === 0 ? '' : `\n这条提议涉及权限，用户确认时会单独看到：\n${permissions.map(x => `- ${x}`).join('\n')}`
     return {
-      text: `提议 #${row.id} 已记下：${current === undefined ? '新建' : `修改（基于第 ${current.version} 版）`}${KIND_NAMES[p.kind]}「${p.name}」。它还没有生效，要等用户确认后才会保存。`,
+      text: `提议 #${row.id} 已记下：${current === undefined ? '新建' : `修改（基于第 ${current.version} 版）`}${KIND_NAMES[p.kind]}「${p.name}」。它还没有生效，要等用户确认后才会保存。${note}`,
       isError: false,
     }
   }
+}
+
+/**
+ * 提议涉及的权限改动（中文说明），入库时算好，用户确认时醒目列出。
+ * 修改已有约定：用改进提案的核对（src/improve/guard.ts 的 permissionChanges），同一套规则；它对模板不看技能，这里补上技能的增删。
+ * 新建的约定没有可比的旧版本：整份权限都要人看，列出它的权限面（模板）或一句总的说明（工作流）。
+ */
+export const permissionsOf = (kind: ProposalKind, before: string | undefined, after: string, conventions: Conventions): string[] => {
+  if (before === undefined) {
+    if (kind === 'workflow') return ['新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认']
+    const t = parseTemplate(after)
+    if (!t.ok) return []
+    const a = t.template
+    return [
+      `新建的 Agent 模板：模型 ${a.model}，写入 ${a.write}${a.writePaths === undefined ? '' : `（${a.writePaths.join('、')}）`}，去掉的工具组 ${a.denyTools.join('、') || '无'}，技能 ${a.skills.join('、') || '无'}，MCP ${a.mcp.map(m => m.name).join('、') || '无'}`,
+    ]
+  }
+  const out = permissionChanges(kind, before, after, conventions.lookup())
+  if (kind === 'template') {
+    const a = parseTemplate(before)
+    const b = parseTemplate(after)
+    if (a.ok && b.ok && JSON.stringify([...a.template.skills].sort()) !== JSON.stringify([...b.template.skills].sort()))
+      out.push(`模板的技能从 ${a.template.skills.join('、') || '无'} 改成 ${b.template.skills.join('、') || '无'}`)
+  }
+  return out
 }
