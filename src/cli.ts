@@ -9,7 +9,7 @@ import type { NodeId } from './workflow/types.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { Executors, healthOf } from './executor/registry.ts'
+import { Executors, healthOf, unknownExecutor } from './executor/registry.ts'
 import type { ExecutorContext } from './executor/types.ts'
 import { takeMasterKey } from './credentials/key.ts'
 import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
@@ -190,17 +190,11 @@ const decide = (pass: boolean) => {
 const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
 
 /** 注册表里的执行器：角色按 executor 选，用到时才建。模型 key 每次取都重新读凭据存储（Web 上换了 key 之后起的进程就用新的）。 */
-const executors = () => new Executors(executorContext(() => resolveModelKey(credentials, envModelKey)))
-const executor = () => redacting(executors(), redact)
-/** 交给 Supervisor 的执行器：遮蔽过的执行器，以及核对角色写的执行器有没有登记。 */
-const supervised = () => {
-  const registry = executors()
-  return { executor: redacting(registry, redact), unknownExecutor: (name: string) => registry.unknown(name) }
-}
+const executor = () => redacting(new Executors(executorContext(() => resolveModelKey(credentials, envModelKey))), redact)
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
 const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
-  const { executor: ex, unknownExecutor } = supervised()
+  const ex = executor()
   const shutdown = () => {
     void ex.close().finally(() => process.exit(130))
   }
@@ -350,7 +344,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const port = Number(values.port)
     const publicUrl = process.env.EOS_PUBLIC_URL === undefined || process.env.EOS_PUBLIC_URL === '' ? undefined : parsePublicUrl(process.env.EOS_PUBLIC_URL)
     if (typeof publicUrl === 'string') return fail(publicUrl)
-    const { executor: ex, unknownExecutor } = supervised()
+    const ex = executor()
     // Web 服务进程的输出也写进 logs/eos.log：服务器上没人盯着终端。
     const processLog = processLogPath(dataDir)
     const note = (raw: string) => {
@@ -377,7 +371,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
       credentials,
       improve: { executor: ex, dataDir },
-      chat: new WebChats({ store, conventions: sup.conventions, executor: ex, dataDir, redact, changes: id => committedChanges(store.meta(id)), now: Date.now }),
+      chat: new WebChats({ store, conventions: sup.conventions, executor: ex, unknownExecutor, dataDir, redact, changes: id => committedChanges(store.meta(id)), now: Date.now }),
       ...(publicUrl === undefined ? {} : { publicUrl }),
     })
     const plan = listenPlan(values.host, port, publicUrl)
@@ -422,6 +416,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
       conventions,
       executor,
+      unknownExecutor,
       dataDir,
       redact,
       now: Date.now,

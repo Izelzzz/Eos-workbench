@@ -8,6 +8,10 @@ import type { AgentSpec, AskHandler, Executor, ExecutorContext, ExecutorKind, He
 /** 登记的执行器。第一个是默认执行器：角色没有写 executor 时用它。 */
 export const EXECUTORS: readonly ExecutorKind[] = [dsh]
 
+/** 这个名字没有登记时的说明；登记了时 undefined。模板和工作流写的 executor 在创建任务、建对话时用它核对。 */
+export const unknownExecutor = (name: string, kinds: readonly ExecutorKind[] = EXECUTORS): string | undefined =>
+  kinds.some(k => k.name === name) ? undefined : `没有名为「${name}」的执行器（可用的：${kinds.map(k => k.name).join('、')}）`
+
 /**
  * 按名字分派的执行器。每种执行器第一次用到时才建（没用到的执行器装没装好不影响别的）。
  * 不写名字时用默认执行器（登记的第一个）：角色没写 executor 的调用、本来就没有记录执行器的旧任务和旧对话都走它。
@@ -27,18 +31,9 @@ export class Executors implements Executor {
     return this.kinds[0]!.name
   }
 
-  get names(): string[] {
-    return this.kinds.map(k => k.name)
-  }
-
-  /** 这个名字没有登记时的说明；登记了时 undefined。 */
-  unknown(name: string): string | undefined {
-    return this.kinds.some(k => k.name === name) ? undefined : `没有名为「${name}」的执行器（可用的：${this.names.join('、')}）`
-  }
-
   private get(name: string): Executor {
     const kind = this.kinds.find(k => k.name === name)
-    if (kind === undefined) throw new Error(this.unknown(name))
+    if (kind === undefined) throw new Error(unknownExecutor(name, this.kinds))
     let ex = this.made.get(name)
     if (ex === undefined) {
       ex = kind.create(this.ctx)

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 import { zstdCompressSync } from 'node:zlib'
 import { DshExecutor } from '../src/executor/dsh.ts'
-import { EXECUTORS, Executors, healthOf } from '../src/executor/registry.ts'
+import { EXECUTORS, Executors, healthOf, unknownExecutor } from '../src/executor/registry.ts'
 import type { AgentSpec, Executor, ExecutorContext, ExecutorKind } from '../src/executor/types.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { MemoryExecutor } from './memory-executor.ts'
@@ -196,8 +196,8 @@ test('两个执行器里有同名的会话和 nonce 时，找回走调用用的�
 test('注册表：没登记的名字报错并列出可用的；找回不会去建没用到的执行器，建不起来的执行器报出原因', async () => {
   const made: MemoryExecutor[] = []
   const reg = new Executors(ctx, [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)])
-  assert.equal(reg.unknown('a'), undefined)
-  assert.equal(reg.unknown('zzz'), '没有名为「zzz」的执行器（可用的：a、broken、c）')
+  assert.equal(unknownExecutor('a', [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)]), undefined)
+  assert.equal(unknownExecutor('zzz', [kind('a', []), kind('broken', []), kind('c', [])]), '没有名为「zzz」的执行器（可用的：a、broken、c）')
   await assert.rejects(reg.send({ key: 'k', spec: { ...spec('/w'), executor: 'zzz' }, prompt: 'p', nonce: 'n', ask }), /没有名为「zzz」的执行器/)
   await reg.send({ key: 'k', spec: spec('/w'), prompt: 'p', nonce: 'n', ask })
   assert.equal((await reg.findReply('k', 'n'))?.sessionId, 'a-1')

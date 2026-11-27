@@ -38,6 +38,8 @@ export type ChatOptions = {
   now: () => number
   /** 每个 trace 事件到达时（已遮蔽）：命令行用它显示进度，网页用它边生成边显示。 */
   onEvent?: (chatId: string, e: TraceEvent) => void
+  /** 模板写的执行器没有登记时返回原因：建对话时核对，没登记的名字不记进对话。不给时不核对。 */
+  unknownExecutor?: (name: string) => string | undefined
 }
 
 const keyOf = (id: string) => `chat/${id}`
@@ -83,9 +85,11 @@ export class Chats {
   async start(text: string, actor: ChatActor): Promise<SendResult> {
     const bad = this.invalid(text)
     if (bad !== undefined) return { ok: false, cause: 'input', error: bad }
-    const id = `c${this.o.now().toString(36)}${randomBytes(4).toString('hex')}`
     // 执行器在建对话时定下：会话在那个执行器里，之后改了模板的 executor 也不换（换了就续接不上，也找不回回复）。
     const executor = this.o.conventions.lookup()(ASSISTANT)?.template.executor
+    const unknown = executor === undefined ? undefined : this.o.unknownExecutor?.(executor)
+    if (unknown !== undefined) return { ok: false, cause: 'config', error: `Agent 模板「${ASSISTANT}」：${unknown}` }
+    const id = `c${this.o.now().toString(36)}${randomBytes(4).toString('hex')}`
     this.o.chats.create({ id, firstMessage: this.o.redact(text), actor, ...(executor === undefined ? {} : { executor }) }, this.o.now())
     return this.send(id, text, actor)
   }
@@ -101,7 +105,8 @@ export class Chats {
     const lock = acquire(join(this.o.dataDir, 'locks'), `chat-${id}`)
     if ('heldBy' in lock) return { ok: false, cause: 'busy', error: `这个对话正在回复上一句（进程 ${lock.heldBy}），等它结束再发`, chat }
     try {
-      await this.recover(id)
+      const unclaimed = await this.recover(id)
+      if (unclaimed !== undefined) return { ok: false, cause: 'upstream', error: unclaimed, chat }
       const log = this.o.chats.log(id)
       const first = !log.some(m => m.role === 'assistant')
       const seq = this.o.chats.append(id, { at: this.o.now(), role: 'user', text: this.o.redact(text), actor })
@@ -196,13 +201,21 @@ export class Chats {
     return { ok: false, cause: 'upstream', error, chat: this.o.chats.summary(id)! }
   }
 
-  /** 最后一条是用户的话、后面没有结果：那次调用没做完（平台重启或进程被杀）。向执行器认领回复，认领不到就记下来。 */
-  private async recover(id: string): Promise<void> {
+  /**
+   * 最后一条是用户的话、后面没有结果：那次调用没做完（平台重启或进程被杀）。向执行器认领回复，认领不到就记下来。
+   * 执行器出错（例如建不起来）时什么都不记、返回原因：不是"没有回复"，修好之后下一句还能认领。
+   */
+  private async recover(id: string): Promise<string | undefined> {
     const last = this.o.chats.log(id).at(-1)
     if (last?.role !== 'user') return
     const nonce = nonceOf(id, last.seq)
     const executor = this.o.chats.executorOf(id)
-    const found = await this.o.executor.findReply(keyOf(id), nonce, executor).catch(() => undefined)
+    let found: Reply | undefined
+    try {
+      found = await this.o.executor.findReply(keyOf(id), nonce, executor)
+    } catch (e) {
+      return `上一句的回复认领不了：${this.o.redact((e as Error).message)}`
+    }
     if (found === undefined) {
       const reason = '这一句没有得到回复：调用没有做完（可能是平台重启了），可以再说一次'
       this.o.chats.voidProposals(nonce, reason)

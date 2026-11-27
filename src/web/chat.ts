@@ -26,6 +26,7 @@ export class WebChats {
       store: Store
       conventions: Conventions
       executor: Executor
+      unknownExecutor?: (name: string) => string | undefined
       dataDir: string
       redact: (s: string) => string
       changes: DataSource['changes']
