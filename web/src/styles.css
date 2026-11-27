@@ -307,7 +307,7 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .correction-list li { margin: 8px 0; }
 .correction-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .correction-text { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.correction-files { margin: 4px 0; overflow-wrap: anywhere; }
+.correction-files, .correction-note { margin: 4px 0; overflow-wrap: anywhere; }
 .corrections pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; }
 .correction-form { display: flex; flex-direction: column; gap: 8px; }
 .correction-form p { margin: 0; }

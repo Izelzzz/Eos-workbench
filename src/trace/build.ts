@@ -208,7 +208,8 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const loopQuestions = new Set<string>()
     for (const [k, e] of task.log.entries()) {
       if (e.type === 'note' && e.node === n.id) children.push(instant(`${n.id}.note${k}`, 'note', e.text, e.at))
-      if (e.type === 'correction' && e.node === n.id) children.push(instant(`${n.id}.correction${k}`, 'note', `第 ${e.round} 次修正：改正或补充`, e.at, { output: e.text }))
+      if (e.type === 'correction' && e.node === n.id)
+        children.push(instant(`${n.id}.correction${k}`, 'note', `第 ${e.round} 次修正：改正或补充（未经评审，改完只重跑程序检查）`, e.at, { output: e.text }))
       if (e.type === 'decision' && e.node === n.id)
         children.push(
           instant(`${n.id}.decision${k}`, 'note', `第 ${e.round} 次验收${e.pass ? '通过' : '打回'}（${e.by === 'human' ? '人' : e.by}）`, e.at, e.comment === '' ? {} : { output: e.comment }),
