@@ -18,8 +18,9 @@ import type { ChatStore } from './store.ts'
 import { PROPOSE_TOOL, proposer, proposeToolSpec } from './proposals.ts'
 import { callTool, type DataSource, toolList, TOOLS } from './tools.ts'
 import type { ChatActor, ChatCall, ChatDetail, ChatRead, ChatSummary } from './types.ts'
+import { ASSISTANT_TEMPLATE } from './types.ts'
 
-export const ASSISTANT = 'assistant'
+export const ASSISTANT = ASSISTANT_TEMPLATE
 /** MCP 服务名：agent 看到的工具名里会带上它（各执行器的写法不同）。 */
 export const MCP_NAME = 'eos'
 export const MAX_MESSAGE_CHARS = 20_000
@@ -116,7 +117,16 @@ export class Chats {
     const cwd = join(this.o.dataDir, 'chat', id)
     mkdirSync(cwd, { recursive: true })
     // 提议工具只写提议表（待确认），不写约定；其余工具只读。
-    const propose = proposer({ chats, store: this.o.data.store, conventions: this.o.conventions, redact, chatId: id, call: nonce, now: this.o.now })
+    const { store } = this.o.data
+    const conventions = this.o.conventions
+    const propose = proposer({
+      conventions: { current: (kind, name) => store.convention(kind, name), validate: (kind, name, content) => conventions.validate(kind, name, content), lookup: () => conventions.lookup() },
+      record: (p, at) => chats.addProposal(p, at),
+      redact,
+      chatId: id,
+      call: nonce,
+      now: this.o.now,
+    })
     const endpoint = await openEndpoint({
       name: MCP_NAME,
       tools: [...toolList(), proposeToolSpec()],

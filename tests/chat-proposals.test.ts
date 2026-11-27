@@ -143,18 +143,9 @@ test('no code the agent can reach saves a convention: the chat modules never cal
   // agent 能触发的代码：端点、工具、提议、对话流程。它们都不调用保存约定的方法（保存只在人确认的路径里）。
   for (const f of ['chat.ts', 'mcp.ts', 'tools.ts', 'proposals.ts', 'store.ts']) {
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'chat', f), 'utf8')
-    for (const write of [
-      'saveConvention',
-      'seedConvention',
-      'insertConvention',
-      'decideProposal',
-      'conventions.save(',
-      'conventions.seed(',
-      '.save({',
-      'INSERT INTO conventions',
-      'UPDATE conventions',
-    ])
-      assert.ok(!src.includes(write), `src/chat/${f} contains ${write}`)
+    // 不分大小写、容许空白：换一种写法也扫得到。提议工具本身只拿到只读的约定操作（ConventionReader），由类型保证。
+    for (const write of [/saveConvention/i, /seedConvention/i, /insertConvention/i, /decideProposal/i, /\.\s*(save|seed)\s*\(/i, /(insert\s+into|update|delete\s+from)\s+conventions\b/i])
+      assert.ok(!write.test(src), `src/chat/${f} matches ${write}`)
   }
 })
 
@@ -199,9 +190,9 @@ test('the permission changes of a proposal are computed when it is recorded (the
   const r = await new Chats(p.opts(ex)).start('改一下', 'cli')
   assert.ok(r.ok)
   const [checks, desc, tpl, newTpl, newWf] = p.chats.proposals(r.chat.id).map(x => x.permissions)
-  assert.ok(checks!.includes('不能改检查命令和平台动作'), JSON.stringify(checks))
+  assert.ok(checks!.includes('改了检查命令和平台动作'), JSON.stringify(checks))
   assert.deepEqual(desc, [])
-  assert.ok(tpl!.includes('不能改模板的 writePaths'), JSON.stringify(tpl))
+  assert.ok(tpl!.includes('改了模板的 writePaths'), JSON.stringify(tpl))
   assert.ok(
     tpl!.some(x => x.startsWith('模板的技能从 write-changes 改成 无')),
     JSON.stringify(tpl),
@@ -209,4 +200,27 @@ test('the permission changes of a proposal are computed when it is recorded (the
   assert.match(newTpl![0]!, /^新建的 Agent 模板：模型 .*写入 worktree（src\/\*\*/)
   assert.match(newWf![0]!, /^新建的工作流/)
   assert.match(r.reply, /这条提议涉及权限，用户确认时会单独看到/)
+})
+
+test('a proposal to change the chat agent’s own template is flagged even when no permission field changes', async () => {
+  const p = platform()
+  const own = p.store.convention('template', 'assistant')!.content
+  const ex = new McpExecutor(
+    steps([{ tool, args: { kind: 'template', name: 'assistant', content: own.replace('你是 Eos 平台里的对话助手。', '你是 Eos 平台里的对话助手，回答要短。'), rationale: '更简洁' } }]),
+  )
+  const r = await new Chats(p.opts(ex)).start('让你自己回答短一点', 'cli')
+  assert.ok(r.ok)
+  assert.deepEqual(p.chats.proposals(r.chat.id)[0]!.permissions, ['改的是对话 agent 自己的模板：会改变它用的模型和它的指令'])
+})
+
+test('a reply claimed after a restart whose trace shows a non-platform tool voids that call’s proposals', async () => {
+  const p = platform()
+  const ex = new McpExecutor(() => ({ reply: '新的' }))
+  ex.traceOf = async () => [{ kind: 'tool_start', t: 1, step: 1, id: 'x', name: 'bash', args: '{}' }]
+  const id = p.chats.create({ id: 'c8', firstMessage: '你好', actor: 'cli' }, 1).id
+  const seq = p.chats.append(id, { at: 1, role: 'user', text: '设计一个工作流', actor: 'cli' })
+  p.chats.addProposal({ chatId: id, call: `chat/${id}/${seq}`, kind: 'workflow', name: 'x', content: 'x', rationale: 'x', permissions: [] }, 1)
+  ex.completed.set(`chat/${id}/${seq}`, { sessionId: 's', text: '提了一条', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1 })
+  assert.ok((await new Chats(p.opts(ex)).send(id, '还在吗', 'cli')).ok)
+  assert.match(p.chats.proposals(id)[0]!.voided ?? '', /平台工具以外的工具（bash）/)
 })
