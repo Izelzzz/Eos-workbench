@@ -24,24 +24,26 @@
 
 ### 总览
 
-容器里的进程、用户和数据：
+容器里的进程、用户和数据。容器去掉了全部能力，只加回 SETUID、SETGID、KILL：
 
 ```mermaid
 flowchart TB
   browser["浏览器<br/>SSH 隧道或反向代理"] --> port["宿主机 127.0.0.1:4317"]
   port --> plat
   envf[".env<br/>主密钥、模型 key"] --> plat
-  subgraph container["容器（Docker 默认权限）"]
-    plat["平台<br/>用户 eos"]
+  subgraph container["容器"]
+    plat["平台<br/>用户 eos<br/>带 SETUID、SETGID、KILL"]
     plat -- "切换用户，清掉能力" --> dsh["dsh<br/>用户 eos-agent"]
     plat -- "切换用户，清掉能力" --> chk["检查命令<br/>用户 eos-check"]
     dsh --> agent["agent<br/>Landlock：只能写自己的 worktree 和 /tmp"]
     dsh --> mcp["MCP 服务<br/>沙箱外，用户 eos-agent"]
     plat <--> data[("/data 数据卷<br/>eos.db、dsh、worktrees、repos")]
-    agent -- "写" --> wt["任务的 worktree"]
-    chk -- "写" --> wt
+    agent -- "只能写自己任务的" --> wt["/data/worktrees<br/>各任务的 worktree"]
+    chk -- "能写所有任务的 worktree" --> wt
+    mcp -- "能写所有任务的 worktree" --> wt
   end
-  plat --> ext["模型 API、GitHub"]
+  dsh -- "带模型 key" --> model["模型 API"]
+  plat --> gh["GitHub"]
 ```
 
 | 方面 | 设计 |

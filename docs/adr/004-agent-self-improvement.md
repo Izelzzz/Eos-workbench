@@ -27,13 +27,13 @@
 ```mermaid
 flowchart LR
   logs[("任务日志")] --> ev["归纳证据<br/>程序，纯函数"]
-  ev --> imp["improver agent<br/>只读、无工具"]
+  ev --> imp["improver agent<br/>只读，去掉全部工具组<br/>调用任何工具即作废"]
   conv[("团队约定<br/>当前版本")] --> imp
   imp --> val{"平台校验<br/>结构、证据、不改权限"}
   val -- "不合格" --> drop["不入库，返回原因"]
   val -- "合格" --> prop[("提案<br/>待审批")]
   prop --> human{"人审批"}
-  human -- "批准" --> newv["约定的新版本"]
+  human -- "批准，平台再校验一次" --> newv["约定的新版本"]
   human -- "拒绝或过期" --> rec["留记录"]
   newv --> cmp["前后对比<br/>按版本分组"]
 ```
