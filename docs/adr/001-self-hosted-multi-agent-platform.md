@@ -56,7 +56,7 @@ flowchart LR
 | runner | 执行 effect，把结果作为事件送回引擎 |
 | 存储 | 事件只追加地存进 SQLite（`node:sqlite`），状态随事件快照保存 |
 | 执行内核 | dsh，通过 stdio JSON-RPC 的 SDK 调用 |
-| 执行器接口 | `src/executor/types.ts` 的 `Executor`；dsh 是唯一已接入的实现 |
+| 执行器接口 | `src/executor/types.ts` 的 `Executor`；接入了 dsh（默认）和 Claude Code，角色用 `executor` 选 |
 
 ### 引擎：reducer 和 effect
 
@@ -78,7 +78,7 @@ flowchart LR
 
 - 接口统一提供这几个能力：打开会话、发消息、续接、查已有回复、提问回调、从会话日志回放 trace、释放某个 worktree 的进程。
 - 每种执行器只在 `src/executor/` 下自己的文件里接入。别的模块只依赖 `Executor` 接口。
-- 接口按「外部 agent（例如 Claude Code）由平台直接驱动」设计，不经过 dsh 的 subagent。原因：dsh 的 subagent 不支持多轮续接。外部 agent 还没有接入，见「和目标的差距」。
+- 接口按「外部 agent（例如 Claude Code）由平台直接驱动」设计，不经过 dsh 的 subagent。原因：dsh 的 subagent 不支持多轮续接。Claude Code 由平台用 Claude Agent SDK 直接驱动（`src/executor/claude-code.ts`）。
 
 ### 对话循环
 
@@ -121,7 +121,7 @@ flowchart LR
 |---|---|
 | 内置功能开发、Bug 修复两个工作流模板 | 内置的是 `feature` 和 `standard`，没有 Bug 修复模板 |
 | 用户在对话里描述流程，由工作流设计 agent 生成或修改 YAML，渲染成流程图 | 没有做 |
-| 接入 Claude Code 和 Codex 执行器 | 只有 dsh。Claude Code 的 PoC 已完成（`poc/claude-code/`），没有接入 |
+| 接入 Claude Code 和 Codex 执行器 | 接入了 dsh 和 Claude Code，Codex 没有接入 |
 
 ## 没有采用的方案
 

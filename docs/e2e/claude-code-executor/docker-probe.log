@@ -1,0 +1,20 @@
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ Claude Code：SDK 0.3.331
+⚠ Anthropic API key：没有设置：用 claude-code 执行器的角色跑不起来（主密钥 EOS_MASTER_KEY 没有设置或无效，凭据存储存不进凭据）
+✓ Claude Code 沙箱：Landlock：agent 只能写自己的会话目录和 /tmp，可写的 agent 还能写自己的 worktree；读不到别的进程的环境，各任务共用 /tmp
+✓ agent 的用户：执行器进程（dsh、claude-code）和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境
+PASS 平台以 eos 运行，agent 的用户是 eos-agent :: {"agentUser":"eos-agent"}
+PASS 部署镜像里 Landlock 可用（Docker 默认 seccomp） :: full
+PASS deploy/eos 建好了 claude-code 目录（组 eos-dsh、3770） :: 3770
+PASS 可写的角色：命令以 eos-agent 运行 :: eos-agent
+PASS 可写的角色：能写自己的 worktree :: true
+PASS 可写的角色：写不了数据目录、/app、eos-agent 的家目录 :: {"data":false,"app":false,"home":false}
+PASS 读不到平台的文件（0600，属于 eos） :: cat: /data/platform-secret-1.txt: Permission denied
+PASS agent 从自己的环境、Claude Code 进程和所有能读的进程环境里都读不到真 key、主密钥 :: {"realKey":false,"masterKey":false,"token":true}
+PASS 发到模型接口的是真 key（上游换上的） :: ["sk-ant-probe-real-key"]
+PASS 平台以 eos-agent 读回会话日志，按 nonce 找回回复 :: 完成
+PASS 平台自己（eos）看不进会话目录 :: EACCES
+PASS sessions/ 和会话目录都属于 eos-agent、只有它能进（2700） :: eos-agent 2700 | eos-agent 2700
+PASS 只读的角色：写不了 worktree :: false
+PASS 平台给的技能在镜像里能用（插件目录 agent 只读） :: true
+failed=0

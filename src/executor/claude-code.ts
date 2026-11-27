@@ -1,7 +1,7 @@
 // Claude Code 执行器：用 Claude Agent SDK 驱动 Claude Code。唯一引用 @anthropic-ai/claude-agent-sdk 的模块（加上它的上游 claude-code-upstream.ts）。
 // - 每次调用一个 query()：Claude Code 进程跑完这一轮就退出。会话 id 由 key 确定性地算出（UUID），第一次新建，之后续接。
 // - 能力面按调用给（tools 白名单、插件里的技能、mcpServers），不读任何设置文件和指令文件（settingSources: []）。
-// - 沙箱：整个 Claude Code 进程（和它起的所有命令）套在 Landlock 下，只能写这个会话自己的目录，可写的角色再加上 worktree。
+// - 沙箱：整个 Claude Code 进程（和它起的所有命令）套在 Landlock 下，只能写这个会话自己的目录和 /tmp，可写的角色再加上 worktree。
 //   Claude Code 自己的沙箱用的是 bwrap，在部署镜像里用不了（ADR-006），也套不进 Landlock 里。Landlock 用不了时拒绝调用。
 // - 模型 key 不进 Claude Code 进程：它的 ANTHROPIC_BASE_URL 指向平台在本机起的上游（claude-code-upstream.ts），
 //   拿到的只是这次调用的一次性令牌。
@@ -325,6 +325,10 @@ const isLink = (p: string): boolean => {
 /** 在 $1 下找会话 $2 的日志并原样输出（以 agent 的用户运行：会话目录是 0700，只有它能读）。 */
 const CAT_LOG = 'for f in "$1"/.claude/projects/*/"$2".jsonl; do if [ -f "$f" ]; then exec cat "$f"; fi; done; exit 3'
 
+/** 结束命令行里带 $1 的进程（不含这个 shell 自己：它的参数里也有 $1）。以 agent 的用户运行时只碰得到它的进程。 */
+const KILL_SESSION =
+  'for p in /proc/[0-9]*; do n=${p#/proc/}; [ "$n" = "$$" ] && continue; case "$(tr "\\000" " " < "$p/cmdline" 2>/dev/null)" in *"$1"*) kill -KILL "$n" 2>/dev/null;; esac; done; exit 0'
+
 export type ClaudeCodeOptions = {
   /** 执行器的数据目录（平台数据目录下的 claude-code/）。 */
   home: string
@@ -427,9 +431,13 @@ export class ClaudeCodeExecutor implements Executor {
     return dir
   }
 
-  /** Landlock 下能写的：会话目录，可写的角色加上 worktree；还有 /dev/null 和 /dev/tty（有时）。 */
+  /**
+   * Landlock 下能写的：会话目录、/tmp，可写的角色加上 worktree；还有 /dev/null 和 /dev/tty（有时）。
+   * /tmp 和 dsh 在 Landlock 下一样能写：部署镜像把 npm、pip、corepack 的缓存放在 /tmp（Dockerfile），agent 装依赖要写它。
+   * 平台和执行器自己会加载的东西都不放在 /tmp（ADR-006）。
+   */
   private grants(home: string, spec: AgentSpec): string[] {
-    return [home, ...(spec.write === 'worktree' ? [spec.cwd] : []), '/dev/null', ...(existsSync('/dev/tty') ? ['/dev/tty'] : [])]
+    return [home, '/tmp', ...(spec.write === 'worktree' ? [spec.cwd] : []), '/dev/null', ...(existsSync('/dev/tty') ? ['/dev/tty'] : [])]
   }
 
   /** 起 Claude Code 进程：清掉能力（或切换到 agent 的用户），再套上 Landlock。stderr 留最后一段，进程异常退出时放进报错。 */
@@ -445,9 +453,12 @@ export class ClaudeCodeExecutor implements Executor {
     }
   }
 
-  /** 同一个会话的进程如果还活着（平台崩溃留下的孤儿，ppid 是 1），先结束它：它会和这次调用同时写同一个会话。 */
+  /**
+   * 同一个会话的进程如果还活着（平台崩溃留下的孤儿，ppid 是 1），先结束它：它会和这次调用同时写同一个会话。
+   * 命令行里带会话 id（--session-id、--resume）的就是。按 /proc 找，不依赖 pkill（部署镜像里没有 procps）。
+   */
   private killStale(id: string): void {
-    this.run(['pkill', '-KILL', '-f', '--', id])
+    this.run(['sh', '-c', KILL_SESSION, 'sh', id])
   }
 
   private mcpServers(mcp: AgentMcp[]): Options['mcpServers'] {
@@ -623,7 +634,7 @@ export const claudeCodeHealth = (f: ClaudeCodeFacts): Health => {
   }
   items.push(
     f.landlock === 'full'
-      ? { name: 'Claude Code 沙箱', status: 'ok', detail: 'Landlock：agent 只能写自己的会话目录，可写的 agent 还能写自己的 worktree；读不到别的进程的环境' }
+      ? { name: 'Claude Code 沙箱', status: 'ok', detail: 'Landlock：agent 只能写自己的会话目录和 /tmp，可写的 agent 还能写自己的 worktree；读不到别的进程的环境，各任务共用 /tmp' }
       : f.landlock === 'partial'
         ? note('Claude Code 沙箱', 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作', '换用较新的内核')
         : note('Claude Code 沙箱', 'Landlock 用不了：Claude Code 执行器拒绝调用', '使用启用了 Landlock 的 Linux 内核（5.13 以上，LSM 列表里有 landlock）'),
@@ -637,15 +648,14 @@ export const claudeCodeHealth = (f: ClaudeCodeFacts): Health => {
   return { items, sandboxed: true }
 }
 
-const installFact = (root: string): ClaudeCodeFacts['install'] => {
+/** SDK 的版本，以及它按平台分的可选依赖里那个原生的 Claude Code 在不在（SDK 的 exports 没有导出 package.json，按入口文件找目录）。 */
+export const installFact = (root: string, platform: string = process.platform, arch: string = process.arch): ClaudeCodeFacts['install'] => {
   try {
-    const req = createRequire(join(root, 'package.json'))
-    const pkg = req.resolve('@anthropic-ai/claude-agent-sdk/package.json')
-    const version = (JSON.parse(readFileSync(pkg, 'utf8')) as { version?: string; claudeCodeVersion?: string }).version
-    // 原生的 Claude Code 在按平台分的可选依赖里
-    const native = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    const nativeDir = dirname(createRequire(pkg).resolve(`${native}/package.json`))
-    return version === undefined || !existsSync(nativeDir) ? { missing: true } : { version: `SDK ${version}` }
+    const dir = dirname(createRequire(join(root, 'package.json')).resolve('@anthropic-ai/claude-agent-sdk'))
+    const version = (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: string }).version
+    const native = `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`
+    const found = (createRequire(join(dir, 'package.json')).resolve.paths(native) ?? []).some(p => existsSync(join(p, native, 'package.json')))
+    return version === undefined || !found ? { missing: true } : { version: `SDK ${version}` }
   } catch {
     return { missing: true }
   }

@@ -16,7 +16,7 @@
 | Eos 没有登录，能打开地址的人权限相同 | 不要把端口暴露到网络上，按「访问」一节的两种方式访问 |
 | 主密钥丢失后，存过的凭据只能重新录入 | 把 `.env` 里的 `EOS_MASTER_KEY` 另外备份一份 |
 | 能使用 docker 的宿主机用户能看到主密钥 | 只让可信的人加入 docker 组 |
-| 配置了 MCP 服务时，MCP 服务读得到模型 key；沙箱失效时 agent 也读得到 | 使用额度受限的模型 key |
+| 配置了 MCP 服务时，MCP 服务读得到 DeepSeek 的模型 key；沙箱失效时 agent 也读得到 | 使用额度受限的模型 key |
 | 一个任务的 agent 能读服务器上所有仓库和所有任务的记录 | 只放入对全体使用者都可见的仓库 |
 | agent 访问网络不受限制 | 需要限制时在宿主机或 Docker 网络一层配置 |
 
@@ -53,6 +53,8 @@
 5. 按「访问」一节打开页面。
 
 **把模型 key 移到凭据页（可选）。** 启动后在 Web 的凭据页添加名为 `deepseek` 的凭据，再从 `.env` 删掉 `DEEPSEEK_API_KEY` 一行，执行 `docker compose up -d`。凭据页里有 `deepseek` 时，`.env` 里的 key 不再使用。
+
+**用 Claude Code 跑 agent（可选）。** 默认执行器是 dsh。要让某个角色用 Claude Code，见「用 Claude Code 执行器」。
 
 **在容器里运行命令。** 平台的命令行是 `eos`（例如 `eos doctor`）。运行其他命令时加 `-u eos`：
 
@@ -182,6 +184,26 @@ agent 运行任务时使用的就是这个镜像。
 
 「检查」一列是 CI 验证镜像时运行的命令（清单在 `.github/scripts/image-probe-checks.json`，修改时两处同时修改）。
 
+### 用 Claude Code 执行器
+
+角色（工作流里的角色或 Agent 模板）写上 `executor: claude-code` 后，这个角色用 Claude Code 运行。没有写的角色仍用 dsh。
+
+1. 准备 Anthropic API key，二选一：
+   - 在 `.env` 里加一行 `ANTHROPIC_API_KEY=<你的 key>`，执行 `docker compose up -d`；
+   - 在 Web 的凭据页添加名为 `anthropic`、类型为「模型 API key」的凭据。两处都有时用凭据页的。
+2. 在角色里写 `executor: claude-code`。不写 `model` 时用 `claude-sonnet-5-5`。
+3. 运行 `docker compose exec eos eos doctor`，Claude Code 的几项应为 ✓。这几项只在 `eos doctor` 里列出，没有准备好时平台照常启动，用 Claude Code 的角色在调用时报错。
+
+使用前要知道的：
+
+| 事项 | 说明 |
+|---|---|
+| 模型 key | 只在平台进程里。Claude Code 进程和 agent 拿到的是一次调用有效的令牌，调用结束后作废 |
+| 沙箱 | 整个 Claude Code 进程在 Landlock 下运行：只能写自己的会话目录和 `/tmp`，可写的角色还能写自己的 worktree。宿主机不支持 Landlock 时拒绝调用 |
+| 网络 | Claude Code 只经平台访问模型接口，关掉了遥测、错误报告和自动更新。agent 的命令访问网络不受限制，和 dsh 一样 |
+| 模型接口地址 | 默认 `https://api.anthropic.com`。经网关访问时设置 `EOS_ANTHROPIC_BASE_URL`（https，或本机的 http）；模型请求和 key 都会发到那里 |
+| 许可 | Claude Agent SDK 和它带的 Claude Code 按 Anthropic 的条款使用（见 `node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md`） |
+
 ### 安装项目依赖
 
 项目自己的依赖由 agent 安装在任务的工作目录里，不需要部署方操作。支持：
@@ -282,6 +304,7 @@ services:
 |---|---|
 | `eos.db`（和 `-wal`、`-shm`） | 任务、事件、trace、约定、改进提案、加密的凭据 |
 | `dsh/` | agent 的会话日志（续跑和回放 trace 要用） |
+| `claude-code/` | 用 Claude Code 执行器的 agent 的会话日志，和平台给这些 agent 的技能 |
 | `worktrees/` | 每个任务的工作目录 |
 | `repos/` | 克隆的仓库：平台克隆的在 `repos/github.com/` 下，自行克隆的在 `repos/local/` 下 |
 | `git-home/` | 平台运行 git 时使用的空 HOME |
@@ -347,6 +370,7 @@ docker compose run --rm -u eos-agent eos rm -rf /data/dsh/process-cwd /data/dsh/
 | 日志里有「切换不到平台用户 eos」，容器不断重启 | `compose.yaml` 里的 `cap_add` 被去掉或不全 | 恢复 `cap_add`（`SETUID`、`SETGID`、`KILL`） |
 | `eos doctor` 的「沙箱」为 ✗ | 宿主机内核不支持 Landlock | 换用 5.13 以上并启用 Landlock 的内核 |
 | `eos doctor` 的「检查命令的用户」为 ✗ | 平台不是以 root 启动的，例如派生镜像里加了 `USER eos` | 去掉派生镜像里的 `USER eos` |
+| 用 Claude Code 的角色报「没有可用的 Anthropic API key」或「Landlock 用不了」 | 没有设置 Anthropic API key；或者宿主机内核不支持 Landlock | 按「用 Claude Code 执行器」补上 key；换用启用了 Landlock 的内核 |
 | `eos doctor` 全部为 ✓，任务在第一步失败 | doctor 不检查 agent 的运行时能否启动 | 查看任务页的日志 |
 | 浏览器返回 421 | SSH 隧道的本地端口不是 4317；或者用域名访问但 `EOS_PUBLIC_URL` 没有设置、和域名不一致 | 隧道改用 4317，或把 `EOS_PUBLIC_URL` 设成浏览器里实际使用的地址（见「访问」） |
 | 页面能打开，写操作返回 403 | 反向代理没有传递原始 Host | 按「反向代理」配置 |

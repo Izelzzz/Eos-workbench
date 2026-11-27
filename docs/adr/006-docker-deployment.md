@@ -93,7 +93,7 @@ Landlock 挡住的是对域外进程的 ptrace 类访问。对照：沙箱外同
 
 #### 模型 key 的保护依赖沙箱生效
 
-这一版 dsh 只能从进程环境里得到模型 key，所以模型 key 在 dsh 进程的环境里。
+这一版 dsh 只能从进程环境里得到模型 key，所以 DeepSeek 的 key 在 dsh 进程的环境里。Anthropic 的 key 不在 Claude Code 进程里：Claude Code 和 agent 拿到的只是一次调用有效的令牌（ADR-005「模型 key 的来源」）。
 
 - 验证过的配置：本镜像、这份 compose、内核 6.18。在这个配置下 Landlock 挡住了 agent 读取 dsh 和平台进程的环境。
 - Landlock 没有生效时（内核不支持，或以别的方式运行而没有经过沙箱），同一用户的 agent 能读到模型 key。
@@ -141,8 +141,8 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | 用户 | 运行什么 | 能读 | 能写 |
 |---|---|---|---|
 | root | 只有 1 号进程（`docker-init`），以及 `docker compose exec` 不加 `-u` 时的命令 | 只有 `SETUID`、`SETGID`、`KILL` 三个能力，读写不了别的用户的文件 | 同左 |
-| `eos` | 平台、git；平台进程自己带着 `SETUID`、`SETGID`、`KILL` | `/data` 全部（dsh 的会话日志以 `eos-agent` 的身份读）、自己进程的环境（主密钥） | `/data` 全部，`/data/dsh` 里 dsh 自己建的 0700 目录除外 |
-| `eos-agent` | dsh、agent、dsh 启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、dsh 进程的环境（模型 key；agent 在 Landlock 里读不到）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；agent 在 Landlock 里只能写自己的 worktree 和 `/tmp` |
+| `eos` | 平台、git；平台进程自己带着 `SETUID`、`SETGID`、`KILL` | `/data` 全部（dsh 和 Claude Code 的会话日志以 `eos-agent` 的身份读）、自己进程的环境（主密钥） | `/data` 全部，`/data/dsh` 里 dsh 自己建的 0700 目录、`/data/claude-code/sessions/` 除外 |
+| `eos-agent` | dsh、Claude Code、agent、它们启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、dsh 进程的环境（模型 key；agent 在 Landlock 里读不到）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；agent 在 Landlock 里只能写自己的 worktree 和 `/tmp` |
 | `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
 **为什么分成三个普通用户**
@@ -199,6 +199,8 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。上一级 `/data/dsh` 的 sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
 | `/data/dsh/mcp-cwd/` | 属于 `eos-agent` | MCP 服务在里面写缓存和日志；平台不往里写 |
 | dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/executor/dsh.ts` 的 `readSessionLogAs`） |
+| `/data/claude-code` | 和 `/data/dsh` 一样（`deploy/eos` 用同一个函数准备）；平台往 `eos-profiles/` 写技能 | Claude Code 以 `eos-agent` 运行 |
+| `/data/claude-code/sessions/` 和其中每个会话的目录 | `eos-agent` 创建，2700（setgid 从上一级继承） | 会话的 HOME、配置和会话日志。Claude Code 在 Landlock 下只能写自己这个会话的目录、`/tmp`，可写的角色还能写 worktree。平台以 `eos-agent` 的身份建目录、读日志 |
 | `/data/worktrees` | 2755，带 setgid，组 `eos-work` | 目录本身组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接 |
 | 各任务的 worktree | 组 `eos-work`，平台的 umask 是 002 | 检查命令能写 agent 改过的文件 |
 

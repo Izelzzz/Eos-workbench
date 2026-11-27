@@ -1,10 +1,11 @@
 // Claude Code 执行器：能力面的换算、每次工具调用的检查、提问、进程环境、上游的认证，
 // 以及真的启动 Claude Code（套着 Landlock，模型接口是本机的假接口）核对 key 隔离、写入范围、工具表、技能、提问、后台作业。
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
-import { answer, BUILTIN_TOOLS, ClaudeCodeExecutor, claudeCodeHealth, gate, processEnv, replyAfter, sessionIdFor, toolsFor, traceAfter, type Entry } from '../src/executor/claude-code.ts'
+import { answer, BUILTIN_TOOLS, ClaudeCodeExecutor, claudeCodeHealth, gate, installFact, processEnv, replyAfter, sessionIdFor, toolsFor, traceAfter, type Entry } from '../src/executor/claude-code.ts'
 import { anthropicBaseUrl, Upstream } from '../src/executor/claude-code-upstream.ts'
 import type { AgentProfile, AgentSpec } from '../src/executor/types.ts'
 import { FakeAnthropic, stepOf, type Block, type Req } from './fake-anthropic.ts'
@@ -156,6 +157,12 @@ describe('会话日志', () => {
   })
 })
 
+test('自检：认得出装好的 SDK 和原生的 Claude Code；没有这个平台的原生包时算没装好', () => {
+  assert.deepEqual(installFact(ROOT), { version: `SDK ${JSON.parse(readFileSync(join(ROOT, 'node_modules/@anthropic-ai/claude-agent-sdk/package.json'), 'utf8')).version}` })
+  assert.deepEqual(installFact(ROOT, 'plan9', 'x64'), { missing: true })
+  assert.deepEqual(installFact('/'), { missing: true }, '没有装 SDK')
+})
+
 test('自检：没准备好的只提示、只在 eos doctor 里列出，不拦下平台启动；接口地址写错时拦下', () => {
   const h = claudeCodeHealth({ install: { missing: true }, landlock: 'unusable', modelKey: { source: 'missing' }, credentialsUsable: true })
   assert.ok(h.items.every(i => i.status === 'warn' && i.doctorOnly === true))
@@ -212,14 +219,14 @@ describe('真的启动 Claude Code', () => {
     await ex.close()
   })
 
-  test('写入范围：可写的角色只能写 worktree 和自己的会话目录；只读的角色连 worktree 也写不了', async () => {
+  test('写入范围：可写的角色只能写 worktree、自己的会话目录和 /tmp；只读的角色连 worktree 也写不了', async () => {
     const { root, ws, ex } = make()
-    const cmd = `echo x > ${ws}/in.txt; echo x > ${root}/out.txt; echo x > /tmp/eos-cc-${process.pid}.txt; echo done`
+    const cmd = `echo x > ${ws}/in.txt; echo x > ${root}/out.txt; echo x > ${ROOT}/eos-cc-escape.txt; echo done`
     fake.reply = script(() => [{ tool: 'Bash', input: { command: cmd } }])
     await ex.send({ key: 'k/w', spec: spec(ws), prompt: '写', nonce: 'n1', ask: async () => '' })
     assert.equal(existsSync(join(ws, 'in.txt')), true)
     assert.equal(existsSync(join(root, 'out.txt')), false)
-    assert.equal(existsSync(`/tmp/eos-cc-${process.pid}.txt`), false)
+    assert.equal(existsSync(join(ROOT, 'eos-cc-escape.txt')), false)
     rmSync(join(ws, 'in.txt'))
     await ex.send({ key: 'k/r', spec: spec(ws, {}, 'none'), prompt: '写', nonce: 'n1', ask: async () => '' })
     assert.equal(existsSync(join(ws, 'in.txt')), false)
@@ -295,6 +302,20 @@ describe('真的启动 Claude Code', () => {
     assert.match(result, /blue/)
     assert.match(result, /不能起后台作业/)
     assert.equal(existsSync(join(ws, 'bg.txt')), false)
+    await ex.close()
+  })
+
+  test('平台崩溃留下的同一个会话的进程，在下一次调用前结束；别的会话的不碰', async () => {
+    const { ws, ex } = make()
+    const mine = spawn('sh', ['-c', 'sleep 60', 'sh', sessionIdFor('k/orphan')], { stdio: 'ignore' })
+    const other = spawn('sh', ['-c', 'sleep 60', 'sh', sessionIdFor('k/someone-else')], { stdio: 'ignore' })
+    const exited = new Promise(ok => mine.on('exit', ok))
+    fake.reply = r => [{ text: `claude-code：${stepOf(r)}` }]
+    await ex.send({ key: 'k/orphan', spec: spec(ws), prompt: '一', nonce: 'n1', ask: async () => '' })
+    await exited
+    assert.equal(mine.signalCode, 'SIGKILL')
+    assert.equal(other.exitCode, null, '别的会话的进程还在')
+    other.kill()
     await ex.close()
   })
 

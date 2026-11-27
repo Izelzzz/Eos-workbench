@@ -106,6 +106,9 @@ if [ -n "${EOS_AGENT_USER:-}" ]; then
   # 迁移停在中间（返回 2）时，除了 doctor 都不运行：会启动 dsh 的命令（web、run、resume……）会建出 dsh 目录，
   # 下一次启动平台就会把它当成旧数据再迁移，删掉复制好的数据。
   prepare_dsh "${1:-}" || { code=$?; [ "$code" = 2 ] && [ "${1:-}" != doctor ] && exit 1; echo "eos：没能把 $data/dsh 准备成 $EOS_AGENT_USER 能用的，任务启动 dsh 时可能失败" >&2; }
+  # Claude Code 执行器的数据目录和 dsh 的一样：Claude Code 以 eos-agent 运行，在 sessions/ 下建自己的会话目录（0700）；
+  # 平台往 eos-profiles/ 写技能，并以 eos-agent 的身份读会话日志（src/executor/claude-code.ts）。没有旧数据要迁移。
+  own_dsh "$data/claude-code" || echo "eos：没能把 $data/claude-code 准备成 $EOS_AGENT_USER 能用的，用 Claude Code 执行器的任务可能失败" >&2
 fi
 
 cd /app
