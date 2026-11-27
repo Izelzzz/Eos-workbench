@@ -64,6 +64,7 @@ const executorImports = {
   patterns: [
     { group: ['@deepseek-ai/*'], message: 'dsh 的包只在 src/executor/dsh.ts 里接入（CLAUDE.md 代码约定）' },
     { group: ['**/vendor/dsh-sdk-client', '**/vendor/dsh-sdk-client/**'], message: 'dsh 的客户端只在 src/executor/dsh.ts 里接入（CLAUDE.md 代码约定）' },
+    { group: ['@anthropic-ai/*'], message: 'Claude Agent SDK 只在 src/executor/claude-code.ts 里接入（CLAUDE.md 代码约定）' },
     // executor 目录下除了 types 以外的任何路径（包括子目录和直接导入目录本身）；types 可以带 .ts/.js 等扩展名
     {
       regex: '(^|/)executor(/(?!types(\\.[cm]?[jt]s)?$).*)?$',
@@ -163,21 +164,45 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: `ImportExpression[source.value=/${executorImports.patterns[2].regex.replaceAll('/', '\\/')}/]`,
-          message: executorImports.patterns[2].message,
+          selector: `ImportExpression[source.value=/${executorImports.patterns[3].regex.replaceAll('/', '\\/')}/]`,
+          message: executorImports.patterns[3].message,
         },
         {
           selector: 'ImportExpression[source.value=/^@deepseek-ai\\//]',
           message: executorImports.patterns[0].message,
         },
+        { selector: 'ImportExpression[source.value=/^@anthropic-ai\\//]', message: executorImports.patterns[2].message },
         ...executorNameSyntax,
       ],
     },
   },
+  // 执行器目录里：每种执行器的包只在它自己的文件里。landlock.ts 只用 node-addon-system 的 Landlock 启动器（给自己没有可用沙箱的执行器套沙箱）
   {
     files: ['src/executor/**'],
-    ignores: ['src/executor/dsh.ts'],
+    ignores: ['src/executor/dsh.ts', 'src/executor/claude-code.ts', 'src/executor/landlock.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: executorImports.patterns.slice(0, 3) }] },
+  },
+  {
+    files: ['src/executor/dsh.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [executorImports.patterns[2]] }] },
+  },
+  {
+    files: ['src/executor/claude-code.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: executorImports.patterns.slice(0, 2) }] },
+  },
+  {
+    files: ['src/executor/landlock.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { regex: '^@deepseek-ai/(?!node-addon-system/landlock-run$)', message: 'src/executor/landlock.ts 只用 Landlock 启动器（@deepseek-ai/node-addon-system/landlock-run）' },
+            ...executorImports.patterns.slice(1, 3),
+          ],
+        },
+      ],
+    },
   },
   {
     files: ['src/cli.ts'],
@@ -187,7 +212,7 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            ...executorImports.patterns.slice(0, 2),
+            ...executorImports.patterns.slice(0, 3),
             { regex: '(^|/)executor/(?!(types|registry)(\\.[cm]?[jt]s)?$)', message: 'src/cli.ts 只建执行器注册表（src/executor/registry.ts），不直接引用某个执行器（CLAUDE.md 代码约定）' },
           ],
         },
@@ -200,6 +225,7 @@ export default tseslint.config(
           message: 'src/cli.ts 只建执行器注册表（src/executor/registry.ts），不直接引用某个执行器（CLAUDE.md 代码约定）',
         },
         { selector: 'ImportExpression[source.value=/^@deepseek-ai\\//]', message: executorImports.patterns[0].message },
+        { selector: 'ImportExpression[source.value=/^@anthropic-ai\\//]', message: executorImports.patterns[2].message },
         ...executorNameSyntax,
       ],
     },

@@ -26,10 +26,10 @@ export const lastPrompt = (r: Req): string => {
   return ''
 }
 
-/** 当前这一轮里模型已经回复了几次（最后一条带文字的用户消息之后的 assistant 消息数）。 */
+/** 当前这一轮里模型已经回复了几次：带 nonce 标记（平台发的那条）的最后一条用户消息之后的 assistant 消息数。 */
 export const stepOf = (r: Req): number => {
   const msgs = r.body.messages ?? []
-  const at = msgs.findLastIndex(m => m.role === 'user' && (typeof m.content === 'string' || (m.content as { type?: string }[]).some(c => c.type === 'text')))
+  const at = msgs.findLastIndex(m => m.role === 'user' && JSON.stringify(m.content).includes('<!-- eos:'))
   return msgs.slice(at + 1).filter(m => m.role === 'assistant').length
 }
 
