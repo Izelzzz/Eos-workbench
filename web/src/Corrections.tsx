@@ -8,8 +8,10 @@ const STATE = { running: ['running', '进行中'], done: ['ok', '完成'], stopp
 
 export function Corrections(props: { task: TaskDetail; onSubmitted: (resumeNeeded: boolean) => void }) {
   const t = props.task
-  // 默认交给最后一个 agent 节点（通常是写代码的那个）。
-  const [node, setNode] = useState(t.correctable.at(-1) ?? '')
+  const [picked, setPicked] = useState<string>()
+  // 默认交给最后一个 agent 节点（通常是写代码的那个）。面板可能在任务完成前就挂上了（那时还没有可选的节点），
+  // 所以每次渲染时按现在的可选节点算：选过的还在就用它，否则用默认的。
+  const node = picked !== undefined && t.correctable.includes(picked) ? picked : (t.correctable.at(-1) ?? '')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -47,7 +49,9 @@ export function Corrections(props: { task: TaskDetail; onSubmitted: (resumeNeede
               <p className="correction-text">{c.text}</p>
               {c.replies.length > 0 && (
                 <details>
-                  <summary>「{c.node}」的回复（{c.replies.length} 次）</summary>
+                  <summary>
+                    「{c.node}」的回复（{c.replies.length} 次）
+                  </summary>
                   {c.replies.map((r, i) => (
                     <pre key={i}>{r}</pre>
                   ))}
@@ -66,10 +70,13 @@ export function Corrections(props: { task: TaskDetail; onSubmitted: (resumeNeede
             void submit()
           }}
         >
-          <p className="muted">任务已完成。发现要改正或补充的地方，写在这里：交给选中的节点在原来的会话和工作目录里继续做（不是重新跑一遍），改完重跑程序检查{t.links.some(l => l.kind === 'pull-request') ? '，推到同一个分支、更新同一个 PR' : ''}。</p>
+          <p className="muted">
+            任务已完成。发现要改正或补充的地方，写在这里：交给选中的节点在原来的会话和工作目录里继续做（不是重新跑一遍），改完重跑程序检查
+            {t.links.some(l => l.kind === 'pull-request') ? '，推到同一个分支、更新同一个 PR' : ''}。
+          </p>
           <label>
             交给
-            <select value={node} disabled={busy} onChange={e => setNode(e.target.value)}>
+            <select value={node} disabled={busy} onChange={e => setPicked(e.target.value)}>
               {t.correctable.map(n => (
                 <option key={n} value={n}>
                   {n}

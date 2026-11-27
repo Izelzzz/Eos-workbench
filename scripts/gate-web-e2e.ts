@@ -3,6 +3,7 @@
 // 2. 任务停在卡点上后，浏览器打开任务列表（能看出、能筛出等验收的任务）和任务页（卡点面板、被验收的产出、改动）；
 // 3. 在页面上不写意见点「打回修改」（应提示要写意见），写意见后打回；改完回到卡点（第 2 次）后在页面上点「通过」，任务完成；
 // 4. 390 宽度下打开列表和任务页，核对没有横向滚动；
+// 4b. 修正（路线图 5c）：任务完成后在页面上提交一条补充，交给开发；改完任务回到完成，修正记录显示第几次、内容和改到的文件；
 // 5. 从存储里核对结果，写 gate-web-report.json，截图在同一目录。
 // 用法：node --import tsx scripts/gate-web-e2e.ts [输出目录]
 import { execFileSync } from 'node:child_process'
@@ -59,8 +60,9 @@ const executor: Executor = {
     let text = '方案：在 src/math.js 实现 sum。'
     if (p.key.endsWith('/build')) {
       devTurns++
-      writeFileSync(join(store.meta(id).worktree, 'src', 'math.js'), devTurns === 1 ? V1 : V2)
-      text = devTurns === 1 ? '实现了 sum。' : '按验收意见在 sum 上方补了 JSDoc 注释。'
+      if (devTurns <= 2) writeFileSync(join(store.meta(id).worktree, 'src', 'math.js'), devTurns === 1 ? V1 : V2)
+      else writeFileSync(join(store.meta(id).worktree, 'README.md'), '# 示例\n\n`sum([1, 2, 3])` 返回 6。\n')
+      text = devTurns === 1 ? '实现了 sum。' : devTurns === 2 ? '按验收意见在 sum 上方补了 JSDoc 注释。' : '按修正在 README.md 里补了用法示例。'
     } else if (p.key.endsWith('/review')) text = PASS
     return { sessionId: `s:${p.key}`, text, usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 }, ms: 20, model: 'fake' }
   },
@@ -168,6 +170,22 @@ const toggleLeft = await filtered.getByRole('button', { name: '显示全部' }).
 await filtered.getByRole('button', { name: '显示全部' }).click()
 const allBack = await filtered.locator('table.tasks tbody tr').count()
 await shot(filtered, '9-list-filter-after-accept.png')
+
+// 修正：任务完成后在页面上提交一条补充（默认交给最后一个 agent 节点 build），改完任务回到完成。
+const CORRECTION = '补充：在 README.md 里写一段 sum 的用法示例。'
+const sessionBefore = store.get(id)!.sessions.build
+await page.getByLabel('改正或补充').fill(CORRECTION)
+await page.getByRole('button', { name: '提交修正' }).click()
+await until('修正完成', () => store.get(id)?.status === 'done' && store.get(id)!.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'))
+await page.waitForSelector('section.corrections li .pill.ok')
+await page.waitForSelector('section.corrections >> text=README.md')
+const correctionText = await page.locator('section.corrections').innerText()
+await page.locator('section.corrections').screenshot({ path: join(out, '10-correction.png') })
+const narrowDone = await open(390)
+await narrowDone.goto(`${base}/#/tasks/${id}`)
+await narrowDone.waitForSelector('section.corrections li')
+const narrowCorrection = await overflow(narrowDone)
+await narrowDone.locator('section.corrections').screenshot({ path: join(out, '11-correction-390.png') })
 await browser.close()
 await supervisor.idle()
 
@@ -200,6 +218,20 @@ const checks = {
   '390 宽度：任务列表没有横向滚动': narrowList.scrollWidth <= narrowList.innerWidth,
   '390 宽度：任务页没有横向滚动': narrowTask.scrollWidth <= narrowTask.innerWidth,
   '筛选打开时任务被通过（没有等验收的了）：还能切回显示全部': toggleLeft && allBack === 2,
+  '页面上提交修正：交给 build 原来的会话，改完回到完成；修正记录显示第几次、交给谁、内容、完成、改到的文件':
+    /第 1 次修正/.test(correctionText) &&
+    correctionText.includes('交给「build」') &&
+    correctionText.includes(CORRECTION) &&
+    correctionText.includes('完成') &&
+    correctionText.includes('改动的文件：README.md') &&
+    task.sessions.build === sessionBefore &&
+    JSON.stringify(
+      store
+        .events(id)
+        .filter(e => e.event.kind === 'corrected')
+        .map(e => [e.actor, e.accepted]),
+    ) === JSON.stringify([['web', true]]),
+  '390 宽度：有修正记录的任务页没有横向滚动': narrowCorrection.scrollWidth <= narrowCorrection.innerWidth,
   页面没有报错: errors.length === 0,
 }
 const commit = (() => {
@@ -210,7 +242,18 @@ const commit = (() => {
     return {}
   }
 })()
-const report = { ...commit, task: id, checks, round2Text, narrowList, narrowTask, errors, calls: task.log.flatMap(e => (e.type === 'call' ? [`${e.call} ${e.purpose}@${e.node}`] : [])) }
+const report = {
+  ...commit,
+  task: id,
+  checks,
+  round2Text,
+  correctionText,
+  narrowCorrection,
+  narrowList,
+  narrowTask,
+  errors,
+  calls: task.log.flatMap(e => (e.type === 'call' ? [`${e.call} ${e.purpose}@${e.node}`] : [])),
+}
 writeFileSync(join(out, 'gate-web-report.json'), JSON.stringify(report, null, 2))
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 server.close()

@@ -4,7 +4,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { describePosition } from './engine/machine.ts'
+import { agentNodes, describePosition } from './engine/machine.ts'
+import type { NodeId } from './workflow/types.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
@@ -31,6 +32,7 @@ const HELP = `用法：
   eos retry <任务>                                        重试失败的任务
   eos answer <任务> "<回答>"                              回答 agent 的提问或对话尽头的问题
   eos gates                                               列出停在卡点上、等人验收的任务
+  eos correct <任务> --node <节点> "<改正或补充>"          已完成的任务：交给这个 agent 节点在原来的会话里修改，改完重跑检查
   eos accept <任务> ["<备注>"]                             验收通过
   eos send-back <任务> "<意见>"                            验收打回：交回被验收的节点按意见修改，改完回到卡点
   eos status [任务]                                       列出任务，或查看一个任务
@@ -57,6 +59,7 @@ const { values, positionals } = parseArgs({
     workflow: { type: 'string', default: 'standard' },
     data: { type: 'string' },
     'no-wait': { type: 'boolean', default: false },
+    node: { type: 'string' },
     port: { type: 'string', default: '4317' },
     host: { type: 'string', default: '127.0.0.1' },
     help: { type: 'boolean', short: 'h' },
@@ -265,6 +268,15 @@ const commands: Record<string, () => Promise<void> | void> = {
   },
   'send-back'() {
     decide(false)
+  },
+  /** 已完成的任务上提交一条改正或补充，然后在本进程里接着跑（和 retry 一样）。 */
+  async correct() {
+    const t = taskOf(positionals[1])
+    if (values.node === undefined) fail(`需要 --node <节点>，可以交给：${agentNodes(t.workflow).join('、')}`)
+    const step = store.dispatch(t.id, { kind: 'corrected', node: values.node as NodeId, text: positionals.slice(2).join(' ') }, Date.now(), 'cli')
+    if (!step.accepted) fail(step.reason!)
+    say(`第 ${step.task.correction!.round} 次修正：交给「${values.node}」`)
+    await run(t.id)
   },
   status() {
     if (positionals[1] !== undefined) return summary(taskOf(positionals[1]))
