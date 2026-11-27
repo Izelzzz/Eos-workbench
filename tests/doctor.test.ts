@@ -96,7 +96,7 @@ test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项�
   assert.equal(dshFacts({ ...ctx({ source: 'missing' }), credentialsUsable: false }).credentialsUsable, false)
   assert.match(
     text,
-    /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 只给启动平台的命令设置 EOS_MASTER_KEY=<生成的值>.*不要写进 ~\/\.zshrc.*③ 另外备份这个值/,
+    /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32.*存进一个只有你能读的文件（权限 600）；② 只给启动平台的命令设置 EOS_MASTER_KEY，例如 EOS_MASTER_KEY=\$\(cat <那个文件>\) npm run eos -- web；不要把值直接敲在命令行里（会进 shell 历史），也不要写进 ~\/\.zshrc.*③ 另外备份这个值/,
   )
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)

@@ -6,6 +6,6 @@ Eos 环境检查（数据目录 /home/user/Eos-workbench/<数据目录>）
 ✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
 ✓ dsh：0.2.2-rc.5
 ✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码
-  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 只给启动平台的命令设置 EOS_MASTER_KEY=<生成的值>，例如 EOS_MASTER_KEY=<生成的值> npm run eos -- web，或者写进只有启动脚本读的、权限 600 的文件；不要写进 ~/.zshrc 这类所有程序都会继承的启动配置。Docker 部署写进 .env，见 docs/deploy.md；③ 另外备份这个值：丢了它，存过的凭据只能重新录入
+  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32（没有 openssl 时：node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），存进一个只有你能读的文件（权限 600）；② 只给启动平台的命令设置 EOS_MASTER_KEY，例如 EOS_MASTER_KEY=$(cat <那个文件>) npm run eos -- web；不要把值直接敲在命令行里（会进 shell 历史），也不要写进 ~/.zshrc 这类所有程序都会继承的启动配置。Docker 部署写进 .env，见 docs/deploy.md；③ 另外备份这个值：丢了它，存过的凭据只能重新录入
 ✓ git：2.43.0
 ✓ 数据目录：/home/user/Eos-workbench/<数据目录> 可写

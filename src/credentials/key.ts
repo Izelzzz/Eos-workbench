@@ -11,7 +11,7 @@ export type MasterKey = { readonly id: string; readonly key: Buffer }
 export type MasterKeyState = { kind: 'ok'; key: MasterKey } | { kind: 'missing' } | { kind: 'invalid'; error: string }
 
 /** 怎么设置主密钥：eos doctor、Web 的凭据页和代码托管页、凭据存储的报错都用这一份。 */
-export const GENERATE_HINT = `平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 只给启动平台的命令设置 ${MASTER_KEY_ENV}=<生成的值>，例如 ${MASTER_KEY_ENV}=<生成的值> npm run eos -- web，或者写进只有启动脚本读的、权限 600 的文件；不要写进 ~/.zshrc 这类所有程序都会继承的启动配置。Docker 部署写进 .env，见 docs/deploy.md；③ 另外备份这个值：丢了它，存过的凭据只能重新录入`
+export const GENERATE_HINT = `平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32（没有 openssl 时：node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），存进一个只有你能读的文件（权限 600）；② 只给启动平台的命令设置 ${MASTER_KEY_ENV}，例如 ${MASTER_KEY_ENV}=$(cat <那个文件>) npm run eos -- web；不要把值直接敲在命令行里（会进 shell 历史），也不要写进 ~/.zshrc 这类所有程序都会继承的启动配置。Docker 部署写进 .env，见 docs/deploy.md；③ 另外备份这个值：丢了它，存过的凭据只能重新录入`
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 
