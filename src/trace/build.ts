@@ -15,6 +15,7 @@ export const PURPOSE: Record<Purpose, string> = {
   instruct: '按用户指示调整',
   accept: '验收',
   amend: '按验收意见修改',
+  correct: '修正',
 }
 
 const ended = (spans: Span[]) => spans.every(s => s.end !== undefined)
@@ -207,6 +208,7 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
     const loopQuestions = new Set<string>()
     for (const [k, e] of task.log.entries()) {
       if (e.type === 'note' && e.node === n.id) children.push(instant(`${n.id}.note${k}`, 'note', e.text, e.at))
+      if (e.type === 'correction' && e.node === n.id) children.push(instant(`${n.id}.correction${k}`, 'note', `第 ${e.round} 次修正：改正或补充`, e.at, { output: e.text }))
       if (e.type === 'decision' && e.node === n.id)
         children.push(
           instant(`${n.id}.decision${k}`, 'note', `第 ${e.round} 次验收${e.pass ? '通过' : '打回'}（${e.by === 'human' ? '人' : e.by}）`, e.at, e.comment === '' ? {} : { output: e.comment }),
@@ -218,8 +220,10 @@ export const buildTrace = (task: Task, trace: { call: string; event: TraceEvent 
       if (e.type === 'answer' && loopQuestions.has(e.questionId)) children.push(instant(`${n.id}.a.${e.questionId}`, 'answer', `回答 ${e.questionId}`, e.at, { output: e.text }))
     }
     children.sort(byStart)
+    // 正在修正的节点：按任务现在的状态显示（修正结束后任务回到完成）。
+    const correcting = task.correction?.node === n.id
     const status: SpanStatus =
-      i < task.cursor
+      i < task.cursor && !correcting
         ? 'ok'
         : i > task.cursor
           ? 'pending'

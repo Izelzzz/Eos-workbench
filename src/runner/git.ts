@@ -478,6 +478,24 @@ export const committedChanges = (w: Worktree, head?: string): TaskChanges => {
 }
 
 /**
+ * 平台替每次调用做的提交改了哪些文件，按调用 id：平台提交的说明是「eos: <节点> <用途> (<调用 id>)」（见 supervisor 的 afterWrite）。
+ * 给任务页显示「这次修正改了什么」。只看任务分支上基线之后的提交；说明对不上的提交（例如 agent 自己做的）不算。
+ * 只用来显示：agent 能自己提交、写同样格式的说明，所以这里的结果不作为任何核对的依据。
+ */
+export const filesByCall = (w: Worktree): Record<string, string[]> => {
+  const loc = locate(w.worktree, w.repo)
+  const out = wgitText(loc, ['-c', 'core.quotePath=false', 'log', '--no-renames', '--format=%x01%s', '--name-only', `${w.baseSha}..refs/heads/${w.branch}`])
+  const byCall: Record<string, string[]> = {}
+  for (const chunk of out.split('\x01').slice(1)) {
+    const [subject = '', ...files] = chunk.split('\n')
+    const call = /^eos: \S+ \S+ \((c\d+)\)$/.exec(subject.trim())?.[1]
+    if (call === undefined) continue
+    byCall[call] = [...new Set([...(byCall[call] ?? []), ...files.map(f => f.trim()).filter(f => f !== '')])]
+  }
+  return byCall
+}
+
+/**
  * head 是不是任务自己的提交：在基线和任务分支之间（基线是 head 的祖先，head 是任务分支的祖先）。
  * 取单个文件的 diff 前核对，不让请求读仓库里别的提交（包括基线之前的历史）。
  */

@@ -957,3 +957,46 @@ test('卡点：任务页带上卡点信息；页面上打回（写意见）、�
     await s.close()
   }
 })
+
+test('修正：已完成的任务在页面上提交改正或补充，接口起 runner 在原来的会话里改完；任务详情带修正记录；没完成、交给对话节点、空内容被拒绝', async () => {
+  const s = await serve()
+  try {
+    const meta = s.store.meta('t1')
+    s.store.create({ id: 't5', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 5000)
+    const correct = (body: unknown) => postTo(s.base, '/api/tasks/t5/correct', body)
+    const get = async () => (await (await fetch(`${s.base}/api/tasks/t5`)).json()) as TaskDetail
+    assert.equal((await correct({ node: 'build', text: '改一下' })).status, 409, '还没完成')
+    assert.deepEqual((await get()).correctable, [])
+    for (const [i, text] of ['方案', '实现 v1', PASS].entries())
+      assert.ok(s.store.dispatch('t5', { kind: 'replied', call: `c${i + 1}` as never, sessionId: 's-build', text, usage: zero, ms: 1 }, 5001 + i, 'executor').accepted)
+    let d = await get()
+    assert.equal(d.status, 'done')
+    assert.deepEqual([d.correctable, d.corrections], [['plan', 'build'], []])
+    assert.equal((await correct({ node: 'review', text: '改一下' })).status, 409, '对话节点不行')
+    assert.equal((await correct({ node: 'build', text: ' ' })).status, 409, '空内容')
+    assert.equal((await correct({ node: 'build' })).status, 400)
+    assert.deepEqual(await (await correct({ node: 'build', text: '再补一个负数的测试' })).json(), { ok: true, resumeNeeded: false })
+    for (let i = 0; i < 200 && (d = await get()).status !== 'done'; i++) await new Promise(r => setTimeout(r, 10))
+    assert.equal(d.status, 'done')
+    assert.deepEqual(d.corrections, [{ round: 1, node: 'build', text: '再补一个负数的测试', at: d.corrections[0]!.at, state: 'done', replies: ['回复'], files: [] }])
+    assert.equal(d.position, '已完成（修正过 1 次）')
+    const t = s.store.get('t5')!
+    const last = t.log.findLast(e => e.type === 'call')
+    assert.deepEqual(last?.type === 'call' && [last.purpose, last.node, last.round], ['correct', 'build', 1])
+    assert.deepEqual(
+      s.store
+        .events('t5')
+        .filter(e => e.event.kind === 'corrected')
+        .map(e => [e.actor, e.accepted]),
+      [
+        ['web', false],
+        ['web', false],
+        ['web', false],
+        ['web', true],
+      ],
+    )
+    await s.supervisor.idle()
+  } finally {
+    await s.close()
+  }
+})

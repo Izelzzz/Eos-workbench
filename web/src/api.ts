@@ -10,6 +10,8 @@ import type {
   CreateResponse,
   DecideResponse,
   FieldError,
+  CorrectRequest,
+  CorrectResponse,
   GateRequest,
   GateResponse,
   GenerateResponse,
@@ -41,6 +43,8 @@ export type {
   ConventionRow,
   ConventionsResponse,
   FieldError,
+  CorrectRequest,
+  CorrectResponse,
   GateRequest,
   GateResponse,
   GenerateResponse,
@@ -81,6 +85,7 @@ const post = async <T extends { ok: boolean }>(path: string, body: unknown): Pro
 export const listWorkflows = () => get<WorkflowInfo[]>('/api/workflows')
 export const createTask = (input: { repo: string; workflow: string; request: string }) => post<CreateResponse>('/api/tasks', input)
 export const answerQuestion = (id: string, questionId: string, text: string) => post<AnswerResponse>(`/api/tasks/${encodeURIComponent(id)}/answer`, { questionId, text })
+export const correctTask = (id: string, body: CorrectRequest) => post<CorrectResponse>(`/api/tasks/${encodeURIComponent(id)}/correct`, body)
 export const decideGate = (id: string, body: GateRequest) => post<GateResponse>(`/api/tasks/${encodeURIComponent(id)}/gate`, body)
 export const taskAction = (id: string, action: 'resume' | 'retry' | 'abort') => post<ActionResponse>(`/api/tasks/${encodeURIComponent(id)}/${action}`, {})
 
