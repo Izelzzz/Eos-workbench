@@ -275,17 +275,22 @@ test('permission guard: template permission fields, workflow role permissions, n
     permissionChanges('template', t(), t().replace('src/**', '"**"').replace('deepseek-flash', 'deepseek-pro'), () => undefined),
     ['不能改模板的 model', '不能改模板的 writePaths'],
   )
+  assert.deepEqual(
+    permissionChanges('template', t(), `executor: other\n${t()}`, () => undefined),
+    ['不能改模板的 executor'],
+    '换执行器也是权限改动：不同执行器的沙箱和能力不同',
+  )
   const w = (roles: string, run = '[npm, test]') => `name: t\nroles:\n${roles}\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现, checks: [{ run: ${run} }] }\n`
   const dev = '  dev: { prompt: 写代码, write: worktree }\n  rev: { prompt: 评审, tools: { deny: [bash, web] } }'
   const none = () => undefined
   assert.deepEqual(permissionChanges('workflow', w(dev), w(dev.replace('写代码', '写好代码')), none), [])
   assert.deepEqual(permissionChanges('workflow', w(dev), w(dev.replace(', write: worktree', '')), none), [
-    '不能改角色「dev」的模型、写入范围、工具或 MCP（包括换成别的模板）',
+    '不能改角色「dev」的执行器、模型、写入范围、工具或 MCP（包括换成别的模板）',
     '不能让节点「build」换成权限不同的角色',
   ])
   assert.deepEqual(
     permissionChanges('workflow', w(dev), w(`${dev}\n  ops: { prompt: 运维, tools: { deny: [] } }`), none),
-    ['新增的角色「ops」的模型、写入范围、工具或 MCP 必须和已有的某个角色完全相同'],
+    ['新增的角色「ops」的执行器、模型、写入范围、工具或 MCP 必须和已有的某个角色完全相同'],
     'a new role cannot get tools no role had',
   )
   assert.deepEqual(permissionChanges('workflow', w(dev), w(`${dev}\n  note: { prompt: 记录, tools: { deny: [web, bash] } }`), none), [], 'a new role with the same rights as an existing one is fine')

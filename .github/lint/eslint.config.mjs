@@ -67,10 +67,20 @@ const executorImports = {
     // executor 目录下除了 types 以外的任何路径（包括子目录和直接导入目录本身）；types 可以带 .ts/.js 等扩展名
     {
       regex: '(^|/)executor(/(?!types(\\.[cm]?[jt]s)?$).*)?$',
-      message: '执行器的实现只在 src/executor/ 里，别的模块只认 src/executor/types.ts 的 Executor 接口（CLAUDE.md 代码约定）。组装执行器的入口是 src/cli.ts',
+      message: '执行器的实现只在 src/executor/ 里，别的模块只认 src/executor/types.ts 的 Executor 接口（CLAUDE.md 代码约定）。执行器在 src/executor/registry.ts 登记，src/cli.ts 只建注册表',
     },
   ],
 }
+
+// CLAUDE.md：执行器是可以替换的部件，换一个执行器时 src/executor/ 以外的代码不用改。所以外面不能出现执行器的名字：
+// 按名字判断（=== 'dsh'、switch）、按名字取默认值、按名字拼路径都算。执行器的名字只在 src/executor/registry.ts 登记。
+// 新登记一个执行器时把名字加进来。
+const EXECUTOR_NAMES = ['dsh', 'claude-code']
+const executorNameMessage = '执行器的名字只出现在 src/executor/ 里：外面按 Executor 接口和注册表写，不按某个执行器的名字判断或取值（CLAUDE.md 代码约定）'
+const executorNameSyntax = [
+  { selector: `Literal[value=/^(${EXECUTOR_NAMES.join('|')})$/]`, message: executorNameMessage },
+  { selector: `TemplateElement[value.cooked=/^(${EXECUTOR_NAMES.join('|')})$/]`, message: executorNameMessage },
+]
 
 export default tseslint.config(
   {
@@ -143,7 +153,7 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
 
-  // 2. 执行器只在 src/executor/ 里接入；src/cli.ts 是组装执行器的入口
+  // 2. 执行器只在 src/executor/ 里接入；src/cli.ts 只建注册表
   {
     files: ['src/**', 'web/src/**'],
     ignores: ['src/executor/**', 'src/cli.ts'],
@@ -160,6 +170,7 @@ export default tseslint.config(
           selector: 'ImportExpression[source.value=/^@deepseek-ai\\//]',
           message: executorImports.patterns[0].message,
         },
+        ...executorNameSyntax,
       ],
     },
   },
@@ -170,7 +181,19 @@ export default tseslint.config(
   },
   {
     files: ['src/cli.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: executorImports.patterns.slice(0, 2) }] },
+    rules: {
+      // cli 只建注册表：只能引用 src/executor/ 的接口和注册表，不直接引用某个执行器
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...executorImports.patterns.slice(0, 2),
+            { regex: '(^|/)executor/(?!(types|registry)(\\.[cm]?[jt]s)?$)', message: 'src/cli.ts 只建执行器注册表（src/executor/registry.ts），不直接引用某个执行器（CLAUDE.md 代码约定）' },
+          ],
+        },
+      ],
+      'no-restricted-syntax': ['error', ...executorNameSyntax],
+    },
   },
 
   // 1. 纯逻辑目录（放在执行器规则后面：同一条规则后写的覆盖先写的，所以这里把两类限制合在一起）
@@ -180,7 +203,7 @@ export default tseslint.config(
       'no-restricted-imports': ['error', { ...pureImports, patterns: [...executorImports.patterns, pureRelativeImports] }],
       'no-restricted-globals': ['error', ...pureGlobals],
       // 动态 import() 绕得过上面的导入限制；纯逻辑里也用不到它
-      'no-restricted-syntax': ['error', { selector: 'ImportExpression', message: 'src/workflow、src/engine 是纯逻辑：不用动态 import()（CLAUDE.md 代码约定）' }],
+      'no-restricted-syntax': ['error', { selector: 'ImportExpression', message: 'src/workflow、src/engine 是纯逻辑：不用动态 import()（CLAUDE.md 代码约定）' }, ...executorNameSyntax],
       // 通过 globalThis 取全局，绕得过 no-restricted-globals
       'no-restricted-properties': ['error', ...pureGlobals.map(g => ({ object: 'globalThis', property: g.name, message: g.message }))],
     },
@@ -203,13 +226,6 @@ export default tseslint.config(
         },
       ],
     },
-  },
-  {
-    // src/runner/doctor.ts 引用 src/executor/dsh.ts 的 dshInstall / 沙箱探测：#67 审查时作为接受的例外（doctor 要报告
-    // dsh 实际会用的沙箱）。这里只放开「引用执行器实现」一条，仍然不许直接引用 @deepseek-ai/* 和 vendor 里的客户端。
-    // 收回：把要报告的信息放进 Executor 接口（例如 executor.describe()），doctor 只认接口。
-    files: ['src/runner/doctor.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: executorImports.patterns.slice(0, 2) }] },
   },
   {
     // src/executor/dsh.ts:152 用了 any：dsh 的事件类型没有导出。收回：dsh 导出类型后改成具体类型。

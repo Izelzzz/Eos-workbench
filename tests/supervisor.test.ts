@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import type { Executor } from '../src/executor/types.ts'
 import { acquire } from '../src/runner/lock.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
@@ -199,4 +200,27 @@ nodes:
   const checks = task.log.flatMap(e => (e.type === 'check' ? [e.results[0]!.passed] : []))
   assert.deepEqual(checks, [false, true])
   assert.match(readFileSync(join(s.store.meta(created.id).worktree, 'NOTES.md'), 'utf8'), /## 改动/)
+})
+
+test('角色写了没登记的执行器时创建任务就报错，不建任务；登记了的照常创建，运行时按角色把执行器名字交给执行器', async () => {
+  const s = sandbox()
+  const seen: (string | undefined)[] = []
+  const recording = new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : `回复 ${key}`))
+  const send = recording.send.bind(recording)
+  recording.send = (p: Parameters<Executor['send']>[0]) => (seen.push(p.spec.executor), send(p))
+  const sup = new Supervisor({ store: s.store, executor: recording, dataDir: s.data, pollMs: 2, unknownExecutor: n => (n === 'other' ? undefined : `没有名为「${n}」的执行器`) })
+  const wf = (executor: string) =>
+    `name: mixed\nroles:\n  dev: { executor: ${executor}, prompt: 写代码, write: worktree }\n  rev: { prompt: 评审 }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n`
+  assert.ok(sup.conventions.save({ kind: 'workflow', name: 'mixed', content: wf('nope'), actor: 'web' }, 1).ok)
+  const bad = await sup.create({ repo: s.repo, workflow: 'mixed', request: '需求' })
+  assert.equal(bad.ok, false)
+  assert.match(!bad.ok ? bad.error : '', /工作流 mixed 的角色 dev：没有名为「nope」的执行器/)
+  assert.deepEqual(s.store.list(), [])
+  assert.ok(sup.conventions.save({ kind: 'workflow', name: 'mixed', content: wf('other'), actor: 'web' }, 2).ok)
+  const ok = await sup.create({ repo: s.repo, workflow: 'mixed', request: '需求' })
+  assert.ok(ok.ok)
+  const started = sup.start(ok.id)
+  assert.ok(started.ok)
+  await started.done
+  assert.deepEqual([...new Set(seen)], ['other', undefined], '开发用指定的执行器，评审没写，用默认的')
 })

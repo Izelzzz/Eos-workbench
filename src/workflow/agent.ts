@@ -34,6 +34,8 @@ const mcpServer = z
 
 /** 模板和直接写的角色共用的字段。 */
 export const agentFields = {
+  /** 执行器的名字。有没有登记由平台在创建任务时核对：解析时不知道平台登记了哪些执行器。 */
+  executor: id.optional(),
   model: text.default(DEFAULT_MODEL),
   effort: z.enum(['low', 'high', 'max'], { error: '只能是 low、high 或 max' }).optional(),
   prompt: text,
@@ -72,6 +74,7 @@ export const agentErrors = (a: AgentFieldsOut, at: (field: string) => string): F
 }
 
 export const toAgentConfig = (a: AgentFieldsOut): AgentConfig => ({
+  ...(a.executor === undefined ? {} : { executor: a.executor }),
   model: a.model,
   ...(a.effort === undefined ? {} : { effort: a.effort }),
   prompt: a.prompt,

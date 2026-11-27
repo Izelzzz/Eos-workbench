@@ -44,6 +44,20 @@ test('a template parses into an agent config with defaults filled in', () => {
   assert.deepEqual(reader.template.writePaths, [], 'a read-only template writes nothing')
 })
 
+test('模板和直接写的角色可以写 executor（执行器的名字）；不写时没有这个字段，由平台用默认执行器；名字格式不对时报错', () => {
+  const t = parseTemplate('name: dev\nexecutor: claude-code\nprompt: 写代码\n')
+  assert.ok(t.ok)
+  assert.equal(t.template.executor, 'claude-code')
+  const plain = parseTemplate('name: dev\nprompt: 写代码\n')
+  assert.ok(plain.ok && !('executor' in plain.template))
+  const bad = parseTemplate('name: dev\nexecutor: Claude Code\nprompt: 写代码\n')
+  assert.ok(!bad.ok)
+  assert.equal(bad.errors[0]?.path, 'executor')
+  const wf = parseWorkflow('name: t\nroles:\n  dev: { executor: other, prompt: 写代码 }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n', builtinLookup())
+  assert.ok(wf.ok)
+  assert.equal(wf.workflow.roles.dev?.executor, 'other')
+})
+
 test('template errors are in Chinese with their location', () => {
   const errorsOf = (src: string) => {
     const r = parseTemplate(src)

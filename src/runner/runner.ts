@@ -117,6 +117,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
             }
           },
           spec: {
+            ...(role.executor === undefined ? {} : { executor: role.executor }),
             model: role.model,
             ...(role.effort === undefined ? {} : { effort: role.effort }),
             write: role.write,

@@ -19,9 +19,12 @@ import { zeroUsage } from '../engine/types.ts'
 import type { DeepSeekHarness as Harness, HarnessSession } from '../../vendor/dsh-sdk-client/index.ts'
 import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
 import type { DeepSeekHarnessOptions } from '../../vendor/dsh-sdk-client/types.ts'
+import { MASTER_KEY_ENV } from '../credentials/key.ts'
+import { MODEL_KEY_CREDENTIAL, MODEL_KEY_ENV, type ModelKey } from '../credentials/model-key.ts'
+import { readSessionLogAs } from '../runner/check-user.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ToolGroup } from '../workflow/types.ts'
-import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
+import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, ExecutorContext, ExecutorKind, Health, HealthItem, Reply } from './types.ts'
 import { isHttpMcp } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
@@ -906,4 +909,173 @@ export class DshExecutor implements Executor {
     this.harnesses.clear()
     this.open.clear()
   }
+}
+
+// ---- 自检（eos doctor 里 dsh 的几项）和在注册表里的登记 ----
+
+/** 自检看的事实：dshHealth 只看它，不做 IO，可单测。 */
+export type DshFacts = {
+  /** dsh 的版本；没装好时 missing，入口（EOS_DSH_LAUNCHER）配置错了时是原因。 */
+  install: { version: string } | { missing: true } | { error: string }
+  /** dsh 实际会用的沙箱（探测得出，不是只看装没装）。 */
+  sandbox: DshSandbox
+  /** 模型 API key 的来源：只有来源，没有 key 本身。 */
+  modelKey: { source: 'credentials' | 'env' | 'missing' } | { source: 'error'; error: string }
+  /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
+  modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
+}
+
+/**
+ * dsh 会用哪个沙箱。都不能用时 dsh 拒绝执行命令，任务一定失败，所以是 ✗。
+ * Landlock 和 bwrap 都限制 agent 只能写自己的 worktree，也都挡住 agent 读别的进程的环境（/proc/<pid>/environ）；
+ * Landlock 不隔离进程号空间和 /tmp（agent 看得到进程列表，各任务共用 /tmp）。
+ */
+const sandboxItem = (f: DshFacts): HealthItem => {
+  const name = '沙箱'
+  switch (f.sandbox.backend) {
+    case 'bwrap':
+      return { name, status: 'ok', detail: 'bwrap：agent 只能写自己的 worktree，在单独的进程号空间里；能写的 agent 有私有的 /tmp，只读的 agent 看到的是共用的 /tmp' }
+    case 'landlock':
+      return f.sandbox.enforcement === 'full'
+        ? {
+            name,
+            status: 'ok',
+            detail: 'Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp',
+          }
+        : {
+            name,
+            status: 'warn',
+            detail: 'Landlock，但内核的 Landlock 版本较旧，只能限制一部分写操作（bwrap 用不了）',
+            fix: '换用较新的内核，或让 bwrap 可用（在容器里需要放开 user namespace，见 docs/adr/006-docker-deployment.md）',
+          }
+    case 'none':
+      return {
+        name,
+        status: 'fail',
+        detail: 'bwrap 和 Landlock 都用不了：dsh 会拒绝执行命令，任务跑不起来',
+        fix: '安装 bubblewrap 并允许非特权 user namespace，或使用启用了 Landlock 的内核（Linux 5.13 以上，LSM 列表里有 landlock）',
+      }
+    case 'platform':
+      return { name, status: 'ok', detail: `${f.sandbox.platform}：由 dsh 选用系统自带的沙箱（macOS Seatbelt；Windows 受限令牌，只能部分限制），这里没有探测` }
+  }
+}
+
+const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDENTIAL}、类型为「模型 API key」的凭据（需要先设置主密钥 ${MASTER_KEY_ENV}）；或在启动平台的环境里设置 ${MODEL_KEY_ENV}=<你的 key>`
+
+/** 凭据存储优先；里面没有才用环境变量。只检查有没有，不检查是否有效。 */
+const modelKeyItem = (f: DshFacts): HealthItem => {
+  const name = 'DeepSeek API key'
+  switch (f.modelKey.source) {
+    case 'credentials':
+      return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'env':
+      return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
+    case 'missing':
+      return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
+    case 'error':
+      return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
+  }
+}
+
+/** 官方的模型接口主机：EOS_MODEL_BASE_URL 指向它时不用提示 */
+const OFFICIAL_MODEL_HOST = 'api.deepseek.com'
+
+/** 模型接口地址：设成别的主机时，模型请求和模型 key 都会发到那里，部署时误设或被人改了要能马上看到。 */
+const modelBaseUrlItem = (f: DshFacts): HealthItem[] => {
+  const name = '模型接口地址'
+  if (f.modelBaseUrl === undefined) return []
+  if (f.modelBaseUrl.kind === 'invalid') {
+    return [{ name, status: 'fail', detail: f.modelBaseUrl.error, fix: '改正环境变量 EOS_MODEL_BASE_URL（https 地址，或本机的 http 地址，不带用户名和密码）；用官方接口时删掉它' }]
+  }
+  const u = f.modelBaseUrl
+  if (u.host === OFFICIAL_MODEL_HOST) return [{ name, status: 'ok', detail: `EOS_MODEL_BASE_URL 指向官方接口 ${u.host}${u.path}` }]
+  // 本机地址（例如 CI 的假模型、本机的网关）：key 不出这台机器，只在 eos doctor 里提示，免得每次启动都打印、让人习惯忽略提示
+  return u.loopback
+    ? [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向本机的 ${u.host}${u.path}：模型请求和模型 key 会发给本机上的这个服务`,
+          fix: '确认它是你在本机运行的模型网关或测试服务',
+          doctorOnly: true,
+        },
+      ]
+    : [
+        {
+          name,
+          status: 'warn',
+          detail: `EOS_MODEL_BASE_URL 指向 ${u.host}，不是官方接口：模型请求和模型 key 都会发到这台主机`,
+          fix: '确认这是你信任的模型网关；不需要时删掉 EOS_MODEL_BASE_URL，改用官方接口',
+        },
+      ]
+}
+
+const installItem = (f: DshFacts): HealthItem =>
+  'version' in f.install
+    ? { name: 'dsh', status: 'ok', detail: f.install.version }
+    : 'missing' in f.install
+      ? { name: 'dsh', status: 'fail', detail: '没有安装，或安装不完整', fix: '在仓库目录运行 npm install' }
+      : { name: 'dsh', status: 'fail', detail: f.install.error, fix: '改正 EOS_DSH_LAUNCHER，或去掉它直接用装好的 dsh' }
+
+export const dshHealth = (f: DshFacts): Health => ({
+  items: [modelKeyItem(f), sandboxItem(f), ...modelBaseUrlItem(f), installItem(f)],
+  sandboxed: f.sandbox.backend !== 'none',
+})
+
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]']
+
+const modelBaseUrlFact = (env: NodeJS.ProcessEnv): Pick<DshFacts, 'modelBaseUrl'> => {
+  try {
+    const url = modelBaseUrl(env)
+    if (url === undefined) return {}
+    const u = new URL(url)
+    return { modelBaseUrl: { kind: 'ok', host: u.host, path: u.pathname, loopback: LOOPBACK.includes(u.hostname) } }
+  } catch (e) {
+    return { modelBaseUrl: { kind: 'invalid', error: (e as Error).message } }
+  }
+}
+
+const installFact = (ctx: ExecutorContext): DshFacts['install'] => {
+  const version = dshInstall(ctx.root)?.version
+  if (version === undefined) return { missing: true }
+  try {
+    dshEntry(ctx.env, ctx.root)
+    return { version }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+export const dshFacts = (ctx: ExecutorContext): DshFacts => {
+  const k: ModelKey = ctx.modelKey()
+  return {
+    install: installFact(ctx),
+    sandbox: dshSandbox(),
+    modelKey: k.source === 'credentials' || k.source === 'env' ? { source: k.source } : k,
+    ...modelBaseUrlFact(ctx.env),
+  }
+}
+
+/** 每起一个 dsh 进程时重新取模型 key：在 Web 上添加、替换或删除 deepseek 凭据后，之后起的进程就用新的。 */
+const currentKey = (ctx: ExecutorContext): string => {
+  const k = ctx.modelKey()
+  if (k.source === 'credentials' || k.source === 'env') return k.value
+  throw new Error(k.source === 'error' ? `模型 API key 读不出来：${k.error}` : `没有可用的模型 API key：凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置 ${MODEL_KEY_ENV}`)
+}
+
+export const dsh: ExecutorKind = {
+  name: 'dsh',
+  create: ctx => {
+    const bin = dshEntry(ctx.env, ctx.root)
+    if (bin === undefined) throw new Error('找不到 dsh，先在仓库目录运行 npm install')
+    return new DshExecutor({
+      dshHome: join(ctx.dataDir, 'dsh'),
+      dshBin: bin,
+      modelKey: () => currentKey(ctx),
+      env: ctx.env,
+      // dsh 以 agent 的用户运行时，会话目录只有它能读。
+      ...(ctx.agentUser === undefined ? {} : { readSessionLog: readSessionLogAs(ctx.agentUser, SESSION_LOG_FILE) }),
+    })
+  },
+  health: ctx => dshHealth(dshFacts(ctx)),
 }

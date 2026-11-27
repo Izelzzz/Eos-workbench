@@ -9,12 +9,13 @@ import type { NodeId } from './workflow/types.ts'
 import { formatMetrics, taskMetrics } from './engine/metrics.ts'
 import { formatReport, report } from './engine/report.ts'
 import type { Task } from './engine/types.ts'
-import { DshExecutor, dshEntry, SESSION_LOG_FILE } from './executor/dsh.ts'
+import { Executors, healthOf } from './executor/registry.ts'
+import type { ExecutorContext } from './executor/types.ts'
 import { takeMasterKey } from './credentials/key.ts'
 import { resolveModelKey, takeModelKeyEnv, type ModelKey } from './credentials/model-key.ts'
 import { knownSecrets, redacting, redactText } from './credentials/redact.ts'
 import { Credentials } from './credentials/store.ts'
-import { AGENT_USER_ENV, readSessionLogAs, resolveCheckUser } from './runner/check-user.ts'
+import { AGENT_USER_ENV, resolveCheckUser } from './runner/check-user.ts'
 import { evaluate, formatItems, gather } from './runner/doctor.ts'
 import { appendLog, processLogPath, taskLogPath } from './runner/logs.ts'
 import { holder } from './runner/lock.ts'
@@ -43,7 +44,7 @@ const HELP = `用法：
   eos log <任务>                                          完整对话记录与耗时、token 统计
   eos abort <任务>                                        中止任务
   eos workflows                                           列出内置工作流
-  eos doctor                                              检查运行环境（Node、API key、git、数据目录、dsh）
+  eos doctor                                              检查运行环境（Node、git、数据目录，各执行器的安装、沙箱和 API key）
   eos web [--port 4317] [--host 127.0.0.1]                打开 Web 界面（任务列表与 trace 详情）
   eos improve [--workflow standard] [--tasks <id,…>]      从已结束的任务归纳证据，生成改进提案（待审批）
   eos proposals                                           列出改进提案
@@ -111,15 +112,24 @@ const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'correct', 'improve', 'web'
 const checkUser = resolveCheckUser(process.env)
 /** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */
 const agentUser = resolveCheckUser(process.env, undefined, AGENT_USER_ENV)
+/** 交给执行器的环境。modelKey 由调用方给：启动检查看启动时的状态，运行时每次重新读凭据存储。 */
+const executorContext = (modelKey: ExecutorContext['modelKey']): ExecutorContext => ({
+  root: ROOT,
+  dataDir,
+  env: process.env,
+  modelKey,
+  ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
+})
+const startupChecks = () => evaluate(gather({ root: ROOT, dataDir, executors: healthOf(executorContext(() => startupModelKey)), masterKey, checkUser, agentUser }))
 if (positionals[0] === 'doctor' && !values.help) {
-  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
+  const items = startupChecks()
   say(`Eos 环境检查（数据目录 ${dataDir}）\n${formatItems(items)}`)
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
 // chat 只有新建和接着说会调用模型；list、show 只读数据库。
 if (!values.help && (NEEDS_ENV.has(positionals[0] ?? '') || (positionals[0] === 'chat' && ['new', 'send'].includes(positionals[1] ?? '')))) {
-  const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
+  const items = startupChecks()
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
   const warned = items.filter(i => i.status === 'warn' && i.doctorOnly !== true)
@@ -136,14 +146,6 @@ const redact = (() => {
   const secrets = knownSecrets(credentials, extra, Date.now, e => process.stderr.write(`读不到凭据列表，遮蔽暂时沿用上次的凭据值：${(e as Error).message}\n`))
   return (text: string) => redactText(text, secrets())
 })()
-
-const dshBin = (): string => {
-  try {
-    return dshEntry(process.env, ROOT) ?? fail('找不到 dsh，先在仓库目录运行 npm install')
-  } catch (e) {
-    return fail((e as Error).message)
-  }
-}
 
 const taskOf = (id: string | undefined): Task => {
   if (id === undefined) return fail('需要任务 id')
@@ -187,28 +189,18 @@ const decide = (pass: boolean) => {
 
 const proposalId = (): number => (/^\d{1,15}$/.test(positionals[1] ?? '') ? Number(positionals[1]) : fail('需要提案号（数字），见 eos proposals'))
 
-/** 每起一个 dsh 进程时重新取模型 key：在 Web 上添加、替换或删除 deepseek 凭据后，之后起的进程就用新的。 */
-const currentModelKey = (): string => {
-  const k = resolveModelKey(credentials, envModelKey)
-  if (k.source === 'credentials' || k.source === 'env') return k.value
-  throw new Error(k.source === 'error' ? `模型 API key 读不出来：${k.error}` : '没有可用的模型 API key：凭据存储里没有 deepseek，也没有设置 DEEPSEEK_API_KEY')
+/** 注册表里的执行器：角色按 executor 选，用到时才建。模型 key 每次取都重新读凭据存储（Web 上换了 key 之后起的进程就用新的）。 */
+const executors = () => new Executors(executorContext(() => resolveModelKey(credentials, envModelKey)))
+const executor = () => redacting(executors(), redact)
+/** 交给 Supervisor 的执行器：遮蔽过的执行器，以及核对角色写的执行器有没有登记。 */
+const supervised = () => {
+  const registry = executors()
+  return { executor: redacting(registry, redact), unknownExecutor: (name: string) => registry.unknown(name) }
 }
-
-const executor = () =>
-  redacting(
-    new DshExecutor({
-      dshHome: join(dataDir, 'dsh'),
-      dshBin: dshBin(),
-      modelKey: currentModelKey,
-      // dsh 以 agent 的用户运行时，会话目录只有它能读。
-      ...(agentUser.kind === 'ok' ? { readSessionLog: readSessionLogAs(agentUser.user, SESSION_LOG_FILE) } : {}),
-    }),
-    redact,
-  )
 
 /** 在本进程里运行一个任务直到结束（或在 --no-wait 时停在需要用户回答的地方）。 */
 const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
-  const ex = executor()
+  const { executor: ex, unknownExecutor } = supervised()
   const shutdown = () => {
     void ex.close().finally(() => process.exit(130))
   }
@@ -218,6 +210,7 @@ const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
     const sup = new Supervisor({
       store,
       executor: ex,
+      unknownExecutor,
       dataDir,
       credentials,
       actor: 'cli',
@@ -357,7 +350,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const port = Number(values.port)
     const publicUrl = process.env.EOS_PUBLIC_URL === undefined || process.env.EOS_PUBLIC_URL === '' ? undefined : parsePublicUrl(process.env.EOS_PUBLIC_URL)
     if (typeof publicUrl === 'string') return fail(publicUrl)
-    const ex = executor()
+    const { executor: ex, unknownExecutor } = supervised()
     // Web 服务进程的输出也写进 logs/eos.log：服务器上没人盯着终端。
     const processLog = processLogPath(dataDir)
     const note = (raw: string) => {
@@ -368,6 +361,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     const sup = new Supervisor({
       store,
       executor: ex,
+      unknownExecutor,
       dataDir,
       credentials,
       actor: 'web',

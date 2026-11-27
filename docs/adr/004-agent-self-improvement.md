@@ -148,7 +148,7 @@ agent 在调用中途主动提问是正常的澄清，不算证据。
 
 「不改权限」的规则：
 
-- 模板的 `model`、`write`、`writePaths`、`tools`、`mcp` 不能变。`effort`、`skills`、`prompt` 不在核对范围内。
+- 模板的 `executor`、`model`、`write`、`writePaths`、`tools`、`mcp` 不能变。`effort`、`skills`、`prompt` 不在核对范围内。
 - 工作流里已有角色的这些字段不能变。
 - 新增的角色，这些字段必须和原工作流里某个已有的角色完全相同。
 - 已有的节点不能换成权限不同的角色；新增的节点只能使用已有权限的角色。
