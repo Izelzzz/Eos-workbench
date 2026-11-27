@@ -24,6 +24,8 @@ import { keyOf, nonceOf } from '../runner/runner.ts'
 import { committedChanges, fileDiff, filesByCall, onBranch } from '../runner/git.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
+import type { WebChats } from './chat.ts'
+import type { SaveOutcome } from '../chat/save.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ConventionKind } from '../store/types.ts'
@@ -51,6 +53,7 @@ import type {
   ProposalDetail,
   ProposalInfo,
   FileDiff,
+  SaveChatProposalResponse,
   SaveConventionResponse,
   TaskChanges,
   TaskDetail,
@@ -64,6 +67,10 @@ const CONVENTION = /^\/api\/conventions\/(workflow|doc|template|skill)\/([^/]+)$
 const PROPOSAL = /^\/api\/improve\/proposals\/(\d{1,15})$/
 const DECIDE = /^\/api\/improve\/proposals\/(\d{1,15})\/(approve|reject)$/
 
+/** 对话：/api/chats/<id>；保存对话里的提议：/api/chats/proposals/<提议号>/save。 */
+const CHAT = /^\/api\/chats\/(c[0-9a-z]{1,40})$/
+const CHAT_SAVE = /^\/api\/chats\/proposals\/(\d{1,15})\/save$/
+
 const decodeName = (raw: string): string | undefined => {
   try {
     return decodeURIComponent(raw)
@@ -71,6 +78,12 @@ const decodeName = (raw: string): string | undefined => {
     return undefined
   }
 }
+
+/** 保存的结果只回页面需要的：保存成的版本和确认了的权限改动（不回提议全文）。 */
+const saveResponse = (r: SaveOutcome): SaveChatProposalResponse =>
+  r.ok
+    ? { ok: true, version: r.version, permissions: r.permissions }
+    : { ok: false, error: r.error, ...(r.permissions === undefined ? {} : { permissions: r.permissions }), ...(r.code === undefined ? {} : { code: r.code }) }
 
 /** 检查产出的链接：同一个地址只保留一条，排在它最后一次出现的位置，标签用最新的。 */
 export const linksOf = (t: Task): CheckLink[] => {
@@ -196,6 +209,8 @@ export const createWebServer = (o: {
   staticDir: string
   credentials: Credentials
   improve?: { executor: Executor; dataDir: string }
+  /** 对话 agent；不给就没有对话接口（返回 503）。 */
+  chat?: WebChats
   publicUrl?: URL
 }): Server => {
   const allowedOrigin = (req: IncomingMessage) => originFor(req.headers.host, req.socket.localPort, o.publicUrl)
@@ -761,10 +776,22 @@ export const createWebServer = (o: {
         const cred = url.pathname === '/api/credentials' ? 'save' : url.pathname === '/api/credentials/delete' ? 'delete' : undefined
         const reg = url.pathname === '/api/forge-apps/register'
         const userAction = url.pathname === '/api/forge-apps/authorize' ? 'authorize' : url.pathname === '/api/forge-apps/revoke' ? 'revoke' : undefined
-        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg && userAction === undefined)
+        const chatSend = url.pathname === '/api/chats'
+        const chatSave = CHAT_SAVE.exec(url.pathname)
+        if (url.pathname !== '/api/tasks' && action === null && conv === null && dec === null && !gen && cred === undefined && !reg && userAction === undefined && !chatSend && chatSave === null)
           return json(res, 404, { error: '没有这个接口' })
         const g = await guarded(req)
         if (Array.isArray(g)) return json(res, ...g)
+        if (chatSend || chatSave !== null) {
+          if (o.chat === undefined) return json(res, 503, { ok: false, error: '这个服务没有配置对话 agent' })
+          if (chatSave !== null) return json(res, 200, saveResponse(o.chat.save(Number(chatSave[1]), g.body)))
+          // 按行推送这一轮的进度，最后一行是结果。浏览器断开时这一轮照样做完（记录在对话里）。
+          res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' })
+          await o.chat.send(g.body, line => {
+            if (!res.destroyed) res.write(`${JSON.stringify(line)}\n`)
+          })
+          return void res.end()
+        }
         if (reg) return json(res, ...registerApp(req, g.body))
         if (userAction === 'authorize') return json(res, ...authorizeUser(req, g.body))
         if (userAction === 'revoke') return json(res, ...(await revokeUser(g.body)))
@@ -795,6 +822,13 @@ export const createWebServer = (o: {
         const name = decodeName(conv[2]!)
         const d = name === undefined ? undefined : convention(conv[1] as ConventionKind, name)
         return d === undefined ? json(res, 404, { error: `没有约定「${name ?? conv[2]}」` }) : json(res, 200, d)
+      }
+      if (url.pathname === '/api/chats' || CHAT.test(url.pathname)) {
+        if (o.chat === undefined) return json(res, 503, { error: '这个服务没有配置对话 agent' })
+        const id = CHAT.exec(url.pathname)?.[1]
+        if (id === undefined) return json(res, 200, o.chat.list())
+        const d = o.chat.detail(id)
+        return d === undefined ? json(res, 404, { error: `没有对话 ${id}` }) : json(res, 200, d)
       }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
       if (url.pathname === '/api/improve/proposals') return json(res, 200, o.store.proposals().map(proposalInfo))

@@ -4,7 +4,7 @@
 - 读者：要理解或修改对话 agent 的人，以及要换执行器的人
 - 关联：ADR-004（improver 的权限做法）、ADR-005（凭据和遮蔽）、ADR-006（部署里的用户）
 
-对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定；人用 `eos chat save` 确认之后，平台重新检查一遍，才保存成约定的新版本。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
+对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定；人在命令行（`eos chat save`）或网页的「对话」页确认之后，平台重新检查一遍，才保存成约定的新版本。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
 
 ## 背景
 
@@ -30,6 +30,8 @@
 ```mermaid
 flowchart LR
   user["命令行 eos chat"] --> chats["Chats（src/chat/chat.ts）"]
+  page["网页 #/chat"] -->|"/api/chats，按行推送进度"| web["WebChats（src/web/chat.ts）"]
+  web --> chats
   chats -->|每句话开一个| ep["MCP 端点（src/chat/mcp.ts）<br/>127.0.0.1:随机端口，令牌"]
   chats -->|"send：builtinTools 'none'，mcp：[端点]"| ex["Executor 接口"]
   ex --> dsh["dsh 进程（DshExecutor）"]
@@ -41,6 +43,7 @@ flowchart LR
   propose --> chatdb
   chats --> chatdb[("eos.db：chats、chat_messages、chat_trace、chat_proposals")]
   human["人：eos chat save"] --> save["保存（src/chat/save.ts）<br/>重新检查、核对版本、确认权限"]
+  web -->|"人点「保存」"| save
   save --> chatdb
   save -->|写新版本| db
   dsh -. 读配置 .-> patch["dsh home 里的配置<br/>eos-profiles/ephemeral/（含令牌）"]
@@ -54,7 +57,8 @@ flowchart LR
 | 存储 | `chats`、`chat_messages`、`chat_trace`、`chat_proposals` 四张表，在 `src/chat/store.ts` 里建 |
 | 模型和提示词 | 内置 Agent 模板 `assistant`，团队可以改；权限不从模板读 |
 | 失败就关 | 执行了平台工具以外的工具时，这一轮作废 |
-| 保存 | 只由人触发（`eos chat save`）；agent 能触发的模块都不引用保存的代码 |
+| 保存 | 只由人触发（`eos chat save`，或网页上的「保存」）；agent 能触发的模块都不引用保存的代码 |
+| 网页 | 「对话」页：新建、历史、接着说；进度按步推送；提议显示差异，人点「保存」 |
 
 ### 能力面怎么表达
 
@@ -122,7 +126,7 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 
 ### 保存
 
-`eos chat save <提议号> [--allow-permissions <确认码>] [--note "<备注>"]` 是把提议写成约定的唯一入口，在 `src/chat/save.ts`。
+`src/chat/save.ts` 的 `saveProposal` 是把提议写成约定的唯一入口。人从两处触发它：命令行 `eos chat save <提议号> [--allow-permissions <确认码>] [--note "<备注>"]`，操作人记 `cli`；网页上提议的「保存」按钮，操作人记 `web`。
 
 | 情形 | 结果 |
 |---|---|
@@ -133,18 +137,36 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 | 内容里有已知凭据值 | 拒绝 |
 | 按现在的平台状态没有通过保存约定的检查 | 拒绝，列出错误 |
 | 按现在的状态重算，涉及权限改动，但没有带确认码，或者确认码和这条提议、现在的改动清单对不上 | 拒绝，列出这份清单和它的确认码 |
-| 都通过 | 写成新版本：操作人 `cli`；备注「来自对话 <id> 的提议 #<n>」，确认了权限改动时写明是哪些改动，后面接人写的备注。提议记下保存成的版本、操作人和时间；命令行列出确认了的权限改动 |
+| 都通过 | 写成新版本：操作人 `cli` 或 `web`；备注「来自对话 <id> 的提议 #<n>」，确认了权限改动时写明是哪些改动，后面接人写的备注。提议记下保存成的版本、操作人和时间；命令行列出确认了的权限改动 |
 
-- 核对版本、写入新版本、记下提议已保存在同一个事务里（`Store.saveConventionIfLatest` 的 `also`，`BEGIN IMMEDIATE`）：两个进程同时保存，只有一个能写；提议已经保存过或者刚被作废，就整个回滚。这要求提议表和约定表用同一个数据库连接（命令行是 `new ChatStore(store.db)`）。
-- 权限按现在的平台状态重算，不用提议里存的那份。`eos chat show` 用同一个算法显示这份清单和它的确认码。确认码是 sha256 的前 8 位，算进去的是：这条提议的随机值（第一次要确认码时生成，只存在提议表里）、提议号、目标、基于的版本、内容、改动清单。
+- 核对版本、写入新版本、记下提议已保存在同一个事务里（`Store.saveConventionIfLatest` 的 `also`，`BEGIN IMMEDIATE`）：两个进程同时保存，只有一个能写；提议已经保存过或者刚被作废，就整个回滚。这要求提议表和约定表用同一个数据库连接：命令行是 `new ChatStore(store.db)`；网页的 `WebChats` 自己从 `store.db` 建 `ChatStore`，不从外面接收。
+- 权限按现在的平台状态重算，不用提议里存的那份。`viewProposal` 算出提议现在的状态（待确认、这一轮还没结束、已过期、已作废、已保存）、这份清单和它的确认码，`eos chat show` 和网页都用它。确认码是 sha256 的前 8 位，算进去的是：这条提议的随机值（第一次要确认码时生成，只存在提议表里）、提议号、目标、基于的版本、内容、改动清单。
 - 旧数据库里的 `chat_proposals` 没有保存记录和随机值的几列，打开时补上。
 - `eos chat show` 第一次显示一条要确认的提议时会写库（生成随机值）：库只读或被锁时 `show` 也会失败。
 - `eos chat show` 的输出经过遮蔽：提议记下之后平台才有的凭据值不会打印出来。
 - `src/chat/` 里 agent 能触发的模块（`chat.ts`、`mcp.ts`、`tools.ts`、`proposals.ts`、`store.ts`）都不引用 `save.ts`，`tests/chat-save.test.ts` 核对。
 
+- 网页上，涉及权限改动的提议显示红框警告和确认码，要先勾「我看过上面的权限改动」，「保存」按钮才可用；点保存时带上确认码，等于命令行的 `--allow-permissions`。
+
 **为什么保存时要重新检查**：提议是在记下那一刻检查的。从记下到保存之间，引用的模板、技能、文档和目标约定都可能被改过，算好的权限也可能不准。
 
 **为什么权限改动要带确认码**：保存一条普通提议和放宽权限是两件事，确认权限要是一个明确的动作。确认码绑定的是人在 `eos chat show` 里看到的那条提议和那份清单：看过之后平台状态变了、清单多了一项，旧的确认码就对不上，人要再看一次。别的提议的确认码对不上，即使两条的清单一样。随机值不在对话 agent 能读到的任何结果里，对话 agent 算不出确认码，不能在回复里直接给出一条能用的保存命令，人得自己运行 `show`。它不防同一台机器上能读平台数据库的进程，见「已知限制」。
+
+### 网页
+
+| 接口 | 做什么 |
+|---|---|
+| `GET /api/chats` | 对话列表 |
+| `GET /api/chats/<id>` | 对话记录（每条回复带读了哪些数据）、提议（`viewProposal` 的结果，内容经过遮蔽）、用量 |
+| `POST /api/chats` | 新建对话（不带 `chat`）或接着说；响应是 `application/x-ndjson`，按行推送进度，最后一行是结果 |
+| `POST /api/chats/proposals/<n>/save` | 保存一条提议，`confirm` 是确认码 |
+
+- 写接口和别的写接口一样，要求同源的 Origin 和 JSON 请求体。
+- 推送的进度来自执行器的 trace 事件：agent 开始读一次数据（工具名和参数），读取出错，某一步写出的文字。工具返回的内容不推。最后一步的文字就是回复。
+- 浏览器断开时这一轮照样做完，回复记进对话。
+- 页面在 `web/src/Chat.tsx`：`#/chat` 是新建和历史对话，`#/chat/<id>` 是一个对话。
+
+**为什么按步推送，不逐字推送**：dsh 只在一步做完时推送这一步的完整结果，实时通知里没有逐字的片段。所以页面上读了什么、每一步的文字一到就显示，回复整段出现。
 
 ### 端点
 
@@ -206,7 +228,8 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有保存约定的工具，最坏是回答被带偏，或者记下一条被带偏的提议；提议要人看过差异、确认后才保存 |
 | 确认码的随机值存在平台数据库里 | 对话 agent 读不到，但任务里的 agent（eos-agent，有 shell）能读 `/data` 下的数据库，读到随机值就能算出确认码。确认码防的是对话 agent 给出现成的保存命令、人照抄跳过 `show`，不防同机上的其他进程。和 `docs/roadmap.md` 的「任务之间的隔离」是同一个问题 |
 | 工作流不能引用还没保存的模板 | 新工作流要用新角色时，模板的提议要先保存，工作流的提议才能通过检查 |
-| 没有登录 | 对话的 actor 只记 `cli`、`web`，和任务事件的写法一样 |
+| 没有登录 | 对话和保存的 actor 只记 `cli`、`web`，和任务事件的写法一样。能打开平台的人都能保存提议 |
+| 回复不逐字显示 | dsh 不推送逐字的片段，见「网页」 |
 | `BUILTIN_TOOL_ROWS` 按当前 dsh 版本列 | dsh 新增的工具行不会自动关掉。E2E 核对发给模型的工具表；运行时还有「失败就关」 |
 
 ## 涉及的文件
@@ -215,11 +238,12 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 |---|---|
 | 执行器接口和 dsh 翻译 | `src/executor/types.ts`、`src/executor/dsh.ts` |
 | 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`save.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 网页 | `src/web/chat.ts`、`src/web/server.ts`、`src/web/types.ts`、`web/src/Chat.tsx` |
 | 带版本核对的保存、差异 | `src/store/store.ts` 的 `saveConventionIfLatest`、`src/workflow/diff.ts` |
 | 模板 | `src/workflow/agents/assistant.yaml` |
 | 命令行接线 | `src/cli.ts` |
-| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/chat-save.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
-| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-save-e2e.ts`、`scripts/chat-docker-probe.ts` |
+| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/chat-save.test.ts`、`tests/web-chat.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
+| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-save-e2e.ts`、`scripts/chat-web-e2e.ts`、`scripts/chat-docker-probe.ts` |
 
 ## 证据
 
@@ -233,5 +257,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 最终代码上真实 dsh 的提议链路（假模型，含退回一次） | `docs/e2e/chat-c1/fake-model-report.json` |
 | 真实模型提议、人确认保存：不带确认参数被拒，带上后保存，操作人和来源写进新版本 | `docs/e2e/chat-c2/report.json` |
 | 保存时的重新检查、版本核对、权限确认；agent 的全部工具跑一遍约定表不变 | `tests/chat-save.test.ts` |
+| 真实模型在网页上：回复完成前页面已显示读了什么；提议显示差异和权限警告，勾选确认后保存，操作人 `web`；390 宽不横向滚动 | `docs/e2e/chat-b/report.json`、`docs/e2e/chat-b/chat-1440.png`、`docs/e2e/chat-b/chat-390-chat.png` |
+| 网页接口：按行推送、保存要确认码、操作人 `web`、和约定表同一个连接、这一轮没结束不能保存、内容遮蔽、同源检查 | `tests/web-chat.test.ts` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
 | 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |

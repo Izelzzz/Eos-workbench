@@ -62,3 +62,14 @@ export type ChatTraceRow = { call: string; seq: number; event: TraceEvent }
 
 /** 对话的用量汇总：只算这个对话自己的调用。 */
 export type ChatMetrics = { purpose: typeof CHAT_PURPOSE; calls: number; failed: number; usage: Usage; agentMs: number; reads: number }
+
+/**
+ * 一条提议现在的状态（命令行 eos chat show 和网页共用）：
+ * - saved / voided：保存过、作废了；
+ * - unanswered：所在那一轮还没有回复（还在进行，或者没做完），现在不能保存；
+ * - stale：目标约定已经不是提议基于的版本，保存会被拒；
+ * - pending：可以保存。permissions、code 只在这时给：要确认的权限改动（按现在的状态算）和它们的确认码（没有改动时不给码）。
+ * current：目标约定现在的版本（新建的没有），用来显示差异。
+ */
+export type ProposalState = 'pending' | 'unanswered' | 'stale' | 'voided' | 'saved'
+export type ProposalView = { proposal: ChatProposal; state: ProposalState; current?: { version: number; content: string }; permissions: string[]; code?: string }

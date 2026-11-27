@@ -22,6 +22,7 @@ import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
 import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
+import { WebChats } from './web/chat.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
@@ -382,6 +383,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       staticDir: join(import.meta.dirname, '..', 'web', 'dist'),
       credentials,
       improve: { executor: ex, dataDir },
+      chat: new WebChats({ store, conventions: sup.conventions, executor: ex, dataDir, redact, changes: id => committedChanges(store.meta(id)), now: Date.now }),
       ...(publicUrl === undefined ? {} : { publicUrl }),
     })
     const plan = listenPlan(values.host, port, publicUrl)

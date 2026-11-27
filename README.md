@@ -61,6 +61,7 @@ Eos 是一个自己部署的多 agent 开发平台。你在网页上写下需求
 |---|---|
 | 任务 | 查看所有任务；新建任务 |
 | 任务详情 | 查看每一步的对话、工具调用、检查结果和改动；回答 agent 的提问；继续、重试或中止任务 |
+| 对话 | 和对话 agent 聊平台上的工作流、约定和任务，请它设计工作流或 Agent 模板。它的提议显示差异，你点「保存」才生效；涉及权限的要多确认一步 |
 | 团队约定 | 维护工作流、约定文档、Agent 模板和技能。每次保存是一个新版本 |
 | 凭据 | 保存模型 key 和 Git 令牌。需要先设置主密钥，见部署文档 |
 | 代码托管 | 注册 GitHub App，用 GitHub 账号授权 |
@@ -88,6 +89,7 @@ npm run eos -- run --repo <仓库路径或 GitHub 地址> "<需求>"
 | `doctor` | 检查运行环境 |
 | `web` | 启动网页 |
 | `improve`、`proposals`、`approve`、`reject` | 生成、查看、批准、拒绝改进提案 |
+| `chat new`、`chat send`、`chat list`、`chat show`、`chat save` | 和对话 agent 对话；查看它的提议和差异，确认保存 |
 
 完整的参数见 `npm run eos -- --help`。
 
