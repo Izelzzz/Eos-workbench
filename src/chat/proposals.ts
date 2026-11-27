@@ -12,7 +12,7 @@ import { ASSISTANT_TEMPLATE, type ChatProposal, type ProposalKind } from './type
 export const PROPOSE_TOOL = 'propose_convention'
 /** 一次调用（用户说一句话）里最多记几条提议：防止 agent 在一轮里刷出一堆。 */
 export const MAX_PROPOSALS_PER_CALL = 5
-/** 内容上限：执行器把中文转成 \\uXXXX 时每字 6 字节，4 万字也装得进端点 256 KiB 的请求体。 */
+/** 内容上限：执行器把中文转成 \uXXXX 时每字 6 字节，4 万字也装得进端点 256 KiB 的请求体。 */
 export const MAX_CONTENT_CHARS = 40_000
 
 const KIND_NAMES: Record<ProposalKind, string> = { workflow: '工作流', template: 'Agent 模板' }

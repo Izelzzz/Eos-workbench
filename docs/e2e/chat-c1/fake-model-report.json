@@ -1,13 +1,13 @@
 {
   "mode": "fake-model",
-  "commit": "786bef714e52125a78a75061ebee5ed65355183a",
+  "commit": "a3d930b9f4d13a52a73d48b44dfa153e07f41398",
   "uncommitted": [],
-  "chat": "cmwyn69dk77e75574",
+  "chat": "cmwynexb46b451178",
   "checks": [
     {
       "name": "命令成功，有回复",
       "ok": true,
-      "detail": "  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__propose_convention\n  … 读取 mcp__eos__propose_convention\n\n── 2026-11-27 07:10:20 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n接着说：npm run eos -- chat send cmwyn69dk77e75574 \"<话>\"\n"
+      "detail": "  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__propose_convention\n  … 读取 mcp__eos__propose_convention\n\n── 2026-11-27 07:17:04 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n接着说：npm run eos -- chat send cmwynexb46b451178 \"<话>\"\n"
     },
     {
       "name": "发给模型的工具表：8 个只读工具和提议工具，全是平台工具",
@@ -72,7 +72,7 @@
       ]
     },
     {
-      "name": "模型 key 不在对话记录和命令输出里",
+      "name": "平台持有的模型 key 不在对话记录、提议、对话 trace 和命令输出里",
       "ok": true
     },
     {
@@ -97,7 +97,7 @@
       ]
     }
   ],
-  "transcript": "对话 cmwyn69dk77e75574：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 07:10:18 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 07:10:20 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n提议（agent 提的，都还没有保存）：\n  #1  工作流「review-only」（新建）\n      ⚠ 涉及权限：新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n\n用途 chat：1 次调用（0 次没有回复），读数据 1 次，输入 400 输出 40，agent 0.2s\n",
+  "transcript": "对话 cmwynexb46b451178：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 07:17:02 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 07:17:04 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n提议（agent 提的，都还没有保存）：\n  #1  工作流「review-only」（新建）\n      ⚠ 涉及权限：新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n\n用途 chat：1 次调用（0 次没有回复），读数据 1 次，输入 400 输出 40，agent 0.2s\n",
   "proposals": [
     {
       "id": 1,
