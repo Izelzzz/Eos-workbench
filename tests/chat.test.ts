@@ -293,12 +293,28 @@ test('the MCP endpoint refuses requests without the right token, from browsers o
   await assert.rejects(client.tools())
 })
 
-test('assistant 模板写了 executor 时，对话 agent 用那个执行器', async () => {
+test('对话的执行器在建对话时按 assistant 模板定下，之后每一句和找回都用它；改了模板不影响已有的对话', async () => {
   const p = platform()
   const ex = new McpExecutor(() => ({ reply: '好' }))
-  const content = p.store.convention('template', 'assistant')!.content.replace(/^name: assistant$/m, 'name: assistant\nexecutor: other')
-  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content, actor: 'web' }, 2).ok)
+  const recovered: (string | undefined)[] = []
+  const find = ex.findReply.bind(ex)
+  ex.findReply = async (key, nonce, executor) => (recovered.push(executor), find(key, nonce))
+  const old = await new Chats(p.opts(ex)).start('之前的对话', 'cli')
+  assert.ok(old.ok)
+  const template = p.store.convention('template', 'assistant')!.content
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template.replace(/^name: assistant$/m, 'name: assistant\nexecutor: other'), actor: 'web' }, 2).ok)
   const r = await new Chats(p.opts(ex)).start('你好', 'cli')
   assert.ok(r.ok, JSON.stringify(r))
-  assert.equal(ex.specs[0]!.executor, 'other')
+  assert.ok(p.conventions.save({ kind: 'template', name: 'assistant', content: template, actor: 'web' }, 3).ok)
+  assert.ok((await new Chats(p.opts(ex)).send(r.chat.id, '接着说', 'cli')).ok)
+  assert.ok((await new Chats(p.opts(ex)).send(old.chat.id, '旧对话接着说', 'cli')).ok)
+  assert.deepEqual(
+    ex.specs.map(s => s.executor),
+    [undefined, 'other', 'other', undefined],
+    '新对话一直用建对话时的执行器；旧对话一直用默认的',
+  )
+  // 平台重启后找回：最后一句是用户的话
+  p.chats.append(r.chat.id, { at: 200, role: 'user', text: '没回完的一句', actor: 'cli' })
+  await new Chats(p.opts(ex)).send(r.chat.id, '再说一句', 'cli')
+  assert.equal(recovered.at(-1), 'other', '找回交给同一个执行器')
 })

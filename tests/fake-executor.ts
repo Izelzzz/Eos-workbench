@@ -15,7 +15,7 @@ export class FakeExecutor implements Executor {
     p.onEvent?.({ kind: 'step_end', t: 20, step: 1 })
     return { sessionId: `s:${p.key}`, text, usage: { input: 100, output: 10, cacheRead: 1000, cacheWrite: 0 }, ms: 50, model: 'deepseek-flash' }
   }
-  async findReply(_key: string, nonce: string) {
+  async findReply(_key: string, nonce: string, _executor?: string) {
     return this.completed.get(nonce)
   }
   async traceOf() {

@@ -52,10 +52,13 @@ export interface Executor {
    * nonce 写进消息里，供 findReply 认领。
    */
   send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply>
-  /** 会话里带这个 nonce 的消息如果已经有完整的回复，返回它；否则返回 undefined（需要重发）。 */
-  findReply(key: string, nonce: string): Promise<Reply | undefined>
-  /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。 */
-  traceOf(key: string, nonce: string): Promise<TraceEvent[]>
+  /**
+   * 会话里带这个 nonce 的消息如果已经有完整的回复，返回它；否则返回 undefined（需要重发）。
+   * executor：这次调用 send 时 spec.executor 的值（不写是默认执行器）。注册表据此交给那个执行器；单个执行器不用它。
+   */
+  findReply(key: string, nonce: string, executor?: string): Promise<Reply | undefined>
+  /** 从会话日志里回放这次调用的 trace；运行时没有记录事件流的调用（例如崩溃后找回的）用它补上。executor 同 findReply。 */
+  traceOf(key: string, nonce: string, executor?: string): Promise<TraceEvent[]>
   /** 释放这个工作目录占用的资源（例如 agent 进程）。任务的 runner 结束时调用；之后的调用照常可用。 */
   release(cwd: string): Promise<void>
   close(): Promise<void>

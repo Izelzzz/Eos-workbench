@@ -87,11 +87,12 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
     const role = roleOf(task.workflow, call.role)
     const key = keyOf(id, call.session)
     const nonce = nonceOf(id, call)
-    const recovered = await o.executor.findReply(key, nonce)
+    // 找回时交给这次调用该用的执行器：角色在任务的工作流快照里，之后改模板不影响（旧任务的角色没写，用默认执行器）
+    const recovered = await o.executor.findReply(key, nonce, role.executor)
     if (recovered !== undefined) {
       log(`↺ ${label(task, call)}：会话里已有这次调用的回复，直接使用`)
       // 崩溃前那次运行的事件流可能没记全：已有的保留，没有就从会话日志回放。
-      if (!o.store.hasTrace(id, call.id)) o.store.appendTrace(id, call.id, await o.executor.traceOf(key, nonce))
+      if (!o.store.hasTrace(id, call.id)) o.store.appendTrace(id, call.id, await o.executor.traceOf(key, nonce, role.executor))
     } else log(`→ ${label(task, call)}`)
     let reply = recovered
     let asking: Promise<unknown> = Promise.resolve()

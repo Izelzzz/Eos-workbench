@@ -208,6 +208,8 @@ test('角色写了没登记的执行器时创建任务就报错，不建任务�
   const recording = new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : `回复 ${key}`))
   const send = recording.send.bind(recording)
   recording.send = (p: Parameters<Executor['send']>[0]) => (seen.push(p.spec.executor), send(p))
+  const recovered: (string | undefined)[] = []
+  recording.findReply = async (_key, nonce, executor) => (recovered.push(executor), recording.completed.get(nonce))
   const sup = new Supervisor({ store: s.store, executor: recording, dataDir: s.data, pollMs: 2, unknownExecutor: n => (n === 'other' ? undefined : `没有名为「${n}」的执行器`) })
   const wf = (executor: string) =>
     `name: mixed\nroles:\n  dev: { executor: ${executor}, prompt: 写代码, write: worktree }\n  rev: { prompt: 评审 }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n`
@@ -223,4 +225,5 @@ test('角色写了没登记的执行器时创建任务就报错，不建任务�
   assert.ok(started.ok)
   await started.done
   assert.deepEqual([...new Set(seen)], ['other', undefined], '开发用指定的执行器，评审没写，用默认的')
+  assert.deepEqual([...new Set(recovered)], ['other', undefined], '找回回复时按角色交给同一个执行器')
 })

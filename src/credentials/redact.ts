@@ -77,11 +77,11 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
       })
     return { ...reply, text: redact(reply.text) }
   },
-  findReply: async (key, nonce) => {
-    const r = await ex.findReply(key, nonce)
+  findReply: async (key, nonce, executor) => {
+    const r = await ex.findReply(key, nonce, executor)
     return r === undefined ? undefined : { ...r, text: redact(r.text) }
   },
-  traceOf: async (key, nonce) => redactDeep(await ex.traceOf(key, nonce), redact),
+  traceOf: async (key, nonce, executor) => redactDeep(await ex.traceOf(key, nonce, executor), redact),
   release: cwd => ex.release(cwd),
   close: () => ex.close(),
 })

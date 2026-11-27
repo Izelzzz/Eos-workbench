@@ -169,9 +169,10 @@ test('注册表按 spec.executor 分派，不写时用第一个（默认）；�
     made.map(m => [...m.sessions.keys()]),
     [['t/dev'], ['t/review']],
   )
-  // 崩溃后找回：不知道是哪个执行器的会话，问每个执行器
-  assert.equal((await reg.findReply('t/review', 'n1'))?.text, viaB.text)
-  assert.equal((await reg.traceOf('t/review', 'n1'))[0]?.kind, 'call_start')
+  // 找回时按调用用的执行器交给它；不写名字时是默认执行器
+  assert.equal((await reg.findReply('t/review', 'n1', 'b'))?.text, viaB.text)
+  assert.equal((await reg.traceOf('t/review', 'n1', 'b'))[0]?.kind, 'call_start')
+  assert.equal(await reg.findReply('t/review', 'n1'), undefined, '默认执行器里没有这个会话')
   await reg.release('/w')
   assert.deepEqual(
     made.map(m => m.released),
@@ -181,15 +182,32 @@ test('注册表按 spec.executor 分派，不写时用第一个（默认）；�
   assert.ok(made.every(m => m.closed))
 })
 
-test('注册表：没登记的名字报错并列出可用的；建不起来的执行器不影响找别的执行器的回复，用它时报出原因', async () => {
+test('两个执行器里有同名的会话和 nonce 时，找回走调用用的那个执行器，不会认错', async () => {
   const made: MemoryExecutor[] = []
-  const reg = new Executors(ctx, [kind('a', made), kind('broken', made, { fails: true })])
+  const reg = new Executors(ctx, [kind('a', made), kind('b', made)])
+  const inA = await reg.send({ key: 't/x', spec: spec('/w'), prompt: '甲', nonce: 'n', ask })
+  const inB = await reg.send({ key: 't/x', spec: { ...spec('/w'), executor: 'b' }, prompt: '乙', nonce: 'n', ask })
+  assert.equal((await reg.findReply('t/x', 'n', 'b'))?.text, inB.text)
+  assert.equal((await reg.findReply('t/x', 'n'))?.text, inA.text)
+  assert.match(JSON.stringify(await reg.traceOf('t/x', 'n', 'b')), /乙/)
+  assert.doesNotMatch(JSON.stringify(await reg.traceOf('t/x', 'n', 'b')), /甲/)
+})
+
+test('注册表：没登记的名字报错并列出可用的；找回不会去建没用到的执行器，建不起来的执行器报出原因', async () => {
+  const made: MemoryExecutor[] = []
+  const reg = new Executors(ctx, [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)])
   assert.equal(reg.unknown('a'), undefined)
-  assert.equal(reg.unknown('zzz'), '没有名为「zzz」的执行器（可用的：a、broken）')
+  assert.equal(reg.unknown('zzz'), '没有名为「zzz」的执行器（可用的：a、broken、c）')
   await assert.rejects(reg.send({ key: 'k', spec: { ...spec('/w'), executor: 'zzz' }, prompt: 'p', nonce: 'n', ask }), /没有名为「zzz」的执行器/)
   await reg.send({ key: 'k', spec: spec('/w'), prompt: 'p', nonce: 'n', ask })
   assert.equal((await reg.findReply('k', 'n'))?.sessionId, 'a-1')
+  assert.deepEqual(
+    made.map(m => m.name),
+    ['a'],
+    '只建了用到的执行器',
+  )
   await assert.rejects(reg.send({ key: 'k2', spec: { ...spec('/w'), executor: 'broken' }, prompt: 'p', nonce: 'n', ask }), /broken 没装好/)
+  await assert.rejects(reg.findReply('k2', 'n', 'broken'), /broken 没装好/, '建不起来不当成"没有回复"（否则会重发）')
   assert.throws(() => new Executors(ctx, []), /没有登记任何执行器/)
   assert.throws(() => new Executors(ctx, [kind('a', []), kind('a', [])]), /名字重复/)
 })

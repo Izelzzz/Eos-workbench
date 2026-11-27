@@ -12,7 +12,7 @@ export class MemoryExecutor implements Executor {
   closed = false
   private n = 0
 
-  constructor(private readonly name = 'memory') {}
+  constructor(readonly name = 'memory') {}
 
   async send(p: { key: string; spec: AgentSpec; prompt: string; nonce: string; ask: AskHandler; onEvent?: (e: TraceEvent) => void }): Promise<Reply> {
     let s = this.sessions.get(p.key)

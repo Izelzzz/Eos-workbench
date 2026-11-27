@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS chats (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   title TEXT NOT NULL,
-  actor TEXT NOT NULL
+  actor TEXT NOT NULL,
+  executor TEXT
 );
 CREATE TABLE IF NOT EXISTS chat_messages (
   chat_id TEXT NOT NULL REFERENCES chats(id),
@@ -61,19 +62,22 @@ export class ChatStore {
     db.exec(SCHEMA)
     // 早先建的 chat_proposals 没有保存记录的几列：补上（CREATE TABLE IF NOT EXISTS 不会改已有的表）。
     // 两个进程同时打开旧库时，后补的那个会碰到「列已存在」：别人补上了，忽略。
-    const columns = new Set((db.prepare('PRAGMA table_info(chat_proposals)').all() as { name: string }[]).map(c => c.name))
-    for (const [name, type] of [
-      ['saved_version', 'INTEGER'],
-      ['saved_actor', 'TEXT'],
-      ['saved_at', 'INTEGER'],
-      ['confirm_salt', 'TEXT'],
-    ] as const)
+    // 早先建的 chats 没有 executor 一列：补上，旧对话这一列是空的（用默认执行器，和它们当初用的一样）。
+    for (const [table, name, type] of [
+      ['chat_proposals', 'saved_version', 'INTEGER'],
+      ['chat_proposals', 'saved_actor', 'TEXT'],
+      ['chat_proposals', 'saved_at', 'INTEGER'],
+      ['chat_proposals', 'confirm_salt', 'TEXT'],
+      ['chats', 'executor', 'TEXT'],
+    ] as const) {
+      const columns = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name))
       if (!columns.has(name))
         try {
-          db.exec(`ALTER TABLE chat_proposals ADD COLUMN ${name} ${type}`)
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`)
         } catch (e) {
           if (!/duplicate column/i.test(String(e))) throw e
         }
+    }
   }
 
   private tx<T>(fn: () => T): T {
@@ -88,11 +92,18 @@ export class ChatStore {
     }
   }
 
-  create(p: { id: string; firstMessage: string; actor: ChatActor }, at: number): ChatSummary {
+  /** executor：这个对话用的执行器，建对话时定下，之后每一句和找回都用它（不写是默认执行器）。 */
+  create(p: { id: string; firstMessage: string; actor: ChatActor; executor?: string }, at: number): ChatSummary {
     const line = p.firstMessage.trim().split('\n')[0] ?? ''
     const title = line.length > TITLE_CHARS ? `${line.slice(0, TITLE_CHARS)}…` : line
-    this.db.prepare('INSERT INTO chats (id, created_at, updated_at, title, actor) VALUES (?, ?, ?, ?, ?)').run(p.id, at, at, title, p.actor)
+    this.db.prepare('INSERT INTO chats (id, created_at, updated_at, title, actor, executor) VALUES (?, ?, ?, ?, ?, ?)').run(p.id, at, at, title, p.actor, p.executor ?? null)
     return this.summary(p.id)!
+  }
+
+  /** 对话用的执行器；没有记录（默认执行器，或者是加这一列之前的对话）时 undefined。 */
+  executorOf(id: string): string | undefined {
+    const r = this.db.prepare('SELECT executor FROM chats WHERE id = ?').get(id) as { executor: string | null } | undefined
+    return r?.executor ?? undefined
   }
 
   /** 追加一条记录，返回它的序号。 */
