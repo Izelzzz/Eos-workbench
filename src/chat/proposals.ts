@@ -48,7 +48,7 @@ export type ConventionReader = {
  */
 export const proposer = (o: {
   conventions: ConventionReader
-  record: (p: Omit<ChatProposal, 'id' | 'at' | 'voided'>, at: number) => ChatProposal
+  record: (p: Omit<ChatProposal, 'id' | 'at' | 'voided' | 'saved'>, at: number) => ChatProposal
   redact: (s: string) => string
   chatId: string
   call: string
@@ -104,6 +104,7 @@ export const describe = (s: string): string =>
     .replace(/必须和已有的某个角色完全相同$/, '和已有的角色都不同')
     .replace(/只能用已有权限的角色$/, '用了已有角色没有的权限')
     .replace(/；只能加人验收的卡点$/, '')
+    .replace(/^当前版本无法解析，不能自动核对权限；请在团队约定页手动修改$/, '当前版本无法解析，平台没能逐项比较权限：保存前请逐项核对')
 
 const changesOf = (kind: ProposalKind, before: string | undefined, after: string, lookup: TemplateLookup): string[] => {
   if (before === undefined) {

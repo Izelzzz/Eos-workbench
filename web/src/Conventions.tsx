@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ConventionDetail, ConventionKind, ConventionRow, ConventionsResponse, FieldError } from './api.ts'
 import { getConvention, listConventions, saveConvention } from './api.ts'
-import { diffLines, diffStat, fold } from './diff.ts'
+import { diffLines, diffStat, fold } from '../../src/workflow/diff.ts'
 import { ago } from './format.ts'
 
 const NEW_WORKFLOW = `name: my-flow

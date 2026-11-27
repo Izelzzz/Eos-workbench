@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { diffLines, diffStat, fold } from '../web/src/diff.ts'
+import { diffLines, diffStat, fold } from '../src/workflow/diff.ts'
 
 test('line diff keeps common lines and marks additions and deletions', () => {
   const d = diffLines('a\nb\nc', 'a\nc\nd')

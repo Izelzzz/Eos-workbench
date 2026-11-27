@@ -1,0 +1,137 @@
+{
+  "mode": "real-model",
+  "commit": "bfad7e8c0b4e0e5581534dff0a9c8ae039c5852c",
+  "uncommitted": [],
+  "chat": "cmwyph6rt8597f092",
+  "checks": [
+    {
+      "name": "命令成功，有回复",
+      "ok": true,
+      "detail": "__list_conventions\n  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__propose_convention\n\n── 2026-11-27 08:15:07 助手 · 17.1s · 输入 3045 输出 2686\n（用了工具：list_conventions、list_conventions、get_convention、get_convention、get_convention、propose_convention）\n我已提交提议 #1（新建工作流 `review-only`），但它还没有生效，需要等你确认后才会保存。\n\n**内容：两个节点**\n1. `spec`（agent，角色 `spec-writer`）：写 `docs/spec.md`，并将交付物设为 `背景 / 范围 / 验收标准` 三节，供平台检查；这几项沿用 `standard` 的写法。\n2. `review`（dialog，角色 `reviewer`，`with: spec`，`maxRounds: 3`）：reviewer 只读评审规格，不通过就把具体问题交回规格作者改稿，最多 3 轮。\n\n**依据**\n- 参照 `standard` 工作流 v1（内置）：`roles` 引用模板、agent 节点的交付物分节检查、dialog 加 `maxRounds` 退回修改的写法。\n- 使用平台现有模板 `spec-writer` v1（write: worktree，writePaths: [docs/**]）和 `reviewer` v1（write: none），未新建模板。\n\n**几处与 standard 的取舍，请你确认是否合适**\n- 不含 `build / test / deliver`：本工作流只产出规格，不改代码、不跑测试、不交付。\n- `review` 节点没加 `checks`（standard 的 review 带 `npm test`）：规格阶段没有有意义的测试命令来跑。如果你希望有自动卡点（比如只检查 `docs/spec.md` 的分节），可以再加。\n- 没有设置 `escalate`：`standard` 的 review 在 3/5 轮不过时会升级让 spec 重新确认；这里 review 的对象就是 spec 本身，升级也没有落地对象，所以第 3 轮不过会停在评审节点，而不是升级到另一个节点。如果你希望“3 轮不过就暂停等用户”，这是当前行为；要改成别的规则，请告诉我。\n- 权限方面：这里只是新建一个工作流，没有改动任何模板的模型、写入范围、工具组、MCP，也没有去掉评审（评审是第二步）。平台提醒：确认时会让你核对工作流中角色的模型、写入范围、工具和 MCP、检查命令与卡点。\n\n补充一点提示：`reviewer` 模板的提示词是为代码评审写的（用 `git diff` / `git log` 看改动、核对代码），用在这里评审的是 `docs/spec.md` 这份文档。功能上能用（新文件会出现在 diff 里），但如果你要它更贴规格评审（比如重点查验收标准可验证性），可能需要另建一个 spec-reviewer 模板；需要的话我可以提一个模板提议。\n\n接着说：npm run eos -- chat send cmwyph6rt8597f092 \"<话>\"\n"
+    },
+    {
+      "name": "发给模型的工具表：8 个只读工具和提议工具，全是平台工具",
+      "ok": true,
+      "detail": [
+        "mcp__eos__convention_history",
+        "mcp__eos__get_convention",
+        "mcp__eos__get_task",
+        "mcp__eos__get_task_changes",
+        "mcp__eos__get_task_metrics",
+        "mcp__eos__get_task_trace",
+        "mcp__eos__list_conventions",
+        "mcp__eos__list_tasks",
+        "mcp__eos__propose_convention"
+      ]
+    },
+    {
+      "name": "agent 用了提议工具",
+      "ok": true,
+      "detail": [
+        {
+          "tool": "list_conventions",
+          "args": "{\"kind\":\"workflow\"}",
+          "isError": false
+        },
+        {
+          "tool": "list_conventions",
+          "args": "{\"kind\":\"template\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"standard\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"template\",\"name\":\"spec-writer\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"template\",\"name\":\"reviewer\"}",
+          "isError": false
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"review-only\",\"content\":\"name: review-only\\ndescription: 只做规格：spec-writer 写规格 → reviewer 评审规格，不通过退回规格作者修改，最多 3 轮；不做开发、测试和交付。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - { path: docs/spec.md, sections: [背景, ",
+          "isError": false
+        }
+      ]
+    },
+    {
+      "name": "至少一条提议通过保存时的检查、没有作废",
+      "ok": true,
+      "detail": [
+        {
+          "id": 1,
+          "kind": "workflow",
+          "name": "review-only",
+          "voided": null
+        }
+      ]
+    },
+    {
+      "name": "保存之前约定表一行都没变",
+      "ok": true
+    },
+    {
+      "name": "eos chat show 显示了全文、权限警告和带确认码的保存命令",
+      "ok": true,
+      "detail": [
+        "我已提交提议 #1（新建工作流 `review-only`），但它还没有生效，需要等你确认后才会保存。",
+        "提议（agent 提的；只有用 eos chat save 确认之后才会保存）：",
+        "  #1  工作流「review-only」（新建）",
+        "      ⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions 2cdc2d30：",
+        "        ⚠ 新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认",
+        "        + # 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。",
+        "        +   # 评审规格：reviewer 只读核对 docs/spec.md，不通过时把具体问题交回规格作者修改；最多 3 轮。",
+        "      保存：npm run eos -- chat save 1 --allow-permissions 2cdc2d30"
+      ]
+    },
+    {
+      "name": "不带 --allow-permissions 保存被拒绝，约定表不变",
+      "ok": true,
+      "detail": "(node:17036) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `node --trace-warnings ...` to show where the warning was created)\n提议 #1 涉及权限改动，要确认之后才能保存（命令行加 --allow-permissions 2cdc2d30）：\n- 新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n"
+    },
+    {
+      "name": "带上确认码之后保存成第 1 版，操作人 cli，备注写明对话和提议，列出确认了的权限",
+      "ok": true,
+      "detail": {
+        "out": "已保存：工作流「review-only」第 1 版（来自对话 cmwyph6rt8597f092 的提议 #1，确认了权限改动）\n  已确认：新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n",
+        "version": 1,
+        "actor": "cli",
+        "note": "来自对话 cmwyph6rt8597f092 的提议 #1（确认了权限改动）：E2E 确认"
+      }
+    },
+    {
+      "name": "保存的内容就是提议的内容",
+      "ok": true
+    },
+    {
+      "name": "同一条提议不能再保存一次",
+      "ok": true,
+      "detail": "(node:17050) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `node --trace-warnings ...` to show where the warning was created)\n提议 #1 已经保存过（工作流「review-only」第 1 版）\n"
+    },
+    {
+      "name": "保存后 eos chat show 显示已保存",
+      "ok": true
+    },
+    {
+      "name": "平台持有的模型 key 不在对话记录、提议、对话 trace 和命令输出里",
+      "ok": true
+    }
+  ],
+  "transcript": "对话 cmwyph6rt8597f092：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 08:14:47 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 08:15:07 助手 · 17.1s · 输入 3045 输出 2686\n（用了工具：list_conventions、list_conventions、get_convention、get_convention、get_convention、propose_convention）\n我已提交提议 #1（新建工作流 `review-only`），但它还没有生效，需要等你确认后才会保存。\n\n**内容：两个节点**\n1. `spec`（agent，角色 `spec-writer`）：写 `docs/spec.md`，并将交付物设为 `背景 / 范围 / 验收标准` 三节，供平台检查；这几项沿用 `standard` 的写法。\n2. `review`（dialog，角色 `reviewer`，`with: spec`，`maxRounds: 3`）：reviewer 只读评审规格，不通过就把具体问题交回规格作者改稿，最多 3 轮。\n\n**依据**\n- 参照 `standard` 工作流 v1（内置）：`roles` 引用模板、agent 节点的交付物分节检查、dialog 加 `maxRounds` 退回修改的写法。\n- 使用平台现有模板 `spec-writer` v1（write: worktree，writePaths: [docs/**]）和 `reviewer` v1（write: none），未新建模板。\n\n**几处与 standard 的取舍，请你确认是否合适**\n- 不含 `build / test / deliver`：本工作流只产出规格，不改代码、不跑测试、不交付。\n- `review` 节点没加 `checks`（standard 的 review 带 `npm test`）：规格阶段没有有意义的测试命令来跑。如果你希望有自动卡点（比如只检查 `docs/spec.md` 的分节），可以再加。\n- 没有设置 `escalate`：`standard` 的 review 在 3/5 轮不过时会升级让 spec 重新确认；这里 review 的对象就是 spec 本身，升级也没有落地对象，所以第 3 轮不过会停在评审节点，而不是升级到另一个节点。如果你希望“3 轮不过就暂停等用户”，这是当前行为；要改成别的规则，请告诉我。\n- 权限方面：这里只是新建一个工作流，没有改动任何模板的模型、写入范围、工具组、MCP，也没有去掉评审（评审是第二步）。平台提醒：确认时会让你核对工作流中角色的模型、写入范围、工具和 MCP、检查命令与卡点。\n\n补充一点提示：`reviewer` 模板的提示词是为代码评审写的（用 `git diff` / `git log` 看改动、核对代码），用在这里评审的是 `docs/spec.md` 这份文档。功能上能用（新文件会出现在 diff 里），但如果你要它更贴规格评审（比如重点查验收标准可验证性），可能需要另建一个 spec-reviewer 模板；需要的话我可以提一个模板提议。\n\n提议（agent 提的；只有用 eos chat save 确认之后才会保存）：\n\n  #1  工作流「review-only」（新建）\n      状态：待确认，还没有保存\n      理由：新增一个只管规格的工作流：两阶段，spec 节点由 spec-writer 模板产出 docs/spec.md（沿用 standard 的交付物分节检查：背景、范围、验收标准），review 节点用 dialog 让 reviewer 模板只读评审，with 指向 spec，因此评审不通过时退回规格作者改稿，maxRounds: 3 对应用户要求的最多 3 轮。去掉了 standard 里的 build/test/deliver，因为本工作流不写代码、不跑测试、不交付；review 节点也就不带 npm test 这种代码测试命令。角色仍是引用的现有模板，没有改动任何模板的模型、写入范围、工具组或 MCP，也没有去掉评审（评审是第二步）。\n      ⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions 2cdc2d30：\n        ⚠ 新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n      全文（新建）：\n        + name: review-only\n        + description: 只做规格：spec-writer 写规格 → reviewer 评审规格，不通过退回规格作者修改，最多 3 轮；不做开发、测试和交付。\n        + docs: [研发约定]\n        + \n        + # 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\n        + roles:\n        +   spec-writer: { template: spec-writer }\n        +   reviewer: { template: reviewer }\n        + \n        + nodes:\n        +   - id: spec\n        +     kind: agent\n        +     role: spec-writer\n        +     task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n        +     deliverables:\n        +       - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n        + \n        +   # 评审规格：reviewer 只读核对 docs/spec.md，不通过时把具体问题交回规格作者修改；最多 3 轮。\n        +   - id: review\n        +     kind: dialog\n        +     role: reviewer\n        +     with: spec\n        +     maxRounds: 3\n        +     task: 评审 docs/spec.md 里的规格：是否覆盖需求、范围是否清楚、验收标准是否逐条可执行可验证，找出真实存在的缺口和歧义。不通过时把具体问题和修改建议交回规格作者。\n        + \n      保存：npm run eos -- chat save 1 --allow-permissions 2cdc2d30\n\n用途 chat：1 次调用（0 次没有回复），读数据 5 次，输入 3045 输出 2686，agent 17.1s\n",
+  "transcriptAfterSave": "对话 cmwyph6rt8597f092：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 08:14:47 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 08:15:07 助手 · 17.1s · 输入 3045 输出 2686\n（用了工具：list_conventions、list_conventions、get_convention、get_convention、get_convention、propose_convention）\n我已提交提议 #1（新建工作流 `review-only`），但它还没有生效，需要等你确认后才会保存。\n\n**内容：两个节点**\n1. `spec`（agent，角色 `spec-writer`）：写 `docs/spec.md`，并将交付物设为 `背景 / 范围 / 验收标准` 三节，供平台检查；这几项沿用 `standard` 的写法。\n2. `review`（dialog，角色 `reviewer`，`with: spec`，`maxRounds: 3`）：reviewer 只读评审规格，不通过就把具体问题交回规格作者改稿，最多 3 轮。\n\n**依据**\n- 参照 `standard` 工作流 v1（内置）：`roles` 引用模板、agent 节点的交付物分节检查、dialog 加 `maxRounds` 退回修改的写法。\n- 使用平台现有模板 `spec-writer` v1（write: worktree，writePaths: [docs/**]）和 `reviewer` v1（write: none），未新建模板。\n\n**几处与 standard 的取舍，请你确认是否合适**\n- 不含 `build / test / deliver`：本工作流只产出规格，不改代码、不跑测试、不交付。\n- `review` 节点没加 `checks`（standard 的 review 带 `npm test`）：规格阶段没有有意义的测试命令来跑。如果你希望有自动卡点（比如只检查 `docs/spec.md` 的分节），可以再加。\n- 没有设置 `escalate`：`standard` 的 review 在 3/5 轮不过时会升级让 spec 重新确认；这里 review 的对象就是 spec 本身，升级也没有落地对象，所以第 3 轮不过会停在评审节点，而不是升级到另一个节点。如果你希望“3 轮不过就暂停等用户”，这是当前行为；要改成别的规则，请告诉我。\n- 权限方面：这里只是新建一个工作流，没有改动任何模板的模型、写入范围、工具组、MCP，也没有去掉评审（评审是第二步）。平台提醒：确认时会让你核对工作流中角色的模型、写入范围、工具和 MCP、检查命令与卡点。\n\n补充一点提示：`reviewer` 模板的提示词是为代码评审写的（用 `git diff` / `git log` 看改动、核对代码），用在这里评审的是 `docs/spec.md` 这份文档。功能上能用（新文件会出现在 diff 里），但如果你要它更贴规格评审（比如重点查验收标准可验证性），可能需要另建一个 spec-reviewer 模板；需要的话我可以提一个模板提议。\n\n提议（agent 提的；只有用 eos chat save 确认之后才会保存）：\n\n  #1  工作流「review-only」（新建）\n      状态：已保存为第 1 版（cli，2026-11-27 08:15:08）\n      理由：新增一个只管规格的工作流：两阶段，spec 节点由 spec-writer 模板产出 docs/spec.md（沿用 standard 的交付物分节检查：背景、范围、验收标准），review 节点用 dialog 让 reviewer 模板只读评审，with 指向 spec，因此评审不通过时退回规格作者改稿，maxRounds: 3 对应用户要求的最多 3 轮。去掉了 standard 里的 build/test/deliver，因为本工作流不写代码、不跑测试、不交付；review 节点也就不带 npm test 这种代码测试命令。角色仍是引用的现有模板，没有改动任何模板的模型、写入范围、工具组或 MCP，也没有去掉评审（评审是第二步）。\n\n用途 chat：1 次调用（0 次没有回复），读数据 5 次，输入 3045 输出 2686，agent 17.1s\n",
+  "proposals": [
+    {
+      "id": 1,
+      "kind": "workflow",
+      "name": "review-only",
+      "voided": null,
+      "content": "name: review-only\ndescription: 只做规格：spec-writer 写规格 → reviewer 评审规格，不通过退回规格作者修改，最多 3 轮；不做开发、测试和交付。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  # 评审规格：reviewer 只读核对 docs/spec.md，不通过时把具体问题交回规格作者修改；最多 3 轮。\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: spec\n    maxRounds: 3\n    task: 评审 docs/spec.md 里的规格：是否覆盖需求、范围是否清楚、验收标准是否逐条可执行可验证，找出真实存在的缺口和歧义。不通过时把具体问题和修改建议交回规格作者。\n"
+    }
+  ]
+}

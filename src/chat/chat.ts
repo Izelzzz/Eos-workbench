@@ -43,6 +43,12 @@ export type ChatOptions = {
 const keyOf = (id: string) => `chat/${id}`
 const nonceOf = (id: string, seq: number) => `chat/${id}/${seq}`
 
+/** 一次调用是对话里哪一句用户的话引起的（nonceOf 的反过来）：save.ts 用它核对那一轮已经有了回复。 */
+export const turnOf = (call: string): { chat: string; seq: number } | undefined => {
+  const m = /^chat\/([^/]+)\/(\d+)$/.exec(call)
+  return m === null ? undefined : { chat: m[1]!, seq: Number(m[2]) }
+}
+
 /**
  * 执行器报告的工具名 → 平台工具的名字；不是平台的只读工具时 undefined。执行器可能给 MCP 工具加前缀（例如 mcp__eos__list_tasks），所以按结尾认。
  * 执行了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。

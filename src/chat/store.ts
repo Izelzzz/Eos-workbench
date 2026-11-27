@@ -1,9 +1,10 @@
-// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace），只追加。
+// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace、chat_proposals）。消息和 trace 只追加；提议只改作废、保存记录和确认码的随机值。
 // 平台重启后从这里读出对话记录接着聊；agent 那一侧的会话由执行器按对话 id 续接。
+import { randomBytes } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind } from './types.ts'
+import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind, ProposalSaved } from './types.ts'
 import { PROPOSE_TOOL } from './proposals.ts'
 import { CHAT_PURPOSE } from './types.ts'
 
@@ -43,7 +44,11 @@ CREATE TABLE IF NOT EXISTS chat_proposals (
   content TEXT NOT NULL,
   rationale TEXT NOT NULL,
   permissions TEXT NOT NULL,
-  voided TEXT
+  voided TEXT,
+  saved_version INTEGER,
+  saved_actor TEXT,
+  saved_at INTEGER,
+  confirm_salt TEXT
 );`
 
 /** 标题取第一条消息的开头。 */
@@ -54,6 +59,21 @@ type NewMessage = ChatMessage extends infer M ? (M extends ChatMessage ? Omit<M,
 export class ChatStore {
   constructor(private readonly db: DatabaseSync) {
     db.exec(SCHEMA)
+    // 早先建的 chat_proposals 没有保存记录的几列：补上（CREATE TABLE IF NOT EXISTS 不会改已有的表）。
+    // 两个进程同时打开旧库时，后补的那个会碰到「列已存在」：别人补上了，忽略。
+    const columns = new Set((db.prepare('PRAGMA table_info(chat_proposals)').all() as { name: string }[]).map(c => c.name))
+    for (const [name, type] of [
+      ['saved_version', 'INTEGER'],
+      ['saved_actor', 'TEXT'],
+      ['saved_at', 'INTEGER'],
+      ['confirm_salt', 'TEXT'],
+    ] as const)
+      if (!columns.has(name))
+        try {
+          db.exec(`ALTER TABLE chat_proposals ADD COLUMN ${name} ${type}`)
+        } catch (e) {
+          if (!/duplicate column/i.test(String(e))) throw e
+        }
   }
 
   private tx<T>(fn: () => T): T {
@@ -142,11 +162,33 @@ export class ChatStore {
   }
 
   /** 记下一条提议（只追加）。提议不改任何约定。 */
-  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided'>, at: number): ChatProposal {
+  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided' | 'saved'>, at: number): ChatProposal {
     const r = this.db
       .prepare('INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, base_version, content, rationale, permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(p.chatId, p.call, at, p.kind, p.name, p.baseVersion ?? null, p.content, p.rationale, JSON.stringify(p.permissions))
     return this.proposal(Number(r.lastInsertRowid))!
+  }
+
+  /**
+   * 一条提议的确认码用的随机值（只由 save.ts 用）：第一次要时生成并记下。
+   * 不在 ChatProposal 里、不进 agent 能看到的任何结果，所以 agent 算不出确认码。
+   */
+  confirmSalt(id: number): string {
+    this.db.prepare('UPDATE chat_proposals SET confirm_salt = ? WHERE id = ? AND confirm_salt IS NULL').run(randomBytes(16).toString('hex'), id)
+    const r = this.db.prepare('SELECT confirm_salt FROM chat_proposals WHERE id = ?').get(id) as { confirm_salt: string } | undefined
+    if (r === undefined) throw new Error(`没有提议 #${id}`)
+    return r.confirm_salt
+  }
+
+  /** 记下提议已经保存成了哪个版本（只在人确认保存之后由 save.ts 调用）。已经记过的、已作废的不改，返回是否记下。 */
+  markSaved(id: number, saved: ProposalSaved): boolean {
+    return (
+      Number(
+        this.db
+          .prepare('UPDATE chat_proposals SET saved_version = ?, saved_actor = ?, saved_at = ? WHERE id = ? AND saved_version IS NULL AND voided IS NULL')
+          .run(saved.version, saved.actor, saved.at, id).changes,
+      ) === 1
+    )
   }
 
   /** 作废一次调用里记下的提议（那一轮被作废时）。 */
@@ -191,4 +233,5 @@ const proposalRow = (r: Record<string, unknown>): ChatProposal => ({
   rationale: String(r.rationale),
   permissions: JSON.parse(String(r.permissions)) as string[],
   ...(r.voided === null ? {} : { voided: String(r.voided) }),
+  ...(r.saved_version === null ? {} : { saved: { version: Number(r.saved_version), actor: r.saved_actor as ChatActor, at: Number(r.saved_at) } }),
 })
