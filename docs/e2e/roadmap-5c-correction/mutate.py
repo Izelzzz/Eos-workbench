@@ -11,6 +11,7 @@ M = [
     ('改完不重跑检查', 'if (checks.length === 0) return finishCorrection(task, at)', 'return finishCorrection(task, at)'),
     ('检查没过也结束修正', 'if (allPassed(results)) return finishCorrection(task, at)', 'return finishCorrection(task, at)'),
     ('修正后不推送（漏掉平台动作）', "const platform = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind === 'platform')", 'const platform: Check[] = []'),
+    ('只跑被修正节点自己的和测试它的检查（修正别的节点时不跑测试就推送）', "const program = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind !== 'platform')", "const program = wf.nodes.flatMap(n => (n.kind !== 'gate' && (n.id === _target || (n.kind === 'dialog' && n.with === _target)) ? n.checks : [])).filter(c => c.kind !== 'platform')"),
     ('修正的补齐多一次', 'if (task.correction!.fixes < n.maxFixes)', 'if (task.correction!.fixes <= n.maxFixes)'),
 ]
 src = open(P).read()
