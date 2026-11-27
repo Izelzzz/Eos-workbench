@@ -15,6 +15,7 @@ import type { TraceEvent } from '../trace/types.ts'
 import { TOOL_GROUPS } from '../workflow/types.ts'
 import { openEndpoint } from './mcp.ts'
 import type { ChatStore } from './store.ts'
+import { PROPOSE_TOOL, proposer, proposeToolSpec } from './proposals.ts'
 import { callTool, type DataSource, toolList, TOOLS } from './tools.ts'
 import type { ChatActor, ChatCall, ChatDetail, ChatRead, ChatSummary } from './types.ts'
 
@@ -45,7 +46,7 @@ const nonceOf = (id: string, seq: number) => `chat/${id}/${seq}`
  * 执行器报告的工具名 → 平台工具的名字；不是平台的只读工具时 undefined。执行器可能给 MCP 工具加前缀（例如 mcp__eos__list_tasks），所以按结尾认。
  * 执行了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。
  */
-const OURS = TOOLS.map(t => t.name)
+const OURS = [...TOOLS.map(t => t.name), PROPOSE_TOOL]
 const ours = (name: string): string | undefined => OURS.find(t => name === t || name.endsWith(`__${t}`))
 
 /** 这次调用执行了的工具里，不是平台只读工具的那些（只看真正执行了的 tool_start；模型要了但执行器没有的工具不算）。 */
@@ -114,7 +115,13 @@ export class Chats {
     const nonce = nonceOf(id, seq)
     const cwd = join(this.o.dataDir, 'chat', id)
     mkdirSync(cwd, { recursive: true })
-    const endpoint = await openEndpoint({ name: MCP_NAME, tools: toolList(), call: (name, args) => callTool(this.o.data, redact, name, args) })
+    // 提议工具只写提议表（待确认），不写约定；其余工具只读。
+    const propose = proposer({ chats, store: this.o.data.store, conventions: this.o.conventions, redact, chatId: id, call: nonce, now: this.o.now })
+    const endpoint = await openEndpoint({
+      name: MCP_NAME,
+      tools: [...toolList(), proposeToolSpec()],
+      call: (name, args) => (name === PROPOSE_TOOL ? propose(args) : callTool(this.o.data, redact, name, args)),
+    })
     const events: TraceEvent[] = []
     chats.appendTrace(id, nonce, [{ kind: 'call_start', t: this.o.now() }])
     let reply: Reply
@@ -144,7 +151,11 @@ export class Chats {
       await this.o.executor.release(cwd).catch(() => undefined)
     }
     const foreign = foreignIn(events)
-    if (foreign.length > 0) return this.failed(id, `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`)
+    if (foreign.length > 0) {
+      const reason = `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`
+      chats.voidProposals(nonce, reason)
+      return this.failed(id, reason)
+    }
     return this.succeeded(id, reply, endpoint.reads())
   }
 
@@ -176,7 +187,9 @@ export class Chats {
     if (!this.o.chats.trace(id).some(r => r.call === nonce && r.event.kind !== 'call_start')) this.o.chats.appendTrace(id, nonce, events)
     const foreign = foreignIn(events)
     if (foreign.length > 0) {
-      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废` })
+      const reason = `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`
+      this.o.chats.voidProposals(nonce, reason)
+      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: reason })
       return
     }
     this.succeeded(id, found, readsIn(events))
