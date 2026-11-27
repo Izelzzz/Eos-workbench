@@ -33,7 +33,7 @@ const argsText = (args: string): string => {
     const v = JSON.parse(args) as Record<string, unknown>
     return Object.entries(v)
       .filter(([k]) => k !== 'content' && k !== 'rationale')
-      .map(([, x]) => String(x))
+      .map(([, x]) => (typeof x === 'object' && x !== null ? JSON.stringify(x) : String(x)))
       .join(' / ')
   } catch {
     return ''
@@ -113,13 +113,14 @@ const STATE: Record<ProposalView['state'], { label: string; cls: string }> = {
   saved: { label: '已保存', cls: 'ok' },
 }
 
-function Proposal(props: { v: ProposalView; onSaved: () => void }) {
+/** error：上一次保存失败的原因，放在对话那一层：确认码变了时卡片会重新挂载，错误不能跟着丢。 */
+function Proposal(props: { v: ProposalView; error?: string; onSaved: (error?: string) => void }) {
   const { v } = props
   const p = v.proposal
   const [allow, setAllow] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState(props.error)
   const needsAllow = v.code !== undefined
   const save = async () => {
     setBusy(true)
@@ -128,8 +129,8 @@ function Proposal(props: { v: ProposalView; onSaved: () => void }) {
     setBusy(false)
     if (!r.ok) {
       setError(r.error)
-      // 权限改动在看过之后变了：刷新，让人看新的清单再确认。
-      if ('code' in r && r.code !== undefined) props.onSaved()
+      // 权限改动在看过之后变了：刷新，让人看新的清单再确认（原因带过去，重新挂载后照样显示）。
+      if ('code' in r && r.code !== undefined) props.onSaved(r.error)
       return
     }
     props.onSaved()
@@ -295,6 +296,7 @@ function Conversation(props: { id: string }) {
   const [error, setError] = useState<string>()
   const [live, setLive] = useState<Live>()
   const [reload, setReload] = useState(0)
+  const [saveErrors, setSaveErrors] = useState<Record<number, string | undefined>>({})
   const end = useRef<HTMLDivElement>(null)
   useEffect(() => {
     getChat(props.id).then(
@@ -303,7 +305,10 @@ function Conversation(props: { id: string }) {
         setLive(undefined)
         setError(undefined)
       },
-      e => setError(String(e.message)),
+      e => {
+        setLive(undefined)
+        setError(String(e.message))
+      },
     )
   }, [props.id, reload])
   // 有新内容时滚到底。effect 不能返回值（React 会把返回值当成清理函数调用）。
@@ -328,7 +333,15 @@ function Conversation(props: { id: string }) {
           <h2 className="chat-h2">提议（agent 提的，你点「保存」之后才生效）</h2>
           {view.proposals.map(v => (
             // 确认码变了（权限清单变了）就是另一份要确认的东西：换 key，勾选状态清掉，要重新勾。
-            <Proposal key={`${v.proposal.id}-${v.code ?? ''}`} v={v} onSaved={() => setReload(n => n + 1)} />
+            <Proposal
+              key={`${v.proposal.id}-${v.code ?? ''}`}
+              v={v}
+              {...(saveErrors[v.proposal.id] === undefined ? {} : { error: saveErrors[v.proposal.id] })}
+              onSaved={error => {
+                setSaveErrors(e => ({ ...e, [v.proposal.id]: error }))
+                setReload(n => n + 1)
+              }}
+            />
           ))}
         </>
       )}

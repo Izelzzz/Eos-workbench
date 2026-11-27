@@ -75,16 +75,20 @@ export class WebChats {
   save(id: number, body: Record<string, unknown>): SaveOutcome {
     if (body.confirm !== undefined && typeof body.confirm !== 'string') return { ok: false, error: 'confirm 必须是确认码' }
     if (body.note !== undefined && typeof body.note !== 'string') return { ok: false, error: 'note 必须是文字' }
-    return saveProposal({
-      store: this.o.store,
-      chats: this.chats,
-      conventions: this.o.conventions,
-      redact: this.o.redact,
-      id,
-      actor: 'web',
-      ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
-      ...(body.note === undefined ? {} : { note: body.note }),
-      now: this.o.now,
-    })
+    // 和 detail 一样经过遮蔽（错误说明和权限清单里不该有凭据值，这里统一兜底）。
+    return redactDeep(
+      saveProposal({
+        store: this.o.store,
+        chats: this.chats,
+        conventions: this.o.conventions,
+        redact: this.o.redact,
+        id,
+        actor: 'web',
+        ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
+        ...(body.note === undefined ? {} : { note: body.note }),
+        now: this.o.now,
+      }),
+      this.o.redact,
+    )
   }
 }

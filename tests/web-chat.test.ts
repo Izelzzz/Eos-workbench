@@ -180,8 +180,10 @@ test('the web save writes the convention and the proposal mark through the store
     assert.equal(seen.confirm_salt, salt)
     assert.equal((s.store.db.prepare('SELECT confirm_salt FROM chat_proposals WHERE id = ?').get(id) as { confirm_salt: string | null }).confirm_salt, null)
     // 对照：提议表换一个连接，保存在事务里碰到库被锁，整笔回滚。这就是 WebChats 自己从 store.db 建 ChatStore 的原因。
-    const other = new ChatStore(new DatabaseSync(join(s.dir, 'eos.db')))
-    assert.throws(() => saveProposal({ store: s.store, chats: other, conventions: s.conventions, redact: x => x, id, actor: 'web', now: Date.now }))
+    const otherDb = new DatabaseSync(join(s.dir, 'eos.db'))
+    const other = new ChatStore(otherDb)
+    assert.throws(() => saveProposal({ store: s.store, chats: other, conventions: s.conventions, redact: x => x, id, actor: 'web', now: Date.now }), /locked|busy/i)
+    otherDb.close()
     assert.equal(s.store.conventionHistory('workflow', 'standard').length, 1)
     assert.equal(s.chat.chats.proposal(id)!.saved, undefined)
     const r = await s.save(id)
@@ -246,6 +248,8 @@ test('chat writes need a same-origin JSON request; without a chat agent the endp
   try {
     const evil = await s.post('/api/chats', { text: '你好' }, 'https://evil.example')
     assert.equal(evil.status, 403)
+    const form = await fetch(`${s.base}/api/chats`, { method: 'POST', headers: { 'content-type': 'text/plain', origin: s.base }, body: 'text=你好' })
+    assert.equal(form.status, 415, 'not JSON')
     assert.equal((await s.post('/api/chats/proposals/1/save', {}, 'https://evil.example')).status, 403)
     assert.deepEqual(await (await fetch(`${s.base}/api/chats`)).json(), [], 'nothing was created')
     const bad = await s.say({ text: 42 })
@@ -258,6 +262,8 @@ test('chat writes need a same-origin JSON request; without a chat agent the endp
   try {
     assert.equal((await fetch(`${none.base}/api/chats`)).status, 503)
     assert.equal((await none.post('/api/chats', { text: '你好' })).status, 503)
+    assert.equal((await none.post('/api/chats/proposals/1/save', {})).status, 503)
+    assert.equal((await fetch(`${none.base}/api/chats/cabc`)).status, 503)
   } finally {
     await none.close()
   }
