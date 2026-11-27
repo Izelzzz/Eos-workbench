@@ -273,7 +273,12 @@ test('permission guard: template permission fields, workflow role permissions, n
   )
   assert.deepEqual(
     permissionChanges('template', t(), t().replace('src/**', '"**"').replace('deepseek-flash', 'deepseek-pro'), () => undefined),
-    ['不能改模板的 model', '不能改模板的 writePaths'],
+    ['不能改模板的 model（deepseek-flash → deepseek-pro）', '不能改模板的 writePaths'],
+  )
+  assert.deepEqual(
+    permissionChanges('template', t(), t().replace('model: deepseek-flash\n', ''), () => undefined),
+    ['不能改模板的 model（deepseek-flash → 执行器默认）'],
+    'from a written model to none is a change: the executor default may differ',
   )
   assert.deepEqual(
     permissionChanges('template', t(), `executor: other\n${t()}`, () => undefined),

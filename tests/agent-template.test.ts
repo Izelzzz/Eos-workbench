@@ -24,7 +24,6 @@ test('a template parses into an agent config with defaults filled in', () => {
   assert.deepEqual(r.template, {
     name: 'developer',
     description: '开发',
-    model: 'deepseek-flash',
     prompt: '写代码',
     write: 'worktree',
     writePaths: ['src/**', 'tests/**'],
@@ -102,7 +101,6 @@ test('a workflow role can reference a template; the resolved role records which 
   assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
   assert.deepEqual(r.workflow.roles.dev, {
     id: 'dev',
-    model: 'deepseek-flash',
     prompt: '写代码',
     write: 'worktree',
     writePaths: ['src/**', 'tests/**'],

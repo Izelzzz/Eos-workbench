@@ -6,7 +6,6 @@ import { TOOL_GROUPS } from './types.ts'
 
 export type FieldError = { path: string; message: string }
 
-export const DEFAULT_MODEL = 'deepseek-flash'
 export const ID = /^[a-z][a-z0-9-]{0,31}$/
 const MCP_NAME = /^[A-Za-z0-9_-]{1,32}$/
 /** 看起来像密钥的环境变量名：模板以明文保存、页面上人人可见，不能放密钥。 */
@@ -36,7 +35,8 @@ const mcpServer = z
 export const agentFields = {
   /** 执行器的名字。有没有登记由平台在创建任务时核对：解析时不知道平台登记了哪些执行器。 */
   executor: id.optional(),
-  model: text.default(DEFAULT_MODEL),
+  /** 不写时用执行器自己的默认模型（模型名随执行器不同，平台不替它选）。 */
+  model: text.optional(),
   effort: z.enum(['low', 'high', 'max'], { error: '只能是 low、high 或 max' }).optional(),
   prompt: text,
   write: z.enum(['none', 'worktree'], { error: '只能是 none 或 worktree' }).default('none'),
@@ -75,7 +75,7 @@ export const agentErrors = (a: AgentFieldsOut, at: (field: string) => string): F
 
 export const toAgentConfig = (a: AgentFieldsOut): AgentConfig => ({
   ...(a.executor === undefined ? {} : { executor: a.executor }),
-  model: a.model,
+  ...(a.model === undefined ? {} : { model: a.model }),
   ...(a.effort === undefined ? {} : { effort: a.effort }),
   prompt: a.prompt,
   write: a.write,

@@ -36,8 +36,55 @@ export const isHttpMcp = (m: AgentMcp): m is HttpMcp => 'url' in m
  */
 export type AgentProfile = { builtinTools: 'standard' | 'none'; denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: AgentMcp[]; background: boolean }
 
-/** executor：用哪个执行器（注册表里的名字）；不写时用注册表的默认执行器。 */
-export type AgentSpec = { executor?: string; model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
+/** executor：用哪个执行器（注册表里的名字）；不写时用注册表的默认执行器。model：不写时用那个执行器自己的默认模型。 */
+export type AgentSpec = { executor?: string; model?: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
+
+/**
+ * 执行器对一个工具组的支持：removable：有，能去掉；absent：本来就没有（角色去掉它等于已经满足）；
+ * fixed：有，但去不掉（角色要去掉它时报错，不能悄悄放过）。
+ */
+export type GroupSupport = 'removable' | 'absent' | 'fixed'
+
+/** 执行器能做到的能力面：每个工具组的支持，以及能不能关掉全部自带工具、关掉后台作业，接不接得了两种 MCP，支不支持技能。 */
+export type Capabilities = {
+  toolGroups: Record<ToolGroup, GroupSupport>
+  noBuiltinTools: boolean
+  noBackground: boolean
+  httpMcp: boolean
+  stdioMcp: boolean
+  skills: boolean
+}
+
+/** 一个 agent 要求执行器做到的（从能力面算出）。建任务、建对话时用它提前核对，send 时注册表再核对一次。 */
+export type AgentNeeds = { builtinTools: 'standard' | 'none'; denyTools: ToolGroup[]; background: boolean; httpMcp: boolean; stdioMcp: boolean; skills: boolean }
+
+export const needsOf = (p: Pick<AgentProfile, 'builtinTools' | 'denyTools' | 'mcp' | 'background'> & { skills: readonly unknown[] }): AgentNeeds => ({
+  builtinTools: p.builtinTools,
+  denyTools: p.denyTools,
+  background: p.background,
+  httpMcp: p.mcp.some(isHttpMcp),
+  stdioMcp: p.mcp.some(m => !isHttpMcp(m)),
+  skills: p.skills.length > 0,
+})
+
+/** 执行器做不到的要求（中文，每条一句）；都做得到时是空的。没有自带工具时，工具组、后台作业、技能不起作用，不核对。 */
+export const unmet = (name: string, c: Capabilities, n: AgentNeeds): string[] => {
+  const out: string[] = []
+  if (n.builtinTools === 'none') {
+    if (!c.noBuiltinTools) out.push(`执行器「${name}」关不掉自带的工具`)
+  } else {
+    const fixed = n.denyTools.filter(g => c.toolGroups[g] === 'fixed')
+    if (fixed.length > 0) out.push(`执行器「${name}」去不掉工具组 ${fixed.join('、')}`)
+    if (!n.background && !c.noBackground) out.push(`执行器「${name}」关不掉后台作业（可写的角色不能起后台作业）`)
+    if (n.skills && !c.skills) out.push(`执行器「${name}」不支持技能`)
+  }
+  if (n.httpMcp && !c.httpMcp) out.push(`执行器「${name}」接不了平台的 HTTP MCP 端点`)
+  if (n.stdioMcp && !c.stdioMcp) out.push(`执行器「${name}」接不了 stdio 的 MCP 服务`)
+  return out
+}
+
+/** 核对一个 agent 能不能交给某个执行器（不写名字时是默认执行器）：能时 undefined，不能时是原因（没登记，或者做不到的要求）。 */
+export type ExecutorCheck = (executor: string | undefined, needs: AgentNeeds) => string | undefined
 
 export type Reply = { sessionId: string; text: string; usage: Usage; ms: number; model?: string }
 
@@ -69,8 +116,18 @@ export type HealthStatus = 'ok' | 'warn' | 'fail'
 /** doctorOnly：只在 eos doctor 里列出，启动前检查不提示（总会出现的 ⚠ 会让人习惯性忽略真正的提示）。 */
 export type HealthItem = { name: string; status: HealthStatus; detail: string; fix?: string; doctorOnly?: true }
 
-/** 执行器的自检：装没装、版本、沙箱、凭据是否就绪。sandboxed：agent 在沙箱里（平台的「凭据隔离」一项要用）。 */
-export type Health = { items: HealthItem[]; sandboxed: boolean }
+/**
+ * 执行器的自检：装没装、版本、沙箱、凭据是否就绪。
+ * sandboxed：agent 在沙箱里（平台的「凭据隔离」一项要用）。
+ * agentUser：设置了 agent 的用户时，这个执行器能不能真的以那个用户运行 agent（不能时是原因）；没设置时不看。
+ */
+export type Health = { items: HealthItem[]; sandboxed: boolean; agentUser?: string }
+
+/**
+ * 执行器要的模型 key：凭据存储里的名字、平台启动时从环境变量里取走的变量名、在 doctor 里显示的名字。
+ * 平台按这个声明取 key、交给执行器；key 怎么交给执行器自己的进程（环境变量、配置）由执行器决定。
+ */
+export type ModelKeySpec = { credential: string; env: string; label: string }
 
 /** 平台交给执行器的环境：建执行器和自检都只用这些。 */
 export type ExecutorContext = {
@@ -78,7 +135,7 @@ export type ExecutorContext = {
   root: string
   dataDir: string
   env: NodeJS.ProcessEnv
-  /** 模型 key 现在的来源和值（凭据存储优先，环境变量其次）：每次取都重新读，在 Web 上换了 key 之后取到的是新的。 */
+  /** 这个执行器声明的模型 key 现在的来源和值（凭据存储优先，环境变量其次）：每次取都重新读，在 Web 上换了 key 之后取到的是新的。 */
   modelKey: () => ModelKey
   /** 平台的凭据存储能不能存取凭据（设置了有效的主密钥）。不能时，自检里说清凭据存储里为什么没有执行器要的 key。 */
   credentialsUsable: boolean
@@ -86,9 +143,11 @@ export type ExecutorContext = {
   agentUser?: CheckUser
 }
 
-/** 注册表里的一种执行器：名字、怎么建、怎么自检。 */
+/** 注册表里的一种执行器：名字、能做到的能力面、要的模型 key、怎么建、怎么自检。 */
 export type ExecutorKind = {
   name: string
+  capabilities: Capabilities
+  modelKey: ModelKeySpec
   create(ctx: ExecutorContext): Executor
   health(ctx: ExecutorContext): Health
 }

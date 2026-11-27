@@ -7,8 +7,9 @@ import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 import { zstdCompressSync } from 'node:zlib'
 import { DshExecutor } from '../src/executor/dsh.ts'
-import { EXECUTORS, Executors, healthOf, unknownExecutor } from '../src/executor/registry.ts'
-import type { AgentSpec, Executor, ExecutorContext, ExecutorKind } from '../src/executor/types.ts'
+import { checkExecutor, EXECUTORS, Executors, healthOf, modelKeySpecs } from '../src/executor/registry.ts'
+import type { AgentSpec, Capabilities, Executor, ExecutorContext, ExecutorKind } from '../src/executor/types.ts'
+import { needsOf } from '../src/executor/types.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 import { MemoryExecutor } from './memory-executor.ts'
 
@@ -144,8 +145,20 @@ for (const [name, make] of Object.entries({ ...FACTORIES, memory: () => new Memo
 // ---- 注册表 ----
 
 const ctx: ExecutorContext = { root: ROOT, dataDir: '/nonexistent', env: {}, modelKey: () => ({ source: 'missing' }), credentialsUsable: true }
-const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandboxed?: boolean } = {}): ExecutorKind => ({
+const ctxFor = () => ctx
+/** 什么都做得到的能力面；测试里按需改掉几项。 */
+const ALL: Capabilities = {
+  toolGroups: { web: 'removable', subagent: 'removable', bash: 'removable', schedule: 'removable', todo: 'removable', goal: 'removable' },
+  noBuiltinTools: true,
+  noBackground: true,
+  httpMcp: true,
+  stdioMcp: true,
+  skills: true,
+}
+const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandboxed?: boolean; capabilities?: Partial<Capabilities> } = {}): ExecutorKind => ({
   name,
+  capabilities: { ...ALL, ...o.capabilities },
+  modelKey: { credential: name, env: `${name.toUpperCase()}_API_KEY`, label: `${name} key` },
   create: () => {
     if (o.fails) throw new Error(`${name} 没装好`)
     const ex = new MemoryExecutor(name)
@@ -155,11 +168,11 @@ const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandbo
   health: () => ({ items: [{ name, status: 'ok', detail: '在' }], sandboxed: o.sandboxed ?? true }),
 })
 
-describe('执行器接口：注册表（两个假执行器）', () => contract(() => new Executors(ctx, [kind('a', []), kind('b', [])])))
+describe('执行器接口：注册表（两个假执行器）', () => contract(() => new Executors(ctxFor, [kind('a', []), kind('b', [])])))
 
 test('注册表按 spec.executor 分派，不写时用第一个（默认）；同一个工作流的角色可以用不同执行器', async () => {
   const made: MemoryExecutor[] = []
-  const reg = new Executors(ctx, [kind('a', made), kind('b', made)])
+  const reg = new Executors(ctxFor, [kind('a', made), kind('b', made)])
   assert.equal(made.length, 0, '用到时才建')
   const viaDefault = await reg.send({ key: 't/dev', spec: spec('/w'), prompt: '默认', nonce: 'n1', ask })
   const viaB = await reg.send({ key: 't/review', spec: { ...spec('/w'), executor: 'b' }, prompt: '指定', nonce: 'n1', ask })
@@ -184,7 +197,7 @@ test('注册表按 spec.executor 分派，不写时用第一个（默认）；�
 
 test('两个执行器里有同名的会话和 nonce 时，找回走调用用的那个执行器，不会认错', async () => {
   const made: MemoryExecutor[] = []
-  const reg = new Executors(ctx, [kind('a', made), kind('b', made)])
+  const reg = new Executors(ctxFor, [kind('a', made), kind('b', made)])
   const inA = await reg.send({ key: 't/x', spec: spec('/w'), prompt: '甲', nonce: 'n', ask })
   const inB = await reg.send({ key: 't/x', spec: { ...spec('/w'), executor: 'b' }, prompt: '乙', nonce: 'n', ask })
   assert.equal((await reg.findReply('t/x', 'n', 'b'))?.text, inB.text)
@@ -195,9 +208,10 @@ test('两个执行器里有同名的会话和 nonce 时，找回走调用用的�
 
 test('注册表：没登记的名字报错并列出可用的；找回不会去建没用到的执行器，建不起来的执行器报出原因', async () => {
   const made: MemoryExecutor[] = []
-  const reg = new Executors(ctx, [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)])
-  assert.equal(unknownExecutor('a', [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)]), undefined)
-  assert.equal(unknownExecutor('zzz', [kind('a', []), kind('broken', []), kind('c', [])]), '没有名为「zzz」的执行器（可用的：a、broken、c）')
+  const reg = new Executors(ctxFor, [kind('a', made), kind('broken', made, { fails: true }), kind('c', made)])
+  const plain = needsOf({ builtinTools: 'standard', denyTools: [], mcp: [], background: true, skills: [] })
+  assert.equal(checkExecutor('a', plain, [kind('a', []), kind('broken', []), kind('c', [])]), undefined)
+  assert.equal(checkExecutor('zzz', plain, [kind('a', []), kind('broken', []), kind('c', [])]), '没有名为「zzz」的执行器（可用的：a、broken、c）')
   await assert.rejects(reg.send({ key: 'k', spec: { ...spec('/w'), executor: 'zzz' }, prompt: 'p', nonce: 'n', ask }), /没有名为「zzz」的执行器/)
   await reg.send({ key: 'k', spec: spec('/w'), prompt: 'p', nonce: 'n', ask })
   assert.equal((await reg.findReply('k', 'n'))?.sessionId, 'a-1')
@@ -208,13 +222,13 @@ test('注册表：没登记的名字报错并列出可用的；找回不会去�
   )
   await assert.rejects(reg.send({ key: 'k2', spec: { ...spec('/w'), executor: 'broken' }, prompt: 'p', nonce: 'n', ask }), /broken 没装好/)
   await assert.rejects(reg.findReply('k2', 'n', 'broken'), /broken 没装好/, '建不起来不当成"没有回复"（否则会重发）')
-  assert.throws(() => new Executors(ctx, []), /没有登记任何执行器/)
-  assert.throws(() => new Executors(ctx, [kind('a', []), kind('a', [])]), /名字重复/)
+  assert.throws(() => new Executors(ctxFor, []), /没有登记任何执行器/)
+  assert.throws(() => new Executors(ctxFor, [kind('a', []), kind('a', [])]), /名字重复/)
 })
 
 test('自检按登记的顺序问每个执行器', () => {
   assert.deepEqual(
-    healthOf(ctx, [kind('a', []), kind('b', [], { sandboxed: false })]).map(h => [h.name, h.health.items[0]!.name, h.health.sandboxed]),
+    healthOf(ctxFor, [kind('a', []), kind('b', [], { sandboxed: false })]).map(h => [h.name, h.health.items[0]!.name, h.health.sandboxed]),
     [
       ['a', 'a', true],
       ['b', 'b', false],
@@ -227,4 +241,54 @@ test('dsh 登记的描述建出的执行器用数据目录下的 dsh home', () =
   const ex = EXECUTORS.find(k => k.name === 'dsh')!.create({ ...ctx, dataDir })
   assert.ok(ex instanceof DshExecutor)
   assert.equal(ex.processCwd, join(dataDir, 'dsh', 'eos-process-cwd'))
+})
+
+test('执行器做不到的能力面：建任务时的核对和 send 都报出原因；本来就没有的工具组算去掉了', async () => {
+  const limited = kind('lite', [], {
+    capabilities: { toolGroups: { ...ALL.toolGroups, web: 'fixed', schedule: 'absent' }, noBuiltinTools: false, noBackground: false, httpMcp: false, stdioMcp: false, skills: false },
+  })
+  const kinds = [kind('a', []), limited]
+  const role = (o: Partial<Parameters<typeof needsOf>[0]>) => needsOf({ builtinTools: 'standard', denyTools: [], mcp: [], background: true, skills: [], ...o })
+  assert.equal(checkExecutor('lite', role({ denyTools: ['schedule'] }), kinds), undefined, '本来就没有：等于已经去掉')
+  assert.equal(checkExecutor('lite', role({ denyTools: ['web', 'schedule'] }), kinds), '执行器「lite」去不掉工具组 web')
+  assert.equal(checkExecutor('lite', role({ background: false }), kinds), '执行器「lite」关不掉后台作业（可写的角色不能起后台作业）')
+  assert.equal(checkExecutor('lite', role({ skills: [{ name: 's', content: 'x' }] }), kinds), '执行器「lite」不支持技能')
+  assert.equal(checkExecutor('lite', role({ mcp: [{ name: 'm', command: 'node', args: [], env: {} }] }), kinds), '执行器「lite」接不了 stdio 的 MCP 服务')
+  assert.equal(
+    checkExecutor('lite', needsOf({ builtinTools: 'none', denyTools: [], mcp: [{ name: 'p', url: 'http://127.0.0.1/mcp', headers: {} }], background: false, skills: [] }), kinds),
+    '执行器「lite」关不掉自带的工具；执行器「lite」接不了平台的 HTTP MCP 端点',
+  )
+  assert.equal(checkExecutor(undefined, role({ denyTools: ['web'] }), kinds), undefined, '不写名字时核对默认执行器')
+  // send 时注册表也拦：不交给执行器
+  const made: MemoryExecutor[] = []
+  const reg = new Executors(ctxFor, [kind('a', made), kind('lite', made, { capabilities: { toolGroups: { ...ALL.toolGroups, web: 'fixed' } } })])
+  const deny = { ...spec('/w'), executor: 'lite', profile: { ...spec('/w').profile, denyTools: ['web' as const] } }
+  await assert.rejects(reg.send({ key: 'k', spec: deny, prompt: 'p', nonce: 'n', ask }), /执行器「lite」去不掉工具组 web/)
+  assert.deepEqual(made, [], '没有建出执行器，也没有发出去')
+})
+
+test('每个登记的执行器都声明了能力面和模型 key；平台按声明取走的环境变量不重复', () => {
+  for (const k of EXECUTORS) {
+    assert.deepEqual(Object.keys(k.capabilities.toolGroups).sort(), ['bash', 'goal', 'schedule', 'subagent', 'todo', 'web'], k.name)
+    assert.ok(k.modelKey.credential !== '' && /^[A-Z][A-Z0-9_]*$/.test(k.modelKey.env), k.name)
+  }
+  assert.deepEqual(
+    modelKeySpecs([kind('a', []), { ...kind('b', []), modelKey: kind('a', []).modelKey }]).map(s => s.env),
+    ['A_API_KEY'],
+  )
+})
+
+test('每个执行器的上下文按它自己声明的模型 key 给（ctxFor 收到的是那种执行器）', () => {
+  const seen: string[] = []
+  healthOf(k => (seen.push(k.modelKey.credential), ctx), [kind('a', []), kind('b', [])])
+  assert.deepEqual(seen, ['a', 'b'])
+})
+
+test('dsh 声明的模型 key 就是现有部署用的那条：凭据 deepseek、环境变量 DEEPSEEK_API_KEY，不需要迁移', () => {
+  const dsh = EXECUTORS.find(k => k.name === 'dsh')!
+  assert.deepEqual(dsh.modelKey, { credential: 'deepseek', env: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key' })
+  assert.deepEqual(
+    modelKeySpecs().map(s => s.env),
+    ['DEEPSEEK_API_KEY'],
+  )
 })

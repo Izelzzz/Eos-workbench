@@ -16,7 +16,7 @@ import { filesByCall } from '../src/runner/git.ts'
 import { describePosition } from '../src/engine/machine.ts'
 import { keyOf } from '../src/runner/runner.ts'
 import { parseMasterKey, takeMasterKey } from '../src/credentials/key.ts'
-import { MODEL_KEY_CREDENTIAL } from '../src/credentials/model-key.ts'
+import { MODEL_KEY } from '../src/executor/dsh.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { defaultForges, parseRemote } from '../src/forge/forges.ts'
@@ -63,7 +63,7 @@ const setupRepo = () => {
     if (master.kind !== 'ok') throw new Error('EOS_E2E_STORE_KEY 需要同时设置有效的 EOS_MASTER_KEY')
     mkdirSync(DATA, { recursive: true })
     const c = new Credentials(join(DATA, 'eos.db'), master.key)
-    const put = c.put(LOCAL_OWNER, MODEL_KEY_CREDENTIAL, 'api-key', storeKey)
+    const put = c.put(LOCAL_OWNER, MODEL_KEY.credential, 'api-key', storeKey)
     c.close()
     if (!put.ok) throw new Error(put.error)
   }

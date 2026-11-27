@@ -75,17 +75,21 @@ const masterKeyItem = (f: Facts): Item =>
       ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT, doctorOnly: true }
       : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
 
+/** 执行器进程的说法：带上登记的执行器名字，例如「执行器进程（dsh）」。 */
+const executorProcess = (f: Facts): string => (f.executors.length === 0 ? '执行器进程' : `执行器进程（${f.executors.map(e => e.name).join('、')}）`)
+
 /**
  * 检查命令用哪个用户运行。设置了却切换不过去时 ✗：检查命令一定跑不起来，也不能退回到用平台的用户运行。
  * 没有设置时不列出，由「凭据隔离」说明检查命令和平台是同一个用户。
  */
+
 const checkUserItem = (f: Facts): Item[] => {
   const name = '检查命令的用户'
   switch (f.checkUser.kind) {
     case 'none':
       return []
     case 'ok':
-      return [{ name, status: 'ok', detail: `检查命令以 ${f.checkUser.name} 运行，没有任何特权，读不到平台和 dsh 进程的环境` }]
+      return [{ name, status: 'ok', detail: `检查命令以 ${f.checkUser.name} 运行，没有任何特权，读不到平台和${executorProcess(f)}的环境` }]
     case 'fail':
       return [
         {
@@ -112,8 +116,8 @@ const proxyItem = (f: Facts): Item[] =>
       ]
 
 /**
- * dsh 和 agent 用哪个用户运行（切换由 dsh 的入口 deploy/dsh-launch.mjs 做，这里真的切换一次确认平台有这个能力）。
- * 设置了却切换不过去时 ✗：dsh 起不来，任务一定失败。没有设置时不列出，由「凭据隔离」说明。
+ * 执行器进程和 agent 用哪个用户运行（切换由执行器做，例如 dsh 的入口 deploy/dsh-launch.mjs；这里真的切换一次确认平台有这个能力，
+ * 每个执行器也报告自己能不能切换过去）。设置了却切换不过去时 ✗：执行器起不来，任务一定失败。没有设置时不列出，由「凭据隔离」说明。
  */
 const agentUserItem = (f: Facts): Item[] => {
   const name = 'agent 的用户'
@@ -121,7 +125,7 @@ const agentUserItem = (f: Facts): Item[] => {
     case 'none':
       return []
     case 'ok':
-      return [{ name, status: 'ok', detail: `dsh 和 agent 以 ${f.agentUser.name} 运行，没有任何特权，读不到平台进程的环境` }]
+      return [{ name, status: 'ok', detail: `${executorProcess(f)}和 agent 以 ${f.agentUser.name} 运行，没有任何特权，读不到平台进程的环境` }]
     case 'fail':
       return [
         {
@@ -135,8 +139,8 @@ const agentUserItem = (f: Facts): Item[] => {
 }
 
 /**
- * 设置了主密钥时说明谁能读到两样凭据：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；dsh 进程的环境里有模型 key。
- * 别的用户的进程读不到；同一个用户的进程只靠沙箱挡住。agent 是 dsh 启动的，和 dsh 总是同一个用户，所以模型 key 对 agent 总是只靠沙箱。
+ * 设置了主密钥时说明谁能读到两样凭据：平台进程启动时的环境（/proc/<pid>/environ）里一直有主密钥，读出后删不掉；执行器进程的环境里有模型 key。
+ * 别的用户的进程读不到；同一个用户的进程只靠沙箱挡住。agent 是执行器启动的，和执行器进程总是同一个用户，所以模型 key 对 agent 总是只靠沙箱。
  * 检查命令和 agent 都换成独立的用户、沙箱也在时是 ✓。
  */
 const isolationItem = (f: Facts): Item[] => {
@@ -150,7 +154,7 @@ const isolationItem = (f: Facts): Item[] => {
       : sandboxed
         ? 'agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住'
         : '没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥'
-  const agentModel = sandboxed ? 'agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住' : '没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key'
+  const agentModel = sandboxed ? `agent 和${executorProcess(f)}是同一个用户，读不到执行器进程环境里的模型 key 靠沙箱挡住` : `没有可用的沙箱，agent 能读到${executorProcess(f)}环境里的模型 key`
   const detail = `${agentMaster}；${agentModel}；${checks}`
   const ok = f.checkUser.kind === 'ok' && f.agentUser.kind === 'ok' && sandboxed
   if (ok) return [{ name: '凭据隔离', status: 'ok', detail }]
@@ -251,12 +255,13 @@ export const gather = (
     const e = probeSwitch(u.user)
     return e === undefined ? { kind: 'ok', name: u.user.name } : { kind: 'fail', error: `切换不到 ${u.user.name}：${e}` }
   }
-  // agent 的用户还要两样：切换由 dsh 的入口做（没有设置入口时 dsh 还是平台的用户）；dsh 属于别的用户，平台要有 KILL 才能关掉它。
+  // agent 的用户还要两样：每个执行器都能切换过去（各自报告，例如 dsh 要设置它的入口）；执行器进程属于别的用户，平台要有 KILL 才能关掉它。
   const agentFact = (u: CheckUserState): UserFact => {
     const f = userFact(u)
     if (f.kind !== 'ok') return f
-    if ((process.env.EOS_DSH_LAUNCHER ?? '') === '') return { kind: 'fail', error: `设置了 ${AGENT_USER_ENV}，但没有设置 EOS_DSH_LAUNCHER：dsh 不会切换到 ${f.name}，还是平台的用户` }
-    if (!hasCapKill()) return { kind: 'fail', error: `平台进程没有 KILL 能力：dsh 以 ${f.name} 运行，平台关不掉它（换 key、释放进程时）` }
+    const cannot = o.executors.flatMap(e => (e.health.agentUser === undefined ? [] : [e.health.agentUser]))
+    if (cannot.length > 0) return { kind: 'fail', error: cannot.join('；') }
+    if (!hasCapKill()) return { kind: 'fail', error: `平台进程没有 KILL 能力：执行器进程以 ${f.name} 运行，平台关不掉它（换 key、释放进程时）` }
     return f
   }
   return {

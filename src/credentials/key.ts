@@ -1,5 +1,5 @@
 // 凭据的主密钥：从平台进程的环境变量 EOS_MASTER_KEY 读，32 字节、base64 编码。
-// 读出来之后立刻从 process.env 里删掉：平台之后起的子进程（dsh、git、检查命令）都继承不到它。
+// 读出来之后立刻从 process.env 里删掉：平台之后起的子进程（执行器、git、检查命令）都继承不到它。
 // 主密钥不落盘：agent 的沙箱能只读整个文件系统，放在磁盘上就等于 agent 能读到。
 import { createHash } from 'node:crypto'
 

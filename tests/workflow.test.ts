@@ -19,10 +19,10 @@ const errorsOf = (src: string) => {
   return r.ok ? [] : r.errors
 }
 
-test('fills defaults: model deepseek-flash, write none, 5 rounds, no inputs', () => {
+test('fills defaults: no model (the executor picks its own), write none, 5 rounds, no inputs', () => {
   const r = parseWorkflow(base)
   assert.ok(r.ok)
-  assert.equal(r.workflow.roles.rev?.model, 'deepseek-flash')
+  assert.equal(r.workflow.roles.rev?.model, undefined)
   assert.equal(r.workflow.roles.rev?.write, 'none')
   const review = r.workflow.nodes[1]
   assert.equal(review?.kind, 'dialog')

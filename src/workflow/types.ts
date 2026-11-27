@@ -12,9 +12,10 @@ export type Effort = 'low' | 'high' | 'max'
 export type WriteScope = 'none' | 'worktree'
 
 /**
- * 可以从 agent 进程里整组去掉的工具。dsh 只能按插件整组关掉工具，所以按组限制，不按单个工具名：
- * web 联网抓取和搜索；subagent 子 agent 与编排；bash 命令行与后台任务；schedule 定时任务；todo 待办；goal 目标。
- * 读写文件和向用户提问的工具始终保留（写哪些路径由 writePaths 管）。
+ * 可以从 agent 那里整组去掉的能力，和执行器无关：
+ * web 联网（抓网页、搜索）；subagent 起子 agent、编排别的 agent；bash 跑命令（包括后台作业）；schedule 定时任务；todo 待办清单；goal 长期目标。
+ * 读写文件和向用户提问始终保留（写哪些路径由 writePaths 管）。
+ * 每个执行器自己把这些能力翻译成自己的开关（见 src/executor/ 下各执行器的 Capabilities）：去不掉的组在创建任务时报错，执行器本来就没有的组算已经去掉。
  */
 export const TOOL_GROUPS = ['web', 'subagent', 'bash', 'schedule', 'todo', 'goal'] as const
 export type ToolGroup = (typeof TOOL_GROUPS)[number]
@@ -26,7 +27,8 @@ export type McpServer = { name: string; command: string; args: string[]; env: Re
 export type AgentConfig = {
   /** 用哪个执行器跑这个 agent（平台登记的执行器名字）；不写时用平台的默认执行器。 */
   executor?: string
-  model: string
+  /** 模型名；不写时用执行器自己的默认模型。 */
+  model?: string
   effort?: Effort
   /** 角色的职责说明，作为该角色每个会话的第一段内容。 */
   prompt: string

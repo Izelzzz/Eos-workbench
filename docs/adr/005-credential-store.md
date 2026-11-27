@@ -90,7 +90,8 @@ flowchart LR
 
 ### 模型 key 的来源
 
-- 平台先读凭据存储里名为 `deepseek` 的凭据，没有时才用启动时环境变量 `DEEPSEEK_API_KEY` 的值。
+- 每个执行器声明自己要的模型 key：凭据名和环境变量名（`src/executor/types.ts` 的 `ModelKeySpec`）。dsh 的是凭据 `deepseek` 和环境变量 `DEEPSEEK_API_KEY`。
+- 平台先读凭据存储里那条凭据，没有时才用启动时那个环境变量的值。
 - 凭据存储里有 `deepseek` 但读不出来时（没有主密钥、换了主密钥、记录损坏），平台不退回环境变量，直接报错、不启动。原因：避免用错 key。
 - 环境变量在启动时读出并从 `process.env` 删除。之后平台启动的 git、检查命令继承不到它，只有 dsh 进程得到模型 key。
 - 模型 key 必须交给 dsh 进程：这一版 dsh 的模型服务只接受环境变量名（`apiKeyEnv`）。写进配置文件会落在磁盘上，agent 的沙箱能读到。
@@ -143,7 +144,7 @@ flowchart LR
 
 | 范围 | 文件 |
 |---|---|
-| 凭据存储 | `src/credentials/key.ts`（主密钥）、`store.ts`（存储和加密）、`types.ts`（对外类型）、`model-key.ts`（模型 key 的来源）、`redact.ts`（遮蔽） |
+| 凭据存储 | `src/credentials/key.ts`（主密钥）、`store.ts`（存储和加密）、`types.ts`（对外类型）、`model-key.ts`（按执行器声明的名字取模型 key）、`redact.ts`（遮蔽） |
 | 启动和检查 | `src/cli.ts`（启动时读出主密钥）、`src/runner/doctor.ts`（「凭据主密钥」「凭据隔离」两项） |
 | Web | `src/web/server.ts` 的 `/api/credentials` 接口，以及凭据页 |
 

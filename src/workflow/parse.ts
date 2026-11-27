@@ -3,13 +3,12 @@
 import { matchesAny } from './glob.ts'
 import { z } from 'zod'
 import type { FieldError } from './agent.ts'
-import { agentErrors, agentFields, DEFAULT_MODEL, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
+import { agentErrors, agentFields, id, pathOf, relPath, text, toAgentConfig, yamlOf, zodMessage } from './agent.ts'
 import { PLATFORM_ACTIONS, roleOfNode, type Check, type GateNode, type NodeId, type Role, type RoleId, type TemplateLookup, type Workflow, type WorkflowNode } from './types.ts'
 
 export type WorkflowError = FieldError
 export type ParseResult = { ok: true; workflow: Workflow } | { ok: false; errors: WorkflowError[] }
 
-export { DEFAULT_MODEL }
 export const DEFAULT_MAX_ROUNDS = 5
 export const DEFAULT_MAX_FIXES = 2
 export const DEFAULT_CHECK_TIMEOUT_SEC = 600

@@ -11,6 +11,7 @@ import {
   agentEnv,
   ALWAYS_DISABLED,
   BUILTIN_TOOL_ROWS,
+  DEFAULT_MODEL,
   DshExecutor,
   dshEntry,
   EPHEMERAL_STALE_MS,
@@ -808,4 +809,16 @@ test('a failed dsh start removes the token-bearing profile right away; standard 
     .digest('hex')
     .slice(0, 16)
   assert.equal(profileHash(bare), legacy)
+})
+
+test('角色没写模型时 dsh 用自己的默认模型；写了就用写的', async () => {
+  const { created, createHarness } = fakeHarnesses()
+  const ex = new DshExecutor({ dshHome: tmpHome(), dshBin: 'dsh', modelKey: () => 'k', createHarness })
+  await ex.send({ key: 'm/a', nonce: 'n1', prompt: '做事', spec: { write: 'none', cwd: '/data/worktrees/m1', profile: bare }, ask: async () => '' })
+  await ex.send({ key: 'm/b', nonce: 'n1', prompt: '做事', spec: { model: 'deepseek-pro', write: 'none', cwd: '/data/worktrees/m2', profile: bare }, ask: async () => '' })
+  assert.deepEqual(
+    created.map(c => c.model),
+    [DEFAULT_MODEL, 'deepseek-pro'],
+  )
+  await ex.close()
 })

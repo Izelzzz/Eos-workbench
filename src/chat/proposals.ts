@@ -113,7 +113,7 @@ const changesOf = (kind: ProposalKind, before: string | undefined, after: string
     if (!t.ok) return []
     const a = t.template
     return [
-      `新建的 Agent 模板：${a.executor === undefined ? '' : `执行器 ${a.executor}，`}模型 ${a.model}，写入 ${a.write}${a.writePaths === undefined ? '' : `（${a.writePaths.join('、')}）`}，去掉的工具组 ${a.denyTools.join('、') || '无'}，技能 ${a.skills.join('、') || '无'}，MCP ${a.mcp.map(m => m.name).join('、') || '无'}`,
+      `新建的 Agent 模板：${a.executor === undefined ? '' : `执行器 ${a.executor}，`}模型 ${a.model ?? '执行器默认'}，写入 ${a.write}${a.writePaths === undefined ? '' : `（${a.writePaths.join('、')}）`}，去掉的工具组 ${a.denyTools.join('、') || '无'}，技能 ${a.skills.join('、') || '无'}，MCP ${a.mcp.map(m => m.name).join('、') || '无'}`,
     ]
   }
   const out = permissionChanges(kind, before, after, lookup).map(describe)

@@ -1,6 +1,5 @@
 name: assistant
 description: 对话：和用户多轮对话，回答关于平台上的工作流、约定、模板、技能和任务的问题。只能读平台数据，不能改任何东西。
-model: deepseek-flash
 write: none
 tools:
   deny: [web, subagent, bash, schedule, todo, goal]

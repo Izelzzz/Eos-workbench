@@ -129,7 +129,7 @@ const callAndStore = async (
       prompt: `${t.template.prompt.trimEnd()}\n\n${prompt}`,
       spec: {
         ...(t.template.executor === undefined ? {} : { executor: t.template.executor }),
-        model: t.template.model,
+        ...(t.template.model === undefined ? {} : { model: t.template.model }),
         ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
         write: 'none',
         cwd,

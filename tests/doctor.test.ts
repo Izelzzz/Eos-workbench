@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { parseMasterKey } from '../src/credentials/key.ts'
 import type { ModelKey } from '../src/credentials/model-key.ts'
+import { Credentials } from '../src/credentials/store.ts'
+import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { dshFacts, dshHealth, type DshFacts } from '../src/executor/dsh.ts'
 import type { ExecutorContext } from '../src/executor/types.ts'
 import { atLeast, evaluate, formatItems, gather, type Facts } from '../src/runner/doctor.ts'
@@ -138,10 +141,10 @@ test('设置了主密钥时如实说明谁能读到；没有独立用户时是 �
   for (const s of [{ backend: 'bwrap' }, { backend: 'landlock', enforcement: 'full' }] as const) {
     assert.match(
       isolation(s),
-      /^⚠ 凭据隔离：agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到\n  怎么修：用独立的用户运行检查命令和 agent/,
+      /^⚠ 凭据隔离：agent 和平台是同一个用户，读不到主密钥只靠沙箱挡住；agent 和执行器进程（dsh）是同一个用户，读不到执行器进程环境里的模型 key 靠沙箱挡住；检查命令（npm test 等）和平台是同一个用户、不在沙箱里，主密钥和模型 key 都能读到\n  怎么修：用独立的用户运行检查命令和 agent/,
     )
   }
-  assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥；没有可用的沙箱，agent 能读到 dsh 进程环境里的模型 key；检查命令/)
+  assert.match(isolation({ backend: 'none' }), /^⚠ 凭据隔离：没有可用的沙箱，agent 和平台是同一个用户，能读到主密钥；没有可用的沙箱，agent 能读到执行器进程（dsh）环境里的模型 key；检查命令/)
   assert.ok(!evaluate({ ...good, masterKey: { kind: 'missing' } }).some(i => i.name === '凭据隔离'))
   assert.match(isolationOf({ ...good, executors: [] }), /没有可用的沙箱/, '没有执行器报告时不当作有沙箱')
 })
@@ -150,11 +153,11 @@ test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓
   const users: Omit<Facts, 'executors'> = { ...platform, checkUser: { kind: 'ok', name: 'eos-check' }, agentUser: { kind: 'ok', name: 'eos-agent' } }
   const both: Facts = withDsh({ sandbox: { backend: 'landlock', enforcement: 'full' } }, users)
   const text = formatItems(evaluate(both))
-  assert.match(text, /✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和 dsh 进程的环境/)
-  assert.match(text, /✓ agent 的用户：dsh 和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境/)
+  assert.match(text, /✓ 检查命令的用户：检查命令以 eos-check 运行，没有任何特权，读不到平台和执行器进程（dsh）的环境/)
+  assert.match(text, /✓ agent 的用户：执行器进程（dsh）和 agent 以 eos-agent 运行，没有任何特权，读不到平台进程的环境/)
   assert.match(
     text,
-    /✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和 dsh 是同一个用户，读不到 dsh 进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到/,
+    /✓ 凭据隔离：agent 以 eos-agent 运行，读不到平台进程环境里的主密钥；agent 和执行器进程（dsh）是同一个用户，读不到执行器进程环境里的模型 key 靠沙箱挡住；检查命令以 eos-check 运行，主密钥和模型 key 都读不到/,
   )
   const checkOnly = evaluate({ ...both, agentUser: { kind: 'none' } }).find(i => i.name === '凭据隔离')
   assert.equal(checkOnly?.status, 'warn')
@@ -170,19 +173,25 @@ test('检查命令和 agent 都换了用户、沙箱可用时凭据隔离是 ✓
   }
 })
 
-test('gather：设置了 agent 的用户但没有设置 dsh 的入口时是 ✗（dsh 不会切换用户），而不是误报已隔离', () => {
+test('gather：设置了 agent 的用户但执行器切换不过去（dsh 没有设置入口）时是 ✗，而不是误报已隔离', () => {
   const launcher = process.env.EOS_DSH_LAUNCHER
   delete process.env.EOS_DSH_LAUNCHER
   try {
+    const user = { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' }
+    // dsh 自己报告：设置了 agent 的用户、没有入口时切换不过去；设置了入口就没有这一条
+    const health = (env: NodeJS.ProcessEnv) => dshHealth(dshFacts({ ...ctx({ source: 'missing' }, env), agentUser: user }))
+    assert.match(health({}).agentUser ?? '', /设置了 EOS_AGENT_USER，但没有设置 EOS_DSH_LAUNCHER：dsh 不会切换到/)
+    assert.equal(health({ EOS_DSH_LAUNCHER: '/x' }).agentUser, undefined)
+    assert.equal(dshHealth(dshFacts(ctx({ source: 'missing' }))).agentUser, undefined, '没有设置 agent 的用户时不看')
     const f = gather({
       root: ROOT,
       dataDir: join(tmp(), 'data'),
-      executors: noExecutors,
+      executors: [{ name: 'dsh', health: health({}) }],
       masterKey: { kind: 'missing' },
       checkUser: { kind: 'none' },
-      agentUser: { kind: 'ok', user: { name: process.env.USER ?? 'root', gid: 0, home: '/tmp' } },
+      agentUser: { kind: 'ok', user },
     })
-    // 本机没有切换用户的能力时先报切换不过去；有能力（root）时报没有入口。两种都是 ✗。
+    // 本机没有切换用户的能力时先报切换不过去；有能力（root）时报执行器切换不过去。两种都是 ✗。
     assert.equal(f.agentUser.kind, 'fail')
     if (process.getuid?.() === 0) assert.match(f.agentUser.kind === 'fail' ? f.agentUser.error : '', /没有设置 EOS_DSH_LAUNCHER/)
   } finally {
@@ -380,4 +389,17 @@ test('eos web 的端口被占时说清楚：可能已经有一个 eos web 在运
   } finally {
     busy.close()
   }
+})
+
+test('现有部署不用迁移：凭据存储里叫 deepseek 的凭据照常被用上，比环境变量 DEEPSEEK_API_KEY 优先', () => {
+  const data = join(tmp(), 'data')
+  mkdirSync(data, { recursive: true })
+  const master = parseMasterKey(KEY)
+  assert.equal(master.kind, 'ok')
+  const c = new Credentials(join(data, 'eos.db'), master.kind === 'ok' ? master.key : undefined)
+  assert.ok(c.put(LOCAL_OWNER, 'deepseek', 'api-key', 'sk-stored-key-0000').ok)
+  c.close()
+  const r = cli(['doctor', '--data', data], { EOS_MASTER_KEY: KEY, DEEPSEEK_API_KEY: 'sk-env-key-1111' })
+  assert.match(r.stdout, /✓ DeepSeek API key：来自凭据存储（凭据 deepseek）/)
+  assert.ok(!r.stdout.includes('sk-stored-key-0000') && !r.stdout.includes('sk-env-key-1111'))
 })

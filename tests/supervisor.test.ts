@@ -210,7 +210,7 @@ test('角色写了没登记的执行器时创建任务就报错，不建任务�
   recording.send = (p: Parameters<Executor['send']>[0]) => (seen.push(p.spec.executor), send(p))
   const recovered: (string | undefined)[] = []
   recording.findReply = async (_key, nonce, executor) => (recovered.push(executor), recording.completed.get(nonce))
-  const sup = new Supervisor({ store: s.store, executor: recording, dataDir: s.data, pollMs: 2, unknownExecutor: n => (n === 'other' ? undefined : `没有名为「${n}」的执行器`) })
+  const sup = new Supervisor({ store: s.store, executor: recording, dataDir: s.data, pollMs: 2, checkExecutor: n => (n === undefined || n === 'other' ? undefined : `没有名为「${n}」的执行器`) })
   const wf = (executor: string) =>
     `name: mixed\nroles:\n  dev: { executor: ${executor}, prompt: 写代码, write: worktree }\n  rev: { prompt: 评审 }\nnodes:\n  - { id: build, kind: agent, role: dev, task: 实现 }\n  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }\n`
   assert.ok(sup.conventions.save({ kind: 'workflow', name: 'mixed', content: wf('nope'), actor: 'web' }, 1).ok)
