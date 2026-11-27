@@ -37,11 +37,12 @@ flowchart TD
   role --> scope["写入范围<br/>write、writePaths"]
   prof -- "profile 补丁和技能目录" --> dsh["dsh 进程<br/>按能力面区分"]
   dsh --> agent["agent"]
-  scope -- "沙箱：只能写 worktree" --> agent
+  scope -- "沙箱：可写的角色只能写 worktree，只读的角色不能写" --> agent
   agent -- "改动" --> wt["worktree"]
   wt --> revert{"平台在提交前核对<br/>改动在 writePaths 内？"}
-  revert -- "在" --> commit["提交"]
-  revert -- "不在" --> undo["撤销，记入 trace<br/>下一轮告知 agent"]
+  revert -- "在范围内的" --> commit["提交"]
+  revert -- "越界的" --> undo["撤销，记入 trace<br/>下一轮告知 agent"]
+  undo -- "撤销后仍有越界" --> stop["不提交，任务停下"]
 ```
 
 | 方面 | 设计 |

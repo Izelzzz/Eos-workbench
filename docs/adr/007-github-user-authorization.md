@@ -31,12 +31,13 @@ sequenceDiagram
   U->>P: 点击「用 GitHub 账号授权」
   P->>U: 跳转到 GitHub 授权页（带一次性的 state）
   U->>G: 在 GitHub 上同意
-  G->>P: 回调（code 和 state）
+  G->>U: 跳回平台的回调地址（code 和 state）
+  U->>P: 浏览器访问回调地址
   P->>G: 用 code 换用户令牌和刷新令牌
   P->>P: 加密保存为 github-user 凭据
   Note over P,G: 之后的任务
+  P->>G: 使用令牌前，距到期不足 5 分钟或上次被拒时，先用刷新令牌续期
   P->>G: 以授权人的身份克隆、推送、开 PR
-  P->>G: 令牌到期前 5 分钟用刷新令牌续期
 ```
 
 | 方面 | 设计 |
