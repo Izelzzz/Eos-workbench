@@ -18,7 +18,7 @@ const tmp = () => {
   dirs.push(d)
   return d
 }
-const goodDsh: DshFacts = { install: { version: '0.2.2-rc.5' }, sandbox: { backend: 'bwrap' }, modelKey: { source: 'credentials' } }
+const goodDsh: DshFacts = { install: { version: '0.2.2-rc.5' }, sandbox: { backend: 'bwrap' }, modelKey: { source: 'credentials' }, credentialsUsable: true }
 /** 平台的事实加上 dsh 的自检（dsh 的事实改掉其中几项）。 */
 const withDsh = (d: Partial<DshFacts>, f: Omit<Facts, 'executors'>): Facts => ({ ...f, executors: [{ name: 'dsh', health: dshHealth({ ...goodDsh, ...d }) }] })
 const platform: Omit<Facts, 'executors'> = {
@@ -34,7 +34,7 @@ const platform: Omit<Facts, 'executors'> = {
 const good: Facts = withDsh({}, platform)
 /** 只测平台那几项时，gather 不带执行器的自检。 */
 const noExecutors: Facts['executors'] = []
-const ctx = (modelKey: ModelKey, env: NodeJS.ProcessEnv = {}): ExecutorContext => ({ root: ROOT, dataDir: tmp(), env, modelKey: () => modelKey })
+const ctx = (modelKey: ModelKey, env: NodeJS.ProcessEnv = {}): ExecutorContext => ({ root: ROOT, dataDir: tmp(), env, modelKey: () => modelKey, credentialsUsable: true })
 
 test('版本比较按主、次、修订号', () => {
   assert.equal(atLeast('24.9.0', '24.9.0'), true)
@@ -88,7 +88,16 @@ test('Node 版本不够是 ⚠（只提示），其余不满足是 ✗；每项�
   const text = formatItems(items)
   assert.match(text, /⚠ Node：22\.23\.5，低于 Eos 要求的 >=24\.9\.0.*；照常启动，但可能遇到兼容问题\n  怎么修：安装 Node 24\.9\.0/)
   assert.match(text, /✗ DeepSeek API key：凭据存储里没有 deepseek，也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：在 Web 的「凭据」页添加名为 deepseek/)
-  assert.match(text, /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：生成一个主密钥：openssl rand -base64 32/)
+  // 没有主密钥时凭据存储存不进凭据：说清楚为什么里面没有
+  assert.match(
+    formatItems(evaluate(withDsh({ modelKey: { source: 'missing' }, credentialsUsable: false }, platform))),
+    /✗ DeepSeek API key：凭据存储里没有 deepseek：主密钥 EOS_MASTER_KEY 没有设置或无效（见「凭据主密钥」一项），凭据存储存不进凭据；也没有设置环境变量 DEEPSEEK_API_KEY\n  怎么修：/,
+  )
+  assert.equal(dshFacts({ ...ctx({ source: 'missing' }), credentialsUsable: false }).credentialsUsable, false)
+  assert.match(
+    text,
+    /✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32.*备份到这台服务器以外的地方.*② 启动平台时交给它：read -rs EOS_MASTER_KEY; EOS_MASTER_KEY=\$EOS_MASTER_KEY npm run eos -- web.*不要把值写进这台服务器上的文件.*③ Docker 部署：写进宿主机上的 \.env/,
+  )
   assert.match(text, /✗ git：找不到 git 命令/)
   assert.match(text, /✗ 数据目录：\/srv\/eos：没有写权限（EACCES）\n  怎么修：用 --data/)
   assert.match(text, /✗ dsh：没有安装，或安装不完整\n  怎么修：在仓库目录运行 npm install/)
@@ -104,7 +113,7 @@ test('engines 读不出或写法认不出时给出提示；git 运行失败和�
 
 test('没设置主密钥只提示（⚠），写明怎么生成；doctor 只显示指纹', () => {
   const text = formatItems(evaluate({ ...good, masterKey: { kind: 'missing' } }))
-  assert.match(text, /⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据\n  怎么修：生成一个主密钥/)
+  assert.match(text, /⚠ 凭据主密钥：没有设置 EOS_MASTER_KEY，不能保存或读取凭据\n  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成/)
   assert.match(formatItems(evaluate(good)), /✓ 凭据主密钥：已设置 EOS_MASTER_KEY（指纹 0123456789abcdef）/)
 })
 
@@ -257,7 +266,8 @@ test('gather：读 package.json 的 engines；执行器的自检原样带上；�
 const KEY = Buffer.alloc(32, 7).toString('base64')
 
 const cli = (args: string[], env: NodeJS.ProcessEnv) =>
-  spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH, ...env } })
+  // 超时：命令没有按预期失败退出（例如 eos web 真的监听上了）时让测试失败，而不是一直挂着
+  spawnSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args], { cwd: ROOT, encoding: 'utf8', env: { PATH: process.env.PATH, ...env }, timeout: 60_000 })
 
 test('eos doctor 逐项列出结果，有 ✗ 时退出码不为 0', () => {
   const data = join(tmp(), 'data')
@@ -356,4 +366,18 @@ test('dsh 的自检按 EOS_MODEL_BASE_URL 收集解析后的主机，官方主�
   const bad = run('https://user:secret-pw@gateway.example/anthropic')
   assert.equal(bad?.kind, 'invalid')
   assert.ok(!JSON.stringify(bad).includes('secret-pw'))
+})
+
+test('eos web 的端口被占时说清楚：可能已经有一个 eos web 在运行，停掉它或换端口', async () => {
+  const { createServer } = await import('node:net')
+  const busy = createServer()
+  await new Promise<void>(r => busy.listen(0, '127.0.0.1', r))
+  const port = (busy.address() as { port: number }).port
+  try {
+    const r = cli(['web', '--port', String(port), '--data', join(tmp(), 'data')], { DEEPSEEK_API_KEY: 'k' })
+    assert.equal(r.status, 1)
+    assert.match(r.stderr, new RegExp(`端口 ${port} 已被占用（127\\.0\\.0\\.1:${port}），可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口`))
+  } finally {
+    busy.close()
+  }
 })

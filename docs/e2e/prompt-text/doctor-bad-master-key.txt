@@ -1,0 +1,11 @@
+Eos 环境检查（数据目录 <数据目录>）
+⚠ Node：22.23.5，低于 Eos 要求的 >=24.9.0（package.json 的 engines，和 dsh 声明的要求一致）；照常启动，但可能遇到兼容问题
+  怎么修：安装 Node 24.9.0 或更新的版本，再用它启动平台
+✗ DeepSeek API key：凭据存储里没有 deepseek：主密钥 EOS_MASTER_KEY 没有设置或无效（见「凭据主密钥」一项），凭据存储存不进凭据；也没有设置环境变量 DEEPSEEK_API_KEY
+  怎么修：在 Web 的「凭据」页添加名为 deepseek、类型为「模型 API key」的凭据（需要先设置主密钥 EOS_MASTER_KEY）；或在启动平台的环境里设置 DEEPSEEK_API_KEY=<你的 key>
+✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
+✓ dsh：0.2.2-rc.5
+✗ 凭据主密钥：EOS_MASTER_KEY 不是 base64 编码
+  怎么修：平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32（没有 openssl 时：node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），把值备份到这台服务器以外的地方（例如密码管理器）：丢了它，存过的凭据只能重新录入；② 启动平台时交给它：read -rs EOS_MASTER_KEY; EOS_MASTER_KEY=$EOS_MASTER_KEY npm run eos -- web（read 读入时不显示、不进 shell 历史，值只交给这一个命令）。不要把值写进这台服务器上的文件或 ~/.zshrc 这类启动配置（agent 能读到平台用户能读的文件，启动配置会被所有程序继承），也不要直接敲在命令行里（会进 shell 历史）；③ Docker 部署：写进宿主机上的 .env，见 docs/deploy.md
+✓ git：2.43.0
+✓ 数据目录：<数据目录> 可写

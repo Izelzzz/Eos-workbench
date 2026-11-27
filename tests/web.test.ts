@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { Store } from '../src/store/store.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
-import { createWebServer, listenPlan, parsePublicUrl } from '../src/web/server.ts'
+import { createWebServer, listenFailure, listenPlan, parsePublicUrl } from '../src/web/server.ts'
 import { parseMasterKey, type MasterKey } from '../src/credentials/key.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
@@ -256,6 +256,8 @@ test('with a public URL, its host is accepted and only its exact origin may writ
 
 test('the listen address decides the printed address and the warning; an address nobody can reach without a public URL is refused', () => {
   const pub = new URL('https://eos.example.com')
+  assert.equal(listenFailure('127.0.0.1', 4317, { code: 'EADDRINUSE', message: 'x' }), '端口 4317 已被占用（127.0.0.1:4317），可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口')
+  assert.equal(listenFailure('127.0.0.1', 4317, { code: 'EACCES', message: 'x' }), 'Web 服务没能监听 127.0.0.1:4317：EACCES')
   assert.deepEqual(listenPlan('127.0.0.1', 4317, undefined), { url: 'http://127.0.0.1:4317', exposed: false })
   assert.deepEqual(listenPlan('::1', 4317, undefined), { url: 'http://[::1]:4317', exposed: false })
   assert.deepEqual(listenPlan('0.0.0.0', 4317, undefined), { url: 'http://localhost:4317', exposed: true })

@@ -921,6 +921,8 @@ export type DshFacts = {
   sandbox: DshSandbox
   /** 模型 API key 的来源：只有来源，没有 key 本身。 */
   modelKey: { source: 'credentials' | 'env' | 'missing' } | { source: 'error'; error: string }
+  /** 凭据存储能不能存取凭据（设置了主密钥）。 */
+  credentialsUsable: boolean
   /** EOS_MODEL_BASE_URL：没设置时没有这一项；设了时是解析后的主机、路径和是否本机，或者校验失败的原因（不含原始地址）。 */
   modelBaseUrl?: { kind: 'ok'; host: string; path: string; loopback: boolean } | { kind: 'invalid'; error: string }
 }
@@ -971,7 +973,15 @@ const modelKeyItem = (f: DshFacts): HealthItem => {
     case 'env':
       return { name, status: 'ok', detail: `来自环境变量 ${MODEL_KEY_ENV}（凭据存储里没有 ${MODEL_KEY_CREDENTIAL}）` }
     case 'missing':
-      return { name, status: 'fail', detail: `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`, fix: MODEL_KEY_FIX }
+      return {
+        name,
+        status: 'fail',
+        // 主密钥没设置或无效时凭据存储存不进凭据：说清楚为什么里面没有，免得以为是存了没读到
+        detail: f.credentialsUsable
+          ? `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置环境变量 ${MODEL_KEY_ENV}`
+          : `凭据存储里没有 ${MODEL_KEY_CREDENTIAL}：主密钥 ${MASTER_KEY_ENV} 没有设置或无效（见「凭据主密钥」一项），凭据存储存不进凭据；也没有设置环境变量 ${MODEL_KEY_ENV}`,
+        fix: MODEL_KEY_FIX,
+      }
     case 'error':
       return { name, status: 'fail', detail: `凭据存储里的 ${MODEL_KEY_CREDENTIAL} 读不出来：${f.modelKey.error}`, fix: `修好或删掉这条凭据后重新录入；删掉后会改用环境变量 ${MODEL_KEY_ENV}` }
   }
@@ -1052,6 +1062,7 @@ export const dshFacts = (ctx: ExecutorContext): DshFacts => {
     install: installFact(ctx),
     sandbox: dshSandbox(),
     modelKey: k.source === 'credentials' || k.source === 'env' ? { source: k.source } : k,
+    credentialsUsable: ctx.credentialsUsable,
     ...modelBaseUrlFact(ctx.env),
   }
 }

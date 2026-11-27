@@ -22,7 +22,7 @@ import { holder } from './runner/lock.ts'
 import { diffStat } from './runner/git.ts'
 import { Supervisor } from './runner/supervisor.ts'
 import { Store } from './store/store.ts'
-import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
+import { createWebServer, listenFailure, listenPlan, parsePublicUrl } from './web/server.ts'
 import { WebChats } from './web/chat.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
@@ -118,6 +118,7 @@ const executorContext = (modelKey: ExecutorContext['modelKey']): ExecutorContext
   dataDir,
   env: process.env,
   modelKey,
+  credentialsUsable: masterKey.kind === 'ok',
   ...(agentUser.kind === 'ok' ? { agentUser: agentUser.user } : {}),
 })
 const startupChecks = () => evaluate(gather({ root: ROOT, dataDir, executors: healthOf(executorContext(() => startupModelKey)), masterKey, checkUser, agentUser }))
@@ -378,7 +379,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     if (typeof plan === 'string') return fail(plan)
     await new Promise<void>(r => {
       const failed = (e: NodeJS.ErrnoException) => {
-        const line = `Web 服务没能监听 ${values.host}:${port}：${e.code ?? e.message}`
+        const line = listenFailure(values.host, port, e)
         appendLog(processLog, line)
         fail(line)
       }

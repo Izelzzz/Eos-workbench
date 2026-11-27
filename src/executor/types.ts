@@ -80,6 +80,8 @@ export type ExecutorContext = {
   env: NodeJS.ProcessEnv
   /** 模型 key 现在的来源和值（凭据存储优先，环境变量其次）：每次取都重新读，在 Web 上换了 key 之后取到的是新的。 */
   modelKey: () => ModelKey
+  /** 平台的凭据存储能不能存取凭据（设置了有效的主密钥）。不能时，自检里说清凭据存储里为什么没有执行器要的 key。 */
+  credentialsUsable: boolean
   /** agent 用的系统用户（部署镜像里设置）；没有设置时 undefined。 */
   agentUser?: CheckUser
 }
