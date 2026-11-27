@@ -4,7 +4,7 @@
 // 2. 真实链路：容器里起假模型，经 eos 入口跑 `eos chat new`（平台以 eos 运行，dsh 以 eos-agent 运行）。
 //    调用进行中看 DshExecutor 写出的带令牌配置：权限、属主和组，eos-check 和 eos-agent 能不能读；调用结束后核对配置删掉了、对话有回复。
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -68,7 +68,7 @@ const watch = (async () => {
         const s = statSync(p)
         return `${(s.mode & 0o7777).toString(8)} ${execFileSync('stat', ['-c', '%U:%G', p], { encoding: 'utf8' }).trim()}`
       }
-      const token = /Bearer [A-Za-z0-9_-]+/.exec(execFileSync('cat', [file], { encoding: 'utf8' }))?.[0] ?? ''
+      const token = /Bearer [A-Za-z0-9_-]+/.exec(readFileSync(file, 'utf8'))?.[0] ?? ''
       const readable = async (user: string) => ((await as(user, 'cat', file)).includes(token) && token !== '' ? '读得到' : '读不到')
       seen.push({ dir: st(dir), file: st(file), 'eos-check': await readable('eos-check'), 'eos-agent': await readable('eos-agent') })
     }
