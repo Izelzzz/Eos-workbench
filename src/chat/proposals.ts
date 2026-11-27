@@ -50,7 +50,10 @@ export const proposer = (o: { chats: ChatStore; store: Store; conventions: Conve
     const current = o.store.convention(p.kind, p.name)
     if (current?.content === p.content) return fail(`和${KIND_NAMES[p.kind]}「${p.name}」当前的第 ${current.version} 版完全一样，不需要提议`)
     count++
-    const row = o.chats.addProposal({ chatId: o.chatId, call: o.call, kind: p.kind, name: p.name, ...(current === undefined ? {} : { baseVersion: current.version }), content: p.content, rationale: p.rationale }, o.now())
+    const row = o.chats.addProposal(
+      { chatId: o.chatId, call: o.call, kind: p.kind, name: p.name, ...(current === undefined ? {} : { baseVersion: current.version }), content: p.content, rationale: p.rationale },
+      o.now(),
+    )
     return {
       text: `提议 #${row.id} 已记下：${current === undefined ? '新建' : `修改（基于第 ${current.version} 版）`}${KIND_NAMES[p.kind]}「${p.name}」。它还没有生效，要等用户确认后才会保存。`,
       isError: false,

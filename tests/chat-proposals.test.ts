@@ -144,7 +144,38 @@ test('no code the agent can reach saves a convention: the chat modules never cal
   // agent 能触发的代码：端点、工具、提议、对话流程。它们都不调用保存约定的方法（保存只在人确认的路径里）。
   for (const f of ['chat.ts', 'mcp.ts', 'tools.ts', 'proposals.ts', 'store.ts']) {
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'chat', f), 'utf8')
-    for (const write of ['saveConvention', 'seedConvention', 'insertConvention', 'decideProposal', 'conventions.save(', 'conventions.seed(', '.save({', 'INSERT INTO conventions', 'UPDATE conventions'])
+    for (const write of [
+      'saveConvention',
+      'seedConvention',
+      'insertConvention',
+      'decideProposal',
+      'conventions.save(',
+      'conventions.seed(',
+      '.save({',
+      'INSERT INTO conventions',
+      'UPDATE conventions',
+    ])
       assert.ok(!src.includes(write), `src/chat/${f} contains ${write}`)
   }
+})
+
+test('proposals from a turn that got no reply (the call failed, or could not be claimed after a restart) are voided', async () => {
+  const p = platform()
+  const yaml = renamed(standard(p), 'standard-lite')
+  // 调用失败：执行器在提议之后抛错。
+  const failing = new McpExecutor(steps([{ tool, args: { kind: 'workflow', name: 'standard-lite', content: yaml, rationale: 'x' } }]))
+  const send = failing.send.bind(failing)
+  failing.send = async q => {
+    await send(q)
+    throw new Error('连接断了')
+  }
+  const r = await new Chats(p.opts(failing)).start('设计一个工作流', 'cli')
+  assert.equal(r.ok, false)
+  assert.match(p.chats.proposals(r.chat!.id)[0]!.voided ?? '', /调用失败：连接断了/)
+  // 平台重启：这一句的提议已经记下，但调用没做完、也认领不到回复。
+  const id = p.chats.create({ id: 'c7', firstMessage: '你好', actor: 'cli' }, 1).id
+  const seq = p.chats.append(id, { at: 1, role: 'user', text: '设计一个工作流', actor: 'cli' })
+  p.chats.addProposal({ chatId: id, call: `chat/${id}/${seq}`, kind: 'workflow', name: 'standard-lite', content: yaml, rationale: 'x' }, 1)
+  assert.ok((await new Chats(p.opts(new McpExecutor(() => ({ reply: '好' })))).send(id, '还在吗', 'cli')).ok)
+  assert.match(p.chats.proposals(id)[0]!.voided ?? '', /没有得到回复/)
 })

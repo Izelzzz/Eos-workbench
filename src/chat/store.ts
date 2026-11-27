@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind } from './types.ts'
+import { PROPOSE_TOOL } from './proposals.ts'
 import { CHAT_PURPOSE } from './types.ts'
 
 const SCHEMA = `
@@ -171,7 +172,8 @@ export class ChatStore {
       failed: log.filter(m => m.role === 'error').length,
       usage: calls.reduce((u, c) => addUsage(u, c.usage), zeroUsage()),
       agentMs: calls.reduce((n, c) => n + c.ms, 0),
-      reads: calls.reduce((n, c) => n + c.reads.length, 0),
+      // 读数据的次数：不算提议。
+      reads: calls.reduce((n, c) => n + c.reads.filter(r => r.tool !== PROPOSE_TOOL).length, 0),
     }
   }
 }

@@ -9,7 +9,8 @@ import type { HttpMcp } from '../executor/types.ts'
 import type { ToolOutcome } from './tools.ts'
 import type { ChatRead } from './types.ts'
 
-export const MAX_BODY_BYTES = 64 * 1024
+/** 请求体上限：要装得下一条最长的提议（6 万字的 YAML，中文按 3 字节算，加理由和 JSON 转义）。 */
+export const MAX_BODY_BYTES = 256 * 1024
 /** 一次调用（用户说一句话，agent 回一次）里最多读几次数据。到了上限，之后的工具调用都返回错误，agent 只能根据已经读到的回答。 */
 export const MAX_TOOL_CALLS = 30
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05']
@@ -92,7 +93,7 @@ export const openEndpoint = async (o: { name: string; tools: McpTool[]; call: (n
         const args = r.params?.arguments
         if (reads.length >= max) {
           reads.push({ tool: name, args: JSON.stringify(args ?? {}), isError: true })
-          return ok({ content: [{ type: 'text', text: `这一轮读取数据的次数已经到上限（${max} 次），不能再读：请根据已经读到的内容回答。` }], isError: true })
+          return ok({ content: [{ type: 'text', text: `这一轮调用平台工具的次数已经到上限（${max} 次），不能再调用：请根据已经得到的内容回答。` }], isError: true })
         }
         const out = o.call(name, args)
         reads.push({ tool: name, args: JSON.stringify(args ?? {}), isError: out.isError })

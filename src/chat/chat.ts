@@ -145,16 +145,15 @@ export class Chats {
         },
       })
     } catch (e) {
-      return this.failed(id, `调用失败：${redact((e as Error).message)}`)
+      return this.failed(id, nonce, `调用失败：${redact((e as Error).message)}`)
     } finally {
       await endpoint.close()
       await this.o.executor.release(cwd).catch(() => undefined)
     }
     const foreign = foreignIn(events)
     if (foreign.length > 0) {
-      const reason = `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`
-      chats.voidProposals(nonce, reason)
-      return this.failed(id, reason)
+      const reason = `agent 调用了平台工具以外的工具（${foreign.join('、')}），这一轮作废`
+      return this.failed(id, nonce, reason)
     }
     return this.succeeded(id, reply, endpoint.reads())
   }
@@ -167,7 +166,9 @@ export class Chats {
     return { ok: true, chat: this.o.chats.summary(id)!, reply: text, call }
   }
 
-  private failed(id: string, error: string): SendResult {
+  /** 这一轮没有得到回复：记下原因，这一轮的提议跟着作废（用户没看到 agent 对它们的说明，不能拿去保存）。 */
+  private failed(id: string, call: string, error: string): SendResult {
+    this.o.chats.voidProposals(call, error)
     this.o.chats.append(id, { at: this.o.now(), role: 'error', text: error })
     return { ok: false, cause: 'upstream', error, chat: this.o.chats.summary(id)! }
   }
@@ -179,7 +180,9 @@ export class Chats {
     const nonce = nonceOf(id, last.seq)
     const found = await this.o.executor.findReply(keyOf(id), nonce).catch(() => undefined)
     if (found === undefined) {
-      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: '这一句没有得到回复：调用没有做完（可能是平台重启了），可以再说一次' })
+      const reason = '这一句没有得到回复：调用没有做完（可能是平台重启了），可以再说一次'
+      this.o.chats.voidProposals(nonce, reason)
+      this.o.chats.append(id, { at: this.o.now(), role: 'error', text: reason })
       return
     }
     const events = redactDeep(await this.o.executor.traceOf(keyOf(id), nonce).catch(() => []), this.o.redact)
@@ -187,7 +190,7 @@ export class Chats {
     if (!this.o.chats.trace(id).some(r => r.call === nonce && r.event.kind !== 'call_start')) this.o.chats.appendTrace(id, nonce, events)
     const foreign = foreignIn(events)
     if (foreign.length > 0) {
-      const reason = `agent 调用了平台只读工具以外的工具（${foreign.join('、')}），这一轮作废`
+      const reason = `agent 调用了平台工具以外的工具（${foreign.join('、')}），这一轮作废`
       this.o.chats.voidProposals(nonce, reason)
       this.o.chats.append(id, { at: this.o.now(), role: 'error', text: reason })
       return

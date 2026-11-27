@@ -14,7 +14,7 @@ const time = (at: number) => new Date(at).toISOString().replace('T', ' ').slice(
 const line = (m: ChatMessage): string => {
   if (m.role === 'user') return `\n── ${time(m.at)} 你\n${m.text}`
   if (m.role === 'error') return `\n── ${time(m.at)} 没有回复\n${m.text}`
-  const reads = m.call.reads.length === 0 ? '' : `\n（读了：${m.call.reads.map(r => `${r.tool}${r.isError ? '✗' : ''}`).join('、')}）`
+  const reads = m.call.reads.length === 0 ? '' : `\n（用了工具：${m.call.reads.map(r => `${r.tool}${r.isError ? '✗' : ''}`).join('、')}）`
   return `\n── ${time(m.at)} 助手 · ${(m.call.ms / 1000).toFixed(1)}s · 输入 ${m.call.usage.input} 输出 ${m.call.usage.output}${reads}\n${m.text}`
 }
 
