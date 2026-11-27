@@ -143,7 +143,7 @@ for (const [name, make] of Object.entries({ ...FACTORIES, memory: () => new Memo
 
 // ---- 注册表 ----
 
-const ctx: ExecutorContext = { root: ROOT, dataDir: '/nonexistent', env: {}, modelKey: () => ({ source: 'missing' }) }
+const ctx: ExecutorContext = { root: ROOT, dataDir: '/nonexistent', env: {}, modelKey: () => ({ source: 'missing' }), credentialsUsable: true }
 const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandboxed?: boolean } = {}): ExecutorKind => ({
   name,
   create: () => {

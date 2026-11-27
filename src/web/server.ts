@@ -169,6 +169,10 @@ export const listenPlan = (host: string, port: number, publicUrl: URL | undefine
   return `监听 ${host} 时浏览器的 Host 是 ${host}:${port}，不是本机地址；要么改用 --host 0.0.0.0，要么把浏览器用的地址设成 EOS_PUBLIC_URL`
 }
 
+/** 监听失败时的说明。端口被占时多半是已经有一个 eos web 在运行。 */
+export const listenFailure = (host: string, port: number, e: { code?: string; message: string }): string =>
+  e.code === 'EADDRINUSE' ? `端口 ${port} 已被占用，可能已经有一个 eos web 在运行；停掉它或用 --port 换一个端口` : `Web 服务没能监听 ${host}:${port}：${e.code ?? e.message}`
+
 /** 托管平台注册完 App 跳回的路径。 */
 export const APP_CALLBACK = '/api/forge-apps/callback'
 /** 用户在托管平台上授权（OAuth）完跳回的路径。注册 App 时写进 App 的回调地址。 */

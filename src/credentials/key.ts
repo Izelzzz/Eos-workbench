@@ -10,7 +10,8 @@ export type MasterKey = { readonly id: string; readonly key: Buffer }
 
 export type MasterKeyState = { kind: 'ok'; key: MasterKey } | { kind: 'missing' } | { kind: 'invalid'; error: string }
 
-export const GENERATE_HINT = `生成一个主密钥：openssl rand -base64 32（或 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"），在启动平台的环境里设置 ${MASTER_KEY_ENV}=<生成的值>，并单独备份：丢了主密钥，存过的凭据只能重新录入`
+/** 怎么设置主密钥：eos doctor、Web 的凭据页和代码托管页、凭据存储的报错都用这一份。 */
+export const GENERATE_HINT = `平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32；② 在启动平台的环境里设置 ${MASTER_KEY_ENV}=<生成的值>（本机运行时写进 ~/.zshrc 等 shell 的启动配置，就不用每次设；Docker 部署写进 .env，见 docs/deploy.md）；③ 另外备份这个值：丢了它，存过的凭据只能重新录入`
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 

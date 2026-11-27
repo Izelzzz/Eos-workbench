@@ -88,7 +88,10 @@ test('没有主密钥：保存和读取都报中文错误并写明怎么生成�
   new Credentials(path, K1).put(LOCAL_OWNER, 'deepseek', 'api-key', SECRET)
   const c = new Credentials(path, undefined)
   assert.equal(c.usable, false)
-  assert.match((c.put(LOCAL_OWNER, 'x', 'token', 'v') as { error: string }).error, /^没有设置主密钥 EOS_MASTER_KEY，不能保存或读取凭据。生成一个主密钥：openssl rand -base64 32/)
+  assert.match(
+    (c.put(LOCAL_OWNER, 'x', 'token', 'v') as { error: string }).error,
+    /^没有设置主密钥 EOS_MASTER_KEY，不能保存或读取凭据。平台用主密钥加密保存凭据。设置方法：① 生成：openssl rand -base64 32/,
+  )
   assert.match((c.get(LOCAL_OWNER, 'deepseek') as { error: string }).error, /没有设置主密钥/)
   assert.equal(c.list(LOCAL_OWNER).length, 1)
   assert.equal(c.delete(LOCAL_OWNER, 'deepseek'), true)
