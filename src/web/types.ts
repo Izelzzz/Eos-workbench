@@ -168,6 +168,8 @@ export type ChatStreamLine =
   | { type: 'read'; id: string; tool: string; args: string }
   | { type: 'read_failed'; id: string }
   | { type: 'text'; text: string }
+  /** 两步之间没有进度时每 15 秒一行，免得反向代理把空闲的连接断开；页面忽略它。 */
+  | { type: 'ping' }
   | { type: 'done'; ok: true; chat: string }
   | { type: 'done'; ok: false; error: string; chat?: string }
 

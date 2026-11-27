@@ -68,7 +68,8 @@ export type ChatMetrics = { purpose: typeof CHAT_PURPOSE; calls: number; failed:
  * - saved / voided：保存过、作废了；
  * - unanswered：所在那一轮还没有回复（还在进行，或者没做完），现在不能保存；
  * - stale：目标约定已经不是提议基于的版本，保存会被拒；
- * - pending：可以保存。permissions、code 只在这时给：要确认的权限改动（按现在的状态算）和它们的确认码（没有改动时不给码）。
+ * - pending：可以保存。
+ * permissions：涉及的权限改动（按现在的状态算），pending 和 stale 时给。code：确认码，只在 pending 且有权限改动时给。
  * current：目标约定现在的版本（新建的没有），用来显示差异。
  */
 export type ProposalState = 'pending' | 'unanswered' | 'stale' | 'voided' | 'saved'

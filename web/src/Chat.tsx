@@ -216,7 +216,7 @@ function Composer(props: { chat?: string; onDone: (chat?: string) => void; onLiv
     }
     const r = await sendChat({ ...(props.chat === undefined ? {} : { chat: props.chat }), text: said }, on)
     setBusy(false)
-    props.onLive(undefined)
+    // 正在回复的那一格由页面在重新读出记录之后再去掉，免得新的话和回复闪一下不见。
     if (r.ok) setText('')
     else setError(r.error)
     props.onDone(r.chat)
@@ -266,6 +266,7 @@ function ChatList() {
         onLive={setLive}
         onDone={chat => {
           if (chat !== undefined) location.hash = `#/chat/${chat}`
+          else setLive(undefined)
         }}
       />
       {error && <p className="error">{error}</p>}
@@ -299,6 +300,7 @@ function Conversation(props: { id: string }) {
     getChat(props.id).then(
       v => {
         setView(v)
+        setLive(undefined)
         setError(undefined)
       },
       e => setError(String(e.message)),
@@ -325,7 +327,8 @@ function Conversation(props: { id: string }) {
         <>
           <h2 className="chat-h2">提议（agent 提的，你点「保存」之后才生效）</h2>
           {view.proposals.map(v => (
-            <Proposal key={v.proposal.id} v={v} onSaved={() => setReload(n => n + 1)} />
+            // 确认码变了（权限清单变了）就是另一份要确认的东西：换 key，勾选状态清掉，要重新勾。
+            <Proposal key={`${v.proposal.id}-${v.code ?? ''}`} v={v} onSaved={() => setReload(n => n + 1)} />
           ))}
         </>
       )}

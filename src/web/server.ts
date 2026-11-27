@@ -787,10 +787,17 @@ export const createWebServer = (o: {
           if (chatSave !== null) return json(res, 200, saveResponse(o.chat.save(Number(chatSave[1]), g.body)))
           // 按行推送这一轮的进度，最后一行是结果。浏览器断开时这一轮照样做完（记录在对话里）。
           res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' })
-          await o.chat.send(g.body, line => {
+          const write = (line: unknown) => {
             if (!res.destroyed) res.write(`${JSON.stringify(line)}\n`)
-          })
-          return void res.end()
+          }
+          const ping = setInterval(() => write({ type: 'ping' }), 15_000)
+          try {
+            await o.chat.send(g.body, write)
+          } finally {
+            clearInterval(ping)
+            res.end()
+          }
+          return
         }
         if (reg) return json(res, ...registerApp(req, g.body))
         if (userAction === 'authorize') return json(res, ...authorizeUser(req, g.body))

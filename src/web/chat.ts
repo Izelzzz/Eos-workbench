@@ -1,6 +1,6 @@
 // 网页的对话：列表、查看、发话（按步推送进度）、保存提议。和命令行 eos chat 用同一套 Chats、ChatStore 和 save.ts。
 // 提议表和约定表必须用同一个数据库连接（save.ts 在一个事务里写两张表）：ChatStore 由这里从 store.db 建，不从外面传进来。
-import { Chats } from '../chat/chat.ts'
+import { Chats, ours } from '../chat/chat.ts'
 import { saveProposal, viewProposal, type SaveOutcome } from '../chat/save.ts'
 import { ChatStore } from '../chat/store.ts'
 import type { DataSource } from '../chat/tools.ts'
@@ -11,12 +11,9 @@ import type { Store } from '../store/store.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ChatStreamLine, ChatView } from './types.ts'
 
-/** 执行器给 MCP 工具加的前缀（mcp__<服务名>__）不显示给人看。 */
-const toolName = (name: string): string => name.replace(/^mcp__[^_]+__/, '')
-
 /** 一个 trace 事件 → 推给页面的一行进度；不需要显示的返回 undefined。工具的返回内容不推（可能很长，读完的结果在回复里）。 */
 export const streamLine = (e: TraceEvent): ChatStreamLine | undefined => {
-  if (e.kind === 'tool_start') return { type: 'read', id: e.id, tool: toolName(e.name), args: e.args.slice(0, 500) }
+  if (e.kind === 'tool_start') return { type: 'read', id: e.id, tool: ours(e.name) ?? e.name, args: e.args.slice(0, 500) }
   if (e.kind === 'tool_end' && e.isError) return { type: 'read_failed', id: e.id }
   if (e.kind === 'model' && e.text.trim() !== '') return { type: 'text', text: e.text }
   return undefined
@@ -47,12 +44,13 @@ export class WebChats {
     return this.chats.list()
   }
 
-  /** 对话记录、提议（按现在的平台状态算状态和权限）和用量。提议的内容经过遮蔽：记下之后平台才有的凭据值不显示出来。 */
+  /** 对话记录、提议（按现在的平台状态算状态和权限）和用量。 */
   detail(id: string): ChatView | undefined {
     const d = this.chats.detail(id)
     if (d === undefined) return undefined
-    const proposals = this.chats.proposals(id).map(p => redactDeep(viewProposal(p, this.o.store, this.o.conventions, this.chats), this.o.redact))
-    return { ...d, proposals, metrics: this.chats.metrics(id) }
+    // 整个视图都经过遮蔽：记录里可能有平台在那之后才持有的凭据值（例如用户把 key 贴进对话、之后又存成凭据）。
+    const proposals = this.chats.proposals(id).map(p => viewProposal(p, this.o.store, this.o.conventions, this.chats))
+    return redactDeep({ ...d, proposals, metrics: this.chats.metrics(id) }, this.o.redact)
   }
 
   /** 新建对话（不给 chat）或在对话里接着说。进度经 emit 一行行推出去，最后一行是结果。 */
@@ -63,7 +61,13 @@ export class WebChats {
       const line = streamLine(e)
       if (line !== undefined) emit(line)
     })
-    const r = body.chat === undefined ? await flow.start(body.text, 'web') : await flow.send(body.chat, body.text, 'web')
+    let r
+    try {
+      r = body.chat === undefined ? await flow.start(body.text, 'web') : await flow.send(body.chat, body.text, 'web')
+    } catch (e) {
+      // 推送已经开始（响应头发出去了），出错也只能作为最后一行告诉页面。
+      return emit({ type: 'done', ok: false, error: `这一轮出错了：${this.o.redact((e as Error).message)}` })
+    }
     emit(r.ok ? { type: 'done', ok: true, chat: r.chat.id } : { type: 'done', ok: false, error: r.error, ...(r.chat === undefined ? {} : { chat: r.chat.id }) })
   }
 

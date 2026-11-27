@@ -35,7 +35,8 @@ const proposalText = (v: ProposalView): string => {
     pending: () => '待确认，还没有保存',
   }[v.state]()
   const out = [head, `      状态：${state}`, `      理由：${p.rationale}`]
-  if (v.code !== undefined) out.push(`      ⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions ${v.code}：`, ...v.permissions.map(x => `        ⚠ ${x}`))
+  if (v.permissions.length > 0)
+    out.push(`      ⚠⚠ 涉及权限改动（按现在的平台状态算）${v.code === undefined ? '' : `，保存时必须加 --allow-permissions ${v.code}`}：`, ...v.permissions.map(x => `        ⚠ ${x}`))
   if (v.state === 'pending' || v.state === 'stale') {
     const lines = v.current === undefined ? p.content.split('\n').map(text => ({ kind: 'add' as const, text })) : fold(diffLines(v.current.content, p.content))
     out.push(v.current === undefined ? '      全文（新建）：' : `      和当前第 ${v.current.version} 版的差异（+ 新增  - 删除）：`)

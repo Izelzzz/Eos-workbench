@@ -223,13 +223,16 @@ test('while the turn has no reply yet, the proposal shows as unanswered with no 
   }
 })
 
-test('proposal content in the chat view is redacted', async () => {
+test('the whole chat view is redacted: messages, title and proposals recorded before the platform held that credential', async () => {
   const s = await serve(std => reading(() => ({ kind: 'workflow', name: 'standard', content: std().replace(/^description: .*$/m, 'description: 新说明'), rationale: '改说明' })))
   try {
     const done = (await s.say({ text: '改说明' })).at(-1) as Extract<ChatStreamLine, { type: 'done'; ok: true }>
     const id = (await s.view(done.chat)).proposals[0]!.proposal.id
     // 模拟：提议记下之后，平台才有了一个和其中一段相同的凭据值。
     s.store.db.prepare('UPDATE chat_proposals SET content = content || ? WHERE id = ?').run(`\n# ${SECRET}\n`, id)
+    // 用户把 key 贴进了对话（标题取自第一句话），平台之后才把它存成凭据。
+    s.store.db.prepare("UPDATE chat_messages SET text = text || ? WHERE chat_id = ? AND role = 'user'").run(` ${SECRET}`, done.chat)
+    s.store.db.prepare('UPDATE chats SET title = title || ? WHERE id = ?').run(` ${SECRET}`, done.chat)
     const text = JSON.stringify(await s.view(done.chat))
     assert.ok(!text.includes(SECRET))
     assert.equal((await s.save(id)).ok, false, 'and it cannot be saved')
@@ -257,5 +260,37 @@ test('chat writes need a same-origin JSON request; without a chat agent the endp
     assert.equal((await none.post('/api/chats', { text: '你好' })).status, 503)
   } finally {
     await none.close()
+  }
+})
+
+test('a turn that throws ends the stream with an error line, and the server keeps serving', async () => {
+  const s = await serve(() => () => ({ reply: 'x' }))
+  try {
+    s.chat.chats.append = () => {
+      throw new Error(`库被锁了 ${SECRET}`)
+    }
+    const lines = await s.say({ text: '你好' })
+    const last = lines.at(-1) as Extract<ChatStreamLine, { type: 'done' }>
+    assert.equal(last.ok, false)
+    assert.match(!last.ok ? last.error : '', /这一轮出错了：库被锁了/)
+    assert.ok(!JSON.stringify(lines).includes(SECRET), 'the error is redacted')
+    assert.equal((await fetch(`${s.base}/api/chats`)).status, 200, 'still serving')
+  } finally {
+    await s.close()
+  }
+})
+
+test('a stale proposal still lists its permission changes, but has no code and cannot be saved', async () => {
+  const s = await serve(std => reading(() => ({ kind: 'workflow', name: 'standard', content: std().replaceAll('timeoutSec: 600', 'timeoutSec: 60'), rationale: '缩短超时' })))
+  try {
+    const done = (await s.say({ text: '缩短检查超时' })).at(-1) as Extract<ChatStreamLine, { type: 'done'; ok: true }>
+    s.conventions.save({ kind: 'workflow', name: 'standard', content: s.standard().replace(/^description: .*$/m, 'description: 别人改的'), actor: 'cli' }, Date.now())
+    const v = (await s.view(done.chat)).proposals[0]!
+    assert.equal(v.state, 'stale')
+    assert.ok(v.permissions.includes('改了检查命令和平台动作'))
+    assert.equal(v.code, undefined)
+    assert.equal((await s.save(v.proposal.id, {})).ok, false)
+  } finally {
+    await s.close()
   }
 })

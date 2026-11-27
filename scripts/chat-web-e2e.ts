@@ -51,7 +51,9 @@ const atStart = codeState()
   new Conventions(store).seed(Date.now())
   store.close()
 }
-const db = () => new DatabaseSync(join(DATA, 'eos.db'))
+// 只读核对用的一个连接（平台在另一个进程里写，这里读得到已提交的内容）。
+let conn: DatabaseSync | undefined
+const db = () => (conn ??= new DatabaseSync(join(DATA, 'eos.db')))
 const conventionsDump = () => JSON.stringify(db().prepare('SELECT * FROM conventions ORDER BY kind, name, version').all())
 const before = conventionsDump()
 
@@ -109,12 +111,18 @@ try {
   await page.waitForURL(/#\/chat$/)
   check('导航里有「对话」，点进去是对话页', (await page.locator('h1').textContent()) === '对话')
   await page.locator('.chat-composer textarea').fill(ASK)
+  // 回复完成之前：「正在回复」的那一格里出现过读了什么。用 MutationObserver 记下来，回复很快时也不会错过。
+  await page.evaluate(() => {
+    const w = window as unknown as { liveReads: string[] }
+    w.liveReads = []
+    new MutationObserver(() => {
+      for (const li of document.querySelectorAll('.chat-msg.live .chat-reads li')) if (!w.liveReads.includes(li.textContent ?? '')) w.liveReads.push(li.textContent ?? '')
+    }).observe(document.body, { subtree: true, childList: true, characterData: true })
+  })
   await page.getByRole('button', { name: '发送' }).click()
-  // 回复完成之前：「正在回复」的那一格里已经出现读了什么。
-  await page.locator('.chat-msg.live .chat-reads li').first().waitFor({ timeout: 600_000 })
-  const liveReads = await page.locator('.chat-msg.live .chat-reads li').allTextContents()
-  check('回复完成之前，页面上已经显示 agent 读了什么（按步推送）', liveReads.length > 0 && (await page.locator('.chat-msg.live').count()) === 1, liveReads)
   await page.waitForURL(/#\/chat\/c[0-9a-z]+$/, { timeout: 900_000 })
+  const liveReads = (await page.evaluate(() => (window as unknown as { liveReads: string[] }).liveReads)) as string[]
+  check('回复完成之前，页面上已经显示 agent 读了什么（按步推送）', liveReads.length > 0, liveReads)
   chatId = /#\/chat\/(c[0-9a-z]+)$/.exec(page.url())?.[1]
   await page.locator('.chat-msg.assistant').first().waitFor()
   const reads: string[] = await page.locator('.chat-msg.assistant .chat-reads li').allTextContents()
@@ -174,9 +182,9 @@ try {
   await page.locator('.chat-composer textarea').fill('好的，先这样。')
   await page.getByRole('button', { name: '发送' }).click()
   // 等这一轮做完：「正在回复」那一格消失，记录重新读出来。
-  await page.locator('.chat-msg.live').first().waitFor({ timeout: 60_000 })
-  await page.locator('.chat-msg.live').first().waitFor({ state: 'detached', timeout: 900_000 })
-  await page.locator('.chat-log .chat-msg.assistant').nth(1).waitFor({ timeout: 30_000 })
+  await page.waitForFunction(() => document.querySelectorAll('.chat-log .chat-msg.assistant:not(.live)').length === 2 && document.querySelector('.chat-msg.live') === null, undefined, {
+    timeout: 900_000,
+  })
   check('在对话里接着说，记录变成 4 条', (await page.locator('.chat-log .chat-msg:not(.live)').count()) === 4)
   await page.screenshot({ path: join(SHOTS, 'chat-1440.png'), fullPage: true })
 

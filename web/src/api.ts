@@ -136,10 +136,17 @@ export const sendChat = async (body: { chat?: string; text: string }, onLine: (l
       const lines = buffer.split('\n')
       buffer = lines.pop()!
       for (const l of lines) {
-        if (l === '') continue
-        const line = JSON.parse(l) as ChatStreamLine
-        if (line.type === 'done') return line
-        onLine(line)
+        let line: ChatStreamLine
+        try {
+          line = JSON.parse(l) as ChatStreamLine
+        } catch {
+          continue // 空行或被代理截断的半行：跳过
+        }
+        if (line.type === 'done') {
+          void reader.cancel()
+          return line
+        }
+        if (line.type !== 'ping') onLine(line)
       }
     }
     return { type: 'done', ok: false, error: '连接断开了：这一轮可能还在进行，稍后刷新看看' }

@@ -48,8 +48,9 @@ export const viewProposal = (p: ChatProposal, store: Store, conventions: Convent
   const row = store.convention(p.kind, p.name)
   const current = row === undefined ? {} : { current: { version: row.version, content: row.content } }
   const state: ProposalState = p.saved !== undefined ? 'saved' : p.voided !== undefined ? 'voided' : !turnAnswered(p, chats) ? 'unanswered' : row?.version !== p.baseVersion ? 'stale' : 'pending'
-  if (state !== 'pending') return { proposal: p, state, ...current, permissions: [] }
+  if (state !== 'pending' && state !== 'stale') return { proposal: p, state, ...current, permissions: [] }
   const permissions = currentPermissions(p, store, conventions)
+  if (state === 'stale') return { proposal: p, state, ...current, permissions }
   return { proposal: p, state, ...current, permissions, ...(permissions.length === 0 ? {} : { code: confirmationCode(chats.confirmSalt(p.id), p, permissions) }) }
 }
 
