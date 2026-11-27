@@ -238,3 +238,31 @@ test('人验收的卡点：等结论的时间算等用户，第一次就通过�
   const accept = stage(c.task, 'accept')
   assert.deepEqual([accept.waitUserMs, accept.agentMs, accept.calls], [6000 + 3500, 400, 1])
 })
+
+test('修正单独算一个阶段：不拉长被修正节点原来的阶段；修正进行中时它是进行中的阶段', () => {
+  const c = new Clock('none', workflow({ maxRounds: 1, escalate: false }))
+  c.reply(1000, 800, '方案')
+  c.reply(2000, 900, '实现')
+  c.reply(3000, 900, PASS)
+  assert.equal(c.task.status, 'done')
+  c.send(100_000, { kind: 'corrected', node: 'build' as never, text: '再补一个测试' })
+  // 修正进行中：「修正」是进行中的阶段，build 原来的阶段不变。
+  const running = taskMetrics(c.task, 100_500)
+  assert.deepEqual(
+    running.stages.map(s => [s.node, s.open]),
+    [
+      ['plan', false],
+      ['build', false],
+      ['review', false],
+      ['修正', true],
+    ],
+  )
+  assert.equal(running.stages.find(s => s.node === 'build')!.wallMs, 900)
+  c.reply(101_000, 600, '补了测试')
+  assert.equal(c.task.status, 'done')
+  const after = taskMetrics(c.task, 1e9)
+  const build = after.stages.find(s => s.node === 'build')!
+  const fix = after.stages.find(s => s.node === '修正')!
+  assert.deepEqual([build.wallMs, build.calls], [900, 1])
+  assert.deepEqual([fix.calls, fix.agentMs, fix.open], [1, 600, false])
+})

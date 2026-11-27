@@ -1000,3 +1000,38 @@ test('修正：已完成的任务在页面上提交改正或补充，接口起 r
     await s.close()
   }
 })
+
+test('continueTask：任务刚完成、本进程的 runner 还在收尾时提交修正，等它结束后再起一个 runner 把修正做完', async () => {
+  const s = await serve()
+  try {
+    const meta = s.store.meta('t1')
+    s.store.create({ id: 't6', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 6000)
+    let release!: () => void
+    const held = new Promise<void>(r => (release = r))
+    const ex = new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复'))
+    // 任务完成后的第一次收尾（关掉 agent 进程）卡住，模拟 runner 已经走完、还没放锁。提交前的那些 release 不拦。
+    let first = true
+    ex.release = async () => {
+      if (first && s.store.get('t6')!.status === 'done') {
+        first = false
+        await held
+      }
+    }
+    const sup = new Supervisor({ store: s.store, executor: ex, dataDir: s.dir, pollMs: 5 })
+    assert.ok(sup.start('t6').ok)
+    for (let i = 0; i < 200 && s.store.get('t6')!.status !== 'done'; i++) await new Promise(r => setTimeout(r, 5))
+    assert.equal(s.store.get('t6')!.status, 'done')
+    assert.ok(sup.running('t6'), '收尾还没完，runner 还算在跑')
+    assert.ok(s.store.dispatch('t6', { kind: 'corrected', node: 'build' as never, text: '再改一下' }, 7000, 'web').accepted)
+    assert.equal(sup.continueTask('t6'), true)
+    release()
+    for (let i = 0; i < 200 && !s.store.get('t6')!.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'); i++) await new Promise(r => setTimeout(r, 5))
+    assert.ok(
+      s.store.get('t6')!.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'),
+      '新起的 runner 把修正做完了',
+    )
+    await sup.idle()
+  } finally {
+    await s.close()
+  }
+})

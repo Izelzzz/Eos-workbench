@@ -38,7 +38,7 @@ test('已完成的任务提交修正：交给指定节点原来的会话，不�
   d.reply('补了负数的测试')
   assert.equal(d.task.status, 'done')
   assert.equal(d.task.correction, undefined)
-  assert.equal(d.task.outputs.build, '补了负数的测试')
+  assert.equal(d.task.outputs.build, '实现 v1\n\n# 第 1 次修正\n\n补了负数的测试', '修正的回复接在原来的产出后面')
   assert.equal(d.task.sessions.build, sessionsBefore.build, '会话不变')
   assert.equal(d.task.log.filter(e => e.type === 'call').length, calls + 1, '只多了这一次修正调用')
   assert.ok(d.task.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'))

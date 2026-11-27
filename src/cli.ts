@@ -99,7 +99,7 @@ const fail = (s: string): never => {
 // 启动检查在打开数据库之前做：数据目录不可写时也能给出看得懂的说明。
 const ROOT = join(import.meta.dirname, '..')
 /** 会调用模型或运行任务的命令：启动前先检查环境，不通过就不启动。 */
-const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'improve', 'web'])
+const NEEDS_ENV = new Set(['run', 'resume', 'retry', 'correct', 'improve', 'web'])
 /** 检查命令用的系统用户（部署镜像里设置 EOS_CHECK_USER）。设置错了由启动检查拦下。 */
 const checkUser = resolveCheckUser(process.env)
 /** dsh 和 agent 的用户（部署镜像里设置 EOS_AGENT_USER，由 dsh 的入口切换过去）。设置错了由启动检查拦下。 */

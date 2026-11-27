@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { TaskDetail } from './api.ts'
 import { correctTask } from './api.ts'
 
-const STATE = { running: ['running', '进行中'], done: ['ok', '完成'], stopped: ['error', '没做完'] } as const
+const STATE = { running: ['running', '进行中'], done: ['ok', '完成'], failed: ['error', '失败（重试后接着做）'], aborted: ['error', '已中止，没做完'] } as const
 
 export function Corrections(props: { task: TaskDetail; onSubmitted: (resumeNeeded: boolean) => void }) {
   const t = props.task

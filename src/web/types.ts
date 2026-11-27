@@ -41,8 +41,8 @@ export type CorrectionInfo = {
   node: string
   text: string
   at: number
-  /** running：进行中；done：完成；stopped：没做完（任务失败或中止）。 */
-  state: 'running' | 'done' | 'stopped'
+  /** running：进行中；done：完成；failed：任务失败了，重试后接着做；aborted：任务中止，没做完。 */
+  state: 'running' | 'done' | 'failed' | 'aborted'
   /** 这次修正里节点的每次回复（第一次是按修正修改，之后是检查没过时的修复），按先后。 */
   replies: string[]
   /** 这次修正的提交改到的文件。 */

@@ -490,7 +490,8 @@ export const filesByCall = (w: Worktree): Record<string, string[]> => {
     const [subject = '', ...files] = chunk.split('\n')
     const call = /^eos: \S+ \S+ \((c\d+)\)$/.exec(subject.trim())?.[1]
     if (call === undefined) continue
-    byCall[call] = [...new Set([...(byCall[call] ?? []), ...files.map(f => f.trim()).filter(f => f !== '')])]
+    // 最多列 200 个文件：只用来显示。
+    byCall[call] = [...new Set([...(byCall[call] ?? []), ...files.map(f => f.trim()).filter(f => f !== '')])].slice(0, 200)
   }
   return byCall
 }

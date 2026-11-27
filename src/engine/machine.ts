@@ -384,8 +384,12 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
       return onDecision(withGate(task, { formatRetries: 0 }), g, { pass: v.verdict === 'pass', comment: describeVerdict(v), by: call.role }, at)
     }
 
-    case 'correct':
-      return afterCorrect({ ...task, outputs: { ...task.outputs, [call.node]: text } }, at)
+    case 'correct': {
+      // 修正的回复接在原来的产出后面（和补齐一样），不覆盖：之后的修正和卡点还要看原来的说明。
+      const prev = task.outputs[call.node]
+      const output = `${prev === undefined ? '' : `${prev}\n\n`}# 第 ${task.correction!.round} 次修正\n\n${text}`
+      return afterCorrect({ ...task, outputs: { ...task.outputs, [call.node]: output } }, at)
+    }
 
     case 'amend': {
       const g = gateNode(task)

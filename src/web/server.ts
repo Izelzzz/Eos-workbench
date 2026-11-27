@@ -258,7 +258,7 @@ export const createWebServer = (o: {
         node: c.node,
         text: c.text,
         at: c.at,
-        state: done ? 'done' : task.correction?.round === c.round && task.status !== 'aborted' ? 'running' : 'stopped',
+        state: done ? 'done' : task.correction?.round !== c.round || task.status === 'aborted' ? 'aborted' : task.status === 'failed' ? 'failed' : 'running',
         replies: calls.map(e => e.reply),
         files: [...new Set(calls.flatMap(e => files[e.call] ?? []))],
       }
@@ -332,9 +332,8 @@ export const createWebServer = (o: {
     if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
     const step = o.store.dispatch(id, { kind: 'decided', gate: body.gate as NodeId, round: body.round, pass: body.pass, comment: body.comment }, Date.now(), 'web')
     if (!step.accepted) return [409, { ok: false, error: step.reason ?? '结论没有被接受' }]
-    if (isTerminal(step.task) || o.supervisor.running(id)) return [200, { ok: true, resumeNeeded: false }]
-    const started = o.supervisor.start(id)
-    return [200, { ok: true, resumeNeeded: !started.ok && !o.supervisor.running(id) }]
+    if (isTerminal(step.task)) return [200, { ok: true, resumeNeeded: false }]
+    return [200, { ok: true, resumeNeeded: !o.supervisor.continueTask(id) }]
   }
 
   /** 已完成的任务上提交一条改正或补充（actor 记成 web），然后起 runner 接着做；起不来时提示点「继续」。 */
@@ -343,9 +342,7 @@ export const createWebServer = (o: {
     if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
     const step = o.store.dispatch(id, { kind: 'corrected', node: body.node as NodeId, text: body.text }, Date.now(), 'web')
     if (!step.accepted) return [409, { ok: false, error: step.reason ?? '修正没有被接受' }]
-    if (o.supervisor.running(id)) return [200, { ok: true, resumeNeeded: false }]
-    const started = o.supervisor.start(id)
-    return [200, { ok: true, resumeNeeded: !started.ok && !o.supervisor.running(id) }]
+    return [200, { ok: true, resumeNeeded: !o.supervisor.continueTask(id) }]
   }
 
   const answer = (id: string, body: Record<string, unknown>): [number, AnswerResponse] => {
