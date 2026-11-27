@@ -936,6 +936,12 @@ test('卡点：任务页带上卡点信息；页面上打回（写意见）、�
     for (let i = 0; i < 200 && (d = await get()).status !== 'done'; i++) await new Promise(r => setTimeout(r, 10))
     assert.equal(d.status, 'done')
     assert.equal(d.gate, undefined)
+    // 中止或失败的任务不再显示卡点（卡点状态还留在任务里）。
+    s.store.create({ id: 't3', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false, gate: 'human' }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 3000)
+    for (const [i, text] of ['方案', '实现 v1', PASS].entries()) s.store.dispatch('t3', { kind: 'replied', call: `c${i + 1}` as never, sessionId: 's', text, usage: zero, ms: 1 }, 3001 + i, 'executor')
+    assert.ok(s.store.dispatch('t3', { kind: 'abort' }, 3010, 'web').accepted)
+    const aborted = (await (await fetch(`${s.base}/api/tasks/t3`)).json()) as TaskDetail
+    assert.deepEqual([aborted.status, aborted.gate], ['aborted', undefined])
     const decided = s.store.events('t2').filter(e => e.event.kind === 'decided')
     assert.deepEqual(
       decided.map(e => [e.actor, e.accepted]),

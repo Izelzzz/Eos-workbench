@@ -314,6 +314,8 @@ function TaskPage(props: { id: string }) {
         )}
         {task.gate && (
           <Gate
+            // 换了一次验收（别处打回、改完回到卡点）：面板重新开始，不留上一次的意见和报错。
+            key={`${task.gate.node}-${task.gate.round}`}
             task={task}
             onDecided={(pass, resumeNeeded) => {
               const what = pass ? '已通过' : '已打回，交回修改；改完会回到这个卡点'

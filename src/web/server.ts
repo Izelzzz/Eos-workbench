@@ -214,8 +214,12 @@ export const createWebServer = (o: {
     return rows
   }
 
-  /** 停在卡点上时：验收什么、由谁验收、第几次、被验收的产出和这个卡点上已有的结论。 */
+  /**
+   * 停在卡点上时：验收什么、由谁验收、第几次、被验收的产出和这个卡点上已有的结论。
+   * 任务中止或失败时不给（卡点状态还留在任务里，但页面上不该再显示「等结论」「修改中」）。
+   */
   const gateOf = (task: Task): GateInfo | undefined => {
+    if (task.status !== 'running' && task.status !== 'waiting_user' && task.status !== 'waiting_accept') return undefined
     const g = task.gate
     const n = task.workflow.nodes.find(x => x.id === g?.node)
     if (g === undefined || n?.kind !== 'gate') return undefined
