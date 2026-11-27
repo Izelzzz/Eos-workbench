@@ -14,6 +14,7 @@ import { promisify } from 'node:util'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { TOOLS } from '../src/chat/tools.ts'
 import { DshExecutor, dshInstall } from '../src/executor/dsh.ts'
 import { Conventions } from '../src/conventions/conventions.ts'
 import { Store } from '../src/store/store.ts'
@@ -130,7 +131,7 @@ const dbDump = JSON.stringify([messages, chatTrace])
 const checks: [string, boolean, unknown][] = [
   ['两轮命令都成功', first.code === 0 && second.code === 0 && list.code === 0 && show.code === 0, { first: first.out.slice(-600), second: second.out.slice(-600) }],
   ['两轮都有回复，记录是 用户/助手/用户/助手', messages.map(m => m.role).join(',') === 'user,assistant,user,assistant', messages.map(m => m.role)],
-  ['发给模型的工具表里只有平台工具（mcp__eos__*），而且有 8 个', offered.length === 8 && offered.every(t => t.startsWith('mcp__eos__')), offered],
+  ['发给模型的工具表里只有平台工具（mcp__eos__*）：8 个只读工具和提议工具', offered.length === TOOLS.length + 1 && offered.every(t => t.startsWith('mcp__eos__')), offered],
   ...(fake ? [['假模型收到的工具表和 dsh 会话日志里的一致', JSON.stringify(fakeTools) === JSON.stringify(offered), fakeTools] as [string, boolean, unknown]] : []),
   ['agent 至少读了一次数据，trace 里的工具全是平台工具', reads.length > 0 && traceTools.length > 0 && traceTools.every(t => t.startsWith('mcp__eos__')), { reads, traceTools }],
   ['模型 key 不在对话记录、对话 trace、命令输出里', !dbDump.includes(KEY) && !outputs.join('\n').includes(KEY), undefined],

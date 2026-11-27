@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
 import { MAX_BODY_BYTES, openEndpoint } from '../src/chat/mcp.ts'
+import { PROPOSE_TOOL } from '../src/chat/proposals.ts'
 import { ChatStore } from '../src/chat/store.ts'
 import { callTool, MAX_OUTPUT_CHARS, TOOLS, type DataSource } from '../src/chat/tools.ts'
 import { Conventions } from '../src/conventions/conventions.ts'
@@ -72,7 +73,8 @@ test('a chat runs through the Executor interface alone: the agent gets only the 
   assert.equal(spec.write, 'none')
   assert.equal(spec.profile.mcp.length, 1)
   assert.ok(isHttpMcp(spec.profile.mcp[0]!))
-  assert.deepEqual(ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(), TOOLS.map(t => t.name).sort())
+  // 只读工具，加上只记提议、不保存的提议工具（tests/chat-proposals.test.ts）。
+  assert.deepEqual(ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(), [...TOOLS.map(t => t.name), PROPOSE_TOOL].sort())
   assert.match(ex.history.get(`chat/${r.chat.id}`)?.[0] ?? '', /你是 Eos 平台里的对话助手/, 'the first message carries the assistant template prompt')
   assert.deepEqual(
     r.call.reads.map(x => x.tool),

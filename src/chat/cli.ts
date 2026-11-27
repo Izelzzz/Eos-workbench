@@ -36,6 +36,12 @@ export const chatCommand = async (args: string[], o: Omit<ChatOptions, 'executor
     const d = o.chats.detail(rest[0] ?? '') ?? o.fail(`没有对话 ${rest[0] ?? ''}`)
     o.say(`对话 ${d.id}：${d.title}`)
     for (const m of d.log) o.say(line(m))
+    const proposals = o.chats.proposals(d.id)
+    if (proposals.length > 0) o.say(`\n提议（agent 提的，都还没有保存）：`)
+    for (const p of proposals)
+      o.say(
+        `  #${p.id}  ${p.kind === 'workflow' ? '工作流' : 'Agent 模板'}「${p.name}」${p.baseVersion === undefined ? '（新建）' : `（基于第 ${p.baseVersion} 版）`}${p.voided === undefined ? '' : `  已作废：${p.voided}`}`,
+      )
     const m = o.chats.metrics(d.id)
     return o.say(`\n用途 ${m.purpose}：${m.calls} 次调用（${m.failed} 次没有回复），读数据 ${m.reads} 次，输入 ${m.usage.input} 输出 ${m.usage.output}，agent ${(m.agentMs / 1000).toFixed(1)}s`)
   }
