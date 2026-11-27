@@ -95,6 +95,7 @@ await model?.close()
 const db = new DatabaseSync(join(DATA, 'eos.db'))
 const proposals = db.prepare('SELECT * FROM chat_proposals WHERE chat_id = ? ORDER BY id').all(id ?? '') as { id: number; kind: string; name: string; content: string; voided: string | null }[]
 const messages = db.prepare('SELECT role, text, call FROM chat_messages WHERE chat_id = ? ORDER BY seq').all(id ?? '') as { role: string; text: string; call: string | null }[]
+const chatTrace = db.prepare('SELECT event FROM chat_trace WHERE chat_id = ?').all(id ?? '') as { event: string }[]
 const reads = messages.flatMap(m => (m.call === null ? [] : (JSON.parse(m.call) as { reads: { tool: string; isError: boolean }[] }).reads))
 const store = new Store(join(DATA, 'eos.db'))
 const conventions = new Conventions(store)
@@ -119,7 +120,7 @@ const checks: [string, boolean, unknown][] = [
       .filter(l => l.includes('提议') || l.includes('#'))
       .slice(-6),
   ],
-  ['模型 key 不在对话记录和命令输出里', !JSON.stringify([messages, proposals]).includes(KEY) && !outputs.join('\n').includes(KEY), undefined],
+  ['平台持有的模型 key 不在对话记录、提议、对话 trace 和命令输出里', !JSON.stringify([messages, proposals, chatTrace]).includes(KEY) && !outputs.join('\n').includes(KEY), undefined],
   ...(fake ? [['假模型：第一条名字对不上的提议被退回', reads.filter(r => r.tool === PROPOSE_TOOL && r.isError).length === 1, reads] as [string, boolean, unknown]] : []),
 ]
 store.close()

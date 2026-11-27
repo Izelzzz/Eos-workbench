@@ -30,6 +30,9 @@ export type ChatMessage =
 
 export type ChatDetail = ChatSummary & { log: ChatMessage[] }
 
+/** 对话 agent 用的内置 Agent 模板（模型、effort、提示词从这里来，权限由平台定死）。 */
+export const ASSISTANT_TEMPLATE = 'assistant'
+
 /** agent 能提议的约定：工作流和 Agent 模板。 */
 export type ProposalKind = 'workflow' | 'template'
 

@@ -88,7 +88,7 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 
 ### 提议
 
-提议工具是 `propose_convention`：kind（`workflow` 或 `template`）、name、完整的 YAML、理由。
+提议工具是 `propose_convention`：kind（`workflow` 或 `template`）、name（最多 64 字）、完整的 YAML（最多 4 万字）、理由（最多 4000 字）。
 
 | 情形 | 结果 |
 |---|---|
@@ -100,11 +100,14 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 | 提出它的那一轮没有得到回复（执行了平台工具以外的工具、调用失败、平台重启后认领不到） | 提议标成作废：用户没看到 agent 对它的说明 |
 
 - 提议不改约定表。`src/chat/` 里 agent 能触发的代码（端点、工具、提议、对话流程、存储）都不调用保存约定的方法，`tests/chat-proposals.test.ts` 核对这一点。
-- 提议现在只能查看：`eos chat show` 列出对话里的提议。这一版没有保存提议的入口。
+- 平台不提供从对话保存提议的入口；`eos chat show` 列出对话里的提议和涉及的权限。
+- 提议是按记下那一刻的模板、技能、文档和最新版本检查的；之后这些变了，提议可能不再成立，涉及的权限也可能过时。
 - 工作流引用的 Agent 模板要已经保存在平台上，才能通过检查。
 - 涉及的权限改动在记下时算好，存进提议，也写进返回给 agent 的结果：
   - 修改已有约定：用改进提案的核对（`src/improve/guard.ts` 的 `permissionChanges`），另外补上模板技能的增删（那个核对不看技能）；
   - 新建的约定：模板列出它的模型、写入范围、去掉的工具组、技能和 MCP；工作流记一句总的说明，整份都要确认。
+  - 对话 agent 自己的模板 `assistant`：权限不从它读，但模型和指令从它来，单独标出。
+  - 改进提案核对的说明是禁止的口气，这里改成陈述（「改了检查命令和平台动作」）。
 - 和改进提案不同，涉及权限的提议不退回：它们只有人确认才保存。
 
 **为什么权限改动不退回**：设计新工作流时常常要写检查命令、写入范围和新角色，按改进提案的规则一律退回，对话 agent 就设计不了这些。提议不会自己生效，所以改成算好、列出来，由人决定。
@@ -116,7 +119,7 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 ### 端点
 
 - 只接受 `POST /mcp`、`application/json` 的请求，只回 JSON，不开 SSE 流。
-- 请求体最多 256 KiB（装得下一条最长的提议），不接受批量请求。
+- 请求体最多 256 KiB，不接受批量请求。4 万字的提议即使每字按 `\uXXXX` 编码（6 字节）也装得下。
 - 一次调用最多 30 次工具调用（读数据和提议一起算），到上限后的调用都返回错误（也记进这次调用用过的工具）。
 - Host 必须是 `127.0.0.1:<端口>`；带 Origin 的请求一律拒绝。
 - 令牌按定长比较：两边各算 sha256，再用 `timingSafeEqual`。
@@ -194,6 +197,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 部署镜像里 eos-check、eos-agent 不带令牌和带错令牌都被拒；容器里跑通一次 `eos chat`，配置是 2750/0640、组 eos-dsh，eos-check 读不到，eos-agent 读得到，调用结束后删掉 | `docs/e2e/chat-a/docker-probe.json` |
 | 最终代码上真实 dsh 的工具表、遮蔽、令牌清理（假模型） | `docs/e2e/chat-a/fake-model-report.json` |
 | 真实模型提议一个工作流：提议通过检查、记成待确认，约定表没有变化 | `docs/e2e/chat-c1/report.json` |
-| 提议的检查、退回、上限、作废；agent 能触发的代码不保存约定 | `tests/chat-proposals.test.ts` |
+| 提议的检查、退回、上限、作废；涉及的权限改动怎么算；agent 能触发的代码不保存约定 | `tests/chat-proposals.test.ts` |
+| 最终代码上真实 dsh 的提议链路（假模型，含退回一次） | `docs/e2e/chat-c1/fake-model-report.json` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
 | 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |
