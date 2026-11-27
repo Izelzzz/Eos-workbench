@@ -47,7 +47,9 @@ export function Corrections(props: { task: TaskDetail; onSubmitted: (resumeNeede
                 <span className={`pill ${STATE[c.state][0]}`}>{STATE[c.state][1]}</span>
               </div>
               <p className="correction-text">{c.text}</p>
-              <p className="muted correction-note">本次修正未经评审：改完只重跑了程序检查{t.links.some(l => l.kind === 'pull-request') ? '，推到了同一个分支和 PR' : ''}，没有再请评审或验收。</p>
+              <p className="muted correction-note">
+                本次修正不经评审：改完只重跑程序检查{c.state === 'done' && t.links.some(l => l.kind === 'pull-request') ? '，已推到同一个分支和 PR' : ''}，不再请评审或验收。
+              </p>
               {c.replies.length > 0 && (
                 <details>
                   <summary>

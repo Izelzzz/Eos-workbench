@@ -62,11 +62,7 @@ test('修正之后只重跑程序检查和平台动作（不再请评审）：�
     ['file', 'run', 'platform'],
     '开发的交付物、评审和交付前的测试（去重）、最后推送',
   )
-  assert.deepEqual(
-    correctionChecks(wf, 'plan' as NodeId).map(c => c.kind),
-    ['platform'],
-    '修正方案：没有评审它的检查，只重新推送',
-  )
+  assert.deepEqual(correctionChecks(wf, 'plan' as NodeId), correctionChecks(wf, 'build' as NodeId), '修正别的节点也一样：推送前过一遍全部程序检查')
   const d = new Driver(wf)
   finish(d, true, true)
   d.send(correct('build', '把函数名改成 total'))
@@ -119,4 +115,26 @@ test('不接受的修正：任务没完成、交给对话节点或不存在的�
   assert.match(reduce(d.task, correct('build', '再改一下'), 9).reason ?? '', /只有已完成的任务/)
   d.send({ kind: 'abort' })
   assert.equal(reduce(d.task, correct('build', '改一下'), 9).accepted, false)
+})
+
+test('修正交给别的节点（例如写文档的节点）也要过一遍全部程序检查才推送：它也能改到代码', async () => {
+  const { parseWorkflow } = await import('../src/workflow/parse.ts')
+  const r = parseWorkflow(`
+name: t
+roles:
+  dev: { prompt: 写代码, write: worktree }
+  writer: { prompt: 写文档, write: worktree }
+  rev: { prompt: 评审 }
+nodes:
+  - { id: build, kind: agent, role: dev, task: 实现 }
+  - { id: docs, kind: agent, role: writer, task: 写文档 }
+  - { id: test, kind: dialog, with: build, task: 测试, checks: [{ run: [npm, test] }] }
+  - { id: review, kind: dialog, role: rev, with: build, task: 评审 }
+  - { id: deliver, kind: dialog, with: build, task: 交付, checks: [{ platform: pull-request }] }
+`)
+  assert.ok(r.ok, JSON.stringify(!r.ok && r.errors))
+  assert.deepEqual(correctionChecks(r.workflow, 'docs' as NodeId), [
+    { kind: 'run', run: ['npm', 'test'], timeoutSec: 600 },
+    { kind: 'platform', action: 'pull-request' },
+  ])
 })

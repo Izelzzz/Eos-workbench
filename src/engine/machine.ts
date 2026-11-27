@@ -214,11 +214,12 @@ const gateChecked = (task: Task, g: GateNode, results: CheckResult[], at: number
 }
 
 /**
- * 修正之后重跑的检查：被修正节点自己的，和评审、测试它（with 是它）的对话节点的交付物和命令检查（不再请评审 agent），
- * 再加工作流里的平台动作（推送到同一个分支、复用同一个 PR），排在最后：前面的检查都通过了才推送。同样的检查只跑一次。
+ * 修正之后重跑的检查：工作流里所有节点的交付物和命令检查（不再请评审 agent），再加工作流里的平台动作
+ * （推送到同一个分支、复用同一个 PR），排在最后：前面的检查都通过了才推送。同样的检查只跑一次。
+ * 不只跑被修正节点自己的：修正可能改到别的节点负责的东西（例如改文档的节点也能改代码），推送前要和正常流程一样过一遍全部程序检查。
  */
-export const correctionChecks = (wf: Workflow, target: NodeId): Check[] => {
-  const program = wf.nodes.flatMap(n => (n.kind !== 'gate' && (n.id === target || (n.kind === 'dialog' && n.with === target)) ? n.checks : [])).filter(c => c.kind !== 'platform')
+export const correctionChecks = (wf: Workflow, _target: NodeId): Check[] => {
+  const program = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind !== 'platform')
   const platform = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind === 'platform')
   const seen = new Set<string>()
   return [...program, ...platform].filter(c => {
