@@ -5,7 +5,7 @@ import { Chats, type ChatOptions } from './chat.ts'
 import type { Conventions } from '../conventions/conventions.ts'
 import type { Store } from '../store/store.ts'
 import { diffLines, fold } from '../workflow/diff.ts'
-import { confirmationCode, currentPermissions, saveProposal } from './save.ts'
+import { confirmationCode, currentPermissions, saveProposal, turnAnswered } from './save.ts'
 import type { ChatStore } from './store.ts'
 import type { ChatMessage, ChatProposal } from './types.ts'
 
@@ -30,7 +30,8 @@ const KIND = { workflow: '工作流', template: 'Agent 模板' } as const
 const proposalView = (p: ChatProposal, store: Store, conventions: Conventions, chats: ChatStore): string => {
   const current = store.convention(p.kind, p.name)
   // 按现在的状态重算（和保存时同一个算法）：提议记下之后平台状态可能变了。
-  const permissions = p.saved === undefined && p.voided === undefined ? currentPermissions(p, store, conventions) : []
+  const open = p.saved === undefined && p.voided === undefined && turnAnswered(p, chats)
+  const permissions = open ? currentPermissions(p, store, conventions) : []
   const code = permissions.length > 0 ? confirmationCode(chats.confirmSalt(p.id), p, permissions) : ''
   const head = `  #${p.id}  ${KIND[p.kind]}「${p.name}」${p.baseVersion === undefined ? '（新建）' : `（修改，基于第 ${p.baseVersion} 版）`}`
   const state =
@@ -38,12 +39,14 @@ const proposalView = (p: ChatProposal, store: Store, conventions: Conventions, c
       ? `已保存为第 ${p.saved.version} 版（${p.saved.actor}，${time(p.saved.at)}）`
       : p.voided !== undefined
         ? `已作废：${p.voided}`
-        : current?.version !== p.baseVersion
-          ? `已过期：「${p.name}」现在是第 ${current?.version ?? '?'} 版，保存会被拒绝，请让 agent 重新提议`
-          : '待确认，还没有保存'
+        : !open
+          ? '这一轮还没有回复（还在进行，或者没做完），现在不能保存'
+          : current?.version !== p.baseVersion
+            ? `已过期：「${p.name}」现在是第 ${current?.version ?? '?'} 版，保存会被拒绝，请让 agent 重新提议`
+            : '待确认，还没有保存'
   const out = [head, `      状态：${state}`, `      理由：${p.rationale}`]
   if (permissions.length > 0) out.push(`      ⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions ${code}：`, ...permissions.map(x => `        ⚠ ${x}`))
-  if (p.saved === undefined && p.voided === undefined) {
+  if (open) {
     const lines = current === undefined ? p.content.split('\n').map(text => ({ kind: 'add' as const, text })) : fold(diffLines(current.content, p.content))
     out.push(current === undefined ? '      全文（新建）：' : `      和当前第 ${current.version} 版的差异（+ 新增  - 删除）：`)
     for (const l of lines) out.push(l.kind === 'skip' ? `        … 省略 ${l.count} 行` : `        ${l.kind === 'add' ? '+' : l.kind === 'del' ? '-' : ' '} ${l.text}`)

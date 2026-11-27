@@ -1,4 +1,4 @@
-// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace），只追加。
+// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace、chat_proposals）。消息和 trace 只追加；提议只改作废、保存记录和确认码的随机值。
 // 平台重启后从这里读出对话记录接着聊；agent 那一侧的会话由执行器按对话 id 续接。
 import { randomBytes } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'

@@ -1,7 +1,8 @@
 // 保存对话里的提议：唯一一条把 agent 的提议写成约定新版本的路径，只由人触发（命令行 eos chat save，之后的网页「保存」）。
 // agent 能触发的模块（端点、工具、提议、对话流程、存储）都不引用这个文件（tests/chat-save.test.ts 核对）。
 // 保存前按现在的状态重新检查一遍：提议是在记下那一刻检查的，之后模板、技能、文档、目标约定都可能变了。
-// - 作废的、已经保存过的不保存；
+// - 作废的、已经保存过的不保存；提议所在的那一轮还没有回复（还在进行，或者没做完）的也不保存：
+//   那一轮可能在之后被作废（例如 agent 调用了平台以外的工具），保存了就撤不回；
 // - 目标约定的最新版本不是提议基于的版本（新建的：已经有人建了）就拒绝；
 // - 按保存约定时的规则重新检查；内容里有已知凭据值就拒绝；和当前版本一样就不保存；
 // - 按现在的状态重算涉及的权限改动。有改动时要带确认码（eos chat show 显示）：它是这条提议（号、目标、基于的版本、内容）
@@ -12,6 +13,7 @@
 import { createHash } from 'node:crypto'
 import type { Conventions } from '../conventions/conventions.ts'
 import type { Store } from '../store/store.ts'
+import { turnOf } from './chat.ts'
 import { permissionsOf } from './proposals.ts'
 import type { ChatStore } from './store.ts'
 import type { ChatActor, ChatProposal } from './types.ts'
@@ -29,6 +31,13 @@ export const confirmationCode = (salt: string, p: ChatProposal, permissions: str
     .update(JSON.stringify([salt, p.id, p.kind, p.name, p.baseVersion ?? null, p.content, permissions]))
     .digest('hex')
     .slice(0, 8)
+
+/** 提议所在的那一轮已经做完、得到了回复：这一句用户的话之后的第一条记录是助手的回复。 */
+export const turnAnswered = (p: ChatProposal, chats: ChatStore): boolean => {
+  const turn = turnOf(p.call)
+  if (turn === undefined || turn.chat !== p.chatId) return false
+  return chats.log(p.chatId).find(m => m.seq > turn.seq)?.role === 'assistant'
+}
 
 /** 按现在的平台状态，这条提议涉及的权限改动（eos chat show 和保存用同一个算法、同一个时刻的状态）。 */
 export const currentPermissions = (p: ChatProposal, store: Store, conventions: Conventions): string[] =>
@@ -51,6 +60,7 @@ export const saveProposal = (o: {
   const what = `${KIND_NAMES[p.kind]}「${p.name}」`
   if (p.voided !== undefined) return { ok: false, error: `提议 #${p.id} 已作废，不能保存：${p.voided}` }
   if (p.saved !== undefined) return { ok: false, error: `提议 #${p.id} 已经保存过（${what}第 ${p.saved.version} 版）` }
+  if (!turnAnswered(p, o.chats)) return { ok: false, error: `提议 #${p.id} 所在的那一轮还没有回复（还在进行，或者没做完），不能保存：等这一轮结束再看` }
   const current = o.store.convention(p.kind, p.name)
   if (current?.version !== p.baseVersion) return { ok: false, error: stale(p, current?.version) }
   if (current?.content === p.content) return { ok: false, error: `${what}的当前版本已经和这条提议一样，不需要保存` }

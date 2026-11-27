@@ -137,10 +137,11 @@ test('a proposal is checked again at save time: stale base version, a name taken
   p.conventions.save({ kind: 'workflow', name: 'lite', content: cur.replace(/^name: .*$/m, 'name: lite').replace(/^description: .*$/m, 'description: 抢先'), actor: 'web' }, 160)
   assert.match((p.save(fresh, true) as { error: string }).error, /已经有它的第 1 版了/)
   // 直接写进提议表的几种（模拟记下之后平台状态变了）：
-  const chatId = p.chats.proposal(id)!.chatId
+  // 挂在已经有回复的那一轮上（没有回复的那一轮另有测试）。
+  const { chatId, call } = p.chats.proposal(id)!
   const add = (content: string, extra: Partial<{ voided: string }> = {}) => {
-    const row = p.chats.addProposal({ chatId, call: 'c', kind: 'workflow', name: 'standard', baseVersion: 2, content, rationale: 'x', permissions: [] }, 1)
-    if (extra.voided !== undefined) p.chats.voidProposals('c', extra.voided)
+    const row = p.chats.addProposal({ chatId, call, kind: 'workflow', name: 'standard', baseVersion: 2, content, rationale: 'x', permissions: [] }, 1)
+    if (extra.voided !== undefined) p.chats.voidProposals(call, extra.voided)
     return row.id
   }
   const v2 = p.store.convention('workflow', 'standard')!.content
@@ -329,4 +330,42 @@ test('a proposal voided after the save checks but before the write is not marked
   assert.equal(r.ok, false)
   assert.equal(p.dump(), before)
   assert.equal(p.chats.proposal(id)!.saved, undefined)
+})
+
+test('a proposal cannot be saved while its turn has no reply yet: the turn may still be voided afterwards', async () => {
+  const p = platform()
+  const content = standard(p).replace(/^description: .*$/m, 'description: 新说明')
+  let during: ReturnType<typeof p.save> | undefined
+  const script: McpScript = ({ results }) => {
+    if (results.length === 0) return { tool, args: { kind: 'workflow', name: 'standard', content, rationale: '改说明' } }
+    // 这一轮还在进行：人这时去保存（提议已经落库了）。
+    const id = p.chats.proposals(p.chats.list()[0]!.id).at(-1)!.id
+    during = p.save(id)
+    return { reply: '提了' }
+  }
+  const r = await new Chats(p.opts(new McpExecutor(script))).start('提一条', 'cli')
+  assert.ok(r.ok)
+  assert.equal(during?.ok, false)
+  assert.match((during as { error: string }).error, /那一轮还没有回复/)
+  const id = p.chats.proposals(r.chat.id).at(-1)!.id
+  // 去掉回复，模拟这一轮还没结束时的 show。
+  p.store.db.prepare("DELETE FROM chat_messages WHERE chat_id = ? AND role = 'assistant'").run(r.chat.id)
+  const out: string[] = []
+  await chatCommand(['show', r.chat.id], {
+    chats: p.chats,
+    data: p.data,
+    conventions: p.conventions,
+    dataDir: p.dir,
+    redact: p.redact,
+    now: () => 300,
+    executor: () => new McpExecutor(() => ({ reply: 'x' })),
+    say: s => void out.push(s),
+    fail: s => {
+      throw new Error(s)
+    },
+  })
+  const shown = out.join('\n')
+  assert.match(shown, /这一轮还没有回复/)
+  assert.ok(!shown.includes(`chat save ${id}`), 'no save command for an unfinished turn')
+  assert.equal(p.save(id).ok, false)
 })
