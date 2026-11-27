@@ -1,4 +1,4 @@
-# 镜像 eos:cc（sha256:8a977e68b5b6bbc3b5cc0b3a3b03a3f2bad1bcf452bd8ceb024c0231a9e73093）；代码 c438a4311ee609e71d71881a1fae7558b5ef95dc，src、deploy、tests/fake-anthropic.ts 里没提交的改动：3 个文件
+# 镜像 eos:cc（sha256:8a977e68b5b6bbc3b5cc0b3a3b03a3f2bad1bcf452bd8ceb024c0231a9e73093）；代码 65d6bbca38436e1943c4eb8ca8bcecb7b548fda9，src、deploy、tests/fake-anthropic.ts 里没提交的改动：0 个文件
 ✓ 沙箱：Landlock（bwrap 用不了）：能写的 agent 只能写自己的 worktree 和 /tmp，只读的 agent 什么都写不了；agent 读不到别的进程的环境，但看得到进程列表，各任务共用 /tmp
 ✓ Claude Code：SDK 0.3.331
 ⚠ Anthropic API key：没有设置：用 claude-code 执行器的角色跑不起来（主密钥 EOS_MASTER_KEY 没有设置或无效，凭据存储存不进凭据）
