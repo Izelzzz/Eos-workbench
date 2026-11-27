@@ -1,0 +1,145 @@
+{
+  "mode": "real-model",
+  "commit": "69d544e261b4a26a87cbc5b5dca1adc03a1a21f0",
+  "uncommitted": [],
+  "chat": "cmwyt24nhd3f8620f",
+  "checks": [
+    {
+      "name": "导航里有「对话」，点进去是对话页",
+      "ok": true
+    },
+    {
+      "name": "回复完成之前，页面上已经显示 agent 读了什么（按步推送）",
+      "ok": true,
+      "detail": [
+        "读了约定列表：workflow",
+        "读了约定列表：template",
+        "读了约定：workflow / standard",
+        "读了约定：template / spec-writer",
+        "读了约定：template / reviewer",
+        "读了约定列表：doc",
+        "读了约定：workflow / feature",
+        "读了约定：doc / 研发约定",
+        "提议"
+      ]
+    },
+    {
+      "name": "回复完成后跳到这个对话，回复上列出读了哪些数据",
+      "ok": true,
+      "detail": [
+        "读了约定列表：workflow",
+        "读了约定列表：template",
+        "读了约定：workflow / standard",
+        "读了约定：template / spec-writer",
+        "读了约定：template / reviewer",
+        "读了约定列表：doc",
+        "读了约定：workflow / feature",
+        "读了约定：doc / 研发约定",
+        "提议"
+      ]
+    },
+    {
+      "name": "至少一条提议可以保存",
+      "ok": true,
+      "detail": [
+        {
+          "id": 1,
+          "kind": "workflow",
+          "name": "review-only"
+        }
+      ]
+    },
+    {
+      "name": "保存之前约定表一行都没变",
+      "ok": true
+    },
+    {
+      "name": "提议显示差异（新建显示全文）和醒目的权限警告",
+      "ok": true,
+      "detail": {
+        "head": "#1 工作流「review-only」新建待确认",
+        "diffLines": 26
+      }
+    },
+    {
+      "name": "没勾确认之前「保存」不可用",
+      "ok": true
+    },
+    {
+      "name": "勾上确认之后保存成第 1 版：操作人 web，备注写明对话、提议和确认了的权限，内容就是提议的内容",
+      "ok": true,
+      "detail": {
+        "version": 1,
+        "actor": "web",
+        "note": "来自对话 cmwyt24nhd3f8620f 的提议 #1（确认了权限改动：新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认）：E2E 网页确认"
+      }
+    },
+    {
+      "name": "保存后显示「已保存」、不再有保存按钮",
+      "ok": true
+    },
+    {
+      "name": "在对话里接着说，记录变成 4 条",
+      "ok": true
+    },
+    {
+      "name": "历史对话列表里有这个对话",
+      "ok": true
+    },
+    {
+      "name": "390 宽不横向滚动（待确认的提议、对话、列表）",
+      "ok": true,
+      "detail": {
+        "proposal": 390,
+        "list": 390,
+        "chat": 390
+      }
+    },
+    {
+      "name": "平台持有的模型 key 不在页面、对话记录和服务输出里",
+      "ok": true
+    },
+    {
+      "name": "页面没有脚本错误",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "log": [
+    {
+      "seq": 1,
+      "role": "user",
+      "text": "帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。",
+      "call": null
+    },
+    {
+      "seq": 2,
+      "role": "assistant",
+      "text": "已用提议工具提交了工作流「review-only」（提议 #1，尚未生效，需你确认后才会保存）。\n\n**设计内容**\n- `roles`：`spec-writer` → 平台模板 `spec-writer`；`reviewer` → 平台模板 `reviewer`，都是直接引用，没有改模板。\n- `spec`（agent，role: spec-writer）：按 standard 的写法，任务是把需求写成规格存到 `docs/spec.md`，交付物要求包含「背景 / 范围 / 验收标准」三节。\n- `review`（dialog，role: reviewer，with: spec，maxRounds: 3，inputs: [spec]）：评审规格是否可执行、可验证、验收标准是否完整无歧义；不通过就交回 spec 节点修改后再评审，最多 3 轮。\n- `docs: [研发约定]`，与 standard 一致。\n\n**依据与取舍**（读自平台）\n- 参考的是 `standard` 工作流 v1：它的 spec 节点同样是 `role: spec-writer`、`docs/spec.md`、章节 `[背景, 范围, 验收标准]`；评审节点是 `kind: dialog` + `role: reviewer` + `inputs`。\n- 参考了 `spec-writer` v1（只写 `docs/**`）和 `reviewer` v1（`write: none`、只读）两个模板，所以评审阶段不会产生文件改动。\n- 相对 standard 做了两处裁剪：去掉了 review 的 `checks: [{run: [npm, test]}]`，因为本流程没有代码/测试，跑测试没有意义；去掉了 `deliver` 阶段，因为用户只要两个阶段。\n- 没有加 `escalate`：用户只要求「来回最多 3 轮」，所以只设 `maxRounds: 3`；3 轮仍不通过时任务会停下等人工处理。如果你希望 3 轮后自动回到 spec 重写，或让任务直接失败并说明原因，可以再加 `escalate: spec` 或调整卡点。\n\n**权限相关（单独提示）**\n- 这是新建工作流，平台提示它涉及权限：工作流里各角色的模型、写入范围、工具组、MCP，以及检查命令、评审顺序和卡点，都需要你在确认时一并核对。本次提议没有修改任何模板的模型、写入范围、工具组、MCP 或检查命令，也没有省略评审阶段——两个阶段里第二个就是评审。\n- 确认前它不会出现在可用工作流里。",
+      "call": "{\"model\":\"deepseek-flash\",\"usage\":{\"input\":3581,\"output\":2728,\"cacheRead\":23680,\"cacheWrite\":0},\"ms\":16862,\"reads\":[{\"tool\":\"list_conventions\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\"}\",\"isError\":false},{\"tool\":\"list_conventions\",\"args\":\"{\\\"kind\\\":\\\"template\\\"}\",\"isError\":false},{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\",\\\"name\\\":\\\"standard\\\"}\",\"isError\":false},{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"template\\\",\\\"name\\\":\\\"spec-writer\\\"}\",\"isError\":false},{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"template\\\",\\\"name\\\":\\\"reviewer\\\"}\",\"isError\":false},{\"tool\":\"list_conventions\",\"args\":\"{\\\"kind\\\":\\\"doc\\\"}\",\"isError\":false},{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\",\\\"name\\\":\\\"feature\\\"}\",\"isError\":false},{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"doc\\\",\\\"name\\\":\\\"研发约定\\\"}\",\"isError\":false},{\"tool\":\"propose_convention\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\",\\\"name\\\":\\\"review-only\\\",\\\"content\\\":\\\"name: review-only\\\\ndescription: 规格评审：spec-writer 写规格，reviewer 独立评审；评审不通过就和规格作者对话修改，最多 3 轮。\\\\ndocs: [研发约定]\\\\n\\\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\\\nroles:\\\\n  spec-writer: { template: spec-writer }\\\\n  reviewer: { template: reviewer }\\\\n\\\\nnodes:\\\\n  - id: spec\\\\n    kind: agent\\\\n    role: spec-writer\\\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\\\n    deliverables:\\\\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准]\",\"isError\":false}]}"
+    },
+    {
+      "seq": 3,
+      "role": "user",
+      "text": "好的，先这样。",
+      "call": null
+    },
+    {
+      "seq": 4,
+      "role": "assistant",
+      "text": "好，提议 #1「review-only」就先这样放着——它目前只是记下的提议，还没保存生效；等你在平台上确认后才会变成新版本的工作流。需要调整（比如加 `escalate: spec`、改轮数或补测试检查）随时说。",
+      "call": "{\"model\":\"deepseek-flash\",\"usage\":{\"input\":175,\"output\":93,\"cacheRead\":7552,\"cacheWrite\":0},\"ms\":1401,\"reads\":[]}"
+    }
+  ],
+  "proposals": [
+    {
+      "id": 1,
+      "kind": "workflow",
+      "name": "review-only",
+      "voided": null,
+      "saved_version": 1,
+      "saved_actor": "web",
+      "content": "name: review-only\ndescription: 规格评审：spec-writer 写规格，reviewer 独立评审；评审不通过就和规格作者对话修改，最多 3 轮。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  # 评审：reviewer 只读，不通过就交回 spec 节点修改，再评审，最多 3 轮。\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: spec\n    maxRounds: 3\n    inputs: [spec]\n    task: 评审 docs/spec.md 是否可执行、可验证：逐条核对验收标准是否完整、无歧义、可验证，范围是否清晰。不通过时逐条列出问题并交回规格作者修改。\n"
+    }
+  ]
+}

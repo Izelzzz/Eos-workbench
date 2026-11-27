@@ -3,6 +3,7 @@ import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
+import { Chat, parseChatRoute } from './Chat.tsx'
 import { Changes } from './Changes.tsx'
 import { Corrections } from './Corrections.tsx'
 import { Gate } from './Gate.tsx'
@@ -404,6 +405,7 @@ export function App() {
   const conv = parseConventionRoute(hash)
   const improve = parseImproveRoute(hash)
   const forges = hash === '#/forges' || hash.startsWith('#/forges?')
+  const chat = parseChatRoute(hash)
   return (
     <>
       <header className="topbar">
@@ -411,8 +413,11 @@ export function App() {
           Eos Workbench
         </a>
         <nav className="topnav">
-          <a href="#/" className={conv === undefined && improve === undefined && hash !== '#/insights' && hash !== '#/credentials' && !forges ? 'active' : ''}>
+          <a href="#/" className={conv === undefined && improve === undefined && chat === undefined && hash !== '#/insights' && hash !== '#/credentials' && !forges ? 'active' : ''}>
             任务
+          </a>
+          <a href="#/chat" className={chat !== undefined ? 'active' : ''}>
+            对话
           </a>
           <a href="#/insights" className={hash === '#/insights' ? 'active' : ''}>
             统计
@@ -434,6 +439,8 @@ export function App() {
       <main className={conv === undefined ? '' : 'wide'}>
         {conv !== undefined ? (
           <Conventions route={conv} />
+        ) : chat !== undefined ? (
+          <Chat route={chat} />
         ) : improve !== undefined ? (
           <Improve route={improve} />
         ) : hash === '#/insights' ? (

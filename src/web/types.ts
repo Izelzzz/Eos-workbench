@@ -10,6 +10,7 @@ import type { Comparison } from '../engine/compare.ts'
 import type { Signal } from '../engine/evidence.ts'
 import type { Usage } from '../engine/types.ts'
 import type { Refused } from '../improve/parse.ts'
+import type { ChatDetail, ChatMetrics, ProposalView } from '../chat/types.ts'
 
 /** 卡点上的一次验收结论。by：human 是人，否则是验收的角色。 */
 export type GateDecision = { round: number; by: string; pass: boolean; comment: string; at: number }
@@ -153,3 +154,25 @@ export type AuthorizeUserResponse = { ok: true; url: string } | { ok: false; err
 /** warning：平台这边已经删掉了授权，但没能在托管平台上撤销（要用户自己去撤销）。 */
 export type RevokeUserResponse = { ok: true; warning?: string } | { ok: false; error: string }
 export type RegisterAppResponse = { ok: true; action: string; fields: Record<string, string> } | { ok: false; error: string }
+
+/** 对话页：对话记录、提议（状态和权限按现在的平台状态算，见 src/chat/save.ts 的 viewProposal）和用量。 */
+export type ChatView = ChatDetail & { proposals: ProposalView[]; metrics: ChatMetrics }
+
+/**
+ * 发话接口按行推送（application/x-ndjson），一行一个：
+ * - read：agent 开始读一次数据（工具名、参数）；read_failed：那次读取出错；
+ * - text：agent 某一步写出的文字（最后一步就是回复）；
+ * - done：这一轮结束。ok 时 chat 是对话 id；失败时 error 是原因（对话已经建了时也带 chat）。
+ */
+export type ChatStreamLine =
+  | { type: 'read'; id: string; tool: string; args: string }
+  | { type: 'read_failed'; id: string }
+  | { type: 'text'; text: string }
+  /** 两步之间没有进度时每 15 秒一行，免得反向代理把空闲的连接断开；页面忽略它。 */
+  | { type: 'ping' }
+  | { type: 'done'; ok: true; chat: string }
+  | { type: 'done'; ok: false; error: string; chat?: string }
+
+/** 保存一条提议。confirm：涉及权限改动时页面上显示的确认码（等于命令行的 --allow-permissions）。 */
+export type SaveChatProposalRequest = { confirm?: string; note?: string }
+export type SaveChatProposalResponse = { ok: true; version: number; permissions: string[] } | { ok: false; error: string; permissions?: string[]; code?: string }

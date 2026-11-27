@@ -54,7 +54,7 @@ export const turnOf = (call: string): { chat: string; seq: number } | undefined 
  * 执行了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。
  */
 const OURS = [...TOOLS.map(t => t.name), PROPOSE_TOOL]
-const ours = (name: string): string | undefined => OURS.find(t => name === t || name.endsWith(`__${t}`))
+export const ours = (name: string): string | undefined => OURS.find(t => name === t || name.endsWith(`__${t}`))
 
 /** 这次调用执行了的工具里，不是平台只读工具的那些（只看真正执行了的 tool_start；模型要了但执行器没有的工具不算）。 */
 const foreignIn = (events: TraceEvent[]): string[] => [...new Set(events.flatMap(e => (e.kind === 'tool_start' && ours(e.name) === undefined ? [e.name] : [])))]

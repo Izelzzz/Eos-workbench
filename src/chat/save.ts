@@ -16,7 +16,7 @@ import type { Store } from '../store/store.ts'
 import { turnOf } from './chat.ts'
 import { permissionsOf } from './proposals.ts'
 import type { ChatStore } from './store.ts'
-import type { ChatActor, ChatProposal } from './types.ts'
+import type { ChatActor, ChatProposal, ProposalState, ProposalView } from './types.ts'
 
 export type SaveOutcome =
   | { ok: true; version: number; proposal: ChatProposal; permissions: string[] }
@@ -42,6 +42,17 @@ export const turnAnswered = (p: ChatProposal, chats: ChatStore): boolean => {
 /** 按现在的平台状态，这条提议涉及的权限改动（eos chat show 和保存用同一个算法、同一个时刻的状态）。 */
 export const currentPermissions = (p: ChatProposal, store: Store, conventions: Conventions): string[] =>
   permissionsOf(p.kind, p.name, store.convention(p.kind, p.name)?.content, p.content, conventions.lookup())
+
+/** 一条提议现在的状态和要确认的权限（命令行 eos chat show 和网页共用），见 ProposalView。 */
+export const viewProposal = (p: ChatProposal, store: Store, conventions: Conventions, chats: ChatStore): ProposalView => {
+  const row = store.convention(p.kind, p.name)
+  const current = row === undefined ? {} : { current: { version: row.version, content: row.content } }
+  const state: ProposalState = p.saved !== undefined ? 'saved' : p.voided !== undefined ? 'voided' : !turnAnswered(p, chats) ? 'unanswered' : row?.version !== p.baseVersion ? 'stale' : 'pending'
+  if (state !== 'pending' && state !== 'stale') return { proposal: p, state, ...current, permissions: [] }
+  const permissions = currentPermissions(p, store, conventions)
+  if (state === 'stale') return { proposal: p, state, ...current, permissions }
+  return { proposal: p, state, ...current, permissions, ...(permissions.length === 0 ? {} : { code: confirmationCode(chats.confirmSalt(p.id), p, permissions) }) }
+}
 
 export const saveProposal = (o: {
   store: Store

@@ -2,12 +2,9 @@
 import type { Executor } from '../executor/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import { Chats, type ChatOptions } from './chat.ts'
-import type { Conventions } from '../conventions/conventions.ts'
-import type { Store } from '../store/store.ts'
 import { diffLines, fold } from '../workflow/diff.ts'
-import { confirmationCode, currentPermissions, saveProposal, turnAnswered } from './save.ts'
-import type { ChatStore } from './store.ts'
-import type { ChatMessage, ChatProposal } from './types.ts'
+import { saveProposal, viewProposal } from './save.ts'
+import type { ChatMessage, ProposalView } from './types.ts'
 
 export const CHAT_HELP = `  eos chat new "<话>"                                     新建一个对话（对话 agent 能读平台的工作流、约定和任务，不能改）
   eos chat send <对话> "<话>"                              在对话里接着说
@@ -26,32 +23,26 @@ const line = (m: ChatMessage): string => {
 
 const KIND = { workflow: '工作流', template: 'Agent 模板' } as const
 
-/** 一条提议：状态、理由、涉及的权限、和当前版本的差异（新建的显示全文）、怎么保存。 */
-const proposalView = (p: ChatProposal, store: Store, conventions: Conventions, chats: ChatStore): string => {
-  const current = store.convention(p.kind, p.name)
-  // 按现在的状态重算（和保存时同一个算法）：提议记下之后平台状态可能变了。
-  const open = p.saved === undefined && p.voided === undefined && turnAnswered(p, chats)
-  const permissions = open ? currentPermissions(p, store, conventions) : []
-  const code = permissions.length > 0 ? confirmationCode(chats.confirmSalt(p.id), p, permissions) : ''
+/** 一条提议：状态、理由、涉及的权限、和当前版本的差异（新建的显示全文）、怎么保存。状态和权限按现在的平台状态算（和保存同一个算法）。 */
+const proposalText = (v: ProposalView): string => {
+  const p = v.proposal
   const head = `  #${p.id}  ${KIND[p.kind]}「${p.name}」${p.baseVersion === undefined ? '（新建）' : `（修改，基于第 ${p.baseVersion} 版）`}`
-  const state =
-    p.saved !== undefined
-      ? `已保存为第 ${p.saved.version} 版（${p.saved.actor}，${time(p.saved.at)}）`
-      : p.voided !== undefined
-        ? `已作废：${p.voided}`
-        : !open
-          ? '这一轮还没有回复（还在进行，或者没做完），现在不能保存'
-          : current?.version !== p.baseVersion
-            ? `已过期：「${p.name}」现在是第 ${current?.version ?? '?'} 版，保存会被拒绝，请让 agent 重新提议`
-            : '待确认，还没有保存'
+  const state = {
+    saved: () => `已保存为第 ${p.saved!.version} 版（${p.saved!.actor}，${time(p.saved!.at)}）`,
+    voided: () => `已作废：${p.voided!}`,
+    unanswered: () => '这一轮还没有回复（还在进行，或者没做完），现在不能保存',
+    stale: () => `已过期：「${p.name}」现在是第 ${v.current?.version ?? '?'} 版，保存会被拒绝，请让 agent 重新提议`,
+    pending: () => '待确认，还没有保存',
+  }[v.state]()
   const out = [head, `      状态：${state}`, `      理由：${p.rationale}`]
-  if (permissions.length > 0) out.push(`      ⚠⚠ 涉及权限改动（按现在的平台状态算），保存时必须加 --allow-permissions ${code}：`, ...permissions.map(x => `        ⚠ ${x}`))
-  if (open) {
-    const lines = current === undefined ? p.content.split('\n').map(text => ({ kind: 'add' as const, text })) : fold(diffLines(current.content, p.content))
-    out.push(current === undefined ? '      全文（新建）：' : `      和当前第 ${current.version} 版的差异（+ 新增  - 删除）：`)
+  if (v.permissions.length > 0)
+    out.push(`      ⚠⚠ 涉及权限改动（按现在的平台状态算）${v.code === undefined ? '' : `，保存时必须加 --allow-permissions ${v.code}`}：`, ...v.permissions.map(x => `        ⚠ ${x}`))
+  if (v.state === 'pending' || v.state === 'stale') {
+    const lines = v.current === undefined ? p.content.split('\n').map(text => ({ kind: 'add' as const, text })) : fold(diffLines(v.current.content, p.content))
+    out.push(v.current === undefined ? '      全文（新建）：' : `      和当前第 ${v.current.version} 版的差异（+ 新增  - 删除）：`)
     for (const l of lines) out.push(l.kind === 'skip' ? `        … 省略 ${l.count} 行` : `        ${l.kind === 'add' ? '+' : l.kind === 'del' ? '-' : ' '} ${l.text}`)
-    out.push(`      保存：npm run eos -- chat save ${p.id}${permissions.length > 0 ? ` --allow-permissions ${code}` : ''}`)
   }
+  if (v.state === 'pending') out.push(`      保存：npm run eos -- chat save ${p.id}${v.code === undefined ? '' : ` --allow-permissions ${v.code}`}`)
   return out.join('\n')
 }
 
@@ -79,7 +70,7 @@ export const chatCommand = async (
     const proposals = o.chats.proposals(d.id)
     if (proposals.length > 0) o.say(`\n提议（agent 提的；只有用 eos chat save 确认之后才会保存）：`)
     // 经过 redact：提议记下之后平台才有的凭据值不会被打印出来（保存时也会被拒）。
-    for (const p of proposals) o.say(`\n${o.redact(proposalView(p, o.data.store, o.conventions, o.chats))}`)
+    for (const p of proposals) o.say(`\n${o.redact(proposalText(viewProposal(p, o.data.store, o.conventions, o.chats)))}`)
     const m = o.chats.metrics(d.id)
     return o.say(`\n用途 ${m.purpose}：${m.calls} 次调用（${m.failed} 次没有回复），读数据 ${m.reads} 次，输入 ${m.usage.input} 输出 ${m.usage.output}，agent ${(m.agentMs / 1000).toFixed(1)}s`)
   }

@@ -33,7 +33,11 @@ import type {
   RegisterAppResponse,
   AuthorizeUserResponse,
   RevokeUserResponse,
+  ChatStreamLine,
+  ChatView,
+  SaveChatProposalResponse,
 } from '../../src/web/types.ts'
+import type { ChatSummary } from '../../src/chat/types.ts'
 import type { CredentialKind } from '../../src/credentials/types.ts'
 
 export type { Insights }
@@ -109,3 +113,44 @@ export const listForgeApps = () => get<ForgeAppsResponse>('/api/forge-apps')
 export const registerForgeApp = (body: RegisterAppRequest) => post<RegisterAppResponse>('/api/forge-apps/register', body)
 export const authorizeForgeUser = (name: string) => post<AuthorizeUserResponse>('/api/forge-apps/authorize', { name })
 export const revokeForgeUser = (name: string) => post<RevokeUserResponse>('/api/forge-apps/revoke', { name })
+
+export type { ChatStreamLine, ChatSummary, ChatView }
+export type { ChatMessage } from '../../src/chat/types.ts'
+export type { ProposalView } from '../../src/chat/types.ts'
+
+export const listChats = () => get<ChatSummary[]>('/api/chats')
+export const getChat = (id: string) => get<ChatView>(`/api/chats/${encodeURIComponent(id)}`)
+export const saveChatProposal = (id: number, body: { confirm?: string; note?: string }) => post<SaveChatProposalResponse>(`/api/chats/proposals/${id}/save`, body)
+
+/** 发一句话（不给 chat 就是新建对话）：服务端一行行推送进度，每收到一行调用 onLine，返回最后的结果那一行。 */
+export const sendChat = async (body: { chat?: string; text: string }, onLine: (line: ChatStreamLine) => void): Promise<Extract<ChatStreamLine, { type: 'done' }>> => {
+  try {
+    const res = await fetch('/api/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    if (!res.ok || res.body === null) return { type: 'done', ok: false, error: ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `请求失败：${res.status}` }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buffer = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += value
+      const lines = buffer.split('\n')
+      buffer = lines.pop()!
+      for (const l of lines) {
+        let line: ChatStreamLine
+        try {
+          line = JSON.parse(l) as ChatStreamLine
+        } catch {
+          continue // 空行或被代理截断的半行：跳过
+        }
+        if (line.type === 'done') {
+          void reader.cancel()
+          return line
+        }
+        if (line.type !== 'ping') onLine(line)
+      }
+    }
+    return { type: 'done', ok: false, error: '连接断开了：这一轮可能还在进行，稍后刷新看看' }
+  } catch (e) {
+    return { type: 'done', ok: false, error: `请求失败：${(e as Error).message}` }
+  }
+}
