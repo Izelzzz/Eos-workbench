@@ -368,6 +368,26 @@ export class Supervisor {
     return this.active.has(id) || holder(this.locksDir, id) !== undefined
   }
 
+  /**
+   * 人在网页上做了决定（卡点的结论、修正）之后，让任务有 runner 接着跑。返回 false 表示没有 runner 会接着做，要点「继续」。
+   * 本进程里的 runner 可能正要结束（例如任务刚完成、它还在收尾时提交了修正）：等它结束后，任务还有工作就再起一个。
+   * 别的进程（例如命令行）持有任务时由那边接着做。
+   */
+  continueTask(id: string): boolean {
+    const current = this.active.get(id)
+    if (current !== undefined) {
+      void current
+        .catch(() => undefined)
+        .then(() => {
+          const t = this.o.store.get(id)
+          if (t !== undefined && t.status === 'running' && t.pending !== undefined && !this.running(id)) this.start(id)
+        })
+      return true
+    }
+    if (holder(this.locksDir, id) !== undefined) return true
+    return this.start(id).ok || this.running(id)
+  }
+
   /** 在本进程里开始运行（或续跑）任务。已经有 runner 时不重复启动。 */
   start(id: string, opts: { wait?: boolean } = {}): Started {
     if (this.o.store.get(id) === undefined) return { ok: false, error: `没有任务 ${id}` }

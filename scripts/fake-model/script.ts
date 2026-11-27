@@ -86,8 +86,13 @@ test('有非数字时抛 TypeError', () => {
 
 const verdict = (v: { verdict: 'pass' | 'changes'; summary: string; issues: { severity: string; file?: string; message: string }[] }) => `\`\`\`json\n${JSON.stringify(v, null, 2)}\n\`\`\``
 
-/** 剧本：角色 × 是不是这个会话的第一轮 */
-function turnFor(role: Role, isFirstTurn: boolean): Turn {
+const README = "# e2e-sample\n\n## sum 的用法\n\n```js\nimport { sum } from './src/math.js'\nsum([1, 2, 3]) // 6\nsum([]) // 0\n```\n"
+
+/** 剧本：角色 × 是不是这个会话的第一轮；任务完成后的修正（提示词里有「改正或补充」）单独一种 */
+function turnFor(role: Role, isFirstTurn: boolean, prompt: string): Turn {
+  if (role === 'developer' && prompt.includes('改正或补充')) {
+    return { tools: [write('README.md', README), bash('运行测试', 'npm test')], final: '按修正在 README.md 里补了 sum 的用法示例。验证：npm test 通过。' }
+  }
   switch (role) {
     case 'planner':
       return {
@@ -132,7 +137,7 @@ export function decide(req: Request): Reply {
   if (role === undefined) return { kind: 'text', text: '假模型：认不出角色（feature 模板的角色提示词改过了？要同步改 scripts/fake-model/script.ts）' }
   const turn = turnOf(req)
   const isFirstTurn = !req.messages.slice(0, turn.index).some(m => m.role === 'assistant')
-  const plan = turnFor(role, isFirstTurn)
+  const plan = turnFor(role, isFirstTurn, turn.prompt)
   const next = turn.toolsDone.length < plan.tools.length ? plan.tools[turn.toolsDone.length]! : { kind: 'text' as const, text: plan.final }
   if (next.kind === 'tool' && req.tools !== undefined && !req.tools.some(t => t.name === next.name)) {
     return { kind: 'text', text: `假模型：dsh 没有提供 ${next.name} 工具（改名了？要同步改 scripts/fake-model/script.ts）` }

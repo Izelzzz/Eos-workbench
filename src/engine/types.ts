@@ -11,9 +11,10 @@ export type Usage = { input: number; output: number; cacheRead: number; cacheWri
  * 调用的用途：
  * produce 一个 agent 节点完成工作；fix 交付物检查没通过，同一个 agent 补齐；critique 评审给结论；respond 被评审方回应意见；
  * reconfirm 上游重新确认做法与需求；reapply 被评审方按修订方案调整；instruct 被评审方按用户指示调整；
- * accept 卡点上由 agent 验收；amend 被验收方按打回意见（或重跑检查的失败、用户的指示）修改。
+ * accept 卡点上由 agent 验收；amend 被验收方按打回意见（或重跑检查的失败、用户的指示）修改；
+ * correct 任务完成后，按用户提交的改正或补充（或重跑检查的失败、用户的指示）在节点原来的会话里修改。
  */
-export type Purpose = 'produce' | 'fix' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct' | 'accept' | 'amend'
+export type Purpose = 'produce' | 'fix' | 'critique' | 'respond' | 'reconfirm' | 'reapply' | 'instruct' | 'accept' | 'amend' | 'correct'
 
 export type Call = {
   id: CallId
@@ -87,6 +88,19 @@ export type GateState = {
   lastComment?: string
 }
 
+/** 修正进行到哪一步：work 节点在改；check 改完重跑检查（程序检查，再加工作流里的平台动作）；ask 自动处理用完了，等用户指示。 */
+export type CorrectionPhase = 'work' | 'check' | 'ask'
+
+/** 已完成的任务上的一次修正（改正或补充）：交给哪个 agent 节点、第几次。修正结束后任务回到 done，这个状态清掉。 */
+export type CorrectionState = {
+  /** 第几次修正，从 1 开始。 */
+  round: number
+  node: NodeId
+  phase: CorrectionPhase
+  /** 重跑检查不通过、自动交回修改的次数。 */
+  fixes: number
+}
+
 export type QuestionSource = 'agent' | 'loop'
 
 export type Question = {
@@ -124,6 +138,8 @@ export type Entry =
   | { type: 'question'; at: number; question: Question }
   | { type: 'answer'; at: number; questionId: string; text: string }
   | { type: 'note'; at: number; node?: NodeId; text: string }
+  /** 用户在已完成的任务上提交的一次修正：第几次、交给哪个节点、内容。 */
+  | { type: 'correction'; at: number; round: number; node: NodeId; text: string }
   /** 卡点上的一次验收结论。by：human 是人，否则是验收的角色。打回时 comment 是意见，通过时可以为空。 */
   | { type: 'decision'; at: number; node: NodeId; round: number; by: 'human' | RoleId; pass: boolean; comment: string }
 
@@ -149,6 +165,8 @@ export type Task = {
   dialog?: DialogState
   /** 停在卡点上时的进度；和 dialog 不会同时存在。 */
   gate?: GateState
+  /** 已完成的任务正在修正时的进度；和 dialog、gate 不会同时存在。 */
+  correction?: CorrectionState
   /** 当前 agent 节点因检查没通过已自动补齐的次数，进入新节点时清零。 */
   fixes: number
   pending?: Work
@@ -168,6 +186,8 @@ export type Event =
   | { kind: 'answered'; questionId: string; text: string }
   /** 人在卡点上给出结论。gate、round 指明验收的是哪一次，过期的结论（已经有人决定过）被拒绝；打回时 comment 不能为空。 */
   | { kind: 'decided'; gate: NodeId; round: number; pass: boolean; comment: string }
+  /** 用户在已完成的任务上提交一条改正或补充，交给 node（agent 节点）在它原来的会话里做；text 不能为空。 */
+  | { kind: 'corrected'; node: NodeId; text: string }
   | { kind: 'retry' }
   | { kind: 'abort' }
 

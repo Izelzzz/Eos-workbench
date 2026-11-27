@@ -1,5 +1,5 @@
 // 工作流引擎：纯函数 reduce(task, event, at) → 新任务。不做 IO、不读时钟；at 由调用方给出。
-import type { AgentNode, DialogNode, GateNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
+import type { AgentNode, Check, DialogNode, GateNode, NodeId, RoleId, Workflow, WorkflowNode } from '../workflow/types.ts'
 import { explain, failureFacts } from './failure.ts'
 import { node as nodeOf, role as roleOf } from '../workflow/types.ts'
 import { allPassed, describeCheck, describeFailures } from './checks.ts'
@@ -8,6 +8,8 @@ import {
   amendPrompt,
   approverOf,
   checksStuckQuestion,
+  correctionStuckQuestion,
+  correctPrompt,
   critiquePrompt,
   fixInstructPrompt,
   fixPrompt,
@@ -20,8 +22,8 @@ import {
   scopeNotice,
   stuckQuestion,
 } from './prompts.ts'
-import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, DialogState, Entry, Event, GateState, Question, ReviewKind, Step, Task } from './types.ts'
-import { isCheck, isTerminal } from './types.ts'
+import type { Call, CallId, CheckResult, CheckRun, ConventionDoc, CorrectionState, DialogState, Entry, Event, GateState, Question, ReviewKind, Step, Task } from './types.ts'
+import { isCheck } from './types.ts'
 import { describeVerdict, parseDecision, parseVerdict } from './verdict.ts'
 
 /** 日志说明：对话打满轮次请上游重新确认、调用失败。证据归纳（evidence.ts）按这两种说明识别，改措辞时一起改。 */
@@ -139,7 +141,7 @@ const toUpstream = (task: Task, d: DialogNode, prompt: string): Task =>
   issue(withDialog(task, { phase: 'reconfirm' }), { node: d.id, session: d.escalate!, role: roleOfAgent(task, d.escalate!), purpose: 'reconfirm', prompt })
 
 const ask = (task: Task, q: Omit<Question, 'id'>, at: number): Task => {
-  const node = current(task)?.id
+  const node = task.correction?.node ?? current(task)?.id
   const question: Question = { ...q, ...(node === undefined ? {} : { node }), id: `q${task.log.filter(e => e.type === 'question').length + 1}` }
   return append({ ...task, status: 'waiting_user', question, pending: q.source === 'loop' ? undefined : task.pending }, { type: 'question', at, question })
 }
@@ -211,7 +213,79 @@ const gateChecked = (task: Task, g: GateNode, results: CheckResult[], at: number
   return ask(withGate(t, { phase: 'ask' }), { source: 'loop', text: gateStuckQuestion(t, g, 'checks') }, at)
 }
 
+/**
+ * 修正之后重跑的检查：工作流里所有节点的交付物和命令检查（不再请评审 agent），再加工作流里的平台动作
+ * （推送到同一个分支、复用同一个 PR），排在最后：前面的检查都通过了才推送。同样的检查只跑一次。
+ * 不只跑被修正节点自己的：修正可能改到别的节点负责的东西（例如改文档的节点也能改代码），推送前要和正常流程一样过一遍全部程序检查。
+ */
+export const correctionChecks = (wf: Workflow, _target: NodeId): Check[] => {
+  const program = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind !== 'platform')
+  const platform = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind === 'platform')
+  const seen = new Set<string>()
+  return [...program, ...platform].filter(c => {
+    const k = JSON.stringify(c)
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+}
+
+const withCorrection = (task: Task, patch: Partial<CorrectionState>): Task => ({ ...task, correction: { ...task.correction!, ...patch } })
+
+const correctionNode = (task: Task): AgentNode => {
+  const n = nodeOf(task.workflow, task.correction!.node)
+  if (n.kind !== 'agent') throw new Error(`修正交给的「${n.id}」不是 agent 节点`)
+  return n
+}
+
+/** 修正交给节点原来的会话：用户的改正或补充、重跑检查的失败，或用户的指示。 */
+const correctCall = (task: Task, prompt: string): Task => {
+  const n = correctionNode(task)
+  return issue(withCorrection(task, { phase: 'work' }), { node: n.id, session: n.id, role: n.role, purpose: 'correct', prompt })
+}
+
+const finishCorrection = (task: Task, at: number): Task =>
+  append({ ...task, status: 'done', pending: undefined, correction: undefined }, { type: 'note', at, node: task.correction!.node, text: `第 ${task.correction!.round} 次修正完成` })
+
+/** 节点改完：有要重跑的检查就跑，没有就结束这次修正。 */
+const afterCorrect = (task: Task, at: number): Task => {
+  const checks = correctionChecks(task.workflow, task.correction!.node)
+  if (checks.length === 0) return finishCorrection(task, at)
+  return { ...withCorrection(task, { phase: 'check' }), status: 'running', pending: { id: nextId(task), node: task.correction!.node, purpose: 'check', checks }, nextCall: task.nextCall + 1 }
+}
+
+/**
+ * 修正后重跑的检查。全部通过：这次修正结束，任务回到完成。只有平台动作（推送、开 PR）没完成：agent 改不了，任务失败等人处理，
+ * 重试时整轮重跑。别的检查没过：交回节点修，次数用完问用户。
+ */
+const correctionChecked = (task: Task, results: CheckResult[], at: number): Task => {
+  if (allPassed(results)) return finishCorrection(task, at)
+  const n = correctionNode(task)
+  const failed = results.filter(r => !r.passed)
+  if (results.every(r => r.passed || r.check.kind === 'platform')) {
+    const failure = explain({
+      where: `第 ${task.correction!.round} 次修正的${failed.map(r => describeCheck(r.check)).join('、')}`,
+      error: failed.map(r => r.detail).join('\n'),
+      task: task.id,
+      fix: '这是平台替任务做的动作，agent 改不了：按原因处理远程仓库或凭据',
+    })
+    const again = afterCorrect(task, at)
+    return append({ ...again, status: 'failed', failure }, { type: 'note', at, node: n.id, text: '平台动作没有完成，任务暂停，等人工处理后重试' })
+  }
+  const failures = agentFailures(results)
+  if (task.correction!.fixes < n.maxFixes) return correctCall(withCorrection(task, { fixes: task.correction!.fixes + 1 }), correctPrompt(task, n, { failures }))
+  return ask(withCorrection(task, { phase: 'ask' }), { source: 'loop', text: correctionStuckQuestion(task, n, failures) }, at)
+}
+
+/** 用户在已完成的任务上提交一条改正或补充：记下来，交给那个 agent 节点原来的会话（不是重新跑一遍）。 */
+const onCorrected = (task: Task, node: NodeId, text: string, at: number): Task => {
+  const round = task.log.filter(e => e.type === 'correction').length + 1
+  const opened = append({ ...task, status: 'running', failure: undefined, correction: { round, node, phase: 'work', fixes: 0 } }, { type: 'correction', at, round, node, text })
+  return correctCall(opened, correctPrompt(opened, correctionNode(opened), { text, round }))
+}
+
 const onChecked = (task: Task, run: CheckRun, results: CheckResult[], at: number): Task => {
+  if (task.correction !== undefined) return correctionChecked(task, results, at)
   const n = current(task)!
   if (n.kind === 'gate') return gateChecked(task, gateNode(task), results, at)
   const blocked = platformFailed(task, n, results, at)
@@ -311,6 +385,13 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
       return onDecision(withGate(task, { formatRetries: 0 }), g, { pass: v.verdict === 'pass', comment: describeVerdict(v), by: call.role }, at)
     }
 
+    case 'correct': {
+      // 修正的回复接在原来的产出后面（和补齐一样），不覆盖：之后的修正和卡点还要看原来的说明。
+      const prev = task.outputs[call.node]
+      const output = `${prev === undefined ? '' : `${prev}\n\n`}# 第 ${task.correction!.round} 次修正\n\n${text}`
+      return afterCorrect({ ...task, outputs: { ...task.outputs, [call.node]: output } }, at)
+    }
+
     case 'amend': {
       const g = gateNode(task)
       return afterAmend({ ...task, outputs: { ...task.outputs, [g.with]: text } }, g, at)
@@ -333,6 +414,7 @@ const onReply = (task: Task, call: Call, text: string, at: number): Task => {
  * 对话节点：有上游就交给上游修订方案，否则直接交给被评审方。
  */
 const onLoopAnswer = (task: Task, text: string): Task => {
+  if (task.correction !== undefined) return correctCall(withCorrection(task, { fixes: 0 }), correctPrompt(task, correctionNode(task), { instruction: text }))
   const n = current(task)
   if (n?.kind === 'agent') return issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })
   if (n?.kind === 'gate') {
@@ -344,7 +426,10 @@ const onLoopAnswer = (task: Task, text: string): Task => {
 }
 
 export const reduce = (task: Task, event: Event, at: number): Step => {
-  if (isTerminal(task)) return ignore(task, '任务已结束')
+  if (task.status === 'aborted') return ignore(task, '任务已中止')
+  // 已完成的任务只接受改正或补充。
+  if (task.status === 'done' && event.kind !== 'corrected') return ignore(task, '任务已结束')
+  const round = (task.gate ?? task.dialog ?? task.correction)?.round
   switch (event.kind) {
     case 'replied': {
       const call = task.pending
@@ -359,7 +444,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
           node: call.node,
           role: call.role,
           purpose: call.purpose,
-          ...((task.gate ?? task.dialog) === undefined ? {} : { round: (task.gate ?? task.dialog)!.round }),
+          ...(round === undefined ? {} : { round }),
           prompt: call.prompt,
           reply: event.text,
           usage: event.usage,
@@ -377,7 +462,7 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       if (event.results.length !== run.checks.length) return ignore(task, `检查结果有 ${event.results.length} 条，应该是 ${run.checks.length} 条`)
       const recorded = append(
         { ...task, pending: undefined, status: 'running' },
-        { type: 'check', at, call: run.id, node: run.node, ...((task.gate ?? task.dialog) === undefined ? {} : { round: (task.gate ?? task.dialog)!.round }), results: event.results, ms: event.ms },
+        { type: 'check', at, call: run.id, node: run.node, ...(round === undefined ? {} : { round }), results: event.results, ms: event.ms },
       )
       return ok(onChecked(recorded, run, event.results, at))
     }
@@ -414,6 +499,15 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
       return ok(onDecision({ ...task, status: 'running' }, gateNode(task), { pass: event.pass, comment, by: 'human' }, at))
     }
 
+    case 'corrected': {
+      if (task.status !== 'done') return ignore(task, '只有已完成的任务可以提交改正或补充')
+      const n = task.workflow.nodes.find(x => x.id === event.node)
+      if (n?.kind !== 'agent') return ignore(task, `「${event.node}」不是这个工作流里的 agent 节点，只能交给 agent 节点：${agentNodes(task.workflow).join('、')}`)
+      const text = event.text.trim()
+      if (text === '') return ignore(task, '改正或补充的内容不能为空')
+      return ok(onCorrected(task, n.id, text, at))
+    }
+
     case 'retry':
       if (task.status !== 'failed') return ignore(task, '只有失败的任务可以重试')
       return ok(append({ ...task, status: 'running', failure: undefined }, { type: 'note', at, text: '人工重试' }))
@@ -423,9 +517,13 @@ export const reduce = (task: Task, event: Event, at: number): Step => {
   }
 }
 
+/** 能接修正的节点：工作流里的 agent 节点（有自己的会话）。 */
+export const agentNodes = (wf: Workflow): NodeId[] => wf.nodes.flatMap(n => (n.kind === 'agent' ? [n.id] : []))
+
 /** 一次调用发到了哪个会话：完成工作和评审在节点自己的会话里，回应和调整在被评审方的会话里，重新确认在上游的会话里。 */
 export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['purpose'] }): string => {
   const n = wf.nodes.find(x => x.id === call.node)
+  if (call.purpose === 'correct') return call.node
   if (n?.kind === 'gate') return call.purpose === 'amend' ? n.with : call.node
   if (n?.kind !== 'dialog' || call.purpose === 'produce' || call.purpose === 'fix' || call.purpose === 'critique') return call.node
   return call.purpose === 'reconfirm' ? (n.escalate ?? call.node) : n.with
@@ -433,8 +531,13 @@ export const sessionOf = (wf: Workflow, call: { node: string; purpose: Call['pur
 
 /** 当前节点在流程中的位置说明，给命令行和日志用。 */
 export const describePosition = (task: Task): string => {
+  const c = task.correction
+  if (c !== undefined) return `第 ${c.round} 次修正 · ${c.node} · ${{ work: '修改中', check: '重跑检查', ask: '等用户指示' }[c.phase]}`
   const n = current(task)
-  if (n === undefined) return '已完成'
+  if (n === undefined) {
+    const corrections = task.log.filter(e => e.type === 'correction').length
+    return corrections === 0 ? '已完成' : `已完成（修正过 ${corrections} 次）`
+  }
   if (n.kind === 'gate' && task.gate !== undefined) {
     const g = task.gate
     const phase = { decide: `等待验收（${approverOf(n)}）`, amend: `「${n.with}」按意见修改`, check: '修改后重跑检查', ask: '等用户指示' }[g.phase]

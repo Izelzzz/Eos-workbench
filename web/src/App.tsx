@@ -4,6 +4,7 @@ import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
 import { getTask, listTasks, taskAction } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { Changes } from './Changes.tsx'
+import { Corrections } from './Corrections.tsx'
 import { Gate } from './Gate.tsx'
 import { Credentials } from './Credentials.tsx'
 import { ForgeApps } from './ForgeApps.tsx'
@@ -376,6 +377,13 @@ function TaskPage(props: { id: string }) {
           </a>
         </div>
       </section>
+      <Corrections
+        task={task}
+        onSubmitted={resumeNeeded => {
+          setNotice(resumeNeeded ? '修正已提交。没有程序在运行这个任务，点「继续」让它接着跑。' : '修正已提交，任务继续。')
+          setReload(n => n + 1)
+        }}
+      />
       <Stages metrics={task.metrics} runnerAlive={task.runnerAlive} />
       <Changes id={task.id} version={r.calls} {...(prLink === undefined ? {} : { pr: prLink })} />
       <div className="toolbar">

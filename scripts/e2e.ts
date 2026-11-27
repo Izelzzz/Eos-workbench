@@ -12,6 +12,8 @@ import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
+import { filesByCall } from '../src/runner/git.ts'
+import { describePosition } from '../src/engine/machine.ts'
 import { keyOf } from '../src/runner/runner.ts'
 import { parseMasterKey, takeMasterKey } from '../src/credentials/key.ts'
 import { MODEL_KEY_CREDENTIAL } from '../src/credentials/model-key.ts'
@@ -71,6 +73,9 @@ const cli = (args: string[]) => spawn(process.execPath, ['--import', 'tsx', join
 
 const cliSync = (...args: string[]) => execFileSync(process.execPath, ['--import', 'tsx', join(ROOT, 'src', 'cli.ts'), ...args, '--data', DATA], { cwd: ROOT, env, encoding: 'utf8' })
 const answer = (id: string, text: string) => cliSync('answer', id, text)
+
+/** 任务完成后提交的修正（路线图 5c）：交给开发，在原来的会话和 worktree 里补一段 README。 */
+const CORRECTION = '补充：在仓库根目录的 README.md 里写一段 sum 函数的用法示例（中文说明，带代码块）。'
 
 /** 人在卡点 accept 上的意见：第一次打回，之后通过。 */
 const SEND_BACK = '请在 src/math.js 的 sum 上方补一段 JSDoc 注释，写明参数、返回值和会抛出的错误。'
@@ -212,6 +217,16 @@ const gatesOut = cliSync('gates')
 record(`[e2e] eos gates：\n${gatesOut}\n`)
 if (!second.killed) record('\n[e2e] 警告：没有在卡点上杀掉进程\n')
 await drive(['resume', first.id])
+// 修正：任务完成后提交一条补充，交给开发；eos correct 在本进程里接着跑完。
+const worktreeBefore = (() => {
+  const s = new Store(join(DATA, 'eos.db'))
+  const m = s.meta(first.id)
+  const t = s.get(first.id)!
+  s.close()
+  return { worktree: m.worktree, branch: m.branch, session: t.sessions.build, status: t.status }
+})()
+record(`\n[e2e] 提交修正前：${JSON.stringify(worktreeBefore)}\n`)
+await drive(['correct', first.id, '--node', 'build', CORRECTION])
 
 const store = new Store(join(DATA, 'eos.db'))
 const task = store.get(first.id)!
@@ -297,6 +312,16 @@ const sessions = Object.fromEntries(['plan', 'build', 'review', 'sign-off'].map(
 const decisions = task.log.flatMap(e => (e.type === 'decision' ? [e] : []))
 const gateNotes = task.log.flatMap(e => (e.type === 'note' && e.node === 'accept' && e.text.includes('次验收：等') ? [e.text] : []))
 const firstDecision = task.log.findIndex(e => e.type === 'decision')
+const correctionAt = task.log.findIndex(e => e.type === 'correction')
+const correctCalls = calls.filter(c => c.purpose === 'correct')
+const correctedFiles = (() => {
+  try {
+    const byCall = filesByCall(meta)
+    return [...new Set(correctCalls.flatMap(c => byCall[c.call] ?? []))]
+  } catch {
+    return []
+  }
+})()
 const devCalls = calls.filter(c => c.role === 'developer').map(c => c.call)
 const checks = {
   任务完成: task.status === 'done',
@@ -315,6 +340,18 @@ const checks = {
   命令行列出等验收的任务: gatesOut.includes(first.id) && gatesOut.includes('等待验收'),
   '人打回一次（带意见）、改完回到卡点后通过': JSON.stringify(decisions.filter(d => d.node === 'accept').map(d => [d.round, d.pass, d.comment === SEND_BACK])) === '[[1,false,true],[2,true,false]]',
   打回后交回开发原来的会话修改: calls.some(c => c.purpose === 'amend' && c.node === 'accept' && c.role === 'developer' && sessions.build!.calls.includes(c.call)),
+  '修正：交给开发原来的会话（同一个 dsh 会话），在同一个 worktree 和分支上':
+    correctCalls.length >= 1 &&
+    correctCalls.every(c => c.node === 'build' && sessions.build!.calls.includes(c.call)) &&
+    task.sessions.build === worktreeBefore.session &&
+    meta.worktree === worktreeBefore.worktree &&
+    meta.branch === worktreeBefore.branch,
+  '修正之后只重跑程序检查：没有再请评审或验收，没有重跑别的节点': correctionAt >= 0 && !task.log.slice(correctionAt).some(e => (e.type === 'call' && e.purpose !== 'correct') || e.type === 'decision'),
+  '修正完成，任务回到完成；能看出是第几次修正、改了哪些文件':
+    worktreeBefore.status === 'done' &&
+    task.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成') &&
+    describePosition(task) === '已完成（修正过 1 次）' &&
+    correctedFiles.includes('README.md'),
   '卡点打回之后没有再请评审 agent': !task.log.slice(firstDecision).some(e => e.type === 'call' && e.purpose === 'critique'),
   ...(remote === undefined ? {} : remoteChecks()),
 }
@@ -329,6 +366,7 @@ const result = {
   killedAtGate: second.killed,
   gateLog,
   atGate,
+  correction: { before: worktreeBefore, calls: correctCalls.map(c => c.call), files: correctedFiles },
   checks,
   sessions,
   rejectedReplies: resent,

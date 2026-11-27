@@ -35,6 +35,20 @@ export type GateInfo = {
   decisions: GateDecision[]
 }
 
+/** 已完成的任务上的一次修正：第几次、交给哪个节点、内容、进行到哪、节点的回复和这次修正的提交改了哪些文件。 */
+export type CorrectionInfo = {
+  round: number
+  node: string
+  text: string
+  at: number
+  /** running：进行中；done：完成；failed：任务失败了，重试后接着做；aborted：任务中止，没做完。 */
+  state: 'running' | 'done' | 'failed' | 'aborted'
+  /** 这次修正里节点的每次回复（第一次是按修正修改，之后是检查没过时的修复），按先后。 */
+  replies: string[]
+  /** 这次修正的提交改到的文件。 */
+  files: string[]
+}
+
 export type TaskDetail = {
   id: string
   status: TaskStatus
@@ -44,6 +58,10 @@ export type TaskDetail = {
   question?: Question
   /** 停在卡点上时才有。 */
   gate?: GateInfo
+  /** 修正记录，按先后。 */
+  corrections: CorrectionInfo[]
+  /** 任务完成后可以提交修正的节点（agent 节点）；任务没完成时为空。 */
+  correctable: string[]
   failure?: string
   /** 这个任务的日志文件（平台所在机器上的路径，只用来显示；内容用 /api/tasks/:id/log 看）。 */
   logPath: string
@@ -75,6 +93,10 @@ export type AnswerResponse = { ok: true; resumeNeeded: boolean } | { ok: false; 
 export type GateRequest = { gate: string; round: number; pass: boolean; comment: string }
 /** resumeNeeded：结论记下了，但没有 runner 接着做（起不来），要点「继续」。 */
 export type GateResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }
+
+/** 已完成的任务上提交一条改正或补充，交给 node（agent 节点）。 */
+export type CorrectRequest = { node: string; text: string }
+export type CorrectResponse = { ok: true; resumeNeeded: boolean } | { ok: false; error: string }
 
 export type CreateResponse = { ok: true; id: string } | { ok: false; error: string }
 export type ActionResponse = { ok: true } | { ok: false; error: string }

@@ -1,7 +1,7 @@
 // 对真实的 reduce 做广度优先穷举：每个可达状态都喂一遍所有类别的事件，检查每一步是否守住不变量。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_FORMAT_RETRIES, newTask, reduce } from '../src/engine/machine.ts'
+import { correctionChecks, MAX_FORMAT_RETRIES, newTask, reduce } from '../src/engine/machine.ts'
 import type { Event, Task } from '../src/engine/types.ts'
 import { isCheck, zeroUsage } from '../src/engine/types.ts'
 import type { AgentNode, DialogNode, GateNode, NodeId, Workflow } from '../src/workflow/types.ts'
@@ -22,6 +22,7 @@ const replies: Record<string, string[]> = {
   reconfirm: [REVISE, ASK, GARBAGE],
   accept: [PASS, CHANGES, GARBAGE],
   amend: ['已按验收意见修改'],
+  correct: ['已按改正或补充修改'],
 }
 
 /** 当前状态下所有类别的事件，包括会被拒绝的（过期回复、空回答、非法重试）。 */
@@ -60,6 +61,10 @@ const eventsFor = (t: Task): Event[] => {
   out.push({ kind: 'decided', gate: g.node, round: g.round, pass: false, comment: '  ' })
   out.push({ kind: 'decided', gate: g.node, round: g.round + 1, pass: true, comment: '' })
   out.push({ kind: 'decided', gate: 'review' as never, round: g.round, pass: true, comment: '' })
+  // 已完成的任务上的修正：交给 agent 节点，以及会被拒绝的（交给对话节点、空内容）。不在完成状态时也全部发一遍。
+  out.push({ kind: 'corrected', node: 'build' as NodeId, text: '再补一个负数的测试' })
+  out.push({ kind: 'corrected', node: 'review' as NodeId, text: '交给对话节点' })
+  out.push({ kind: 'corrected', node: 'build' as NodeId, text: '  ' })
   out.push({ kind: 'answered', questionId: 'q999', text: '回答一个不存在的问题' })
   if (t.question !== undefined) {
     out.push({ kind: 'answered', questionId: t.question.id, text: '用户的回答' })
@@ -77,6 +82,8 @@ const key = (t: Task): string =>
     d: t.dialog && { ...t.dialog, lastCritique: undefined },
     // 第几次验收只增不减，只用来核对结论是不是过期的（事件按当前的 round 生成），不影响之后的行为，不算进状态，否则状态空间无穷。
     // 这一段的第几次（cycle）只在 agent 验收时和 maxRounds 比；人验收不限次数，也不算。
+    // 第几次修正只出现在说明文字里，不影响之后的行为，不算进状态。
+    k: t.correction && { ...t.correction, round: undefined },
     g: t.gate && { ...t.gate, lastComment: undefined, round: undefined, cycle: gateOf(t.workflow, t.gate.node).by.kind === 'human' ? undefined : t.gate.cycle },
     p: t.pending && { u: t.pending.purpose, s: isCheck(t.pending) ? undefined : t.pending.session, n: t.pending.node },
     q: t.question?.source,
@@ -115,7 +122,7 @@ const INVARIANTS: Record<string, Check> = {
     if (p === undefined || isCheck(p)) return undefined
     const n = wf.nodes.find(x => x.id === p.node)!
     const expected =
-      p.purpose === 'produce' || p.purpose === 'fix' || p.purpose === 'critique' || p.purpose === 'accept'
+      p.purpose === 'produce' || p.purpose === 'fix' || p.purpose === 'critique' || p.purpose === 'accept' || p.purpose === 'correct'
         ? p.node
         : p.purpose === 'amend'
           ? gateWith(wf, p.node)
@@ -131,6 +138,9 @@ const INVARIANTS: Record<string, Check> = {
   检查跑的是当前节点声明的检查: (_b, _e, a, _acc, wf) => {
     const p = a.pending
     if (p === undefined || !isCheck(p)) return undefined
+    // 修正时：工作流里全部节点的程序检查，加上平台动作（correctionChecks 算出的那一组）。
+    if (a.correction !== undefined)
+      return p.node === a.correction.node && JSON.stringify(p.checks) === JSON.stringify(correctionChecks(wf, a.correction.node)) && p.checks.length > 0 ? undefined : `correction check for ${p.node}`
     const n = wf.nodes[a.cursor]
     return n?.id === p.node && p.checks === n.checks && p.checks.length > 0 ? undefined : `check for ${p.node} at cursor ${a.cursor}`
   },
@@ -206,6 +216,28 @@ const INVARIANTS: Record<string, Check> = {
     return dropped.length === 0 ? undefined : `notice for ${dropped.join(',')} dropped`
   },
   对话和卡点不会同时进行: (_b, _e, a) => (a.dialog !== undefined && a.gate !== undefined ? 'dialog and gate at once' : undefined),
+  '修正只在走完所有节点之后，和对话、卡点不同时进行': (_b, _e, a, _acc, wf) =>
+    a.correction !== undefined && (a.cursor !== wf.nodes.length || a.dialog !== undefined || a.gate !== undefined) ? `correction at cursor ${a.cursor}` : undefined,
+  '修正只接受已完成的任务、交给 agent 节点、内容不为空': (b, e, a, accepted, wf) => {
+    if (e.kind !== 'corrected' || !accepted) return undefined
+    if (b.status !== 'done') return `correction accepted while ${b.status}`
+    if (wf.nodes.find(n => n.id === e.node)?.kind !== 'agent') return `correction for ${e.node}`
+    if (e.text.trim() === '') return 'empty correction accepted'
+    return a.pending?.purpose === 'correct' && !isCheck(a.pending) && a.pending.session === e.node ? undefined : 'correction not sent to the node session'
+  },
+  '修正时只有修正调用和检查：不请评审、不验收': (_b, _e, a) =>
+    a.correction !== undefined && a.pending !== undefined && a.pending.purpose !== 'correct' && a.pending.purpose !== 'check' ? `${a.pending.purpose} during correction` : undefined,
+  '修正的补齐次数不超过被修正节点的 maxFixes': (_b, _e, a, _acc, wf) => {
+    if (a.correction === undefined) return undefined
+    const n = wf.nodes.find(x => x.id === a.correction!.node) as AgentNode
+    return a.correction.fixes <= n.maxFixes ? undefined : `correction fixes ${a.correction.fixes}`
+  },
+  '修正结束（回到完成）时，重跑的检查都通过了；没有要重跑的检查时是节点改完': (b, e, a, accepted) => {
+    if (!accepted || b.correction === undefined || a.status !== 'done') return undefined
+    if (a.correction !== undefined) return 'done with correction open'
+    if (e.kind === 'checked') return e.results.every(r => r.passed) ? undefined : 'correction finished with failing checks'
+    return e.kind === 'replied' && b.pending?.purpose === 'correct' && correctionChecks(b.workflow, b.correction.node).length === 0 ? undefined : `correction finished by ${e.kind}`
+  },
   '卡点状态只在卡点上，且属于当前节点': (_b, _e, a, _acc, wf) => {
     if (a.gate === undefined) return undefined
     const n = wf.nodes[a.cursor]
@@ -314,6 +346,8 @@ const CONFIGS = [
   { maxRounds: 1, escalate: true, gate: 'agent' as const, gateRounds: 2 },
   { maxRounds: 1, escalate: false, checks: 'only' as const, gate: 'agent' as const, gateRounds: 1, gateFixes: 0 },
 ]
+// 上面每一种配置都会走到完成，再对完成的任务提交修正（build 是 agent 节点），所以修正的转移在所有配置里都穷举到了：
+// 没有检查（改完直接结束）、有交付物和测试（重跑检查，失败交回修改、用完问用户）、有平台动作（最后推送；推送失败任务失败等重试）。
 const CHECKS = { none: '无检查', review: '有交付物、评审前跑测试', only: '有交付物、只有测试' }
 
 for (const config of CONFIGS) {

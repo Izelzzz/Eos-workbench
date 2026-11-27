@@ -88,27 +88,33 @@ const union = (spans: Span[]): number => {
 /** a 落在 b 里的部分。 */
 const clip = (a: Span, b: Span): Span => ({ start: Math.max(a.start, b.start), end: Math.min(a.end, b.end) })
 
+/** 任务完成后的修正（改正或补充）单独算一个阶段：不算进被修正节点原来的阶段，否则那个阶段会从当初一直拉到修正结束。 */
+export const CORRECTION_STAGE = '修正'
+
 /** now：进行中的部分算到这个时刻。createdAt：任务创建时刻（第一个阶段还没有任何记录时从这里算起）。 */
 export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMetrics => {
   const finished = task.status === 'done' || task.status === 'aborted'
   const lastAt = task.log.at(-1)?.at ?? now
   const until = finished ? lastAt : now
-  const current = finished ? undefined : task.workflow.nodes[task.cursor]?.id
+  const current = finished ? undefined : task.correction !== undefined ? CORRECTION_STAGE : task.workflow.nodes[task.cursor]?.id
+  // 第一次修正之后的记录都归到「修正」阶段。
+  const cut = task.log.findIndex(e => e.type === 'correction')
+  const stageAt = (i: number, node: string | undefined): string | undefined => (cut >= 0 && i >= cut ? CORRECTION_STAGE : node)
 
   // 提问的等待区间：到下一条日志为止。等回答时只有这些事会写日志，而且都结束这次等待：回答、调用回复（问题作废）、
   // 调用失败、换成新问题（续跑后 agent 重新提问）、中止。还没有下一条日志的算到 until。
   // 人验收的卡点也一样：从开始等验收的说明到下一条日志（结论或中止）。
   const waits = task.log.flatMap((e, i) => {
     const end = task.log[i + 1]?.at ?? until
-    if (e.type === 'question') return [{ node: e.question.node as string | undefined, call: e.question.call as string | undefined, span: { start: e.at, end } }]
-    return isHumanGateWait(task, e) ? [{ node: e.node as string | undefined, call: undefined, span: { start: e.at, end } }] : []
+    if (e.type === 'question') return [{ node: stageAt(i, e.question.node), call: e.question.call as string | undefined, span: { start: e.at, end } }]
+    return isHumanGateWait(task, e) ? [{ node: stageAt(i, e.node), call: undefined, span: { start: e.at, end } }] : []
   })
 
   // 失败到重试的阻塞区间：失败说明带着节点，重试说明不带，按顺序配对。
   const blocks: { node: string | undefined; span: Span }[] = []
   let failedAt: { node: string | undefined; at: number } | undefined
-  for (const e of task.log) {
-    if (isFailure(e) && e.type === 'note' && failedAt === undefined) failedAt = { node: e.node, at: e.at }
+  for (const [i, e] of task.log.entries()) {
+    if (isFailure(e) && e.type === 'note' && failedAt === undefined) failedAt = { node: stageAt(i, e.node), at: e.at }
     else if (isRetry(e) && failedAt !== undefined) {
       blocks.push({ node: failedAt.node, span: { start: failedAt.at, end: e.at } })
       failedAt = undefined
@@ -118,9 +124,9 @@ export const taskMetrics = (task: Task, now: number, createdAt?: number): TaskMe
 
   const stages: StageMetrics[] = []
   const byRole = new Map<string, Omit<RoleMetrics, 'role' | 'template'>>()
-  for (const n of task.workflow.nodes) {
-    const calls = task.log.filter((e): e is Extract<Entry, { type: 'call' }> => e.type === 'call' && e.node === n.id)
-    const checks = task.log.filter((e): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && e.node === n.id)
+  for (const n of [...task.workflow.nodes.map(x => ({ id: x.id as string })), ...(cut >= 0 ? [{ id: CORRECTION_STAGE }] : [])]) {
+    const calls = task.log.filter((e, i): e is Extract<Entry, { type: 'call' }> => e.type === 'call' && stageAt(i, e.node) === n.id)
+    const checks = task.log.filter((e, i): e is Extract<Entry, { type: 'check' }> => e.type === 'check' && stageAt(i, e.node) === n.id)
     const nodeWaits = waits.filter(w => w.node === n.id)
     const nodeBlocks = blocks.filter(b => b.node === n.id)
     const activity: Span[] = [

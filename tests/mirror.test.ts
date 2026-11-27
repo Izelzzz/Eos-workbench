@@ -673,6 +673,52 @@ test('分支已经有打开的 PR（例如崩溃后重跑、人工先开了）�
   assert.equal(apiCalls(r).filter(q => q.method === 'POST').length, 1, '只开过一个 PR')
 })
 
+test('修正（路线图 5c）：已完成、开过 PR 的任务提交修正，改完推到同一个分支、复用同一个 PR，不开第二个', async () => {
+  const r = await remote(TOKEN)
+  assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })
+  const saved = r.sup.conventions.save({ kind: 'workflow', name: 'ship-pr', content: PR_FLOW, actor: 'test' }, Date.now())
+  assert.ok(saved.ok || JSON.stringify(saved).includes('完全一样'), JSON.stringify(saved))
+  // 开发第一次写 feature.txt；修正时（提示词里有「改正或补充」）再写 fix.txt。
+  const executor = new FakeExecutor(async ({ key, prompt }) => {
+    if (key.endsWith('/review')) return PASS
+    const wt = r.store.meta(key.split('/')[0]!).worktree
+    if (prompt.includes('改正或补充')) writeFileSync(join(wt, 'fix.txt'), 'fix\n')
+    else writeFileSync(join(wt, 'feature.txt'), 'new\n')
+    return '改好了'
+  })
+  const sup = new Supervisor({ store: r.store, executor, dataDir: r.data, credentials: r.credentials, forges: [r.forge], pollMs: 2 })
+  const c = (await sup.create({ repo: r.url, workflow: 'ship-pr', request: '给首页加一个按钮' })) as { id: string }
+  const first = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(first.status, 'done', first.failure)
+  const meta = r.store.meta(c.id)
+  const before = remoteSha(r, meta.branch)
+  const posts = () => apiCalls(r).filter(q => q.method === 'POST').length
+  assert.equal(posts(), 1)
+  assert.ok(r.store.dispatch(c.id, { kind: 'corrected', node: 'build' as never, text: '补一个 fix.txt' }, Date.now(), 'cli').accepted)
+  const task = await (sup.start(c.id, { wait: false }) as { done: Promise<import('../src/engine/types.ts').Task> }).done
+  assert.equal(task.status, 'done', task.failure)
+  assert.ok(task.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'))
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: meta.worktree, encoding: 'utf8' }).trim()
+  assert.notEqual(head, before, '修正有新的提交')
+  assert.equal(remoteSha(r, meta.branch), head, '推到了同一个分支')
+  assert.equal(execFileSync('git', ['merge-base', '--is-ancestor', before, head], { cwd: meta.worktree }).length, 0, '在原来的提交之后接着提交（快进，不强推）')
+  assert.equal(posts(), 1, '没有开第二个 PR')
+  const last = task.log
+    .flatMap(e => (e.type === 'check' ? e.results : []))
+    .filter(x => x.check.kind === 'platform')
+    .at(-1)!
+  assert.equal(last.passed, true)
+  assert.deepEqual(
+    last.links?.find(l => l.kind === 'pull-request')?.url,
+    first.log
+      .flatMap(e => (e.type === 'check' ? e.results : []))
+      .filter(x => x.check.kind === 'platform')
+      .at(-1)!
+      .links?.find(l => l.kind === 'pull-request')?.url,
+    '修正后的检查结果链接到同一个 PR',
+  )
+})
+
 test('任务没有改动：推送了，但不开 PR，算通过并写明原因；本机仓库的任务跳过推送和开 PR', async () => {
   const r = await remote(TOKEN)
   assert.deepEqual(r.credentials.put(LOCAL_OWNER, r.credential, 'token', TOKEN), { ok: true })

@@ -154,3 +154,15 @@ export const gateStuckQuestion = (task: Task, g: GateNode, why: 'rounds' | 'chec
       : `「${g.id}」打回修改之后，重跑检查自动交回修改 ${g.maxFixes} 次仍没有通过：`
   return `${head}\n${task.gate?.lastComment ?? '（无）'}\n\n请告诉我接下来怎么做。`
 }
+
+/** 已完成的任务上的修正：用户的改正或补充、修正后重跑检查的失败，或用户的指示。在节点原来的会话里说话。 */
+export const correctPrompt = (task: Task, n: AgentNode, input: { text: string; round: number } | { failures: CheckResult[] } | { instruction: string }): string => {
+  const head = intro(task, n.id, task.workflow, n)
+  if ('instruction' in input) return `${head}${section('用户的指示', input.instruction)}请据此修改。最后简要说明你做了什么。`
+  if ('failures' in input) return `${head}${section('修正之后，重跑检查没有通过', describeFailures(input.failures))}请在原来的工作上修好。最后简要说明你改了什么。`
+  return `${head}${section(`改正或补充（第 ${input.round} 次修正）`, input.text)}这个任务之前已经完成。请在原来的工作上按上面的内容修改或补充，不要从头重来；不需要的改动不要做。最后简要说明你改了什么、为什么。`
+}
+
+/** 修正后重跑检查补齐次数用完，问用户。 */
+export const correctionStuckQuestion = (task: Task, n: AgentNode, results: CheckResult[]): string =>
+  `第 ${task.correction?.round ?? 1} 次修正（交给「${n.id}」）之后，重跑检查自动交回修改 ${n.maxFixes} 次仍没有通过：\n${describeFailures(results)}\n\n请告诉我接下来怎么做。`

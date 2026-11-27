@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve, sep } from 'node:path'
-import { describePosition, sessionOf } from '../engine/machine.ts'
+import { agentNodes, describePosition, sessionOf } from '../engine/machine.ts'
 import { approverOf } from '../engine/prompts.ts'
 import { insights, sampleAt } from '../engine/insights.ts'
 import { taskMetrics } from '../engine/metrics.ts'
@@ -21,7 +21,7 @@ import { CREDENTIAL_KINDS, type CredentialKind, LOCAL_OWNER } from '../credentia
 import { evidence } from '../engine/evidence.ts'
 import { compare, versionUsed, type CompareSample } from '../engine/compare.ts'
 import { keyOf, nonceOf } from '../runner/runner.ts'
-import { committedChanges, fileDiff, onBranch } from '../runner/git.ts'
+import { committedChanges, fileDiff, filesByCall, onBranch } from '../runner/git.ts'
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import { buildTrace } from '../trace/build.ts'
@@ -30,6 +30,8 @@ import type { ConventionKind } from '../store/types.ts'
 import type {
   ActionResponse,
   AnswerResponse,
+  CorrectionInfo,
+  CorrectResponse,
   GateInfo,
   GateResponse,
   ConventionDetail,
@@ -238,6 +240,31 @@ export const createWebServer = (o: {
     }
   }
 
+  /** 修正记录：每次修正的内容、进行到哪、节点的回复，以及这次修正的提交改到的文件（读 git 失败时不给文件）。 */
+  const correctionsOf = (task: Task, meta: ReturnType<Store['meta']>): CorrectionInfo[] => {
+    const entries = task.log.flatMap(e => (e.type === 'correction' ? [e] : []))
+    if (entries.length === 0) return []
+    let files: Record<string, string[]> = {}
+    try {
+      files = filesByCall(meta)
+    } catch {
+      // 仓库或 worktree 不在了：只是少显示文件列表。
+    }
+    return entries.map(c => {
+      const calls = task.log.flatMap(e => (e.type === 'call' && e.purpose === 'correct' && e.round === c.round ? [e] : []))
+      const done = task.log.some(e => e.type === 'note' && e.node === c.node && e.text === `第 ${c.round} 次修正完成`)
+      return {
+        round: c.round,
+        node: c.node,
+        text: c.text,
+        at: c.at,
+        state: done ? 'done' : task.correction?.round !== c.round || task.status === 'aborted' ? 'aborted' : task.status === 'failed' ? 'failed' : 'running',
+        replies: calls.map(e => e.reply),
+        files: [...new Set(calls.flatMap(e => files[e.call] ?? []))],
+      }
+    })
+  }
+
   const detail = async (id: string): Promise<TaskDetail | undefined> => {
     const task = o.store.get(id)
     if (task === undefined) return undefined
@@ -252,6 +279,8 @@ export const createWebServer = (o: {
         return gate === undefined ? {} : { gate }
       })(),
       ...(task.failure === undefined ? {} : { failure: task.failure }),
+      corrections: correctionsOf(task, meta),
+      correctable: task.status === 'done' ? agentNodes(task.workflow) : [],
       logPath: o.supervisor.logPath(id),
       repo: meta.repo,
       ...(meta.remote === undefined ? {} : { remote: meta.remote }),
@@ -303,9 +332,17 @@ export const createWebServer = (o: {
     if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
     const step = o.store.dispatch(id, { kind: 'decided', gate: body.gate as NodeId, round: body.round, pass: body.pass, comment: body.comment }, Date.now(), 'web')
     if (!step.accepted) return [409, { ok: false, error: step.reason ?? '结论没有被接受' }]
-    if (isTerminal(step.task) || o.supervisor.running(id)) return [200, { ok: true, resumeNeeded: false }]
-    const started = o.supervisor.start(id)
-    return [200, { ok: true, resumeNeeded: !started.ok && !o.supervisor.running(id) }]
+    if (isTerminal(step.task)) return [200, { ok: true, resumeNeeded: false }]
+    return [200, { ok: true, resumeNeeded: !o.supervisor.continueTask(id) }]
+  }
+
+  /** 已完成的任务上提交一条改正或补充（actor 记成 web），然后起 runner 接着做；起不来时提示点「继续」。 */
+  const correct = (id: string, body: Record<string, unknown>): [number, CorrectResponse] => {
+    if (typeof body.node !== 'string' || typeof body.text !== 'string') return [400, { ok: false, error: '需要 node 和 text' }]
+    if (o.store.get(id) === undefined) return [404, { ok: false, error: `没有任务 ${id}` }]
+    const step = o.store.dispatch(id, { kind: 'corrected', node: body.node as NodeId, text: body.text }, Date.now(), 'web')
+    if (!step.accepted) return [409, { ok: false, error: step.reason ?? '修正没有被接受' }]
+    return [200, { ok: true, resumeNeeded: !o.supervisor.continueTask(id) }]
   }
 
   const answer = (id: string, body: Record<string, unknown>): [number, AnswerResponse] => {
@@ -717,7 +754,7 @@ export const createWebServer = (o: {
       if (allowedOrigin(req) === undefined) return json(res, 421, { error: o.publicUrl === undefined ? '只接受通过本机地址访问' : `只接受通过本机地址或 ${o.publicUrl.origin} 访问` })
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'POST') {
-        const action = /^\/api\/tasks\/([\w-]+)\/(answer|gate|resume|retry|abort)$/.exec(url.pathname)
+        const action = /^\/api\/tasks\/([\w-]+)\/(answer|gate|correct|resume|retry|abort)$/.exec(url.pathname)
         const conv = CONVENTION.exec(url.pathname)
         const dec = DECIDE.exec(url.pathname)
         const gen = url.pathname === '/api/improve/generate'
@@ -740,6 +777,7 @@ export const createWebServer = (o: {
         }
         if (action === null) return json(res, ...(await create(g.body)))
         if (action[2] === 'gate') return json(res, ...decideGate(action[1]!, g.body))
+        if (action[2] === 'correct') return json(res, ...correct(action[1]!, g.body))
         return json(res, ...(action[2] === 'answer' ? answer(action[1]!, g.body) : act(action[1]!, action[2]!)))
       }
       if (req.method !== 'GET') return json(res, 405, { error: '不支持的请求' })

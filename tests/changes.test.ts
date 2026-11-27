@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { hunks, MAX_DIFF_CHARS, MAX_DIFF_LINES, truncate } from '../src/runner/changes.ts'
-import { committedChanges, createWorktree, fileDiff, MAX_DIFF_BYTES, onBranch } from '../src/runner/git.ts'
+import { committedChanges, createWorktree, fileDiff, filesByCall, MAX_DIFF_BYTES, onBranch } from '../src/runner/git.ts'
 import { Supervisor } from '../src/runner/supervisor.ts'
 import { Store } from '../src/store/store.ts'
 import { Credentials } from '../src/credentials/store.ts'
@@ -205,4 +205,29 @@ test('git 的输出超过上限时只读前面一部分，并注明', () => {
   const d = fileDiff(w, committedChanges(w).head, 'huge.txt')!
   assert.deepEqual(d.truncated, { bytes: MAX_DIFF_BYTES })
   assert.ok(d.diff.startsWith('@@ '))
+})
+
+test('filesByCall：按平台提交说明里的调用 id 找出改到的文件；说明对不上的提交不算，同一调用的多次提交合在一起', () => {
+  const dir = tmp()
+  const repo = join(dir, 'repo')
+  mkdirSync(repo)
+  git(repo, 'init', '-q', '-b', 'main')
+  writeFileSync(join(repo, 'a.txt'), 'a\n')
+  git(repo, 'add', '-A')
+  git(repo, 'commit', '-q', '-m', 'init')
+  const w = createWorktree(repo, dir, 't1')
+  const commit = (files: Record<string, string>, message: string) => {
+    for (const [f, c] of Object.entries(files)) {
+      mkdirSync(join(w.worktree, f, '..'), { recursive: true })
+      writeFileSync(join(w.worktree, f), c)
+    }
+    git(w.worktree, 'add', '-A')
+    git(w.worktree, 'commit', '-q', '-m', message)
+  }
+  commit({ 'src/math.js': 'v1' }, 'eos: build produce (c2)')
+  commit({ 'test/math.test.js': 't', 'b.txt': 'b' }, 'eos: build correct (c7)')
+  commit({ 'src/math.js': 'v2' }, 'eos: build correct (c7)')
+  commit({ 'x.txt': 'x' }, 'agent 自己的提交')
+  commit({ '中文 名.txt': 'z' }, 'eos: build correct (c9)')
+  assert.deepEqual(filesByCall(w), { c2: ['src/math.js'], c7: ['src/math.js', 'b.txt', 'test/math.test.js'], c9: ['中文 名.txt'] })
 })

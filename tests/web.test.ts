@@ -958,3 +958,81 @@ test('卡点：任务页带上卡点信息；页面上打回（写意见）、�
     await s.close()
   }
 })
+
+test('修正：已完成的任务在页面上提交改正或补充，接口起 runner 在原来的会话里改完；任务详情带修正记录；没完成、交给对话节点、空内容被拒绝', async () => {
+  const s = await serve()
+  try {
+    const meta = s.store.meta('t1')
+    s.store.create({ id: 't5', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 5000)
+    const correct = (body: unknown) => postTo(s.base, '/api/tasks/t5/correct', body)
+    const get = async () => (await (await fetch(`${s.base}/api/tasks/t5`)).json()) as TaskDetail
+    assert.equal((await correct({ node: 'build', text: '改一下' })).status, 409, '还没完成')
+    assert.deepEqual((await get()).correctable, [])
+    for (const [i, text] of ['方案', '实现 v1', PASS].entries())
+      assert.ok(s.store.dispatch('t5', { kind: 'replied', call: `c${i + 1}` as never, sessionId: 's-build', text, usage: zero, ms: 1 }, 5001 + i, 'executor').accepted)
+    let d = await get()
+    assert.equal(d.status, 'done')
+    assert.deepEqual([d.correctable, d.corrections], [['plan', 'build'], []])
+    assert.equal((await correct({ node: 'review', text: '改一下' })).status, 409, '对话节点不行')
+    assert.equal((await correct({ node: 'build', text: ' ' })).status, 409, '空内容')
+    assert.equal((await correct({ node: 'build' })).status, 400)
+    assert.deepEqual(await (await correct({ node: 'build', text: '再补一个负数的测试' })).json(), { ok: true, resumeNeeded: false })
+    for (let i = 0; i < 200 && (d = await get()).status !== 'done'; i++) await new Promise(r => setTimeout(r, 10))
+    assert.equal(d.status, 'done')
+    assert.deepEqual(d.corrections, [{ round: 1, node: 'build', text: '再补一个负数的测试', at: d.corrections[0]!.at, state: 'done', replies: ['回复'], files: [] }])
+    assert.equal(d.position, '已完成（修正过 1 次）')
+    const t = s.store.get('t5')!
+    const last = t.log.findLast(e => e.type === 'call')
+    assert.deepEqual(last?.type === 'call' && [last.purpose, last.node, last.round], ['correct', 'build', 1])
+    assert.deepEqual(
+      s.store
+        .events('t5')
+        .filter(e => e.event.kind === 'corrected')
+        .map(e => [e.actor, e.accepted]),
+      [
+        ['web', false],
+        ['web', false],
+        ['web', false],
+        ['web', true],
+      ],
+    )
+    await s.supervisor.idle()
+  } finally {
+    await s.close()
+  }
+})
+
+test('continueTask：任务刚完成、本进程的 runner 还在收尾时提交修正，等它结束后再起一个 runner 把修正做完', async () => {
+  const s = await serve()
+  try {
+    const meta = s.store.meta('t1')
+    s.store.create({ id: 't6', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: { ...meta, branch: 'eos/t1' } }, 6000)
+    let release!: () => void
+    const held = new Promise<void>(r => (release = r))
+    const ex = new FakeExecutor(async ({ key }) => (key.endsWith('/review') ? PASS : '回复'))
+    // 任务完成后的第一次收尾（关掉 agent 进程）卡住，模拟 runner 已经走完、还没放锁。提交前的那些 release 不拦。
+    let first = true
+    ex.release = async () => {
+      if (first && s.store.get('t6')!.status === 'done') {
+        first = false
+        await held
+      }
+    }
+    const sup = new Supervisor({ store: s.store, executor: ex, dataDir: s.dir, pollMs: 5 })
+    assert.ok(sup.start('t6').ok)
+    for (let i = 0; i < 200 && s.store.get('t6')!.status !== 'done'; i++) await new Promise(r => setTimeout(r, 5))
+    assert.equal(s.store.get('t6')!.status, 'done')
+    assert.ok(sup.running('t6'), '收尾还没完，runner 还算在跑')
+    assert.ok(s.store.dispatch('t6', { kind: 'corrected', node: 'build' as never, text: '再改一下' }, 7000, 'web').accepted)
+    assert.equal(sup.continueTask('t6'), true)
+    release()
+    for (let i = 0; i < 200 && !s.store.get('t6')!.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'); i++) await new Promise(r => setTimeout(r, 5))
+    assert.ok(
+      s.store.get('t6')!.log.some(e => e.type === 'note' && e.text === '第 1 次修正完成'),
+      '新起的 runner 把修正做完了',
+    )
+    await sup.idle()
+  } finally {
+    await s.close()
+  }
+})

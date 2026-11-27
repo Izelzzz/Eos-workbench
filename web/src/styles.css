@@ -299,3 +299,18 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
   .tasks td:first-child { overflow-wrap: anywhere; }
   .tasks td.request { max-width: none; white-space: normal; overflow-wrap: anywhere; }
 }
+
+/* 修正 */
+.corrections { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.corrections h2 { font-size: 15px; margin: 0 0 8px; }
+.correction-list { margin: 0 0 10px; padding-left: 20px; }
+.correction-list li { margin: 8px 0; }
+.correction-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.correction-text { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.correction-files, .correction-note { margin: 4px 0; overflow-wrap: anywhere; }
+.corrections pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; }
+.correction-form { display: flex; flex-direction: column; gap: 8px; }
+.correction-form p { margin: 0; }
+.correction-form label { display: flex; gap: 8px; align-items: center; }
+.correction-form textarea { box-sizing: border-box; width: 100%; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+.correction-form button { align-self: flex-start; }
