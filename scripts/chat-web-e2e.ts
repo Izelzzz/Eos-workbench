@@ -90,6 +90,7 @@ const check = (name: string, ok: boolean, detail?: unknown) => {
   console.log(`${ok ? '✓' : '✗'} ${name}`)
 }
 const errors: string[] = []
+const widths390: Record<string, number> = {}
 let chatId: string | undefined
 const browser = await chromium.launch()
 try {
@@ -143,6 +144,14 @@ try {
     await c.locator('.chat-allow input[type=checkbox]').check()
     await c.locator('.chat-note').fill('E2E 网页确认')
     await page.screenshot({ path: join(SHOTS, 'chat-1440-proposal.png'), fullPage: true })
+    // 手机宽度下待确认的提议（权限警告、差异、确认框）。
+    const narrow = await browser.newPage({ viewport: { width: 390, height: 844 } })
+    narrow.on('pageerror', (e: Error) => errors.push(e.message))
+    await narrow.goto(`${base}/#/chat/${chatId}`)
+    await narrow.locator('.chat-permissions').first().waitFor()
+    widths390.proposal = await narrow.evaluate(() => document.documentElement.scrollWidth)
+    await narrow.screenshot({ path: join(SHOTS, 'chat-390-proposal.png'), fullPage: true })
+    await narrow.close()
     await button.click()
     await c.locator('.pill', { hasText: '已保存' }).waitFor({ timeout: 30_000 })
     const name = proposals.find(p => p.id === target)!.name
@@ -164,8 +173,11 @@ try {
   // 接着说一句。
   await page.locator('.chat-composer textarea').fill('好的，先这样。')
   await page.getByRole('button', { name: '发送' }).click()
-  await page.locator('.chat-msg.assistant').nth(1).waitFor({ timeout: 900_000 })
-  check('在对话里接着说，记录变成 4 条', (await page.locator('.chat-log .chat-msg').count()) === 4)
+  // 等这一轮做完：「正在回复」那一格消失，记录重新读出来。
+  await page.locator('.chat-msg.live').first().waitFor({ timeout: 60_000 })
+  await page.locator('.chat-msg.live').first().waitFor({ state: 'detached', timeout: 900_000 })
+  await page.locator('.chat-log .chat-msg.assistant').nth(1).waitFor({ timeout: 30_000 })
+  check('在对话里接着说，记录变成 4 条', (await page.locator('.chat-log .chat-msg:not(.live)').count()) === 4)
   await page.screenshot({ path: join(SHOTS, 'chat-1440.png'), fullPage: true })
 
   await page.goto(`${base}/#/chat`)
@@ -174,7 +186,6 @@ try {
 
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
   phone.on('pageerror', (e: Error) => errors.push(e.message))
-  const widths: Record<string, number> = {}
   for (const [name, hash] of [
     ['list', '#/chat'],
     ['chat', `#/chat/${chatId}`],
@@ -184,14 +195,10 @@ try {
       .locator(name === 'list' ? '.chat-list li' : '.chat-proposal')
       .first()
       .waitFor()
-    widths[name] = await phone.evaluate(() => document.documentElement.scrollWidth)
+    widths390[name] = await phone.evaluate(() => document.documentElement.scrollWidth)
     await phone.screenshot({ path: join(SHOTS, `chat-390-${name}.png`), fullPage: true })
   }
-  check(
-    '390 宽不横向滚动',
-    Object.values(widths).every(w => w <= 390),
-    widths,
-  )
+  check('390 宽不横向滚动（待确认的提议、对话、列表）', Object.keys(widths390).length === 3 && Object.values(widths390).every(w => w <= 390), widths390)
   const pageText = (await page.content()) + (await phone.content())
   const messages = db()
     .prepare('SELECT text, call FROM chat_messages WHERE chat_id = ?')

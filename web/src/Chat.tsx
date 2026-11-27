@@ -177,7 +177,9 @@ function Proposal(props: { v: ProposalView; onSaved: () => void }) {
           {needsAllow && (
             <label className="chat-allow">
               <input type="checkbox" checked={allow} onChange={e => setAllow(e.target.checked)} />
-              我看过上面的权限改动，确认要这样改（确认码 <code>{v.code}</code>）
+              <span>
+                我看过上面的权限改动，确认要这样改（确认码 <code>{v.code}</code>）
+              </span>
             </label>
           )}
           <input className="chat-note" placeholder="备注（可选）" value={note} onChange={e => setNote(e.target.value)} />
@@ -302,7 +304,10 @@ function Conversation(props: { id: string }) {
       e => setError(String(e.message)),
     )
   }, [props.id, reload])
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'end' }), [live, view?.log.length])
+  // 有新内容时滚到底。effect 不能返回值（React 会把返回值当成清理函数调用）。
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'end' })
+  }, [live, view?.log.length])
   if (view === undefined) return error ? <p className="error">{error}</p> : <p className="muted">加载中…</p>
   return (
     <div className="chat-page">
