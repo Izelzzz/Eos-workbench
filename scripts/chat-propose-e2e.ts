@@ -28,7 +28,12 @@ const ASK =
   '帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。'
 
 const git = (...a: string[]) => execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' })
-const codeState = () => ({ commit: git('rev-parse', 'HEAD').trim(), uncommitted: git('status', '--porcelain', '--untracked-files=all').split('\n').filter(l => l !== '') })
+const codeState = () => ({
+  commit: git('rev-parse', 'HEAD').trim(),
+  uncommitted: git('status', '--porcelain', '--untracked-files=all')
+    .split('\n')
+    .filter(l => l !== ''),
+})
 
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(DATA, { recursive: true })
@@ -45,7 +50,7 @@ const before = conventionsDump()
 const requests: Request[] = []
 const fakeYaml = () => {
   const s = new Store(join(DATA, 'eos.db'))
-  const y = s.convention('workflow', 'feature')!.content
+  const y = s.convention('workflow', 'standard')!.content
   s.close()
   return y.replace(/^name: .*$/m, 'name: review-only')
 }
@@ -98,11 +103,22 @@ const offered = id === undefined ? [] : new DshExecutor({ dshHome: join(DATA, 'd
 
 const checks: [string, boolean, unknown][] = [
   ['命令成功，有回复', first.code === 0 && messages.map(m => m.role).join(',') === 'user,assistant', first.out.slice(-1500)],
-  ['发给模型的工具表：8 个只读工具和提议工具，全是平台工具', offered.length === TOOLS.length + 1 && offered.includes(`mcp__eos__${PROPOSE_TOOL}`) && offered.every(t => t.startsWith('mcp__eos__')), offered],
+  [
+    '发给模型的工具表：8 个只读工具和提议工具，全是平台工具',
+    offered.length === TOOLS.length + 1 && offered.includes(`mcp__eos__${PROPOSE_TOOL}`) && offered.every(t => t.startsWith('mcp__eos__')),
+    offered,
+  ],
   ['agent 用了提议工具', reads.some(r => r.tool === PROPOSE_TOOL), reads],
   ['至少一条提议通过保存时的检查、没有作废', valid.length > 0, proposals.map(p => ({ id: p.id, kind: p.kind, name: p.name, voided: p.voided }))],
   ['约定表一行都没变（提议不保存）', conventionsDump() === before, undefined],
-  ['eos chat show 列出了提议', valid.every(p => show.out.includes(`#${p.id}`)) && show.out.includes('都还没有保存'), show.out.split('\n').filter(l => l.includes('提议') || l.includes('#')).slice(-6)],
+  [
+    'eos chat show 列出了提议',
+    valid.every(p => show.out.includes(`#${p.id}`)) && show.out.includes('都还没有保存'),
+    show.out
+      .split('\n')
+      .filter(l => l.includes('提议') || l.includes('#'))
+      .slice(-6),
+  ],
   ['模型 key 不在对话记录和命令输出里', !JSON.stringify([messages, proposals]).includes(KEY) && !outputs.join('\n').includes(KEY), undefined],
   ...(fake ? [['假模型：第一条名字对不上的提议被退回', reads.filter(r => r.tool === PROPOSE_TOOL && r.isError).length === 1, reads] as [string, boolean, unknown]] : []),
 ]

@@ -178,7 +178,7 @@ test('a turn in which the agent used any tool other than the platform’s read-o
   const ex = new McpExecutor(({ results }) => (results.length === 0 ? { tool: 'read', args: { path: '/data/eos.db' } } : { reply: '读到了数据库' }))
   const r = await new Chats(p.opts(ex)).start('读一下数据库', 'cli')
   assert.equal(r.ok, false)
-  assert.match((r as { error: string }).error, /平台只读工具以外的工具（read）/)
+  assert.match((r as { error: string }).error, /平台工具以外的工具（read）/)
   assert.deepEqual(
     p.chats.log(r.chat!.id).map(m => m.role),
     ['user', 'error'],
