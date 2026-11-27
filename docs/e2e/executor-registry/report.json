@@ -1,0 +1,120 @@
+{
+  "commit": "dbcde7c397675d3a2999bdd69b680c79061e00fd",
+  "uncommitted": [],
+  "task": "t261127111857rwr",
+  "killed": true,
+  "killedAtGate": true,
+  "gateLog": [
+    "accept#1 SIGKILL",
+    "accept#1 send-back",
+    "accept#2 accept"
+  ],
+  "atGate": {
+    "status": "waiting_accept",
+    "gate": {
+      "node": "accept",
+      "round": 1,
+      "cycle": 1,
+      "phase": "decide",
+      "fixes": 0,
+      "formatRetries": 0
+    },
+    "calls": 6
+  },
+  "correction": {
+    "before": {
+      "worktree": "/home/user/Eos-workbench/.eos/e2e/data/worktrees/t261127111857rwr",
+      "branch": "eos/t261127111857rwr",
+      "session": "session-79eaa4ba1e888c82ebb8be83a21ce5dd",
+      "status": "done"
+    },
+    "calls": [
+      "c8"
+    ],
+    "files": [
+      "README.md"
+    ]
+  },
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个 dsh 会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true,
+    "agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位": true,
+    "停在人验收的卡点上：状态是等待验收，不挂任何工作": true,
+    "卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）": true,
+    "命令行列出等验收的任务": true,
+    "人打回一次（带意见）、改完回到卡点后通过": true,
+    "打回后交回开发原来的会话修改": true,
+    "修正：交给开发原来的会话（同一个 dsh 会话），在同一个 worktree 和分支上": true,
+    "修正之后只重跑程序检查：没有再请评审或验收，没有重跑别的节点": true,
+    "修正完成，任务回到完成；能看出是第几次修正、改了哪些文件": true,
+    "卡点打回之后没有再请评审 agent": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-077f9229cc6d42def68b87716be7ac15",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "session-79eaa4ba1e888c82ebb8be83a21ce5dd",
+      "calls": [
+        "c2",
+        "c4",
+        "c7",
+        "c8"
+      ],
+      "presets": [
+        "workspace-write"
+      ],
+      "asks": 1
+    },
+    "review": {
+      "sid": "session-031bc9c96d5ecc496a7d7e762b024c7c",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    },
+    "sign-off": {
+      "sid": "session-4f042ae42f097a2ed9faa057a2c83c65",
+      "calls": [
+        "c6"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 63805ms",
+    "c2 produce@build 12775ms",
+    "c3 critique@review#1 17482ms",
+    "c4 respond@review#1 7979ms",
+    "c5 critique@review#2 6662ms",
+    "c6 accept@sign-off#1 42358ms",
+    "c7 amend@accept#2 9496ms",
+    "c8 correct@build#1 8752ms"
+  ],
+  "commits": "2ad7c0f eos: build correct (c8)\ne9dbc5f eos: accept amend (c7)\nb058a7f eos: review respond (c4)\ndf8224a eos: build produce (c2)\n",
+  "npmTest": "数字处理，结果为 NaN\n  ---\n  duration_ms: 0.172419\n  type: 'test'\n  ...\n# Subtest: Infinity 按数字处理，结果为 Infinity\nok 13 - Infinity 按数字处理，结果为 Infinity\n  ---\n  duration_ms: 0.054742\n  type: 'test'\n  ...\n# Subtest: 非数组入参抛 TypeError\nok 14 - 非数组入参抛 TypeError\n  ---\n  duration_ms: 0.231272\n  type: 'test'\n  ...\n1..14\n# tests 14\n# suites 0\n# pass 14\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 86.274126\n"
+}
