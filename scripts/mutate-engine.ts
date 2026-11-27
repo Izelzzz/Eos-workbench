@@ -34,7 +34,7 @@ const MUTATIONS: [string, string, string][] = [
   ['检查没通过也当通过', 'const passed = allPassed(results)', 'const passed = true'],
   ['补齐次数不累加（无限次自动补齐）', 'return issue({ ...task, fixes: task.fixes + 1 }', 'return issue({ ...task, fixes: task.fixes }'],
   ['补齐次数用完也不问用户', 'if (task.fixes < n.maxFixes) {', 'if (true) {'],
-  ['进入新节点不清零补齐次数', 'dialog: undefined, fixes: 0 }, at)', 'dialog: undefined }, at)'],
+  ['进入新节点不清零补齐次数', 'gate: undefined, fixes: 0 }, at)', 'gate: undefined }, at)'],
   [
     '用户指示后不重置补齐次数',
     "issue({ ...task, fixes: 0 }, { node: n.id, session: n.id, role: n.role, purpose: 'fix', prompt: fixInstructPrompt(text) })",
@@ -45,7 +45,7 @@ const MUTATIONS: [string, string, string][] = [
   ['评审方第一次被请来时只给"回复"提示词（缺任务和需求）', "const review = task.sessions[d.id] === undefined ? 'first' : task.dialog!.review", 'const review = task.dialog!.review'],
   ['不校验检查结果条数', 'if (event.results.length !== run.checks.length) return ignore', 'if (false) return ignore'],
   ['检查进行中接受模型回复', 'if (call === undefined || isCheck(call) || call.id !== event.call', 'if (call === undefined || call.id !== event.call'],
-  ['越界撤销不记下要通知的会话（agent 永远不知道自己写越界了）', 'append({ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } }', 'append(task'],
+  ['越界撤销不记下要通知的会话（agent 永远不知道自己写越界了）', '{ ...task, scopeNotices: { ...task.scopeNotices, [call.session]: reverted } },', 'task,'],
   ['越界撤销记在节点上而不是会话上（通知发错会话）', '{ ...task.scopeNotices, [call.session]: reverted }', '{ ...task.scopeNotices, [call.node]: reverted }'],
   [
     '发出调用时不把越界撤销的说明加进提示词',
@@ -58,10 +58,41 @@ const MUTATIONS: [string, string, string][] = [
     'pending: { ...c, id: nextId(task), prompt }, scopeNotices: task.scopeNotices, nextCall',
   ],
   ['没有越界改动也记成一条通知', 'ok(onReply(reverted.length === 0 ? recorded : noteReverted(recorded, call, reverted, at)', 'ok(onReply(noteReverted(recorded, call, reverted, at)'],
-  ['调用日志不记被撤销的越界路径', '...(reverted.length === 0 ? {} : { reverted }) },', '},'],
+  ['调用日志不记被撤销的越界路径', '...(reverted.length === 0 ? {} : { reverted }),', ''],
+  // 卡点（路线图 5a）
+  ['卡点接受过期那一次的结论', ' || g.round !== event.round) return ignore', ') return ignore'],
+  ['卡点打回改完不重跑检查', "(g.checks.length > 0 ? runChecks(withGate(task, { phase: 'check' }), g) : decide(task, g, at))", 'decide(task, g, at)'],
+  ['卡点打回不要求意见', "if (!event.pass && comment === '') return ignore(task, '打回时要写明意见')", 'if (false) return ignore(task, "")'],
+  ['agent 验收多打回一次', 'cycle >= g.by.maxRounds', 'cycle > g.by.maxRounds'],
+  ['卡点重跑检查没通过也回到卡点', 'if (allPassed(results)) return decide(task, g, at)', 'return decide(task, g, at)'],
+  ['打回意见发到卡点自己的会话', "session: g.with, role: roleOfAgent(task, g.with), purpose: 'amend'", "session: g.id, role: roleOfAgent(task, g.with), purpose: 'amend'"],
+  ['打回后第几次不加一（过期结论能通过）', 'formatRetries: 0, round: round + 1 })', 'formatRetries: 0 })'],
+  [
+    '人验收时不进入等待验收（显示成运行中）',
+    "if (g.by.kind === 'human') return { ...noted, status: 'waiting_accept', pending: undefined }",
+    "if (g.by.kind === 'human') return { ...noted, status: 'running', pending: undefined }",
+  ],
+  // 修正（路线图 5c）
+  ['没完成的任务也接受修正', "if (task.status !== 'done') return ignore(task, '只有已完成的任务可以提交改正或补充')", 'if (false) return ignore(task, "")'],
+  [
+    '修正可以交给对话节点',
+    "if (n?.kind !== 'agent') return ignore(task, `「${event.node}」不是这个工作流里的 agent 节点",
+    'if (n === undefined) return ignore(task, `「${event.node}」不是这个工作流里的 agent 节点',
+  ],
+  ['接受空的修正', "if (text === '') return ignore(task, '改正或补充的内容不能为空')", 'if (false) return ignore(task, "")'],
+  ['修正发到别的会话', "{ node: n.id, session: n.id, role: n.role, purpose: 'correct', prompt }", "{ node: n.id, session: task.workflow.nodes[0]!.id, role: n.role, purpose: 'correct', prompt }"],
+  ['修正改完不重跑检查', 'if (checks.length === 0) return finishCorrection(task, at)', 'return finishCorrection(task, at)'],
+  ['修正后检查没过也结束修正', 'if (allPassed(results)) return finishCorrection(task, at)', 'return finishCorrection(task, at)'],
+  ['修正后不推送（漏掉平台动作）', "const platform = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind === 'platform')", 'const platform: Check[] = []'],
+  [
+    '修正只跑被修正节点自己的和测试它的检查（修正别的节点时不跑测试就推送）',
+    "const program = wf.nodes.flatMap(n => (n.kind === 'gate' ? [] : n.checks)).filter(c => c.kind !== 'platform')",
+    "const program = wf.nodes.flatMap(n => (n.kind !== 'gate' && (n.id === _target || (n.kind === 'dialog' && n.with === _target)) ? n.checks : [])).filter(c => c.kind !== 'platform')",
+  ],
+  ['修正的补齐多一次', 'if (task.correction!.fixes < n.maxFixes)', 'if (task.correction!.fixes <= n.maxFixes)'],
 ]
 
-const TESTS = ['tests/engine.test.ts', 'tests/engine.checks.test.ts', 'tests/engine.state-space.test.ts']
+const TESTS = ['tests/engine.test.ts', 'tests/engine.checks.test.ts', 'tests/engine.gate.test.ts', 'tests/engine.correction.test.ts', 'tests/engine.state-space.test.ts']
 const source = readFileSync(join(ROOT, 'src/engine/machine.ts'), 'utf8')
 const work = mkdtempSync(join(tmpdir(), 'eos-mutate-'))
 for (const dir of ['src', 'tests', 'vendor']) cpSync(join(ROOT, dir), join(work, dir), { recursive: true })
@@ -70,11 +101,12 @@ symlinkSync(join(ROOT, 'node_modules'), join(work, 'node_modules'))
 
 const run = (): { failed: boolean; summary: string } => {
   try {
-    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], { cwd: work, stdio: 'pipe', timeout: 120_000, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
+    execFileSync(process.execPath, ['--import', 'tsx', '--test', ...TESTS], { cwd: work, stdio: 'pipe', timeout: 600_000, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
     return { failed: false, summary: '全部通过' }
   } catch (e) {
     const out = String((e as { stdout?: string }).stdout ?? '')
-    const fail = /ℹ fail (\d+)/.exec(out)?.[1]
+    // 输出不是终端时 node:test 用 TAP 报告（「# fail N」），是终端时用 spec 报告（「ℹ fail N」）。
+    const fail = /^(?:ℹ|#) fail (\d+)/m.exec(out)?.[1]
     const err = String((e as { stderr?: string }).stderr ?? '')
     const crashed = /heap out of memory|ERR_CHILD_PROCESS_STDIO_MAXBUFFER|RangeError/.exec(err + String((e as Error).message))?.[0]
     return {
