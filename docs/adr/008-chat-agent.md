@@ -1,10 +1,10 @@
-# ADR-008：对话 agent——读平台数据、提议约定，工具经平台的 MCP 端点交给 agent
+# ADR-008：对话 agent——读平台数据、提议约定、由人确认保存，工具经平台的 MCP 端点交给 agent
 
 - 状态：已采纳（2026-11-26），内容按当前实现维护
 - 读者：要理解或修改对话 agent 的人，以及要换执行器的人
 - 关联：ADR-004（improver 的权限做法）、ADR-005（凭据和遮蔽）、ADR-006（部署里的用户）
 
-对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
+对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定；人用 `eos chat save` 确认之后，平台重新检查一遍，才保存成约定的新版本。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
 
 ## 背景
 
@@ -40,6 +40,9 @@ flowchart LR
   propose -->|只读约定| db
   propose --> chatdb
   chats --> chatdb[("eos.db：chats、chat_messages、chat_trace、chat_proposals")]
+  human["人：eos chat save"] --> save["保存（src/chat/save.ts）<br/>重新检查、核对版本、确认权限"]
+  save --> chatdb
+  save -->|写新版本| db
   dsh -. 读配置 .-> patch["dsh home 里的配置<br/>eos-profiles/ephemeral/（含令牌）"]
 ```
 
@@ -51,6 +54,7 @@ flowchart LR
 | 存储 | `chats`、`chat_messages`、`chat_trace`、`chat_proposals` 四张表，在 `src/chat/store.ts` 里建 |
 | 模型和提示词 | 内置 Agent 模板 `assistant`，团队可以改；权限不从模板读 |
 | 失败就关 | 执行了平台工具以外的工具时，这一轮作废 |
+| 保存 | 只由人触发（`eos chat save`）；agent 能触发的模块都不引用保存的代码 |
 
 ### 能力面怎么表达
 
@@ -100,8 +104,8 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 | 提出它的那一轮没有得到回复（执行了平台工具以外的工具、调用失败、平台重启后认领不到） | 提议标成作废：用户没看到 agent 对它的说明 |
 
 - 提议不改约定表。`src/chat/` 里 agent 能触发的代码（端点、工具、提议、对话流程、存储）都不调用保存约定的方法，`tests/chat-proposals.test.ts` 核对这一点。
-- 平台不提供从对话保存提议的入口；`eos chat show` 列出对话里的提议和涉及的权限。
-- 提议是按记下那一刻的模板、技能、文档和最新版本检查的；之后这些变了，提议可能不再成立，涉及的权限也可能过时。
+- `eos chat show` 列出对话里的提议：状态、理由、涉及的权限、和当前版本的差异（新建的显示全文）、保存命令。
+- 提议是按记下那一刻的模板、技能、文档和最新版本检查的；保存时按当时的状态重新检查，见「保存」。
 - 工作流引用的 Agent 模板要已经保存在平台上，才能通过检查。
 - 涉及的权限改动在记下时算好，存进提议，也写进返回给 agent 的结果：
   - 修改已有约定：用改进提案的核对（`src/improve/guard.ts` 的 `permissionChanges`），另外补上模板技能的增删（那个核对不看技能）；
@@ -115,6 +119,28 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 **为什么提议也要先过检查**：用户看到的提议都是能保存的，不会确认之后才发现格式不对。agent 拿到具体的错误，可以自己改。
 
 **为什么提议的工具和只读工具分开**：`tools.ts` 的工具保持只读，有测试核对它们不改数据库。提议工具只写提议表，单独放在 `proposals.ts`。
+
+### 保存
+
+`eos chat save <提议号> [--allow-permissions] [--note "<备注>"]` 是把提议写成约定的唯一入口，在 `src/chat/save.ts`。
+
+| 情形 | 结果 |
+|---|---|
+| 提议作废了，或者已经保存过 | 拒绝 |
+| 目标约定的最新版本不是提议基于的版本（新建的：这个名字已经有了） | 拒绝，请 agent 基于现在的版本重新提议 |
+| 和当前版本一样 | 拒绝 |
+| 内容里有已知凭据值 | 拒绝 |
+| 按现在的平台状态没有通过保存约定的检查 | 拒绝，列出错误 |
+| 按现在的内容重算，涉及权限改动，但没有 `--allow-permissions` | 拒绝，列出这些改动 |
+| 都通过 | 写成新版本：操作人 `cli`；备注「来自对话 <id> 的提议 #<n>」，确认了权限改动时注明，后面接人写的备注。提议记下保存成的版本、操作人和时间 |
+
+- 核对版本和写入在同一个事务里（`Store.saveConventionIfLatest`）：两个进程同时保存基于同一版本的修改，只有一个成功。
+- 权限按保存时的内容和平台状态重算，不用提议里存的那份。
+- `src/chat/` 里 agent 能触发的模块（`chat.ts`、`mcp.ts`、`tools.ts`、`proposals.ts`、`store.ts`）都不引用 `save.ts`，`tests/chat-save.test.ts` 核对。
+
+**为什么保存时要重新检查**：提议是在记下那一刻检查的。从记下到保存之间，引用的模板、技能、文档和目标约定都可能被改过，算好的权限也可能不准。
+
+**为什么权限改动用单独的参数确认**：保存一条普通提议和放宽权限是两件事。`--allow-permissions` 让「我看过这些权限改动」成为一个明确的动作，命令行在差异上方醒目列出这些改动。
 
 ### 端点
 
@@ -173,7 +199,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 同用户的任务 agent 在调用期间能读到令牌 | 部署镜像里 dsh 和所有任务的 agent 都是 eos-agent，在组 eos-dsh 里，读得到配置文件。调用进行期间，别的任务的 agent 能拿令牌读遮蔽过的平台数据。任务 agent 本来就能读整个 `/data`，没有扩大暴露面。和 `docs/roadmap.md` 的「任务之间的隔离」是同一个问题 |
 | 不用 Docker 部署时 | 平台、dsh、检查命令是同一个用户，都读得到配置文件 |
 | 每句话起一个 dsh 进程 | 令牌每次都换，配置的指纹跟着变 |
-| 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有保存约定的工具，最坏是回答被带偏，或者记下一条被带偏的提议 |
+| 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有保存约定的工具，最坏是回答被带偏，或者记下一条被带偏的提议；提议要人看过差异、确认后才保存 |
 | 工作流不能引用还没保存的模板 | 新工作流要用新角色时，模板的提议要先保存，工作流的提议才能通过检查 |
 | 没有登录 | 对话的 actor 只记 `cli`、`web`，和任务事件的写法一样 |
 | `BUILTIN_TOOL_ROWS` 按当前 dsh 版本列 | dsh 新增的工具行不会自动关掉。E2E 核对发给模型的工具表；运行时还有「失败就关」 |
@@ -183,11 +209,12 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 范围 | 文件 |
 |---|---|
 | 执行器接口和 dsh 翻译 | `src/executor/types.ts`、`src/executor/dsh.ts` |
-| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`save.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 带版本核对的保存、差异 | `src/store/store.ts` 的 `saveConventionIfLatest`、`src/workflow/diff.ts` |
 | 模板 | `src/workflow/agents/assistant.yaml` |
 | 命令行接线 | `src/cli.ts` |
-| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
-| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-docker-probe.ts` |
+| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/chat-save.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
+| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-save-e2e.ts`、`scripts/chat-docker-probe.ts` |
 
 ## 证据
 
@@ -199,5 +226,7 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 真实模型提议一个工作流：提议通过检查、记成待确认，约定表没有变化 | `docs/e2e/chat-c1/report.json` |
 | 提议的检查、退回、上限、作废；涉及的权限改动怎么算；agent 能触发的代码不保存约定 | `tests/chat-proposals.test.ts` |
 | 最终代码上真实 dsh 的提议链路（假模型，含退回一次） | `docs/e2e/chat-c1/fake-model-report.json` |
+| 真实模型提议、人确认保存：不带确认参数被拒，带上后保存，操作人和来源写进新版本 | `docs/e2e/chat-c2/report.json` |
+| 保存时的重新检查、版本核对、权限确认；agent 的全部工具跑一遍约定表不变 | `tests/chat-save.test.ts` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
 | 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |

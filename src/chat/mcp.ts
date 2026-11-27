@@ -9,7 +9,7 @@ import type { HttpMcp } from '../executor/types.ts'
 import type { ToolOutcome } from './tools.ts'
 import type { ChatRead } from './types.ts'
 
-/** 请求体上限：要装得下一条最长的提议（4 万字的 YAML，执行器把中文转成 \uXXXX 时每字 6 字节，加理由和 JSON 转义）。 */
+/** 请求体上限：装得下 4 万字的提议内容（执行器把中文转成 \uXXXX 时每字 6 字节）；内容和理由都写满、又这样编码时会超出（ADR-008）。 */
 export const MAX_BODY_BYTES = 256 * 1024
 /** 一次调用（用户说一句话，agent 回一次）里最多读几次数据。到了上限，之后的工具调用都返回错误，agent 只能根据已经读到的回答。 */
 export const MAX_TOOL_CALLS = 30

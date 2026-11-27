@@ -255,6 +255,22 @@ export class Store {
     return { ...p, version, createdAt: at }
   }
 
+  /**
+   * 只有这个约定的最新版本仍是 expected（undefined：还没有任何版本）时才写入新版本；判断和写入在同一个事务里，
+   * 两个进程同时保存基于同一版本的修改时只有一个成功。返回写入的行，或者 stale 和现在的最新版本。
+   */
+  saveConventionIfLatest(
+    p: { kind: ConventionKind; name: string; content: string; note: string; actor: string },
+    expected: number | undefined,
+    at: number,
+  ): ConventionRow | { stale: true; latest?: number } {
+    return this.tx(() => {
+      const latest = this.latestVersion(p.kind, p.name)
+      if (latest !== expected) return { stale: true, ...(latest === undefined ? {} : { latest }) }
+      return this.insertConvention(p, at)
+    })
+  }
+
   /** 某个约定的最新版本号（只查版本号，不读内容）。 */
   latestVersion(kind: ConventionKind, name: string): number | undefined {
     const r = this.db.prepare('SELECT MAX(version) AS v FROM conventions WHERE kind = ? AND name = ?').get(kind, name) as { v: number | null }

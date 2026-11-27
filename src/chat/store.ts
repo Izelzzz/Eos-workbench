@@ -3,7 +3,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind } from './types.ts'
+import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind, ProposalSaved } from './types.ts'
 import { PROPOSE_TOOL } from './proposals.ts'
 import { CHAT_PURPOSE } from './types.ts'
 
@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS chat_proposals (
   content TEXT NOT NULL,
   rationale TEXT NOT NULL,
   permissions TEXT NOT NULL,
-  voided TEXT
+  voided TEXT,
+  saved_version INTEGER,
+  saved_actor TEXT,
+  saved_at INTEGER
 );`
 
 /** 标题取第一条消息的开头。 */
@@ -142,11 +145,20 @@ export class ChatStore {
   }
 
   /** 记下一条提议（只追加）。提议不改任何约定。 */
-  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided'>, at: number): ChatProposal {
+  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided' | 'saved'>, at: number): ChatProposal {
     const r = this.db
       .prepare('INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, base_version, content, rationale, permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(p.chatId, p.call, at, p.kind, p.name, p.baseVersion ?? null, p.content, p.rationale, JSON.stringify(p.permissions))
     return this.proposal(Number(r.lastInsertRowid))!
+  }
+
+  /** 记下提议已经保存成了哪个版本（只在人确认保存之后由 save.ts 调用）。已经记过的不改，返回是否记下。 */
+  markSaved(id: number, saved: ProposalSaved): boolean {
+    return (
+      Number(
+        this.db.prepare('UPDATE chat_proposals SET saved_version = ?, saved_actor = ?, saved_at = ? WHERE id = ? AND saved_version IS NULL').run(saved.version, saved.actor, saved.at, id).changes,
+      ) === 1
+    )
   }
 
   /** 作废一次调用里记下的提议（那一轮被作废时）。 */
@@ -191,4 +203,5 @@ const proposalRow = (r: Record<string, unknown>): ChatProposal => ({
   rationale: String(r.rationale),
   permissions: JSON.parse(String(r.permissions)) as string[],
   ...(r.voided === null ? {} : { voided: String(r.voided) }),
+  ...(r.saved_version === null ? {} : { saved: { version: Number(r.saved_version), actor: r.saved_actor as ChatActor, at: Number(r.saved_at) } }),
 })

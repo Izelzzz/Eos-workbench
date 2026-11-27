@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
-import { MAX_PROPOSALS_PER_CALL, PROPOSE_TOOL } from '../src/chat/proposals.ts'
+import { describe, MAX_PROPOSALS_PER_CALL, PROPOSE_TOOL } from '../src/chat/proposals.ts'
 import { ChatStore } from '../src/chat/store.ts'
 import type { DataSource } from '../src/chat/tools.ts'
 import { Conventions } from '../src/conventions/conventions.ts'
@@ -224,4 +224,10 @@ test('a reply claimed after a restart whose trace shows a non-platform tool void
   ex.completed.set(`chat/${id}/${seq}`, { sessionId: 's', text: '提了一条', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, ms: 1 })
   assert.ok((await new Chats(p.opts(ex)).send(id, '还在吗', 'cli')).ok)
   assert.match(p.chats.proposals(id)[0]!.voided ?? '', /平台工具以外的工具（bash）/)
+})
+
+test('guard messages are restated as facts, including the one for an unparsable current version', () => {
+  assert.equal(describe('当前版本无法解析，不能自动核对权限；请在团队约定页手动修改'), '当前版本无法解析，平台没能逐项比较权限：保存前请逐项核对')
+  assert.equal(describe('不能删掉卡点「g」，也不能改它验收的节点和验收人'), '删掉或改了卡点「g」：它验收的节点和验收人')
+  assert.equal(describe('新增的节点「n」只能用已有权限的角色'), '新增的节点「n」用了已有角色没有的权限')
 })

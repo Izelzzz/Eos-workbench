@@ -52,7 +52,11 @@ export type ChatProposal = {
   rationale: string
   permissions: string[]
   voided?: string
+  saved?: ProposalSaved
 }
+
+/** 提议被人确认保存后的记录：保存成的版本、操作人、时间。一条提议只保存一次。 */
+export type ProposalSaved = { version: number; actor: ChatActor; at: number }
 
 export type ChatTraceRow = { call: string; seq: number; event: TraceEvent }
 
