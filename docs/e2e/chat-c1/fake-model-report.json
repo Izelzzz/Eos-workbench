@@ -1,0 +1,110 @@
+{
+  "mode": "fake-model",
+  "commit": "a3d930b9f4d13a52a73d48b44dfa153e07f41398",
+  "uncommitted": [],
+  "chat": "cmwynexb46b451178",
+  "checks": [
+    {
+      "name": "命令成功，有回复",
+      "ok": true,
+      "detail": "  … 读取 mcp__eos__get_convention\n  … 读取 mcp__eos__propose_convention\n  … 读取 mcp__eos__propose_convention\n\n── 2026-11-27 07:17:04 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n接着说：npm run eos -- chat send cmwynexb46b451178 \"<话>\"\n"
+    },
+    {
+      "name": "发给模型的工具表：8 个只读工具和提议工具，全是平台工具",
+      "ok": true,
+      "detail": [
+        "mcp__eos__convention_history",
+        "mcp__eos__get_convention",
+        "mcp__eos__get_task",
+        "mcp__eos__get_task_changes",
+        "mcp__eos__get_task_metrics",
+        "mcp__eos__get_task_trace",
+        "mcp__eos__list_conventions",
+        "mcp__eos__list_tasks",
+        "mcp__eos__propose_convention"
+      ]
+    },
+    {
+      "name": "agent 用了提议工具",
+      "ok": true,
+      "detail": [
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"standard\"}",
+          "isError": false
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"wrong-name\",\"content\":\"name: review-only\\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  developer: { template: developer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - {",
+          "isError": true
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"review-only\",\"content\":\"name: review-only\\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  developer: { template: developer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - ",
+          "isError": false
+        }
+      ]
+    },
+    {
+      "name": "至少一条提议通过保存时的检查、没有作废",
+      "ok": true,
+      "detail": [
+        {
+          "id": 1,
+          "kind": "workflow",
+          "name": "review-only",
+          "voided": null
+        }
+      ]
+    },
+    {
+      "name": "约定表一行都没变（提议不保存）",
+      "ok": true
+    },
+    {
+      "name": "eos chat show 列出了提议",
+      "ok": true,
+      "detail": [
+        "帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。",
+        "已经提议了工作流 review-only，等你确认后保存。",
+        "提议（agent 提的，都还没有保存）：",
+        "  #1  工作流「review-only」（新建）"
+      ]
+    },
+    {
+      "name": "平台持有的模型 key 不在对话记录、提议、对话 trace 和命令输出里",
+      "ok": true
+    },
+    {
+      "name": "假模型：第一条名字对不上的提议被退回",
+      "ok": true,
+      "detail": [
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"standard\"}",
+          "isError": false
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"wrong-name\",\"content\":\"name: review-only\\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  developer: { template: developer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - {",
+          "isError": true
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"review-only\",\"content\":\"name: review-only\\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  developer: { template: developer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - ",
+          "isError": false
+        }
+      ]
+    }
+  ],
+  "transcript": "对话 cmwynexb46b451178：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 07:17:02 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 07:17:04 助手 · 0.2s · 输入 400 输出 40\n（用了工具：get_convention、propose_convention✗、propose_convention）\n已经提议了工作流 review-only，等你确认后保存。\n\n提议（agent 提的，都还没有保存）：\n  #1  工作流「review-only」（新建）\n      ⚠ 涉及权限：新建的工作流：其中角色的模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认\n\n用途 chat：1 次调用（0 次没有回复），读数据 1 次，输入 400 输出 40，agent 0.2s\n",
+  "proposals": [
+    {
+      "id": 1,
+      "kind": "workflow",
+      "name": "review-only",
+      "voided": null,
+      "content": "name: review-only\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  developer: { template: developer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  - id: build\n    kind: agent\n    role: developer\n    inputs: [spec]\n    task: 按 docs/spec.md 实现需求，并把改动说明写到 docs/changes.md。\n    maxFixes: 2\n    deliverables:\n      - { path: docs/changes.md, sections: [改动, 验证] }\n\n  # 测试：平台跑测试命令，失败就把输出交回开发修改，再跑，最多 5 轮。按仓库把命令换成你们的测试命令。\n  - id: test\n    kind: dialog\n    with: build\n    task: 运行测试，失败时交回开发修复。\n    maxRounds: 5\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: build\n    escalate: spec\n    maxRounds: 5\n    inputs: [spec]\n    task: 评审开发的改动是否满足 docs/spec.md 的验收标准。\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  # 交付：平台推送任务分支，并向任务的基线分支（远程仓库的默认分支）开 PR，任务页显示 PR 链接。\n  # 令牌只在平台进程里，agent 碰不到。本机仓库的任务没有远程，这一步跳过。推送或开 PR 失败时任务暂停，处理后重试。\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n"
+    }
+  ]
+}

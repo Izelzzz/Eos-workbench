@@ -1,16 +1,16 @@
-# ADR-008：对话 agent——只读平台数据，经平台的 MCP 端点交给 agent
+# ADR-008：对话 agent——读平台数据、提议约定，工具经平台的 MCP 端点交给 agent
 
 - 状态：已采纳（2026-11-26），内容按当前实现维护
 - 读者：要理解或修改对话 agent 的人，以及要换执行器的人
 - 关联：ADR-004（improver 的权限做法）、ADR-005（凭据和遮蔽）、ADR-006（部署里的用户）
 
-对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的只读工具读平台数据，没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
+对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
 
 ## 背景
 
 - 团队需要一个对话入口，用来问平台上的工作流、约定、模板、技能和任务，以及设计工作流。
 - 读取范围：工作流、约定文档、Agent 模板、技能、任务列表，单个任务的状态、trace、指标、改动摘要。不读仓库代码，读不到凭据。
-- agent 只能读，不能保存任何东西。
+- agent 能提议工作流和 Agent 模板，不能保存任何东西：保存要人确认。
 - 平台没有登录，能打开平台的人都能和它对话。
 - dsh 自带文件读写、搜索工具。任务角色只能按工具组关掉命令行、联网等，关不掉这两类。它们开着时，agent 能读数据目录（数据库、所有仓库、所有 trace）。
 
@@ -21,6 +21,7 @@
 3. 工具返回的内容先遮蔽已知凭据值。
 4. 对话的模型调用记进单独的 trace 和指标，用途名 `chat`，不混进任务。
 5. 执行器可以替换：`src/chat/` 只认 `Executor` 接口和它的类型。
+6. agent 能提议新建或修改工作流、Agent 模板；提议通过保存约定时的检查才记下，记下的提议不改任何约定。
 
 ## 设计
 
@@ -34,17 +35,20 @@ flowchart LR
   ex --> dsh["dsh 进程（DshExecutor）"]
   dsh -->|Streamable HTTP + 令牌| ep
   ep --> tools["只读工具（src/chat/tools.ts）<br/>解析参数、遮蔽、截断"]
+  ep --> propose["提议工具（src/chat/proposals.ts）<br/>按保存规则检查"]
   tools --> db[("eos.db：约定、任务、trace")]
-  chats --> chatdb[("eos.db：chats、chat_messages、chat_trace")]
+  propose -->|只读约定| db
+  propose --> chatdb
+  chats --> chatdb[("eos.db：chats、chat_messages、chat_trace、chat_proposals")]
   dsh -. 读配置 .-> patch["dsh home 里的配置<br/>eos-profiles/ephemeral/（含令牌）"]
 ```
 
 | 方面 | 设计 |
 |---|---|
 | 运行方式 | 经 `Executor` 接口，能力面由平台定死：`builtinTools: 'none'`、`write: 'none'`，`mcp` 里只有这次调用的端点 |
-| 工具 | 8 个只读工具，一张表定义；没有写操作，没有读凭据、读仓库文件的工具 |
+| 工具 | 8 个只读工具和 1 个提议工具；没有保存约定的工具，没有读凭据、读仓库文件的工具 |
 | 端点 | 每次调用开一个，调用结束就关；端口随机，令牌 32 字节随机数 |
-| 存储 | `chats`、`chat_messages`、`chat_trace` 三张表，在 `src/chat/store.ts` 里建 |
+| 存储 | `chats`、`chat_messages`、`chat_trace`、`chat_proposals` 四张表，在 `src/chat/store.ts` 里建 |
 | 模型和提示词 | 内置 Agent 模板 `assistant`，团队可以改；权限不从模板读 |
 | 失败就关 | 执行了平台工具以外的工具时，这一轮作废 |
 
@@ -82,11 +86,41 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 
 **为什么先遮蔽再截断**：先截断的话，截断处可能留下半截凭据，遮蔽按完整的值匹配，认不出来。
 
+### 提议
+
+提议工具是 `propose_convention`：kind（`workflow` 或 `template`）、name（最多 64 字）、完整的 YAML（最多 4 万字）、理由（最多 4000 字）。
+
+| 情形 | 结果 |
+|---|---|
+| 没有通过保存约定时的检查（`Conventions.validate`：格式、名字和 YAML 一致、引用的模板、技能、文档存在） | 错误返回给 agent，它改了再提 |
+| 和这个约定当前的版本完全一样 | 退回 |
+| 内容或理由里有已知凭据值 | 退回：约定以明文保存 |
+| 一次调用里已经记了 5 条 | 退回 |
+| 通过 | 记进 `chat_proposals`：基于的版本（新建的没有）、提出它的调用、涉及的权限改动 |
+| 提出它的那一轮没有得到回复（执行了平台工具以外的工具、调用失败、平台重启后认领不到） | 提议标成作废：用户没看到 agent 对它的说明 |
+
+- 提议不改约定表。`src/chat/` 里 agent 能触发的代码（端点、工具、提议、对话流程、存储）都不调用保存约定的方法，`tests/chat-proposals.test.ts` 核对这一点。
+- 平台不提供从对话保存提议的入口；`eos chat show` 列出对话里的提议和涉及的权限。
+- 提议是按记下那一刻的模板、技能、文档和最新版本检查的；之后这些变了，提议可能不再成立，涉及的权限也可能过时。
+- 工作流引用的 Agent 模板要已经保存在平台上，才能通过检查。
+- 涉及的权限改动在记下时算好，存进提议，也写进返回给 agent 的结果：
+  - 修改已有约定：用改进提案的核对（`src/improve/guard.ts` 的 `permissionChanges`），另外补上模板技能的增删（那个核对不看技能）；
+  - 新建的约定：模板列出它的模型、写入范围、去掉的工具组、技能和 MCP；工作流记一句总的说明，整份都要确认。
+  - 对话 agent 自己的模板 `assistant`：权限不从它读，但模型和指令从它来，单独标出。
+  - 改进提案核对的说明是禁止的口气，这里改成陈述（「改了检查命令和平台动作」）。
+- 和改进提案不同，涉及权限的提议不退回：它们只有人确认才保存。
+
+**为什么权限改动不退回**：设计新工作流时常常要写检查命令、写入范围和新角色，按改进提案的规则一律退回，对话 agent 就设计不了这些。提议不会自己生效，所以改成算好、列出来，由人决定。
+
+**为什么提议也要先过检查**：用户看到的提议都是能保存的，不会确认之后才发现格式不对。agent 拿到具体的错误，可以自己改。
+
+**为什么提议的工具和只读工具分开**：`tools.ts` 的工具保持只读，有测试核对它们不改数据库。提议工具只写提议表，单独放在 `proposals.ts`。
+
 ### 端点
 
 - 只接受 `POST /mcp`、`application/json` 的请求，只回 JSON，不开 SSE 流。
-- 请求体最多 64 KiB，不接受批量请求。
-- 一次调用最多 30 次工具调用，到上限后的调用都返回错误（也记进「读了哪些数据」）。
+- 请求体最多 256 KiB，不接受批量请求。4 万字的内容每字按 `\uXXXX` 编码（6 字节）约 240 KB，装得下；内容和理由（4000 字）都写满、又按 `\uXXXX` 编码时会超出，端点回 413。
+- 一次调用最多 30 次工具调用（读数据和提议一起算），到上限后的调用都返回错误（也记进这次调用用过的工具）。
 - Host 必须是 `127.0.0.1:<端口>`；带 Origin 的请求一律拒绝。
 - 令牌按定长比较：两边各算 sha256，再用 `timingSafeEqual`。
 
@@ -139,7 +173,8 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 同用户的任务 agent 在调用期间能读到令牌 | 部署镜像里 dsh 和所有任务的 agent 都是 eos-agent，在组 eos-dsh 里，读得到配置文件。调用进行期间，别的任务的 agent 能拿令牌读遮蔽过的平台数据。任务 agent 本来就能读整个 `/data`，没有扩大暴露面。和 `docs/roadmap.md` 的「任务之间的隔离」是同一个问题 |
 | 不用 Docker 部署时 | 平台、dsh、检查命令是同一个用户，都读得到配置文件 |
 | 每句话起一个 dsh 进程 | 令牌每次都换，配置的指纹跟着变 |
-| 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有写工具，最坏是回答被带偏 |
+| 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有保存约定的工具，最坏是回答被带偏，或者记下一条被带偏的提议 |
+| 工作流不能引用还没保存的模板 | 新工作流要用新角色时，模板的提议要先保存，工作流的提议才能通过检查 |
 | 没有登录 | 对话的 actor 只记 `cli`、`web`，和任务事件的写法一样 |
 | `BUILTIN_TOOL_ROWS` 按当前 dsh 版本列 | dsh 新增的工具行不会自动关掉。E2E 核对发给模型的工具表；运行时还有「失败就关」 |
 
@@ -148,18 +183,21 @@ dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据�
 | 范围 | 文件 |
 |---|---|
 | 执行器接口和 dsh 翻译 | `src/executor/types.ts`、`src/executor/dsh.ts` |
-| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
 | 模板 | `src/workflow/agents/assistant.yaml` |
 | 命令行接线 | `src/cli.ts` |
-| 测试 | `tests/chat.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
-| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-docker-probe.ts` |
+| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
+| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-docker-probe.ts` |
 
 ## 证据
 
 | 结论 | 证据 |
 |---|---|
-| 真实 dsh 发给模型的工具表里只有 8 个 `mcp__eos__*` 工具；两轮对话跨进程续接；trace 里的凭据值被遮蔽；调用结束后配置里没有令牌 | `docs/e2e/chat-a/report.json` |
+| 真实 dsh 发给模型的工具表里只有 `mcp__eos__*` 工具（当时是 8 个只读工具）；两轮对话跨进程续接；trace 里的凭据值被遮蔽；调用结束后配置里没有令牌 | `docs/e2e/chat-a/report.json` |
 | 部署镜像里 eos-check、eos-agent 不带令牌和带错令牌都被拒；容器里跑通一次 `eos chat`，配置是 2750/0640、组 eos-dsh，eos-check 读不到，eos-agent 读得到，调用结束后删掉 | `docs/e2e/chat-a/docker-probe.json` |
 | 最终代码上真实 dsh 的工具表、遮蔽、令牌清理（假模型） | `docs/e2e/chat-a/fake-model-report.json` |
+| 真实模型提议一个工作流：提议通过检查、记成待确认，约定表没有变化 | `docs/e2e/chat-c1/report.json` |
+| 提议的检查、退回、上限、作废；涉及的权限改动怎么算；agent 能触发的代码不保存约定 | `tests/chat-proposals.test.ts` |
+| 最终代码上真实 dsh 的提议链路（假模型，含退回一次） | `docs/e2e/chat-c1/fake-model-report.json` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
 | 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |

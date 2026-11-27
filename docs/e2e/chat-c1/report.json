@@ -1,0 +1,115 @@
+{
+  "mode": "real-model",
+  "commit": "b919bcd6eb52aefc824179b620309c918a38c0af",
+  "uncommitted": [],
+  "chat": "cmwyn021c3dc1b1cf",
+  "checks": [
+    {
+      "name": "命令成功，有回复",
+      "ok": true,
+      "detail": "p__eos__propose_convention\n\n── 2026-11-27 07:05:46 助手 · 15.1s · 输入 3416 输出 2491\n（用了工具：list_conventions、list_conventions、get_convention、get_convention、get_convention、list_conventions、get_convention、propose_convention）\n**结论：已用提议工具提交「review-only」工作流（提议 #1），平台检查通过，但还没生效，需要你确认后才会保存成新版本。**\n\n**提议内容（完整 YAML 要点）**\n- `roles`：`spec-writer` → 平台模板 `spec-writer`；`reviewer` → 平台模板 `reviewer`。沿用 `docs: [研发约定]`。\n- 两个节点：\n  1. `spec`：`kind: agent`，跑 spec-writer，把规格写到 `docs/spec.md`，交付物仍按 `deliverables` 检查，章节要求为「背景 / 范围 / 验收标准」。\n  2. `review`：`kind: dialog`，`role: reviewer`、`with: spec`、`maxRounds: 3`、`inputs: [spec]`。任务里要求逐条核对验收标准、指出缺漏和不可验证处，不通过就交回规格作者修改；通过时明确写「通过」。\n- 与 standard 的对应关系：`roles` 引用模板、agent 节点带 `deliverables`、dialog 节点用 `with` 指定对话对象并用 `maxRounds` 限制轮次，都和 standard 一致；区别是对话对象从 `build` 换成 `spec`，轮次设为 3，并去掉了 test 和 deliver 阶段。\n\n**为什么这么设计**\n- 只做“写规格 + 评审规格”，所以不需要 test/build/deliver 节点，也没有可跑的测试检查命令，评审通过与否靠 reviewer 在回复中明确结论，加上平台对 `docs/spec.md` 章节的检查。\n- `maxRounds: 3` 直接满足“评审不通过最多来回 3 轮”。\n\n**权限变化**\n- 没有权限变化：没有改模板的模型、写入范围、工具组、MCP 或检查命令，评审也保留；仍是 spec-writer 只写 `docs/**`、reviewer 只读。\n\n**依据**\n- `workflow/standard` v1（内置模板）：节点写法、`roles` 引用方式、`deliverables` 和 dialog 的 `with`/`maxRounds` 参照。\n- `template/spec-writer` v1：`write: worktree`、`writePaths: [docs/**]`。\n- `template/reviewer` v1：`write: none`、`effort: high`，任务定位是只核对、不改文件。\n- `doc/研发约定` v1：交付物章节要和 workflows 要求一致、歧义要问用户、评审意见要逐条处理。\n\n需要我调整的话（比如评审对象改成对规格的“可执行性清单”、规格文件路径、或轮次上限），告诉我即可再提一版。\n\n接着说：npm run eos -- chat send cmwyn021c3dc1b1cf \"<话>\"\n"
+    },
+    {
+      "name": "发给模型的工具表：8 个只读工具和提议工具，全是平台工具",
+      "ok": true,
+      "detail": [
+        "mcp__eos__convention_history",
+        "mcp__eos__get_convention",
+        "mcp__eos__get_task",
+        "mcp__eos__get_task_changes",
+        "mcp__eos__get_task_metrics",
+        "mcp__eos__get_task_trace",
+        "mcp__eos__list_conventions",
+        "mcp__eos__list_tasks",
+        "mcp__eos__propose_convention"
+      ]
+    },
+    {
+      "name": "agent 用了提议工具",
+      "ok": true,
+      "detail": [
+        {
+          "tool": "list_conventions",
+          "args": "{\"kind\":\"workflow\"}",
+          "isError": false
+        },
+        {
+          "tool": "list_conventions",
+          "args": "{\"kind\":\"template\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"standard\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"template\",\"name\":\"spec-writer\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"template\",\"name\":\"reviewer\"}",
+          "isError": false
+        },
+        {
+          "tool": "list_conventions",
+          "args": "{\"kind\":\"doc\"}",
+          "isError": false
+        },
+        {
+          "tool": "get_convention",
+          "args": "{\"kind\":\"doc\",\"name\":\"研发约定\"}",
+          "isError": false
+        },
+        {
+          "tool": "propose_convention",
+          "args": "{\"kind\":\"workflow\",\"name\":\"review-only\",\"content\":\"name: review-only\\ndescription: 只写规格、只评审规格：规格作者写规格并保存到 docs/spec.md，评审独立核对规格是否满足需求、可执行、可验证；不通过就交回规格作者修改，最多来回 3 轮。\\ndocs: [研发约定]\\n\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\nroles:\\n  spec-writer: { template: spec-writer }\\n  reviewer: { template: reviewer }\\n\\nnodes:\\n  - id: spec\\n    kind: agent\\n    role: spec-writer\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\n    deliverables:\\n      - { path: docs/spec.md, s",
+          "isError": false
+        }
+      ]
+    },
+    {
+      "name": "至少一条提议通过保存时的检查、没有作废",
+      "ok": true,
+      "detail": [
+        {
+          "id": 1,
+          "kind": "workflow",
+          "name": "review-only",
+          "voided": null
+        }
+      ]
+    },
+    {
+      "name": "约定表一行都没变（提议不保存）",
+      "ok": true
+    },
+    {
+      "name": "eos chat show 列出了提议",
+      "ok": true,
+      "detail": [
+        "帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。",
+        "**结论：已用提议工具提交「review-only」工作流（提议 #1），平台检查通过，但还没生效，需要你确认后才会保存成新版本。**",
+        "**提议内容（完整 YAML 要点）**",
+        "提议（agent 提的，都还没有保存）：",
+        "  #1  工作流「review-only」（新建）"
+      ]
+    },
+    {
+      "name": "模型 key 不在对话记录和命令输出里",
+      "ok": true
+    }
+  ],
+  "transcript": "对话 cmwyn021c3dc1b1cf：帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 sp…\n\n── 2026-11-27 07:05:28 你\n帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。\n\n── 2026-11-27 07:05:46 助手 · 15.1s · 输入 3416 输出 2491\n（用了工具：list_conventions、list_conventions、get_convention、get_convention、get_convention、list_conventions、get_convention、propose_convention）\n**结论：已用提议工具提交「review-only」工作流（提议 #1），平台检查通过，但还没生效，需要你确认后才会保存成新版本。**\n\n**提议内容（完整 YAML 要点）**\n- `roles`：`spec-writer` → 平台模板 `spec-writer`；`reviewer` → 平台模板 `reviewer`。沿用 `docs: [研发约定]`。\n- 两个节点：\n  1. `spec`：`kind: agent`，跑 spec-writer，把规格写到 `docs/spec.md`，交付物仍按 `deliverables` 检查，章节要求为「背景 / 范围 / 验收标准」。\n  2. `review`：`kind: dialog`，`role: reviewer`、`with: spec`、`maxRounds: 3`、`inputs: [spec]`。任务里要求逐条核对验收标准、指出缺漏和不可验证处，不通过就交回规格作者修改；通过时明确写「通过」。\n- 与 standard 的对应关系：`roles` 引用模板、agent 节点带 `deliverables`、dialog 节点用 `with` 指定对话对象并用 `maxRounds` 限制轮次，都和 standard 一致；区别是对话对象从 `build` 换成 `spec`，轮次设为 3，并去掉了 test 和 deliver 阶段。\n\n**为什么这么设计**\n- 只做“写规格 + 评审规格”，所以不需要 test/build/deliver 节点，也没有可跑的测试检查命令，评审通过与否靠 reviewer 在回复中明确结论，加上平台对 `docs/spec.md` 章节的检查。\n- `maxRounds: 3` 直接满足“评审不通过最多来回 3 轮”。\n\n**权限变化**\n- 没有权限变化：没有改模板的模型、写入范围、工具组、MCP 或检查命令，评审也保留；仍是 spec-writer 只写 `docs/**`、reviewer 只读。\n\n**依据**\n- `workflow/standard` v1（内置模板）：节点写法、`roles` 引用方式、`deliverables` 和 dialog 的 `with`/`maxRounds` 参照。\n- `template/spec-writer` v1：`write: worktree`、`writePaths: [docs/**]`。\n- `template/reviewer` v1：`write: none`、`effort: high`，任务定位是只核对、不改文件。\n- `doc/研发约定` v1：交付物章节要和 workflows 要求一致、歧义要问用户、评审意见要逐条处理。\n\n需要我调整的话（比如评审对象改成对规格的“可执行性清单”、规格文件路径、或轮次上限），告诉我即可再提一版。\n\n提议（agent 提的，都还没有保存）：\n  #1  工作流「review-only」（新建）\n\n用途 chat：1 次调用（0 次没有回复），读数据 7 次，输入 3416 输出 2491，agent 15.1s\n",
+  "proposals": [
+    {
+      "id": 1,
+      "kind": "workflow",
+      "name": "review-only",
+      "voided": null,
+      "content": "name: review-only\ndescription: 只写规格、只评审规格：规格作者写规格并保存到 docs/spec.md，评审独立核对规格是否满足需求、可执行、可验证；不通过就交回规格作者修改，最多来回 3 轮。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  # 评审：只核对规格，不改代码。规格作者和评审对话，不通过就修改，最多 3 轮。\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: spec\n    maxRounds: 3\n    inputs: [spec]\n    task: 评审 docs/spec.md 是否满足需求，是否可执行、可验证。逐条核对验收标准；发现缺漏、歧义或不可验证的地方就告诉规格作者修改。通过时在最终回复里明确写“通过”，并列出核对结论。\n"
+    }
+  ]
+}

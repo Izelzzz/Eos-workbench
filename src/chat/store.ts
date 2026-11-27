@@ -3,7 +3,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatSummary, ChatTraceRow } from './types.ts'
+import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind } from './types.ts'
+import { PROPOSE_TOOL } from './proposals.ts'
 import { CHAT_PURPOSE } from './types.ts'
 
 const SCHEMA = `
@@ -30,6 +31,19 @@ CREATE TABLE IF NOT EXISTS chat_trace (
   seq INTEGER NOT NULL,
   event TEXT NOT NULL,
   PRIMARY KEY (chat_id, call_id, seq)
+);
+CREATE TABLE IF NOT EXISTS chat_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL REFERENCES chats(id),
+  call_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_version INTEGER,
+  content TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  voided TEXT
 );`
 
 /** 标题取第一条消息的开头。 */
@@ -127,6 +141,29 @@ export class ChatStore {
     }))
   }
 
+  /** 记下一条提议（只追加）。提议不改任何约定。 */
+  addProposal(p: Omit<ChatProposal, 'id' | 'at' | 'voided'>, at: number): ChatProposal {
+    const r = this.db
+      .prepare('INSERT INTO chat_proposals (chat_id, call_id, created_at, kind, name, base_version, content, rationale, permissions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(p.chatId, p.call, at, p.kind, p.name, p.baseVersion ?? null, p.content, p.rationale, JSON.stringify(p.permissions))
+    return this.proposal(Number(r.lastInsertRowid))!
+  }
+
+  /** 作废一次调用里记下的提议（那一轮被作废时）。 */
+  voidProposals(call: string, reason: string): void {
+    this.db.prepare('UPDATE chat_proposals SET voided = ? WHERE call_id = ? AND voided IS NULL').run(reason, call)
+  }
+
+  proposal(id: number): ChatProposal | undefined {
+    const r = this.db.prepare('SELECT * FROM chat_proposals WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    return r === undefined ? undefined : proposalRow(r)
+  }
+
+  /** 一个对话的提议，先提的在前。 */
+  proposals(chatId: string): ChatProposal[] {
+    return (this.db.prepare('SELECT * FROM chat_proposals WHERE chat_id = ? ORDER BY id').all(chatId) as Record<string, unknown>[]).map(proposalRow)
+  }
+
   metrics(id: string): ChatMetrics {
     const log = this.log(id)
     const calls = log.flatMap(m => (m.role === 'assistant' ? [m.call] : []))
@@ -136,7 +173,22 @@ export class ChatStore {
       failed: log.filter(m => m.role === 'error').length,
       usage: calls.reduce((u, c) => addUsage(u, c.usage), zeroUsage()),
       agentMs: calls.reduce((n, c) => n + c.ms, 0),
-      reads: calls.reduce((n, c) => n + c.reads.length, 0),
+      // 读数据的次数：不算提议。
+      reads: calls.reduce((n, c) => n + c.reads.filter(r => r.tool !== PROPOSE_TOOL).length, 0),
     }
   }
 }
+
+const proposalRow = (r: Record<string, unknown>): ChatProposal => ({
+  id: Number(r.id),
+  chatId: String(r.chat_id),
+  call: String(r.call_id),
+  at: Number(r.created_at),
+  kind: r.kind as ProposalKind,
+  name: String(r.name),
+  ...(r.base_version === null ? {} : { baseVersion: Number(r.base_version) }),
+  content: String(r.content),
+  rationale: String(r.rationale),
+  permissions: JSON.parse(String(r.permissions)) as string[],
+  ...(r.voided === null ? {} : { voided: String(r.voided) }),
+})
