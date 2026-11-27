@@ -1,19 +1,17 @@
 {
-  "commit": "851fae90f4340c23b32ac80f523a48f846f839a5",
+  "commit": "5e36dacb6f9cea2a86ba3d201d51bf70efe01537",
   "uncommitted": [
-    "?? docs/e2e/roadmap-5b-gate-web/report.json",
-    "?? docs/e2e/roadmap-5b-gate-web/run.log",
-    "?? docs/e2e/roadmap-5b-gate-web/web/1-list.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/2-list-filtered.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/3-gate-round1.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/4-gate-round2.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/5-list-390.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/6-gate-390.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/7-task-390.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/8-done.png",
-    "?? docs/e2e/roadmap-5b-gate-web/web/9-list-filter-after-accept.png"
+    "M docs/e2e/roadmap-5b-gate-web/web/1-list.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/2-list-filtered.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/3-gate-round1.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/4-gate-round2.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/5-list-390.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/7-task-390.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/8-done.png",
+    " M docs/e2e/roadmap-5b-gate-web/web/9-list-filter-after-accept.png",
+    " D docs/e2e/roadmap-5b-gate-web/web/gate-web-report.json"
   ],
-  "task": "t261127053226bng",
+  "task": "t261127053914d8o",
   "checks": {
     "列表能看出等验收的任务（提示条、行标记），能筛出只看等验收的": true,
     "任务页显示卡点：第几次、验收对象和验收人、被验收的产出": true,
