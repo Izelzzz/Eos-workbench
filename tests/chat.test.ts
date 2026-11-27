@@ -354,5 +354,5 @@ test('执行器做不到对话 agent 要的能力面（没有自带工具、接�
   assert.equal(r.ok, false)
   assert.match(!r.ok ? r.error : '', /Agent 模板「assistant」：执行器「x」关不掉自带的工具/)
   assert.deepEqual(p.chats.list(), [])
-  assert.deepEqual(seen, [[undefined, { builtinTools: 'none', denyTools: [], background: false, httpMcp: true, stdioMcp: false, skills: false }]])
+  assert.deepEqual(seen, [[undefined, { builtinTools: 'none', denyTools: ['web', 'subagent', 'bash', 'schedule', 'todo', 'goal'], background: false, httpMcp: true, stdioMcp: false, skills: false }]])
 })

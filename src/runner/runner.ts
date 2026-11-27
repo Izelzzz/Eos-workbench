@@ -2,14 +2,22 @@
 // 状态只在存储里；runner 自己只记"哪个调用正在本进程里执行"。
 import type { Call, CheckResult, CheckRun, Task } from '../engine/types.ts'
 import { isCheck } from '../engine/types.ts'
-import type { Executor } from '../executor/types.ts'
+import type { AgentProfile, Executor } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
-import { role as roleOf, type WriteScope } from '../workflow/types.ts'
+import { role as roleOf, type Role } from '../workflow/types.ts'
 import { explain } from '../engine/failure.ts'
 import { describePosition } from '../engine/machine.ts'
 
-/** 角色的 agent 能不能起后台作业：可写的角色不能（见 AgentProfile 的 background）。建任务时核对执行器做不做得到，也按这个算。 */
-export const backgroundFor = (role: { write: WriteScope }): boolean => role.write !== 'worktree'
+/**
+ * 任务里一个角色的能力面（技能另外按任务快照给）。runner 交给执行器的、建任务时核对执行器做不做得到的，都用这一份。
+ * background：可写的角色不能起后台作业（见 AgentProfile 的 background）。
+ */
+export const roleProfile = (role: Pick<Role, 'write' | 'denyTools' | 'mcp'>): Omit<AgentProfile, 'skills'> => ({
+  builtinTools: 'standard',
+  denyTools: role.denyTools,
+  mcp: role.mcp,
+  background: role.write !== 'worktree',
+})
 
 export type RunnerOptions = {
   store: Store
@@ -126,7 +134,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
             ...(role.effort === undefined ? {} : { effort: role.effort }),
             write: role.write,
             cwd: meta.worktree,
-            profile: { builtinTools: 'standard', denyTools: role.denyTools, skills, mcp: role.mcp, background: backgroundFor(role) },
+            profile: { ...roleProfile(role), skills },
           },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
           ask: (q, signal) => {

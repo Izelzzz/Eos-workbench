@@ -75,12 +75,13 @@ const masterKeyItem = (f: Facts): Item =>
       ? { name: '凭据主密钥', status: 'warn', detail: `没有设置 ${MASTER_KEY_ENV}，不能保存或读取凭据`, fix: GENERATE_HINT, doctorOnly: true }
       : { name: '凭据主密钥', status: 'fail', detail: f.masterKey.error, fix: GENERATE_HINT }
 
+/** 执行器进程的说法：带上登记的执行器名字，例如「执行器进程（dsh）」。 */
+const executorProcess = (f: Facts): string => (f.executors.length === 0 ? '执行器进程' : `执行器进程（${f.executors.map(e => e.name).join('、')}）`)
+
 /**
  * 检查命令用哪个用户运行。设置了却切换不过去时 ✗：检查命令一定跑不起来，也不能退回到用平台的用户运行。
  * 没有设置时不列出，由「凭据隔离」说明检查命令和平台是同一个用户。
  */
-/** 执行器进程的说法：带上登记的执行器名字，例如「执行器进程（dsh）」。 */
-const executorProcess = (f: Facts): string => (f.executors.length === 0 ? '执行器进程' : `执行器进程（${f.executors.map(e => e.name).join('、')}）`)
 
 const checkUserItem = (f: Facts): Item[] => {
   const name = '检查命令的用户'
@@ -258,8 +259,8 @@ export const gather = (
   const agentFact = (u: CheckUserState): UserFact => {
     const f = userFact(u)
     if (f.kind !== 'ok') return f
-    const cannot = o.executors.find(e => e.health.agentUser !== undefined)?.health.agentUser
-    if (cannot !== undefined) return { kind: 'fail', error: cannot }
+    const cannot = o.executors.flatMap(e => (e.health.agentUser === undefined ? [] : [e.health.agentUser]))
+    if (cannot.length > 0) return { kind: 'fail', error: cannot.join('；') }
     if (!hasCapKill()) return { kind: 'fail', error: `平台进程没有 KILL 能力：执行器进程以 ${f.name} 运行，平台关不掉它（换 key、释放进程时）` }
     return f
   }

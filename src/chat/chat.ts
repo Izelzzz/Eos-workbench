@@ -9,7 +9,8 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Conventions } from '../conventions/conventions.ts'
 import { redactDeep } from '../credentials/redact.ts'
-import type { AgentNeeds, Executor, ExecutorCheck, Reply } from '../executor/types.ts'
+import type { AgentNeeds, AgentProfile, Executor, ExecutorCheck, Reply } from '../executor/types.ts'
+import { needsOf } from '../executor/types.ts'
 import { acquire } from '../runner/lock.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import { TOOL_GROUPS } from '../workflow/types.ts'
@@ -45,8 +46,10 @@ export type ChatOptions = {
 
 const keyOf = (id: string) => `chat/${id}`
 
-/** 对话 agent 要执行器做到的：一个自带工具都没有，只用平台经 HTTP MCP 交给它的工具（见 call 里的 profile）。 */
-const CHAT_NEEDS: AgentNeeds = { builtinTools: 'none', denyTools: [], background: false, httpMcp: true, stdioMcp: false, skills: false }
+/** 对话 agent 的能力面（mcp 在每次调用时换成这次的端点）：一个自带工具都没有，只用平台经 HTTP MCP 交给它的工具。 */
+const CHAT_PROFILE = { builtinTools: 'none', denyTools: [...TOOL_GROUPS], skills: [], background: false } as const satisfies Omit<AgentProfile, 'mcp'>
+/** 建对话时核对执行器做不做得到：和 call 里交给执行器的同一份能力面，加上一个 HTTP MCP 端点。 */
+const CHAT_NEEDS: AgentNeeds = needsOf({ ...CHAT_PROFILE, denyTools: [...CHAT_PROFILE.denyTools], skills: [], mcp: [{ name: MCP_NAME, url: 'http://127.0.0.1/', headers: {} }] })
 const nonceOf = (id: string, seq: number) => `chat/${id}/${seq}`
 
 /** 一次调用是对话里哪一句用户的话引起的（nonceOf 的反过来）：save.ts 用它核对那一轮已经有了回复。 */
@@ -166,7 +169,7 @@ export class Chats {
           ...route,
           write: 'none',
           cwd,
-          profile: { builtinTools: 'none', denyTools: [...TOOL_GROUPS], skills: [], mcp: [endpoint.mcp], background: false },
+          profile: { ...CHAT_PROFILE, denyTools: [...CHAT_PROFILE.denyTools], skills: [], mcp: [endpoint.mcp] },
         },
         ask: async () => '不能向用户提问：请直接回答，信息不够时在回答里说明还需要什么。',
         onEvent: raw => {

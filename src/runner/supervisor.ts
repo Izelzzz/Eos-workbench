@@ -21,7 +21,7 @@ import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, 
 import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
-import { backgroundFor, runTask } from './runner.ts'
+import { roleProfile, runTask } from './runner.ts'
 
 export type CreateInput = { repo: string; workflow: string; request: string }
 export type Created = { ok: true; id: string } | { ok: false; error: string }
@@ -105,7 +105,7 @@ export class Supervisor {
     const resolved = this.conventions.resolve(input.workflow.trim())
     if (!resolved.ok) return resolved
     for (const [key, r] of Object.entries(resolved.workflow.roles)) {
-      const problem = this.o.checkExecutor?.(r.executor, needsOf({ builtinTools: 'standard', denyTools: r.denyTools, mcp: r.mcp, skills: r.skills, background: backgroundFor(r) }))
+      const problem = this.o.checkExecutor?.(r.executor, needsOf({ ...roleProfile(r), skills: r.skills }))
       if (problem !== undefined) return { ok: false, error: `工作流 ${resolved.workflow.name} 的角色 ${key}：${problem}` }
     }
     const id = newId()

@@ -1007,7 +1007,7 @@ const MODEL_KEY_FIX = `在 Web 的「凭据」页添加名为 ${MODEL_KEY_CREDEN
 
 /** 凭据存储优先；里面没有才用环境变量。只检查有没有，不检查是否有效。 */
 const modelKeyItem = (f: DshFacts): HealthItem => {
-  const name = 'DeepSeek API key'
+  const name = MODEL_KEY.label
   switch (f.modelKey.source) {
     case 'credentials':
       return { name, status: 'ok', detail: `来自凭据存储（凭据 ${MODEL_KEY_CREDENTIAL}）` }
