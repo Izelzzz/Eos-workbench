@@ -49,12 +49,28 @@ test('执行器的实现只被 src/executor/ 和 src/cli.ts 引用；别处只�
   assert.deepEqual(await rules('src/runner/x.ts', impl), restricted)
   assert.deepEqual(await rules('src/engine/x.ts', impl), restricted)
   assert.deepEqual(await rules('src/runner/x.ts', types), [])
-  assert.deepEqual(await rules('src/cli.ts', `import { DshExecutor } from './executor/dsh.ts'\nexport const a = DshExecutor\n`), [])
+  // src/cli.ts 只建注册表：只能引用执行器的 types 和 registry，静态和动态 import 都一样
+  assert.deepEqual(await rules('src/cli.ts', `import { DshExecutor } from './executor/dsh.ts'\nexport const a = DshExecutor\n`), restricted)
+  assert.deepEqual(await rules('src/cli.ts', "export const a = () => import('./executor/dsh.ts')\n"), ['no-restricted-syntax'])
+  assert.deepEqual(
+    await rules('src/cli.ts', `import { Executors } from './executor/registry.ts'\nimport type { Executor } from './executor/types.ts'\nexport const a: Executor | typeof Executors = Executors\n`),
+    [],
+  )
+  assert.deepEqual(await rules('src/cli.ts', "export const a = () => import('./executor/registry.ts')\n"), [])
   assert.deepEqual(await rules('src/executor/other.ts', `import { DshExecutor } from './dsh.ts'\nexport const a = DshExecutor\n`), [])
 })
 
-test('例外只放开那一条：doctor.ts 能引用 dsh.ts 但不能直接用 @deepseek-ai；templates.ts 能读文件但不能起子进程、读时钟', async () => {
-  assert.deepEqual(await rules('src/runner/doctor.ts', `import { dshInstall } from '../executor/dsh.ts'\nexport const a = dshInstall\n`), [])
+test('src/executor/ 以外不能出现执行器的名字（字面量、模板字符串）；执行器目录里可以，长一点的字符串不误伤', async () => {
+  for (const path of ['src/runner/x.ts', 'src/cli.ts', 'src/engine/x.ts', 'web/src/x.ts']) {
+    assert.deepEqual(await rules(path, "export const a = (n: string) => n === 'dsh'\n"), ['no-restricted-syntax'], path)
+    assert.deepEqual(await rules(path, 'export const a = `claude-code`\n'), ['no-restricted-syntax'], path)
+  }
+  assert.deepEqual(await rules('src/executor/x.ts', "export const a = (n: string) => n === 'dsh'\n"), [])
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = 'dsh-home'\n"), [])
+})
+
+test('例外只放开那一条：templates.ts 能读文件但不能起子进程、读时钟；doctor.ts 不再是例外', async () => {
+  assert.deepEqual(await rules('src/runner/doctor.ts', `import { dshInstall } from '../executor/dsh.ts'\nexport const a = dshInstall\n`), restricted)
   assert.deepEqual(await rules('src/workflow/templates.ts', `import { readFileSync } from 'node:fs'\nexport const a = readFileSync\n`), [])
   assert.deepEqual(await rules('src/workflow/templates.ts', `import { spawn } from 'node:child_process'\nexport const a = spawn\n`), restricted)
   assert.deepEqual(await rules('src/workflow/templates.ts', 'export const a = () => Date.now()\n'), ['no-restricted-globals'])
