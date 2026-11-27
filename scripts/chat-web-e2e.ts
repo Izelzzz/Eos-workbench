@@ -120,7 +120,9 @@ try {
   check('回复完成后跳到这个对话，回复上列出读了哪些数据', chatId !== undefined && reads.some(r => r.startsWith('读了')) && reads.some(r => r.startsWith('提议')), reads)
 
   // 要保存的：通过检查、没作废、能保存的 review-only 提议（模型可能先提别的）；没有就取第一条能保存的。
-  const proposals = db().prepare('SELECT id, kind, name FROM chat_proposals WHERE chat_id = ? AND voided IS NULL ORDER BY id').all(chatId ?? '') as { id: number; kind: string; name: string }[]
+  const proposals = db()
+    .prepare('SELECT id, kind, name FROM chat_proposals WHERE chat_id = ? AND voided IS NULL ORDER BY id')
+    .all(chatId ?? '') as { id: number; kind: string; name: string }[]
   const card = async (id: number) => page.locator(`section[aria-label="提议 #${id}"]`)
   let target: number | undefined
   for (const p of [...proposals].sort((a, b) => Number(b.name === 'review-only') - Number(a.name === 'review-only')))
@@ -145,8 +147,7 @@ try {
     await c.locator('.pill', { hasText: '已保存' }).waitFor({ timeout: 30_000 })
     const name = proposals.find(p => p.id === target)!.name
     const row = db().prepare("SELECT version, actor, note, content FROM conventions WHERE kind = 'workflow' AND name = ? ORDER BY version DESC").get(name) as
-      | { version: number; actor: string; note: string; content: string }
-      | undefined
+      { version: number; actor: string; note: string; content: string } | undefined
     const proposed = db().prepare('SELECT content FROM chat_proposals WHERE id = ?').get(target) as { content: string }
     check(
       '勾上确认之后保存成第 1 版：操作人 web，备注写明对话、提议和确认了的权限，内容就是提议的内容',
@@ -179,13 +180,22 @@ try {
     ['chat', `#/chat/${chatId}`],
   ] as const) {
     await phone.goto(`${base}/${hash}`)
-    await phone.locator(name === 'list' ? '.chat-list li' : '.chat-proposal').first().waitFor()
+    await phone
+      .locator(name === 'list' ? '.chat-list li' : '.chat-proposal')
+      .first()
+      .waitFor()
     widths[name] = await phone.evaluate(() => document.documentElement.scrollWidth)
     await phone.screenshot({ path: join(SHOTS, `chat-390-${name}.png`), fullPage: true })
   }
-  check('390 宽不横向滚动', Object.values(widths).every(w => w <= 390), widths)
+  check(
+    '390 宽不横向滚动',
+    Object.values(widths).every(w => w <= 390),
+    widths,
+  )
   const pageText = (await page.content()) + (await phone.content())
-  const messages = db().prepare('SELECT text, call FROM chat_messages WHERE chat_id = ?').all(chatId ?? '')
+  const messages = db()
+    .prepare('SELECT text, call FROM chat_messages WHERE chat_id = ?')
+    .all(chatId ?? '')
   check('平台持有的模型 key 不在页面、对话记录和服务输出里', !pageText.includes(KEY) && !JSON.stringify(messages).includes(KEY) && !serverOut.includes(KEY))
   check('页面没有脚本错误', errors.length === 0, errors)
 } catch (e) {
