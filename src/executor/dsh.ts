@@ -9,7 +9,7 @@
 // - 新会话先设工作目录和权限档位（只读 / 只写工作区），再发第一条消息。
 import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import { probe as probeLandlock } from '@deepseek-ai/node-addon-system/landlock-run'
@@ -21,7 +21,8 @@ import { DeepSeekHarness } from '../../vendor/dsh-sdk-client/index.ts'
 import type { DeepSeekHarnessOptions } from '../../vendor/dsh-sdk-client/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ToolGroup } from '../workflow/types.ts'
-import type { AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
+import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Executor, Reply } from './types.ts'
+import { isHttpMcp } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
 
@@ -169,6 +170,38 @@ export const GROUP_TOOLS: Record<ToolGroup, string[]> = {
 export const ALWAYS_DISABLED = ['tool-plugin-manager', 'skill-office']
 
 /**
+ * builtinTools 为 'none' 时再关掉的行：sdk profile 里所有给模型提供工具的行（文件读写和搜索、命令行、技能、子 agent、
+ * 提问、计划模式、交付物、Office、MCP 资源……），以及会把本机文件内容带进会话的行（消息里的 @文件引用、工作区的 AGENTS.md）。
+ * 剩下的工具只有平台经 mcp 交给它的。scripts/chat-e2e.ts 用真实的 dsh 核对：请求头的工具表里只有 mcp__ 开头的工具。
+ */
+export const BUILTIN_TOOL_ROWS = [
+  'tool-working-directory',
+  'tool-bash',
+  'tool-pwsh',
+  'tool-jobs',
+  'tool-fs',
+  'tool-fs-search',
+  'tool-skill',
+  'plan-mode',
+  'tool-agent-team',
+  'tool-subagent-control',
+  'tool-subagent',
+  'tool-subagent-fork',
+  'tool-workflow',
+  'tool-todo',
+  'tool-goal',
+  'tool-web',
+  'tool-schedule',
+  'tool-ask-user',
+  'tool-office',
+  'mcp-resources',
+  'present',
+  'file-reference-local',
+  'deliverable-file-references',
+  'agent-instructions',
+]
+
+/**
  * 能力面的指纹。dsh 把工具、技能和 MCP 都按进程配置（profile 补丁），不能按会话配，
  * 所以指纹进进程的路由键：能力面相同的角色共用一个 dsh 进程，不同的各起一个。
  * 技能按名字排序（技能目录是个集合，先后无意义）；MCP 保持模板里的顺序。
@@ -177,9 +210,11 @@ export const profileHash = (p: AgentProfile): string =>
   createHash('sha256')
     .update(
       JSON.stringify([
+        // 只有 'none' 进指纹：任务角色（'standard'）的指纹和配置目录和加这个字段之前一样。
+        ...(p.builtinTools === 'none' ? ['no-builtin-tools'] : []),
         [...p.denyTools].sort(),
         [...p.skills].map(s => [s.name, s.content] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
-        p.mcp.map(m => [m.name, m.command, m.args, Object.entries(m.env).sort()]),
+        p.mcp.map(m => (isHttpMcp(m) ? [m.name, m.url, Object.entries(m.headers).sort()] : [m.name, m.command, m.args, Object.entries(m.env).sort()])),
         p.background,
       ]),
     )
@@ -194,10 +229,11 @@ export const profileHash = (p: AgentProfile): string =>
 export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): unknown[] => {
   // 不能起后台作业时：去掉 job_* 工具（tool-jobs）和自带后台运行的 workflow 工具（tool-workflow），bash 不接受 run_in_background；
   // 这时前台命令到了超时直接被杀，不会转成后台作业（dsh 的 promoteOnTimeout 只在能起后台作业时生效）。
-  const disabled = [...new Set([...ALWAYS_DISABLED, ...p.denyTools.flatMap(g => GROUP_ROWS[g]), ...(p.background ? [] : ['tool-jobs', 'tool-workflow'])])]
+  const none = p.builtinTools === 'none'
+  const disabled = [...new Set([...ALWAYS_DISABLED, ...(none ? BUILTIN_TOOL_ROWS : []), ...p.denyTools.flatMap(g => GROUP_ROWS[g]), ...(p.background ? [] : ['tool-jobs', 'tool-workflow'])])]
   return [
     ...disabled.map(id => ({ id, disabled: true })),
-    ...(p.background || p.denyTools.includes('bash') ? [] : [{ id: 'tool-bash', config: { enableRunInBackground: false, promoteOnTimeout: false } }]),
+    ...(none || p.background || p.denyTools.includes('bash') ? [] : [{ id: 'tool-bash', config: { enableRunInBackground: false, promoteOnTimeout: false } }]),
     { id: 'skill-filesystem', config: { includeDefaultRoots: false, customSkillDirs: [skillsDir] } },
     ...(p.mcp.length === 0
       ? []
@@ -206,29 +242,47 @@ export const patchRows = (p: AgentProfile, skillsDir: string, mcpCwd: string): u
             insert: p.mcp.map((m, i) => ({
               id: `eos-mcp-${i}`,
               name: '@deepseek-ai/dsh-mcp-client',
-              config: {
-                transport: 'stdio',
-                serverName: m.name,
-                command: m.command,
-                args: m.args,
-                env: m.env,
-                // MCP 服务的子进程跑在平台自己的目录里，不是任务的 worktree：它不受 agent 沙箱约束，
-                // 用的是平台进程的权限（能读写 worktree 以外的文件、能联网）。模板里加 MCP 服务等于给平台级信任。
-                cwd: mcpCwd,
-                toolCallTimeoutMs: 60_000,
-                closeTimeoutMs: 5_000,
-                // 配置里的值原样用，不做 ${...} 展开：模板里的值不能变成读环境变量的手段。
-                expandTemplates: false,
-                // 服务起不来就让会话失败，而不是让 agent 少一个工具照常干活。
-                failOnStartupError: true,
-              },
+              config: isHttpMcp(m)
+                ? httpMcpConfig(m)
+                : {
+                    transport: 'stdio',
+                    serverName: m.name,
+                    command: m.command,
+                    args: m.args,
+                    env: m.env,
+                    // MCP 服务的子进程跑在平台自己的目录里，不是任务的 worktree：它不受 agent 沙箱约束，
+                    // 用的是平台进程的权限（能读写 worktree 以外的文件、能联网）。模板里加 MCP 服务等于给平台级信任。
+                    cwd: mcpCwd,
+                    toolCallTimeoutMs: 60_000,
+                    closeTimeoutMs: 5_000,
+                    // 配置里的值原样用，不做 ${...} 展开：模板里的值不能变成读环境变量的手段。
+                    expandTemplates: false,
+                    // 服务起不来就让会话失败，而不是让 agent 少一个工具照常干活。
+                    failOnStartupError: true,
+                  },
             })),
           },
         ]),
   ]
 }
 
+/** 平台的 HTTP MCP 端点：dsh 进程自己去连，agent 的工具子进程不经手；连不上就让会话失败；端点只活一次调用，断了不重连。 */
+const httpMcpConfig = (m: Extract<AgentMcp, { url: string }>) => ({
+  transport: 'streamable-http',
+  serverName: m.name,
+  url: m.url,
+  headers: m.headers,
+  toolCallTimeoutMs: 60_000,
+  closeTimeoutMs: 5_000,
+  expandTemplates: false,
+  failOnStartupError: true,
+  reconnect: { enabled: false },
+})
+
 export type LogEvent = { type: string; time: number; data?: Record<string, any> }
+
+/** 带令牌的配置目录多久没改过就算崩溃留下的（一次对话调用远短于这个时间）。 */
+export const EPHEMERAL_STALE_MS = 60 * 60 * 1000
 
 const ZSTD_MAGIC = 0xfd2fb528
 
@@ -537,7 +591,7 @@ export const replyFromRun = (r: RunLike, sessionId: string, ms: number): Reply =
 
 export class DshExecutor implements Executor {
   /** 按「工作目录 + 模型路由」区分的 dsh 进程。 */
-  private readonly harnesses = new Map<string, { cwd: string; h: Harness; keyId: string }>()
+  private readonly harnesses = new Map<string, { cwd: string; h: Harness; keyId: string; ephemeral?: string }>()
   /** 本进程里已经打开（新建或续接）的会话，以及它在哪个工作目录的进程里。 */
   private readonly open = new Map<string, { cwd: string; s: HarnessSession }>()
   private readonly asks = new Map<string, AskHandler>()
@@ -571,28 +625,36 @@ export class DshExecutor implements Executor {
     let h = this.harnesses.get(route)?.h
     if (h === undefined) {
       const patch = this.materialize(spec.profile)
+      const ephemeral = spec.profile.mcp.some(isHttpMcp) ? this.profileDir(spec.profile) : undefined
       const create =
         this.opts.createHarness ??
         (o => {
           this.platformDir(o.processCwd!)
           return new DeepSeekHarness(o)
         })
-      h = create({
-        // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
-        cwd: spec.cwd,
-        processCwd: this.processCwd,
-        patches: [patch],
-        profile: 'sdk',
-        dshHome: this.opts.dshHome,
-        dshBin: this.opts.dshBin,
-        provider: PROVIDER,
-        model: spec.model,
-        ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
-        env: agentEnv(this.opts.env ?? process.env, modelKey),
-        initializeTimeoutMs: 60_000,
-        onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
-      })
-      this.harnesses.set(route, { cwd: spec.cwd, h, keyId })
+      try {
+        h = create({
+          // cwd：会话的工作区（workspace-write 的可写范围）；processCwd：dsh 进程自己的工作目录，平台的空目录。
+          cwd: spec.cwd,
+          processCwd: this.processCwd,
+          patches: [patch],
+          profile: 'sdk',
+          dshHome: this.opts.dshHome,
+          dshBin: this.opts.dshBin,
+          provider: PROVIDER,
+          model: spec.model,
+          ...(spec.effort === undefined ? {} : { reasoningEffort: spec.effort as never }),
+          env: agentEnv(this.opts.env ?? process.env, modelKey),
+          initializeTimeoutMs: 60_000,
+          onUserQuestion: async (req, { signal }) => this.answer(req.sessionId, req.questions, signal),
+        })
+      } catch (e) {
+        // 进程没起来：带令牌的配置马上删掉，不等清理。
+        this.forget(ephemeral)
+        throw e
+      }
+      // 带 HTTP MCP 的能力面（配置里有这次调用的令牌）：进程关掉时把配置目录一起删掉，令牌不留在磁盘上。
+      this.harnesses.set(route, { cwd: spec.cwd, h, keyId, ...(ephemeral === undefined ? {} : { ephemeral }) })
     }
     return h
   }
@@ -610,9 +672,37 @@ export class DshExecutor implements Executor {
     return join(this.opts.dshHome, 'mcp-cwd')
   }
 
-  /** 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。 */
+  /**
+   * 一个能力面在磁盘上的目录，按指纹命名：内容由指纹决定，所以重复写出来的东西完全一样。
+   * 带 HTTP MCP 的能力面（配置里有一次调用的令牌）放在 ephemeral/ 下：进程关掉时删掉，崩溃留下的由 sweepEphemeral 清理。
+   */
   profileDir(profile: AgentProfile): string {
-    return join(this.opts.dshHome, 'eos-profiles', profileHash(profile))
+    return profile.mcp.some(isHttpMcp) ? join(this.ephemeralRoot, profileHash(profile)) : join(this.opts.dshHome, 'eos-profiles', profileHash(profile))
+  }
+
+  get ephemeralRoot(): string {
+    return join(this.opts.dshHome, 'eos-profiles', 'ephemeral')
+  }
+
+  private swept = false
+
+  /**
+   * 清掉崩溃留下的、带令牌的配置目录（本进程第一次写配置时做一次）。只删超过 EPHEMERAL_STALE_MS 没改过的：
+   * 同一个数据目录可能有别的平台进程（网页和命令行）正在用自己的那份。令牌只在那次调用的端点上有效，端点早已关掉，删它是为了不在磁盘上留令牌。
+   */
+  private sweepEphemeral(now = Date.now()): void {
+    if (this.swept) return
+    this.swept = true
+    if (!existsSync(this.ephemeralRoot) || isLink(this.ephemeralRoot)) return
+    for (const name of readdirSync(this.ephemeralRoot)) {
+      const dir = join(this.ephemeralRoot, name)
+      try {
+        if (now - lstatSync(dir).mtimeMs > EPHEMERAL_STALE_MS) rmSync(dir, { recursive: true, force: true })
+      } catch (e) {
+        // 别的平台进程刚好删掉了它（调用结束）：不算错。
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+      }
+    }
   }
 
   /**
@@ -634,17 +724,28 @@ export class DshExecutor implements Executor {
 
   /** 写出这个能力面的 profile 补丁和技能目录，返回补丁文件路径。文件和目录组内不可写：dsh 只读它们。 */
   private materialize(profile: AgentProfile): string {
+    this.sweepEphemeral()
     const dir = this.profileDir(profile)
     const skillsDir = join(dir, 'skills')
     this.platformDir(skillsDir)
+    // 带令牌的配置：其他用户不可读。部署镜像里 dsh 的用户靠组 eos-dsh 读：eos-profiles 带 setgid，新目录继承组；
+    // chmod 时保留 setgid 位，文件再显式改成目录的组（不依赖平台进程的主组）。
+    const secret = profile.mcp.some(isHttpMcp)
+    if (secret) chmodSync(dir, (statSync(dir).mode & 0o2000) | 0o750)
     if (!existsSync(this.mcpCwd)) mkdirSync(this.mcpCwd, { recursive: true })
-    for (const s of profile.skills) {
+    // 没有自带工具的能力面不写技能（技能要靠自带的技能工具加载）。
+    for (const s of profile.builtinTools === 'none' ? [] : profile.skills) {
       // 技能名在边界上已经校验过（只有小写字母、数字和连字符），可以直接当目录名。
       mkdirSync(join(skillsDir, s.name), { recursive: true, mode: 0o755 })
       writeFileSync(join(skillsDir, s.name, 'SKILL.md'), s.content, { mode: 0o644 })
     }
     const file = join(dir, 'cordis.patch.yml')
-    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: 0o644 })
+    writeFileSync(file, stringifyYaml(patchRows(profile, skillsDir, this.mcpCwd)), { mode: secret ? 0o640 : 0o644 })
+    if (secret) {
+      chmodSync(file, 0o640)
+      const gid = statSync(dir).gid
+      if (statSync(file).gid !== gid) chownSync(file, -1, gid)
+    }
     return file
   }
 
@@ -789,14 +890,18 @@ export class DshExecutor implements Executor {
     const routes = [...this.harnesses].filter(([, v]) => v.cwd === cwd)
     for (const [route] of routes) this.harnesses.delete(route)
     for (const [id, v] of this.open) if (v.cwd === cwd) this.open.delete(id)
-    const closed = Promise.allSettled([this.closing.get(cwd), ...routes.map(([, v]) => v.h.close())])
+    const closed = Promise.allSettled([this.closing.get(cwd), ...routes.map(([, v]) => v.h.close().finally(() => this.forget(v.ephemeral)))])
     this.closing.set(cwd, closed)
     await closed
     if (this.closing.get(cwd) === closed) this.closing.delete(cwd)
   }
 
+  private forget(dir: string | undefined): void {
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true })
+  }
+
   async close(): Promise<void> {
-    await Promise.allSettled<unknown>([...[...this.harnesses.values()].map(v => v.h.close()), ...this.closing.values()])
+    await Promise.allSettled<unknown>([...[...this.harnesses.values()].map(v => v.h.close().finally(() => this.forget(v.ephemeral))), ...this.closing.values()])
     this.closing.clear()
     this.harnesses.clear()
     this.open.clear()

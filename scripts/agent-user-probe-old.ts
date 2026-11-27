@@ -7,7 +7,7 @@ import { DshExecutor, dshInstall } from '../src/executor/dsh.ts'
 const cwd = '/data/worktrees/upgrade-task'
 mkdirSync(cwd, { recursive: true })
 const ex = new DshExecutor({ dshHome: '/data/dsh', dshBin: dshInstall(join(import.meta.dirname, '..'))!.bin, modelKey: () => 'sk-probe-old-key' })
-const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd, profile: { denyTools: [], skills: [], mcp: [], background: true } }
+const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd, profile: { builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: true } }
 await (ex as unknown as { session: (key: string, s: typeof spec) => Promise<unknown> }).session(process.argv[2]!, spec)
 await ex.close()
 console.log('ok')

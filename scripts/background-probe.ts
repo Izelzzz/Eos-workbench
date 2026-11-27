@@ -30,7 +30,7 @@ const ex = new DshExecutor({
   env: { ...process.env, NODE_USE_ENV_PROXY: '1' },
   modelKey: () => process.env.DEEPSEEK_API_KEY ?? 'proxy-injected',
 })
-const profile: AgentProfile = { denyTools: [], skills: [], mcp: [], background: false }
+const profile: AgentProfile = { builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: false }
 const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd: wt, profile }
 const pidFile = join(wt, 'bg.pid')
 const prompt = `这是一次后台进程的探针，请按顺序做，某一步失败也继续，最后逐条报告结果和错误原文：

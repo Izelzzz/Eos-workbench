@@ -46,7 +46,7 @@ const probe = async (key: string, write: 'none' | 'worktree', targets: Target[])
     key,
     nonce: `${key}/c1`,
     prompt,
-    spec: { model: 'deepseek-flash', write, cwd: dirs.mine, profile: { denyTools: [], skills: [], mcp: [], background: write !== 'worktree' } },
+    spec: { model: 'deepseek-flash', write, cwd: dirs.mine, profile: { builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: write !== 'worktree' } },
     ask: async () => '不需要，继续',
   })
   return { reply: reply.text, results: files.map(f => ({ role: write === 'worktree' ? '可写角色' : '只读角色', target: f.name, via: f.via, written: existsSync(f.file) })) }

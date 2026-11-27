@@ -14,7 +14,24 @@ export type AgentSkill = { name: string; content: string }
  * agent 进程的能力面。background：能不能起后台作业。可写角色不能（Izelzzz/Eos-workbench#28）：
  * 后台进程会活过这一轮，在平台撤销越界改动时把目录换成指向外面的链接，让平台删到 worktree 之外。
  */
-export type AgentProfile = { denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: McpServer[]; background: boolean }
+/**
+ * 平台交给 agent 的 MCP 端点（标准的 Streamable HTTP）。headers 里通常有这次调用的令牌：执行器只把它交给自己连 MCP 的那一侧，
+ * 不写进 agent 的工具子进程能读到的环境，用完（release）后不留在执行器自己的配置里。
+ */
+export type HttpMcp = { name: string; url: string; headers: Record<string, string> }
+
+/** agent 的 MCP 服务：模板里写的本地 stdio 服务，或者平台提供的 HTTP 端点（有 url 的是后者）。 */
+export type AgentMcp = McpServer | HttpMcp
+
+export const isHttpMcp = (m: AgentMcp): m is HttpMcp => 'url' in m
+
+/**
+ * builtinTools：执行器自带的工具。
+ * - 'standard'：执行器自带的文件读写、搜索、技能、向用户提问等工具照常可用，denyTools 去掉其中的整组（任务里的角色）；
+ * - 'none'：一个自带工具都没有，agent 只能用 mcp 里平台交给它的工具（例如对话 agent 读平台数据）。denyTools、skills、background 不起作用。
+ * 执行器不支持其中某一项（例如没有办法去掉自带工具，或者接不了 HTTP MCP）时，send 必须抛错，不能悄悄忽略。
+ */
+export type AgentProfile = { builtinTools: 'standard' | 'none'; denyTools: ToolGroup[]; skills: AgentSkill[]; mcp: AgentMcp[]; background: boolean }
 
 export type AgentSpec = { model: string; effort?: Effort; write: WriteScope; cwd: string; profile: AgentProfile }
 

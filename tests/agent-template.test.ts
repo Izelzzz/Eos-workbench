@@ -112,7 +112,7 @@ test('an inline role takes the same fields as a template, and its errors are rep
 })
 
 test('built-in templates and skills are valid, and built-in workflows resolve against them', () => {
-  assert.deepEqual(builtinAgentTemplates(), ['developer', 'improver', 'reviewer', 'spec-writer'])
+  assert.deepEqual(builtinAgentTemplates(), ['assistant', 'developer', 'improver', 'reviewer', 'spec-writer'])
   assert.deepEqual(builtinSkills(), ['write-changes'])
   assert.doesNotThrow(checkBuiltinSkills)
   const lookup = builtinLookup()

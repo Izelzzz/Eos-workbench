@@ -132,7 +132,7 @@ const callAndStore = async (
         ...(t.template.effort === undefined ? {} : { effort: t.template.effort }),
         write: 'none',
         cwd,
-        profile: { denyTools: [...TOOL_GROUPS], skills: [], mcp: [], background: false },
+        profile: { builtinTools: 'standard', denyTools: [...TOOL_GROUPS], skills: [], mcp: [], background: false },
       },
       ask: async () => '不回答提问：请只根据消息里的证据和约定内容给出提案。',
     })

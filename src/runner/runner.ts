@@ -121,7 +121,7 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
             ...(role.effort === undefined ? {} : { effort: role.effort }),
             write: role.write,
             cwd: meta.worktree,
-            profile: { denyTools: role.denyTools, skills, mcp: role.mcp, background: role.write !== 'worktree' },
+            profile: { builtinTools: 'standard', denyTools: role.denyTools, skills, mcp: role.mcp, background: role.write !== 'worktree' },
           },
           // 同一次调用里的提问排队：一个问题答完才提出下一个，不会出现第二个问题替换掉还在等回答的第一个。
           ask: (q, signal) => {

@@ -24,6 +24,9 @@ import { createWebServer, listenPlan, parsePublicUrl } from './web/server.ts'
 import { Conventions } from './conventions/conventions.ts'
 import { generate } from './improve/generate.ts'
 import { KIND_NAMES, Proposals, STATUS_NAMES } from './improve/proposals.ts'
+import { CHAT_HELP, chatCommand } from './chat/cli.ts'
+import { ChatStore } from './chat/store.ts'
+import { committedChanges } from './runner/git.ts'
 
 const HELP = `用法：
   eos run --repo <仓库路径或 GitHub 地址> [--workflow standard] "<需求>"   创建任务并运行
@@ -43,6 +46,7 @@ const HELP = `用法：
   eos proposals                                           列出改进提案
   eos approve <提案号> ["<备注>"]                          批准：写成约定的新版本
   eos reject <提案号> "<理由>"                             拒绝
+${CHAT_HELP}
 
 选项：--data <目录>（默认 $EOS_HOME 或 ~/.eos）  --no-wait（需要用户回答时直接退出）
 web：--host 是监听地址（容器里用 0.0.0.0）；通过别的地址访问时（端口映射、反向代理）设 EOS_PUBLIC_URL，例如 https://eos.example.com。没有登录，不要直接暴露到公网。
@@ -107,7 +111,8 @@ if (positionals[0] === 'doctor' && !values.help) {
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
-if (!values.help && NEEDS_ENV.has(positionals[0] ?? '')) {
+// chat 只有新建和接着说会调用模型；list、show 只读数据库。
+if (!values.help && (NEEDS_ENV.has(positionals[0] ?? '') || (positionals[0] === 'chat' && ['new', 'send'].includes(positionals[1] ?? '')))) {
   const items = evaluate(gather({ root: ROOT, dataDir, modelKey: startupModelKey, masterKey, checkUser, agentUser }))
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
@@ -396,6 +401,21 @@ const commands: Record<string, () => Promise<void> | void> = {
     process.once('SIGINT', shutdown)
     process.once('SIGTERM', shutdown)
     await new Promise(() => {})
+  },
+  async chat() {
+    const conventions = new Conventions(store)
+    conventions.seed(Date.now())
+    await chatCommand(positionals.slice(1), {
+      chats: new ChatStore(store.db),
+      data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
+      conventions,
+      executor,
+      dataDir,
+      redact,
+      now: Date.now,
+      say,
+      fail,
+    })
   },
   workflows() {
     const conventions = new Conventions(store)

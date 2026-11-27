@@ -39,7 +39,7 @@ const ex = new DshExecutor({
   modelKey: () => key,
   readSessionLog: readSessionLogAs(agent.user, SESSION_LOG_FILE),
 })
-const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd: worktree, profile: { denyTools: [], skills: [], mcp: [], background: true } }
+const spec = { model: 'deepseek-flash', write: 'worktree' as const, cwd: worktree, profile: { builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: true } }
 // 打开会话：平台每次调用前都走这一步（session 是私有方法，探针直接调用，不发提示词）。
 const open = (k: string) => (ex as unknown as { session: (key: string, s: typeof spec) => Promise<unknown> }).session(k, spec)
 const raw = (id: string) => (ex as unknown as { rawLog: (id: string) => Buffer | undefined }).rawLog(id)

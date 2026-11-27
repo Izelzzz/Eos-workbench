@@ -25,8 +25,8 @@ export function sse(reply: Reply, id: string): string {
   ].join('')
 }
 
-/** 在本机随机端口起服务。onRequest 收到每个请求和回复，用来写日志 */
-export async function startFakeModel(onRequest: (req: Request, reply: Reply) => void = () => {}): Promise<FakeModel> {
+/** 在本机随机端口起服务。onRequest 收到每个请求和回复，用来写日志；script 决定回复（默认是 script.ts 的任务剧本） */
+export async function startFakeModel(onRequest: (req: Request, reply: Reply) => void = () => {}, script: (req: Request) => Reply = decide): Promise<FakeModel> {
   let count = 0
   const fail = (res: ServerResponse, status: number, message: string) =>
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: `假模型：${message}` } }))
@@ -41,7 +41,7 @@ export async function startFakeModel(onRequest: (req: Request, reply: Reply) => 
         if (raw.stream !== true) return fail(res, 400, '只支持流式请求（stream: true）')
         // 协议允许 content 是一个字符串，统一成块的数组
         const request = { ...raw, messages: (raw.messages ?? []).map(m => ({ ...m, content: typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content })) } as Request
-        const reply = decide(request)
+        const reply = script(request)
         count++
         onRequest(request, reply)
         res.writeHead(200, { 'content-type': 'text/event-stream' }).end(sse(reply, String(count)))
