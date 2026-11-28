@@ -110,7 +110,7 @@ const ROUTES: [string, string][] = [
     await page.goto(`${base}/${hash}`)
     await page.waitForSelector('main')
     await page.waitForTimeout(150)
-    check(`宽屏：打开 ${hash} 时当前项是「${want}」`, (await current(page)) === want)
+    check(`宽屏：打开 ${hash} 时当前项是「${want}」`, (await current(page))?.split('，')[0] === want)
   }
   // 当前项有 fill-2 的底，其余没有底
   await page.goto(`${base}/#/insights`)
@@ -214,7 +214,7 @@ const ROUTES: [string, string][] = [
     await page.goto(`${base}/${hash}`)
     await page.waitForSelector('main')
     await page.waitForTimeout(150)
-    check(`窄屏：${hash} 当前项是「${want}」，页面不横向滚动`, (await current(page)) === want && (await noHScroll(page)))
+    check(`窄屏：${hash} 当前项是「${want}」，页面不横向滚动`, (await current(page))?.split('，')[0] === want && (await noHScroll(page)))
   }
   await page.context().close()
 }

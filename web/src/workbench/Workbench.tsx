@@ -16,8 +16,7 @@ export function Workbench({ data, error }: { data: Data | undefined; error: stri
     pending: d => <PendingList key="pending" items={d.pending} />,
     active: d => <ActiveTasks key="active" tasks={d.active} total={d.activeTotal} />,
   }
-  if (data === undefined)
-    return <p className="m-0 px-4 py-5 text-ink-2 md:px-10 md:py-9">{error === undefined ? '加载中…' : `连接不上服务：${error}（自动重试中）`}</p>
+  if (data === undefined) return <p className="m-0 px-4 py-5 text-ink-2 md:px-10 md:py-9">{error === undefined ? '加载中…' : `连接不上服务：${error}（自动重试中）`}</p>
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
       <div className="flex min-w-0 flex-1 flex-col">

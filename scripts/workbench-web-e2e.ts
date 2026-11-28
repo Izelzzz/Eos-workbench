@@ -75,24 +75,41 @@ const active = (page: any) => page.locator('[aria-labelledby=wb-active]')
   const page = await open(1440)
   const nav = page.getByRole('navigation', { name: '主导航' })
   check('首页 #/ 是工作台，导航当前项是「工作台」', (await nav.locator('a[aria-current="page"]').getAttribute('href')) === '#/')
-  check('导航「工作台」的读屏名字带上件数，有小圆点', (await nav.locator('a').first().getAttribute('aria-label')) === '工作台，3 件等你处理' && (await nav.locator('[data-slot=waiting-dot]').count()) === 1)
-  check('等你处理：3 件，按出现先后（提案、验收、提问）', (await pending(page).locator('h2').innerText()).replace(/\s+/g, '') === '等你处理3' && JSON.stringify(await pending(page).locator('li a > span:first-child').allInnerTexts()) === JSON.stringify(['提案', '验收', '提问']))
+  check(
+    '导航「工作台」的读屏名字带上件数，有小圆点',
+    (await nav.locator('a').first().getAttribute('aria-label')) === '工作台，3 件等你处理' && (await nav.locator('[data-slot=waiting-dot]').count()) === 1,
+  )
+  check(
+    '等你处理：3 件，按出现先后（提案、验收、提问）',
+    (await pending(page).locator('h2').innerText()).replace(/\s+/g, '') === '等你处理3' &&
+      JSON.stringify(await pending(page).locator('li a > span:first-child').allInnerTexts()) === JSON.stringify(['提案', '验收', '提问']),
+  )
   const names = await active(page).locator('[data-slot=task-row]').allInnerTexts()
   check('进行中的任务：6 个，等你处理的两个在前', names.length === 6 && names[0]!.startsWith('导出任务列表为 CSV') && names[1]!.startsWith('任务列表支持按状态筛选'))
   check('进行中的任务：等你处理的两行有强调色圆点', (await active(page).locator('[data-slot=task-row][data-waiting]').count()) === 2)
-  check('进度按工作流节点数分段：带卡点的任务 4 段，其余 3 段', (await active(page).locator('[data-slot=task-row]').nth(1).locator('i').count()) === 4 && (await active(page).locator('[data-slot=task-row]').nth(0).locator('i').count()) === 3)
+  check(
+    '进度按工作流节点数分段：带卡点的任务 4 段，其余 3 段',
+    (await active(page).locator('[data-slot=task-row]').nth(1).locator('i').count()) === 4 && (await active(page).locator('[data-slot=task-row]').nth(0).locator('i').count()) === 3,
+  )
   const left = await pending(page).boundingBox()
   const right = await page.locator('aside').boundingBox()
   check('宽屏两栏：右栏 600px 宽、在左栏右边、通到页面底', right.width === 600 && right.x > left.x + left.width && right.y === 0 && right.height >= 900)
-  await active(page).getByRole('button', { name: /统计页增加按仓库筛选/ }).click()
+  await active(page)
+    .getByRole('button', { name: /统计页增加按仓库筛选/ })
+    .click()
   await page.waitForTimeout(200)
   check('点一行任务打开任务详情', page.url() === `${base}/#/tasks/t-0145`)
   await page.goto(`${base}/#/`)
   await active(page).getByRole('link', { name: '全部' }).click()
   await page.waitForSelector('table.tasks tbody tr')
-  check('「全部」到任务列表 #/tasks，导航当前项是「任务」', page.url() === `${base}/#/tasks` && (await page.getByRole('navigation', { name: '主导航' }).locator('a[aria-current="page"]').getAttribute('href')) === '#/tasks')
+  check(
+    '「全部」到任务列表 #/tasks，导航当前项是「任务」',
+    page.url() === `${base}/#/tasks` && (await page.getByRole('navigation', { name: '主导航' }).locator('a[aria-current="page"]').getAttribute('href')) === '#/tasks',
+  )
   await page.goto(`${base}/#/`)
-  await pending(page).getByRole('link', { name: /导出任务列表为 CSV/ }).click()
+  await pending(page)
+    .getByRole('link', { name: /导出任务列表为 CSV/ })
+    .click()
   await page.waitForTimeout(200)
   check('等你处理里的提问链到任务详情', page.url() === `${base}/#/tasks/t-0147`)
   await page.context().close()
@@ -126,7 +143,9 @@ for (const scheme of ['light', 'dark'] as const)
   await a.waitForTimeout(500)
   const left: Buffer = await a.screenshot()
   await a.setViewportSize({ width: 1440 * 2 + 24, height: 900 })
-  await a.setContent(`<body style="margin:0;display:flex;gap:24px;background:#888"><img src="data:image/png;base64,${left.toString('base64')}"><img src="data:image/png;base64,${right.toString('base64')}"></body>`)
+  await a.setContent(
+    `<body style="margin:0;display:flex;gap:24px;background:#888"><img src="data:image/png;base64,${left.toString('base64')}"><img src="data:image/png;base64,${right.toString('base64')}"></body>`,
+  )
   await a.waitForTimeout(100)
   await a.screenshot({ path: join(out, 'vs-design-light-1440.png') })
   shots.push('vs-design-light-1440.png')

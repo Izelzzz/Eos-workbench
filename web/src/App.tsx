@@ -13,6 +13,7 @@ import { Improve, parseImproveRoute } from './Improve.tsx'
 import { Insights } from './Insights.tsx'
 import { NewTask } from './NewTask.tsx'
 import { Settings, parseSettingsRoute } from './shell/Settings.tsx'
+import { navOf } from './shell/Nav.tsx'
 import { Shell } from './shell/Shell.tsx'
 import { Workbench } from './workbench/Workbench.tsx'
 import { Stages } from './Stages.tsx'
@@ -400,36 +401,44 @@ function TaskPage(props: { id: string }) {
   )
 }
 
-/** 工作台的数据：每 5 秒刷新一次。导航的小圆点和工作台页面共用这一份 */
-const useWorkbench = () => {
+/** 工作台的数据：换页时和之后每 5 秒刷新；只用最后一次请求的结果。导航的小圆点和工作台页面共用这一份 */
+const useWorkbench = (hash: string) => {
   const [data, setData] = useState<WorkbenchData>()
   const [error, setError] = useState<string>()
   useEffect(() => {
-    const load = () =>
-      getWorkbench().then(
+    // 换页时先刷新一次：在别的页面处理完一件事，回到工作台时不用等下一个 5 秒
+    let latest = 0
+    const guarded = () => {
+      const n = ++latest
+      return getWorkbench().then(
         d => {
+          if (n !== latest) return
           setData(d)
           setError(undefined)
         },
-        e => setError(String(e.message)),
+        e => n === latest && setError(String(e.message)),
       )
-    void load()
-    const timer = setInterval(load, 5000)
-    return () => clearInterval(timer)
-  }, [])
+    }
+    void guarded()
+    const timer = setInterval(guarded, 5000)
+    return () => {
+      latest = -1
+      clearInterval(timer)
+    }
+  }, [hash])
   return { data, error }
 }
 
 export function App() {
   const hash = useHash()
-  const wb = useWorkbench()
+  const wb = useWorkbench(hash)
   const id = /^#\/tasks\/([\w-]+)/.exec(hash)?.[1]
   const conv = parseConventionRoute(hash)
   const improve = parseImproveRoute(hash)
   const settings = parseSettingsRoute(hash)
   const chat = parseChatRoute(hash)
-  const tasks = hash === '#/tasks'
-  const home = conv === undefined && chat === undefined && improve === undefined && hash !== '#/insights' && settings === undefined && hash !== '#/new' && !tasks && id === undefined
+  // 首页和不认识的地址是工作台（和导航的当前项一致）；别的没对上具体页面的地址（例如 #/tasks?x）照旧显示任务列表
+  const home = navOf(hash) === 'workbench'
   return (
     <Shell hash={hash} waiting={wb.data?.pending.length ?? 0} bleed={home}>
       {conv !== undefined ? (
@@ -444,12 +453,12 @@ export function App() {
         <Settings {...settings} />
       ) : hash === '#/new' ? (
         <NewTask />
-      ) : tasks ? (
-        <TaskList />
       ) : id !== undefined ? (
         <TaskPage key={id} id={id} />
-      ) : (
+      ) : home ? (
         <Workbench {...wb} />
+      ) : (
+        <TaskList />
       )}
     </Shell>
   )
