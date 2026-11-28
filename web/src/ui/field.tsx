@@ -29,7 +29,7 @@ export function FieldDescription({ className, ...props }: ComponentProps<'p'>) {
   return <p data-slot="field-description" className={cn('m-0 text-xs leading-normal text-muted-foreground', className)} {...props} />
 }
 
-/** 错误：说清楚哪里不对、怎么改。没有内容时不渲染 */
+/** 错误：说清楚哪里不对、怎么改。传文字；没有错误时传 undefined、null、false 或空字符串，不渲染 */
 export function FieldError({ className, children, ...props }: ComponentProps<'p'>) {
   if (children === undefined || children === null || children === false || children === '') return null
   return (

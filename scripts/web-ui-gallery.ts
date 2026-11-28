@@ -3,7 +3,7 @@
 // - 390 宽不横向滚动；
 // - 对话框：点开后焦点在对话框里，Esc 关闭并把焦点还给触发按钮；点「删除」执行并关闭；
 // - 页面没有脚本错误。
-// 结果写到 <输出目录>/report.json。用法：node --import tsx scripts/web-ui-gallery.ts <输出目录>
+// 结果写到 <输出目录>/gallery-report.json（不叫 report.json：那是 scripts/e2e.ts 的报告格式，CI 的 pr-checklist 按它核对）。用法：node --import tsx scripts/web-ui-gallery.ts <输出目录>
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { execFileSync } from 'node:child_process'
@@ -18,6 +18,9 @@ const { chromium } = require('playwright') as { chromium: { launch: () => Promis
 
 const ROOT = join(import.meta.dirname, '..')
 const out = process.argv[2] ?? join(ROOT, '.eos', 'ui-gallery')
+// 在写任何输出之前记下代码状态（输出目录在仓库里时，截图本身会算成未提交的改动）
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
+const uncommitted = execFileSync('git', ['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean)
 const dist = join(ROOT, '.eos', 'ui-gallery-dist')
 mkdirSync(out, { recursive: true })
 
@@ -65,6 +68,10 @@ for (const scheme of ['light', 'dark'] as const) {
       `${tag}：输入框、多行输入框、下拉、按钮用页面字体（不是浏览器默认的表单字体）`,
       (await Promise.all(['#g-name', '#g-req', '#g-flow', '[data-slot=button]'].map(s => style(page.locator(s).first(), 'font-family')))).every(f => f === bodyFont),
     )
+    for (const id of ['#bare-ghost', '#bare-link']) {
+      check(`${tag}：页面底色上的 ${id.slice(1)} 按钮没有底色（现有 button 规则的底色没漏进来）`, (await style(page.locator(id), 'background-color')) === 'rgba(0, 0, 0, 0)')
+    }
+    check(`${tag}：输入框字号：窄屏 16px（iOS 不放大），宽屏 14px`, (await style(page.locator('#g-name'), 'font-size')) === (width < 640 ? '16px' : '14px'))
     check(`${tag}：不横向滚动`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     await page.screenshot({ path: join(out, `gallery-${scheme}-${width}.png`), fullPage: true })
 
@@ -74,7 +81,9 @@ for (const scheme of ['light', 'dark'] as const) {
       const dialog = page.getByRole('dialog', { name: '删除 github.com 的令牌？' })
       await dialog.waitFor()
       check(`${tag}：对话框打开后焦点在对话框里`, await dialog.evaluate((d: Element) => d.contains(document.activeElement)))
-      check(`${tag}：对话框不超出屏幕`, await dialog.evaluate((d: Element) => d.getBoundingClientRect().right <= window.innerWidth && d.getBoundingClientRect().left >= 0))
+      check(`${tag}：对话框两边至少留 16px`, await dialog.evaluate((d: Element) => d.getBoundingClientRect().left >= 16 && d.getBoundingClientRect().right <= window.innerWidth - 16))
+      const close = dialog.getByRole('button', { name: '关闭' })
+      check(`${tag}：右上角关闭按钮 28×28、没有内边距（现有 button 规则的内边距没漏进来）`, (await style(close, 'padding-left')) === '0px' && (await style(close, 'width')) === '28px')
       await page.screenshot({ path: join(out, `dialog-${width}.png`) })
       await page.keyboard.press('Escape')
       await dialog.waitFor({ state: 'hidden' })
@@ -91,9 +100,7 @@ await browser.close()
 await new Promise<void>(r => server.httpServer.close(() => r()))
 check('页面没有脚本错误', errors.length === 0)
 
-const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim()
-const uncommitted = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim()
 const passed = Object.values(checks).filter(Boolean).length
-writeFileSync(join(out, 'report.json'), JSON.stringify({ commit, uncommitted, checks, errors }, null, 1))
-console.log(`\n${passed}/${Object.keys(checks).length} 项通过。报告：${join(out, 'report.json')}`)
+writeFileSync(join(out, 'gallery-report.json'), JSON.stringify({ commit, uncommitted, checks, errors }, null, 1))
+console.log(`\n${passed}/${Object.keys(checks).length} 项通过。报告：${join(out, 'gallery-report.json')}`)
 process.exit(passed === Object.keys(checks).length ? 0 : 1)

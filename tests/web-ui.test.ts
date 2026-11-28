@@ -38,9 +38,12 @@ const UI = join(WEB, 'ui')
 const legacyClasses = (): Set<string> => {
   const names = new Set(readFileSync(join(WEB, 'styles.css'), 'utf8').match(/(?<=\.)[a-z][\w-]*/g) ?? [])
   for (const f of readdirSync(WEB).filter(n => n.endsWith('.tsx'))) {
-    for (const m of readFileSync(join(WEB, f), 'utf8').matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\}|\{'([^']*)'\})/g)) {
-      for (const w of (m[1] ?? m[2] ?? m[3] ?? '').split(/[\s$]+/)) if (/^[a-z][\w-]*$/.test(w)) names.add(w)
-    }
+    const src = readFileSync(join(WEB, f), 'utf8')
+    // className="…"、className={…} 里的所有字符串（含三元表达式的分支），以及表格式定义里的 cls: '…'
+    const parts = [...src.matchAll(/className="([^"]*)"/g)].map(m => m[1]!)
+    for (const m of src.matchAll(/className=\{([^}]*)\}/g)) parts.push(...[...m[1]!.matchAll(/['"`]([^'"`]*)['"`]/g)].map(s => s[1]!))
+    parts.push(...[...src.matchAll(/\bcls:\s*'([^']*)'/g)].map(m => m[1]!))
+    for (const w of parts.join(' ').split(/[\s$]+/)) if (/^[a-z][\w-]*$/.test(w)) names.add(w)
   }
   return names
 }
@@ -48,7 +51,10 @@ const legacyClasses = (): Set<string> => {
 test('组件里的每个 Tailwind 类都生成了样式（取值来自令牌）', async () => {
   const ds = await __unstable__loadDesignSystem(readFileSync(join(WEB, 'index.css'), 'utf8'), { base: WEB })
   const legacy = legacyClasses()
-  assert.ok(legacy.has('block') && legacy.has('pill') && legacy.has('trace-row'), '没读到现有页面的类名')
+  assert.ok(
+    ['block', 'pill', 'trace-row', 'active', 'p-agent'].every(n => legacy.has(n)),
+    '没读到现有页面的类名',
+  )
   const missing: string[] = []
   const collisions: string[] = []
   for (const f of readdirSync(UI).filter(n => n.endsWith('.tsx') || n.endsWith('.ts'))) {

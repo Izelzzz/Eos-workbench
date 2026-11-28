@@ -27,7 +27,7 @@ export function DialogContent({ className, children, showCloseButton = true, ...
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid max-h-full w-full max-w-sm -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover p-4 text-sm text-popover-foreground shadow-md outline-none',
+          'fixed inset-x-4 top-1/2 z-50 mx-auto grid max-h-full max-w-sm -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border border-border bg-popover p-4 text-sm text-popover-foreground shadow-md outline-none',
           className,
         )}
         {...props}

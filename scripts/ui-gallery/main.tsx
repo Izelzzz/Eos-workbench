@@ -164,6 +164,12 @@ function Gallery() {
           </DialogContent>
         </Dialog>
         <span id="confirmed">已确认 {confirmed} 次</span>
+        <Button id="bare-ghost" variant="ghost">
+          在页面底色上的幽灵按钮
+        </Button>
+        <Button id="bare-link" variant="link">
+          链接按钮
+        </Button>
       </div>
     </main>
   )
