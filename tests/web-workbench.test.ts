@@ -157,3 +157,20 @@ test('工作台：对话循环走到尽头要人指示时，状态保留第几�
     assert.equal(w.active[0]!.waiting, 'question')
     assert.match(w.active[0]!.state, /^review 第 1\/1 轮 · .* · 等你回答$/)
   }))
+
+test('工作台：agent 验收的卡点打回用完、要人指示时，进「等你处理」，状态保留第几次验收；agent 在验收时不算等你处理', () =>
+  withStore(store => {
+    store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false, gate: 'agent', gateRounds: 1 }), workflowSource: 'y', meta: META }, 1000)
+    reply(store, 't1', ['方案', '实现', PASS], 1100)
+    let w = readWorkbench(store)
+    assert.equal(store.get('t1')!.status, 'running')
+    assert.deepEqual(w.pending, [])
+    assert.equal(w.active[0]!.waiting, undefined)
+    assert.ok(store.dispatch('t1', { kind: 'replied', call: 'c4' as never, sessionId: 's', text: CHANGES, usage: zero, ms: 1 }, 1200, 'executor').accepted)
+    w = readWorkbench(store)
+    assert.deepEqual(
+      w.pending.map(p => p.kind),
+      ['question'],
+    )
+    assert.equal(w.active[0]!.state, 'accept 第 2 次验收 · 等用户指示 · 等你回答')
+  }))

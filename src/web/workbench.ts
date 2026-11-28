@@ -2,7 +2,6 @@
 // workbench 是纯函数（不读存储、不读时钟，方便单测）；readWorkbench 从存储读出进行中的任务和提案交给它。server.ts 只加路由。
 import { describePosition } from '../engine/machine.ts'
 import type { Question, Task } from '../engine/types.ts'
-import type { Store } from '../store/store.ts'
 import type { ProposalRow, TaskMeta, TaskSummary } from '../store/types.ts'
 
 /** 等你处理的一件事。at：这件事出现的时刻，越早越靠前 */
@@ -52,13 +51,13 @@ const waitingOf = (task: Task): WorkbenchTask['waiting'] => {
 }
 
 /**
- * 状态文字。等你回答时写提问的节点；在修正或对话循环里时保留 describePosition 的说明（第几次修正、第几轮）。
+ * 状态文字。等你回答时写提问的节点；在修正、对话循环或卡点里时保留 describePosition 的说明（第几次修正、第几轮、第几次验收）。
  * 等你验收时写卡点和第几次验收。
  */
 const stateOf = (task: Task, waiting: WorkbenchTask['waiting']): string => {
   if (waiting === 'gate') return `${task.gate!.node} 第 ${task.gate!.round} 次验收 · 等你验收`
   if (waiting === 'question') {
-    if (task.correction !== undefined || task.dialog !== undefined) return `${describePosition(task)} · 等你回答`
+    if (task.correction !== undefined || task.dialog !== undefined || task.gate !== undefined) return `${describePosition(task)} · 等你回答`
     return `${task.question!.node ?? task.workflow.nodes[task.cursor]?.id ?? ''} · 等你回答`
   }
   return describePosition(task)
@@ -96,8 +95,16 @@ export function workbench({ tasks, proposals }: WorkbenchInput): Workbench {
   return { pending, active: live.slice(0, ACTIVE_LIMIT), activeTotal: live.length }
 }
 
-/** 从存储读：只读进行中的任务（已结束的任务不用重放日志） */
-export const readWorkbench = (store: Store): Workbench =>
+/** 从存储读要用到的几个方法。写成结构类型而不是引用 Store：网页的代码要引用这里的类型，不能把 node:sqlite 带进去 */
+export type WorkbenchSource = {
+  list(): TaskSummary[]
+  get(id: string): Task | undefined
+  meta(id: string): TaskMeta
+  proposals(): ProposalRow[]
+}
+
+/** 从存储读：只读进行中的任务的状态（已结束的任务不读） */
+export const readWorkbench = (store: WorkbenchSource): Workbench =>
   workbench({
     tasks: store.list().flatMap(summary => {
       if (!LIVE.has(summary.status)) return []
