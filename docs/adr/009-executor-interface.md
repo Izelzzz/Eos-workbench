@@ -118,9 +118,9 @@ flowchart TB
 | 平台（含 Claude Code 的本机上游） | `eos` | 全部模型 key（解开的凭据存储、启动时取走的环境变量）、对话的 MCP 令牌（自己发的） | — |
 | dsh 进程 | `eos-agent` | DeepSeek key（环境变量）；对话的 MCP 令牌（dsh 只能从配置文件读请求头，写在 `dsh/eos-profiles/ephemeral/` 下，组 `eos-dsh` 可读，ADR-008） | Anthropic key |
 | dsh 在沙箱外启动的 stdio MCP 服务 | `eos-agent` | DeepSeek key（继承 dsh 的环境，ADR-006） | — |
-| dsh 的 agent（工具子进程） | `eos-agent`，在沙箱里 | 正在进行的对话的 MCP 令牌（见表下第一条） | 模型 key：沙箱挡住读别的进程的环境 |
+| dsh 的 agent（工具子进程） | `eos-agent`，在沙箱里 | 正在进行的对话的 MCP 令牌（见表下第二条） | 模型 key：沙箱挡住读别的进程的环境 |
 | Claude Code 进程 | `eos-agent`，在 Landlock 里 | 这次调用的一次性令牌（环境变量 `ANTHROPIC_API_KEY`）；对话的 MCP 令牌（经 SDK 的控制通道交给它，不在命令行和环境里） | Anthropic key、DeepSeek key |
-| Claude Code 的 agent 的命令、它启动的 stdio MCP 服务 | `eos-agent`，同一个 Landlock | 这次调用的令牌（继承 Claude Code 的环境）；正在进行的对话的 MCP 令牌（见表下第一条） | 真 key；别的任务的一次性令牌（别的 Landlock 域） |
+| Claude Code 的 agent 的命令、它启动的 stdio MCP 服务 | `eos-agent`，同一个 Landlock | 这次调用的令牌（继承 Claude Code 的环境，见「已知限制」）；正在进行的对话的 MCP 令牌（见表下第二条） | 真 key；别的任务的一次性令牌（别的 Landlock 域） |
 | 检查命令 | `eos-check` | 都读不到：环境是白名单，读不到别的用户进程的环境 | 全部 |
 
 - 对话 agent 是唯一拿到 HTTP MCP 端点（和它的令牌）的 agent，它没有任何自带工具（`builtinTools: 'none'`），自己运行不了命令。任务里的角色只有模板写的 stdio MCP 服务，不带密钥（ADR-003）。
@@ -129,6 +129,10 @@ flowchart TB
 - 模型 key 和令牌不出现在 trace 和日志里：执行器的输出都经过 `redacting()`。
 
 **为什么 Claude Code 的 key 走本机上游**：交给 Claude Code 进程的 key，agent 的命令能从自己的环境和 Claude Code 进程的环境里读到（`poc/claude-code/README.md`）。dsh 做不到这一点：这一版 dsh 只能从环境变量拿模型 key（ADR-005），所以 dsh 那边靠沙箱挡住 agent。
+
+### agent 在哪里运行
+
+每个执行器自己决定它的进程怎么起：在平台所在的机器上起；部署镜像里切换到 `eos-agent`、清掉能力；套什么沙箱（dsh 用它自己的 bwrap 或 Landlock，Claude Code 用平台的 Landlock 启动器）。接口里没有「沙箱」或「运行位置」这一层：同一台机器上的任务共用用户、`/tmp` 和依赖缓存（ADR-006「沙箱不限制什么」）。
 
 ### 约束怎么保持
 
@@ -169,9 +173,14 @@ flowchart TB
 | 调用期间 agent 能借令牌调模型 | 用额度受限的 Anthropic key（ADR-006「已知限制」） |
 | Claude Code 的 agent 能改自己会话的记录 | 它要写自己的会话目录；碰不到别的会话（ADR-006「已知限制」） |
 | Claude Code 只在 Linux 上可用 | 依赖 Landlock；macOS 上拒绝调用 |
+| Claude Code 起的 stdio MCP 服务能读到这次调用的令牌 | 它们继承 Claude Code 的环境，和 agent 的命令在同一个 Landlock 里；调用结束前能经上游调模型，拿不到真 key。和路线图第 16 项「任务之间的隔离」是同一个问题 |
 | Claude Code 的提问期间进程一直挂着 | 用户迟迟不回答时占着一个进程 |
 | 实时 trace 里每一步的输出 token 不准 | SDK 的实时消息带的是流开始时的用量；会话日志回放和调用记录里的是最终值 |
 | `landlock.ts` 用的启动器来自 dsh 依赖的 `@deepseek-ai/node-addon-system` | 在 `package.json` 里单独声明；升级 dsh 时可能跟着换版本 |
+
+## 重新评估的条件
+
+- 路线图第 16 项「任务之间的隔离」定下每个任务一个独立的沙箱（例如每个任务一个容器）时：进程在哪里起、套什么沙箱从各执行器里拆出来，成为执行器以外的一个接口；「谁能读到模型 key 和 MCP 令牌」一节按新的边界重写。
 
 ## 涉及的文件
 
