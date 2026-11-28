@@ -74,8 +74,7 @@ const nav = (page: any) => page.getByRole('navigation', { name: '主导航' })
 const current = async (page: any) => nav(page).locator('a[aria-current="page"]').getAttribute('aria-label')
 const noHScroll = async (page: any) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
 // 名字的浮层：看得见＝不透明且占位置（窄屏下 display: none）
-const labelShown = async (link: any) =>
-  link.locator('span[aria-hidden="true"]').evaluate((s: HTMLElement) => getComputedStyle(s).display !== 'none' && Number(getComputedStyle(s).opacity) > 0.99)
+const labelShown = async (link: any) => link.locator('span[aria-hidden="true"]').evaluate((s: HTMLElement) => getComputedStyle(s).display !== 'none' && Number(getComputedStyle(s).opacity) > 0.99)
 
 const ROUTES: [string, string][] = [
   ['#/', '任务'],
@@ -94,13 +93,17 @@ const ROUTES: [string, string][] = [
   const page = await open(1440)
   await page.goto(`${base}/#/`)
   await page.waitForSelector('table.tasks tbody tr')
-  const names = await nav(page).locator('a').evaluateAll((as: Element[]) => as.map(a => a.getAttribute('aria-label')))
+  const names = await nav(page)
+    .locator('a')
+    .evaluateAll((as: Element[]) => as.map(a => a.getAttribute('aria-label')))
   check('宽屏：导航按顺序是 对话、任务、统计、改进、团队约定、设置，没有「工作台」', JSON.stringify(names) === JSON.stringify(['对话', '任务', '统计', '改进', '团队约定', '设置']))
   const box = await nav(page).boundingBox()
   check('宽屏：导航是左边一条 56px 宽、和窗口一样高', box.x === 0 && box.width === 56 && box.height === 900)
   const settings = await nav(page).getByRole('link', { name: '设置' }).boundingBox()
   check('宽屏：「设置」在左下角', settings.y + settings.height > 900 - 30 && settings.x < 56)
-  const texts = await nav(page).locator('a').evaluateAll((as: Element[]) => as.map(a => a.querySelector('svg') !== null))
+  const texts = await nav(page)
+    .locator('a')
+    .evaluateAll((as: Element[]) => as.map(a => a.querySelector('svg') !== null))
   check('宽屏：每一项都是图标', texts.every(Boolean))
   for (const [hash, want] of ROUTES) {
     await page.goto(`${base}/${hash}`)
@@ -113,7 +116,9 @@ const ROUTES: [string, string][] = [
   await page.waitForSelector('main')
   await page.mouse.move(700, 450)
   await page.waitForTimeout(300) // 颜色有 150ms 的过渡
-  const bg = await nav(page).locator('a').evaluateAll((as: HTMLElement[]) => as.map(a => getComputedStyle(a).backgroundColor))
+  const bg = await nav(page)
+    .locator('a')
+    .evaluateAll((as: HTMLElement[]) => as.map(a => getComputedStyle(a).backgroundColor))
   const fill2 = await page.evaluate(() => {
     const d = document.createElement('div')
     d.style.background = 'var(--fill-2)'
@@ -196,7 +201,9 @@ const ROUTES: [string, string][] = [
   await page.waitForSelector('table.tasks tbody tr')
   const box = await nav(page).boundingBox()
   check('窄屏：导航是顶上的一行', box.y === 0 && box.width === 390 && box.height < 60)
-  const xs = await nav(page).locator('a').evaluateAll((as: Element[]) => as.map(a => a.getBoundingClientRect().right))
+  const xs = await nav(page)
+    .locator('a')
+    .evaluateAll((as: Element[]) => as.map(a => a.getBoundingClientRect().right))
   check('窄屏：「设置」在最右边', Math.max(...xs) === xs.at(-1) && xs.at(-1)! > 390 - 30)
   const chat = nav(page).getByRole('link', { name: '对话' })
   await chat.hover()

@@ -72,7 +72,11 @@ test('组件和页面外壳里的每个 Tailwind 类都生成了样式（取值�
   )
   const missing: string[] = []
   const collisions: string[] = []
-  const files = TAILWIND_DIRS.flatMap(d => readdirSync(d).filter(n => n.endsWith('.tsx') || n.endsWith('.ts')).map(n => join(d, n)))
+  const files = TAILWIND_DIRS.flatMap(d =>
+    readdirSync(d)
+      .filter(n => n.endsWith('.tsx') || n.endsWith('.ts'))
+      .map(n => join(d, n)),
+  )
   assert.ok(TAILWIND_DIRS.includes(UI) && TAILWIND_DIRS.length >= 2, '没读到 index.css 的 @source')
   for (const path of files) {
     const f = path.slice(WEB.length + 1)
