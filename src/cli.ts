@@ -62,7 +62,8 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     repo: { type: 'string' },
-    workflow: { type: 'string', default: 'standard' },
+    workflow: { type: 'string' },
+    request: { type: 'string' },
     data: { type: 'string' },
     'no-wait': { type: 'boolean', default: false },
     node: { type: 'string' },
@@ -131,8 +132,8 @@ if (positionals[0] === 'doctor' && !values.help) {
   // ⚠ 只是提示，有 ✗ 时退出码才不为 0。
   process.exit(items.some(i => i.status === 'fail') ? 1 : 0)
 }
-// chat 只有新建和接着说会调用模型；list、show 只读数据库。
-if (!values.help && (NEEDS_ENV.has(positionals[0] ?? '') || (positionals[0] === 'chat' && ['new', 'send'].includes(positionals[1] ?? '')))) {
+// chat 只有新建、接着说（调用模型）和按提议建任务（运行任务）要检查环境；list、show、save 只读写数据库。
+if (!values.help && (NEEDS_ENV.has(positionals[0] ?? '') || (positionals[0] === 'chat' && ['new', 'send', 'create'].includes(positionals[1] ?? '')))) {
   const items = startupChecks()
   const bad = items.filter(i => i.status === 'fail')
   if (bad.length > 0) fail(`启动前检查没有通过，没有启动：\n${formatItems(bad)}\n\n全部检查：npm run eos -- doctor`)
@@ -230,7 +231,7 @@ const commands: Record<string, () => Promise<void> | void> = {
   async run() {
     if (values.repo === undefined) fail('需要 --repo <仓库路径或 https://github.com/<owner>/<repo>>')
     await run(async sup => {
-      const created = await sup.create({ repo: values.repo!, workflow: values.workflow!, request: positionals.slice(1).join(' ') })
+      const created = await sup.create({ repo: values.repo!, workflow: values.workflow ?? 'standard', request: positionals.slice(1).join(' ') })
       if (!created.ok) return fail(created.error)
       const meta = store.meta(created.id)
       say(`任务 ${created.id}：工作流 ${store.get(created.id)!.workflow.name}，分支 ${meta.branch}，worktree ${meta.worktree}`)
@@ -319,7 +320,7 @@ const commands: Record<string, () => Promise<void> | void> = {
       .filter(x => x !== '')
     let r
     try {
-      r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow!, ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
+      r = await generate({ store, conventions, executor: ex, dataDir, workflow: values.workflow ?? 'standard', ...(tasks === undefined ? {} : { tasks }), actor: 'cli', now: Date.now, log: say })
     } finally {
       await ex.close()
     }
@@ -417,6 +418,9 @@ const commands: Record<string, () => Promise<void> | void> = {
     await chatCommand(positionals.slice(1), {
       ...(values['allow-permissions'] === undefined ? {} : { confirm: values['allow-permissions'] }),
       ...(values.note === undefined ? {} : { note: values.note }),
+      edits: { ...(values.repo === undefined ? {} : { repo: values.repo }), ...(values.workflow === undefined ? {} : { workflow: values.workflow }), ...(values.request === undefined ? {} : { request: values.request }) },
+      // 按任务提议建任务之后和 eos run 一样在本进程里运行它。
+      runTask: make => run(sup => make(input => sup.create(input))),
       chats: new ChatStore(store.db),
       data: { store, conventions, changes: id => committedChanges(store.meta(id)), now: Date.now },
       conventions,

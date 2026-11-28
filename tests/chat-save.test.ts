@@ -6,6 +6,7 @@ import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
 import { chatCommand } from '../src/chat/cli.ts'
 import { PROPOSE_TOOL } from '../src/chat/proposals.ts'
+import { PROPOSE_TASK_TOOL } from '../src/chat/tasks.ts'
 import { confirmationCode, currentPermissions, saveProposal } from '../src/chat/save.ts'
 import { ChatStore } from '../src/chat/store.ts'
 import type { DataSource } from '../src/chat/tools.ts'
@@ -59,7 +60,7 @@ const propose = async (p: ReturnType<typeof platform>, args: Record<string, unkn
   return p.chats.proposals(r.chat.id).at(-1)!.id
 }
 
-test('every tool the agent has, run once, leaves the conventions table unchanged; only a human save writes it', async () => {
+test('every tool the agent has, run once, leaves the conventions and tasks tables unchanged; only a human save writes a convention', async () => {
   const p = platform()
   const before = p.dump()
   const args: Record<string, Record<string, unknown>> = {
@@ -67,18 +68,22 @@ test('every tool the agent has, run once, leaves the conventions table unchanged
     get_convention: { kind: 'workflow', name: 'standard' },
     convention_history: { kind: 'workflow', name: 'standard' },
     list_tasks: {},
+    list_repos: {},
     get_task: { id: 't1' },
     get_task_trace: { id: 't1' },
     get_task_metrics: { id: 't1' },
     get_task_changes: { id: 't1' },
+    [PROPOSE_TASK_TOOL]: { title: '补测试', repo: '/r', workflow: 'standard', request: '补上缺的测试' },
     [PROPOSE_TOOL]: { kind: 'workflow', name: 'standard', content: standard(p).replace(/^description: .*$/m, 'description: 新说明'), rationale: '改说明' },
   }
   const ex = new McpExecutor(steps(Object.entries(args).map(([name, a]) => ({ tool: `mcp__${MCP_NAME}__${name}`, args: a }))))
   const r = await new Chats(p.opts(ex)).start('把所有工具都用一遍', 'cli')
   assert.ok(r.ok)
-  assert.deepEqual(ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(), [...TOOLS.map(t => t.name), PROPOSE_TOOL].sort(), 'that is every tool the agent is offered')
+  assert.deepEqual(ex.offered[0]!.map(t => t.replace(`mcp__${MCP_NAME}__`, '')).sort(), [...TOOLS.map(t => t.name), PROPOSE_TOOL, PROPOSE_TASK_TOOL].sort(), 'that is every tool the agent is offered')
   assert.equal(r.call.reads.filter(x => x.isError).length, 0, JSON.stringify(r.call.reads))
   assert.equal(p.dump(), before, 'nothing the agent ran wrote a convention')
+  assert.deepEqual(p.store.list().map(t => t.id), ['t1'], 'nor created a task')
+  assert.equal(p.chats.taskProposals(r.chat.id).length, 1)
   const saved = p.save(p.chats.proposals(r.chat.id)[0]!.id)
   assert.ok(saved.ok, JSON.stringify(saved))
   assert.notEqual(p.dump(), before)
@@ -221,7 +226,7 @@ test('eos chat show prints each proposal with its state, the diff against the cu
 })
 
 test('the modules the agent can trigger never import the save path', () => {
-  for (const f of ['chat.ts', 'mcp.ts', 'tools.ts', 'proposals.ts', 'store.ts']) {
+  for (const f of ['chat.ts', 'mcp.ts', 'tools.ts', 'proposals.ts', 'tasks.ts', 'store.ts']) {
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'chat', f), 'utf8')
     assert.ok(!/(from|import\()\s*['"]\.\/save(\.ts)?['"]/.test(src), `src/chat/${f} imports the save path`)
   }

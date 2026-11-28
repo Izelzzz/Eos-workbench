@@ -17,6 +17,8 @@ import { TOOL_GROUPS } from '../workflow/types.ts'
 import { openEndpoint } from './mcp.ts'
 import type { ChatStore } from './store.ts'
 import { PROPOSE_TOOL, proposer, proposeToolSpec } from './proposals.ts'
+import { PROPOSE_TASK_TOOL, proposeTaskToolSpec, taskProposer, usedRepos } from './tasks.ts'
+import { workflowProblem } from '../runner/workflow-check.ts'
 import { callTool, type DataSource, toolList, TOOLS } from './tools.ts'
 import type { ChatActor, ChatCall, ChatDetail, ChatRead, ChatSummary } from './types.ts'
 import { ASSISTANT_TEMPLATE } from './types.ts'
@@ -62,7 +64,7 @@ export const turnOf = (call: string): { chat: string; seq: number } | undefined 
  * 执行器报告的工具名 → 平台工具的名字；不是平台的只读工具时 undefined。执行器可能给 MCP 工具加前缀（例如 mcp__eos__list_tasks），所以按结尾认。
  * 执行了别的工具，说明执行器没有按 builtinTools: 'none' 去掉自带工具：这一轮作废（失败就关）。
  */
-const OURS = [...TOOLS.map(t => t.name), PROPOSE_TOOL]
+const OURS = [...TOOLS.map(t => t.name), PROPOSE_TOOL, PROPOSE_TASK_TOOL]
 export const ours = (name: string): string | undefined => OURS.find(t => name === t || name.endsWith(`__${t}`))
 
 /** 这次调用执行了的工具里，不是平台只读工具的那些（只看真正执行了的 tool_start；模型要了但执行器没有的工具不算）。 */
@@ -141,7 +143,7 @@ export class Chats {
     const nonce = nonceOf(id, seq)
     const cwd = join(this.o.dataDir, 'chat', id)
     mkdirSync(cwd, { recursive: true })
-    // 提议工具只写提议表（待确认），不写约定；其余工具只读。
+    // 提议工具只写提议表（待确认），不写约定、不建任务；其余工具只读。
     const { store } = this.o.data
     const conventions = this.o.conventions
     const propose = proposer({
@@ -152,10 +154,26 @@ export class Chats {
       call: nonce,
       now: this.o.now,
     })
+    // 任务提议只写任务提议表，不建任务。工作流只认平台上保存过的（不认文件路径），并核对每个角色的执行器做得到。
+    const proposeTask = taskProposer({
+      check: {
+        repos: () => usedRepos(store).map(r => r.repo),
+        workflow: name => {
+          if (store.convention('workflow', name) === undefined) return `平台上没有这个工作流。现有：${store.conventions('workflow').map(w => w.name).join('、') || '（无）'}`
+          const resolved = conventions.resolve(name)
+          return resolved.ok ? workflowProblem(resolved.workflow, this.o.checkExecutor) : resolved.error
+        },
+      },
+      record: (p, at) => chats.addTaskProposal(p, at),
+      redact,
+      chatId: id,
+      call: nonce,
+      now: this.o.now,
+    })
     const endpoint = await openEndpoint({
       name: MCP_NAME,
-      tools: [...toolList(), proposeToolSpec()],
-      call: (name, args) => (name === PROPOSE_TOOL ? propose(args) : callTool(this.o.data, redact, name, args)),
+      tools: [...toolList(), proposeToolSpec(), proposeTaskToolSpec()],
+      call: (name, args) => (name === PROPOSE_TOOL ? propose(args) : name === PROPOSE_TASK_TOOL ? proposeTask(args) : callTool(this.o.data, redact, name, args)),
     })
     const events: TraceEvent[] = []
     chats.appendTrace(id, nonce, [{ kind: 'call_start', t: this.o.now() }])

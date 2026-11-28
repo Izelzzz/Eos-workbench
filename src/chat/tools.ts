@@ -11,6 +11,7 @@ import type { TaskChanges } from '../runner/changes.ts'
 import type { Store } from '../store/store.ts'
 import type { ConventionKind } from '../store/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
+import { usedRepos } from './tasks.ts'
 
 /** 一个工具返回给 agent 的最多字数：trace、产出可能很长，超出部分截掉并注明。 */
 export const MAX_OUTPUT_CHARS = 20_000
@@ -118,6 +119,12 @@ export const TOOLS: Tool<z.ZodType>[] = [
         .filter(t => (a.status === undefined || t.status === a.status) && (a.workflow === undefined || t.workflow === a.workflow))
         .slice(0, a.limit ?? 20)
         .map(t => ({ ...t, request: d.clip(t.request, 300) })),
+  }),
+  tool({
+    name: 'list_repos',
+    description: '平台上的任务用过的仓库（最近用过的在前）：仓库（远程仓库是网页地址，本机仓库是路径）、用过的任务数、最近一次的时间。提议建任务时仓库只能从这里选。',
+    input: z.object({}),
+    run: d => usedRepos(d.store).slice(0, LIST_LIMIT),
   }),
   tool({
     name: 'get_task',

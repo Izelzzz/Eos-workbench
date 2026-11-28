@@ -1,16 +1,17 @@
-# ADR-008：对话 agent——读平台数据、提议约定、由人确认保存，工具经平台的 MCP 端点交给 agent
+# ADR-008：对话 agent——读平台数据、提议约定和任务、由人确认，工具经平台的 MCP 端点交给 agent
 
 - 状态：已采纳（2026-11-26），内容按当前实现维护
 - 读者：要理解或修改对话 agent 的人，以及要换执行器的人
 - 关联：ADR-004（improver 的权限做法）、ADR-005（凭据和遮蔽）、ADR-006（部署里的用户）
 
-对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，以及提议新建或修改工作流和 Agent 模板。提议只记下来，不改任何约定；人在命令行（`eos chat save`）或网页的「对话」页确认之后，平台重新检查一遍，才保存成约定的新版本。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
+对话 agent 是一个不绑定任务、可以多轮对话的 agent。它只能用平台提供的工具：读平台数据，提议新建或修改工作流和 Agent 模板，以及提议新建任务。提议只记下来，不改任何约定、不建任务：约定的提议由人在命令行（`eos chat save`）或网页的「对话」页确认，平台重新检查一遍才保存成新版本；任务的提议由人在命令行（`eos chat create`）确认，可以先改仓库、工作流和需求，平台照建任务的规则检查后才创建。它没有执行器自带的任何工具。工具经平台在本机开的 MCP 端点交给它。
 
 ## 背景
 
 - 团队需要一个对话入口，用来问平台上的工作流、约定、模板、技能和任务，以及设计工作流。
 - 读取范围：工作流、约定文档、Agent 模板、技能、任务列表，单个任务的状态、trace、指标、改动摘要。不读仓库代码，读不到凭据。
 - agent 能提议工作流和 Agent 模板，不能保存任何东西：保存要人确认。
+- 用户想在对话里直接说要做的开发工作：agent 能提议一个任务（仓库、工作流、需求），不能自己建：创建要人确认。
 - 平台没有登录，能打开平台的人都能和它对话。
 - dsh 自带文件读写、搜索工具。任务角色只能按工具组关掉命令行、联网等，关不掉这两类。它们开着时，agent 能读数据目录（数据库、所有仓库、所有 trace）。
 
@@ -22,6 +23,7 @@
 4. 对话的模型调用记进单独的 trace 和指标，用途名 `chat`，不混进任务。
 5. 执行器可以替换：`src/chat/` 只认 `Executor` 接口和它的类型。
 6. agent 能提议新建或修改工作流、Agent 模板；提议通过保存约定时的检查才记下，记下的提议不改任何约定。
+7. agent 能提议新建任务；提议通过检查才记下，记下的提议不建任务。仓库只能是平台上的任务用过的。
 
 ## 设计
 
@@ -38,26 +40,33 @@ flowchart LR
   dsh -->|Streamable HTTP + 令牌| ep
   ep --> tools["只读工具（src/chat/tools.ts）<br/>解析参数、遮蔽、截断"]
   ep --> propose["提议工具（src/chat/proposals.ts）<br/>按保存规则检查"]
+  ep --> ptask["任务提议工具（src/chat/tasks.ts）<br/>仓库、工作流检查"]
+  ptask -->|只读任务、约定| db
+  ptask --> chatdb
   tools --> db[("eos.db：约定、任务、trace")]
   propose -->|只读约定| db
   propose --> chatdb
-  chats --> chatdb[("eos.db：chats、chat_messages、chat_trace、chat_proposals")]
+  chats --> chatdb[("eos.db：chats、chat_messages、chat_trace、<br/>chat_proposals、chat_task_proposals")]
   human["人：eos chat save"] --> save["保存（src/chat/save.ts）<br/>重新检查、核对版本、确认权限"]
   web -->|"人点「保存」"| save
   save --> chatdb
   save -->|写新版本| db
+  human2["人：eos chat create"] --> create["创建（src/chat/create.ts）<br/>重新检查、可改三项"]
+  create --> chatdb
+  create -->|"Supervisor.create"| db
   dsh -. 读配置 .-> patch["dsh home 里的配置<br/>eos-profiles/ephemeral/（含令牌）"]
 ```
 
 | 方面 | 设计 |
 |---|---|
 | 运行方式 | 经 `Executor` 接口，能力面由平台定死：`builtinTools: 'none'`、`write: 'none'`，`mcp` 里只有这次调用的端点 |
-| 工具 | 8 个只读工具和 1 个提议工具；没有保存约定的工具，没有读凭据、读仓库文件的工具 |
+| 工具 | 9 个只读工具和 2 个提议工具（约定、任务）；没有保存约定、建任务的工具，没有读凭据、读仓库文件的工具 |
 | 端点 | 每次调用开一个，调用结束就关；端口随机，令牌 32 字节随机数 |
-| 存储 | `chats`、`chat_messages`、`chat_trace`、`chat_proposals` 四张表，在 `src/chat/store.ts` 里建 |
+| 存储 | `chats`、`chat_messages`、`chat_trace`、`chat_proposals`、`chat_task_proposals` 五张表，在 `src/chat/store.ts` 里建 |
 | 执行器、模型和提示词 | 内置 Agent 模板 `assistant`，团队可以改；权限不从模板读 |
 | 失败就关 | 执行了平台工具以外的工具时，这一轮作废 |
 | 保存 | 只由人触发（`eos chat save`，或网页上的「保存」）；agent 能触发的模块都不引用保存的代码 |
+| 建任务 | 只由人触发（`eos chat create`）；agent 能触发的模块都不引用创建的代码和 `Supervisor` |
 | 网页 | 「对话」页：新建、历史、接着说；进度按步推送；提议显示差异，人点「保存」 |
 
 ### 能力面怎么表达
@@ -84,6 +93,7 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 |---|---|
 | `list_conventions`、`get_convention`、`convention_history` | 工作流、约定文档、Agent 模板、技能的列表、内容、版本历史 |
 | `list_tasks`、`get_task` | 任务列表；单个任务的状态、当前位置、失败原因、产出（截断）、记录摘要 |
+| `list_repos` | 任务用过的仓库：远程仓库是网页地址，本机仓库是路径；用过的任务数、最近一次的时间 |
 | `get_task_trace` | 不给 call 时是每次调用的摘要；给 call 时是这次调用的事件（长内容截断） |
 | `get_task_metrics` | 任务的阶段指标 |
 | `get_task_changes` | 改动的文件列表和增删行数，不含文件内容和 diff |
@@ -144,11 +154,50 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 - 旧数据库里的 `chat_proposals` 没有保存记录和随机值的几列，打开时补上。
 - `eos chat show` 第一次显示一条要确认的提议时会写库（生成随机值）：库只读或被锁时 `show` 也会失败。
 - `eos chat show` 的输出经过遮蔽：提议记下之后平台才有的凭据值不会打印出来。
-- `src/chat/` 里 agent 能触发的模块（`chat.ts`、`mcp.ts`、`tools.ts`、`proposals.ts`、`store.ts`）都不引用 `save.ts`，`tests/chat-save.test.ts` 核对。
+- `src/chat/` 里 agent 能触发的模块（`chat.ts`、`mcp.ts`、`tools.ts`、`proposals.ts`、`tasks.ts`、`store.ts`）都不引用 `save.ts`，`tests/chat-save.test.ts` 核对。
 
 **为什么保存时要重新检查**：提议是在记下那一刻检查的。从记下到保存之间，引用的模板、技能、文档和目标约定都可能被改过，算好的权限也可能不准。
 
 **为什么权限改动要带确认码**：保存一条普通提议和放宽权限是两件事，确认权限要是一个明确的动作。确认码绑定的是人在 `eos chat show` 或网页上看到的那条提议和那份清单：看过之后平台状态变了、清单多了一项，旧的确认码就对不上，人要再看一次。别的提议的确认码对不上，即使两条的清单一样。随机值不在对话 agent 能读到的任何结果里，对话 agent 算不出确认码，不能在回复里直接给出一条能用的保存命令，人得自己在 `show` 或网页上看。它不防同一台机器上能读平台数据库的进程，见「已知限制」。
+
+### 任务提议
+
+提议工具是 `propose_task`：标题（最多 80 字）、仓库（最多 512 字）、工作流（最多 64 字）、需求（最多 2 万字）。
+
+| 情形 | 结果 |
+|---|---|
+| 仓库不是 `list_repos` 列出的（按字符串完全相同比较） | 错误返回给 agent，列出用过的仓库 |
+| 工作流不是平台上保存过的（文件路径也不认），或者解析不了，或者某个角色的执行器做不到它的能力面（`checkExecutor`，和建任务同一个核对） | 错误返回给 agent |
+| 标题、仓库或需求里有已知凭据值 | 退回：需求会以明文交给任务里的 agent |
+| 一次调用里已经记了 5 条 | 退回 |
+| 通过 | 记进 `chat_task_proposals`：提出它的调用、标题、三项 |
+| 提出它的那一轮没有得到回复 | 和约定的提议一样标成作废 |
+
+- 任务提议和约定的提议各自编号，命令行写成「任务提议 #n」。
+- `eos chat show` 列出任务提议：状态（待确认、这一轮还没有回复、已作废、已创建）、三项、创建命令。已创建的显示实际用的三项。
+- `src/chat/` 里 agent 能触发的模块（`chat.ts`、`mcp.ts`、`tools.ts`、`proposals.ts`、`tasks.ts`、`store.ts`）都不引用 `create.ts`，也不引用 `Supervisor`，`tests/chat-tasks.test.ts` 核对。
+
+**为什么仓库只能是用过的**：建任务的仓库可以是平台机器上的任意路径。agent 能任意填的话，就能从「找不到目录」「不是 git 仓库」这些错误里试探服务器上有哪些目录。用过的仓库已经在平台的任务记录里。要用别的仓库时，人在确认时改，见「创建任务」。
+
+**为什么工作流只认保存过的**：建任务的 `--workflow` 也认文件路径，平台会读那个文件。agent 填路径同样能试探服务器上的文件。
+
+### 创建任务
+
+`src/chat/create.ts` 的 `createFromProposal` 是把任务提议变成任务的唯一入口。人从命令行触发：`eos chat create <任务提议号> [--repo <仓库>] [--workflow <工作流>] [--request "<需求>"]`，操作人记 `cli`；建好之后和 `eos run` 一样在本进程里运行。
+
+| 情形 | 结果 |
+|---|---|
+| 提议作废了，或者已经创建过任务 | 拒绝 |
+| 提议所在的那一轮还没有回复 | 拒绝：那一轮之后可能被作废 |
+| 另一个进程正在按这条提议建任务（锁 `chat-task-<号>`） | 拒绝 |
+| 人改过的需求里有已知凭据值 | 拒绝 |
+| 按改过的三项建任务没有通过 `Supervisor.create` 的检查 | 拒绝，提议仍是待确认，可以改了再建 |
+| 都通过 | 建任务，任务的 meta 记下 `origin`「来自对话 <id> 的任务提议 #<n>」；提议记下建成的任务、操作人、时间和实际用的三项 |
+
+- 人改的项不受「只能是用过的仓库」的限制：和直接建任务一样，由 `Supervisor.create` 检查。
+- 创建任务不放宽任何权限：工作流和它引用的模板都是已经保存的约定，任务按它们运行。
+
+**为什么要加锁**：建任务要更新镜像、建 worktree，可能要一会儿。没有锁的话，两处同时确认会按同一条提议建出两个任务。
 
 ### 网页
 
@@ -228,6 +277,10 @@ Claude Code 经 SDK 的控制通道拿到 MCP 的配置，令牌不在它的命�
 | 工具返回里可能有提示词注入 | trace、任务产出里有其他 agent 写的文字。对话 agent 没有保存约定的工具，最坏是回答被带偏，或者记下一条被带偏的提议；提议要人看过差异、确认后才保存 |
 | 确认码的随机值存在平台数据库里 | 对话 agent 读不到，但任务里的 agent（eos-agent，有 shell）能读 `/data` 下的数据库，读到随机值就能算出确认码。确认码防的是对话 agent 给出现成的保存命令、人照抄跳过 `show`，不防同机上的其他进程。和 `docs/roadmap.md` 的「任务之间的隔离」是同一个问题 |
 | 工作流不能引用还没保存的模板 | 新工作流要用新角色时，模板的提议要先保存，工作流的提议才能通过检查 |
+| 任务提议的仓库只能是用过的 | 平台上还没有任务用过的仓库，agent 提议不了；人在确认时改仓库。`list_repos` 会把本机仓库的路径交给 agent |
+| 建好任务、记到提议上之前进程死了 | 任务已经建了，提议仍是待确认，再确认一次会再建一个任务 |
+| 网页上还不能确认任务提议 | 只有命令行 `eos chat create` |
+| 已部署的平台上 `assistant` 模板不会自动更新 | 内置模板只在平台上没有时写入。旧的提示词里没有提任务提议，agent 靠工具说明知道它 |
 | 没有登录 | 对话和保存的 actor 只记 `cli`、`web`，和任务事件的写法一样。能打开平台的人都能保存提议 |
 | 回复不逐字显示 | dsh 不推送逐字的片段，见「网页」 |
 | `BUILTIN_TOOL_ROWS` 按当前 dsh 版本列 | dsh 新增的工具行不会自动关掉。E2E 核对发给模型的工具表；运行时还有「失败就关」 |
@@ -237,13 +290,14 @@ Claude Code 经 SDK 的控制通道拿到 MCP 的配置，令牌不在它的命�
 | 范围 | 文件 |
 |---|---|
 | 执行器接口和 dsh 翻译 | `src/executor/types.ts`、`src/executor/dsh.ts` |
-| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`save.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 对话 | `src/chat/types.ts`、`store.ts`、`tools.ts`、`proposals.ts`、`tasks.ts`、`save.ts`、`create.ts`、`mcp.ts`、`chat.ts`、`cli.ts` |
+| 建任务的检查 | `src/runner/workflow-check.ts`、`src/runner/supervisor.ts` 的 `create` |
 | 网页 | `src/web/chat.ts`、`src/web/server.ts`、`src/web/types.ts`、`web/src/Chat.tsx` |
 | 带版本核对的保存、差异 | `src/store/store.ts` 的 `saveConventionIfLatest`、`src/workflow/diff.ts` |
 | 模板 | `src/workflow/agents/assistant.yaml` |
 | 命令行接线 | `src/cli.ts` |
-| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/chat-save.test.ts`、`tests/web-chat.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
-| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-save-e2e.ts`、`scripts/chat-web-e2e.ts`、`scripts/chat-docker-probe.ts` |
+| 测试 | `tests/chat.test.ts`、`tests/chat-proposals.test.ts`、`tests/chat-save.test.ts`、`tests/chat-tasks.test.ts`、`tests/web-chat.test.ts`、`tests/mcp-executor.ts`（不调模型、按标准 MCP 连端点的假执行器）、`tests/executor.test.ts` |
+| 验证脚本 | `scripts/chat-e2e.ts`、`scripts/chat-task-e2e.ts`、`scripts/chat-propose-e2e.ts`、`scripts/chat-save-e2e.ts`、`scripts/chat-web-e2e.ts`、`scripts/chat-docker-probe.ts` |
 
 ## 证据
 
@@ -260,4 +314,6 @@ Claude Code 经 SDK 的控制通道拿到 MCP 的配置，令牌不在它的命�
 | 真实模型在网页上：回复完成前页面已显示读了什么；提议显示差异和权限警告，勾选确认后保存，操作人 `web`；390 宽不横向滚动 | `docs/e2e/chat-b/report.json`、`docs/e2e/chat-b/chat-1440-proposal.png`、`docs/e2e/chat-b/chat-1440.png`、`docs/e2e/chat-b/chat-390-proposal.png`、`docs/e2e/chat-b/chat-390-chat.png`、`docs/e2e/chat-b/chat-390-list.png` |
 | 网页接口：按行推送、保存要确认码、操作人 `web`、和约定表同一个连接、这一轮没结束不能保存、内容遮蔽、同源检查 | `tests/web-chat.test.ts` |
 | `src/chat/` 不经过 dsh 也能跑通 | `tests/chat.test.ts`、`tests/mcp-executor.ts` |
+| 任务提议的检查、退回、上限、作废；创建时可改三项、重新检查、只建一次、记下来源；agent 能触发的代码不建任务 | `tests/chat-tasks.test.ts` |
+| 真实模型提议一个任务：只用列出的仓库，任务表不变；人改了需求后创建 | `docs/e2e/chat-d1/report.json` |
 | 配置的权限和组、删除、崩溃后清理；任务角色的指纹不变 | `tests/executor.test.ts` |
