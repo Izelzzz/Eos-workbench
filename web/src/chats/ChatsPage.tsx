@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { ChatList } from './ChatList.tsx'
 import { Conversation } from './Conversation.tsx'
+import { FlowCanvas } from './FlowCanvas.tsx'
 import { conversations as seed, type Conversation as Chat, type WorkflowChange } from './mock.ts'
 
 /** 对话页：一个居中的对话，或者全部对话的列表。不依赖页面上的其他部分 */
 export function ChatsPage() {
   const [chats, setChats] = useState<Chat[]>(seed)
   const [view, setView] = useState<'chat' | 'list'>('chat')
+  const [canvas, setCanvas] = useState<WorkflowChange>()
   const [id, setId] = useState<string>()
   const [waiting, setWaiting] = useState(false)
   const chat = chats.find(c => c.id === id)
@@ -50,7 +52,9 @@ export function ChatsPage() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface max-md:min-h-screen">
-      {view === 'list' ? (
+      {canvas !== undefined ? (
+        <FlowCanvas change={canvas} onBack={() => setCanvas(undefined)} />
+      ) : view === 'list' ? (
         <ChatList
           chats={chats}
           onOpen={open}
@@ -65,7 +69,7 @@ export function ChatsPage() {
           onBack={() => setView('chat')}
         />
       ) : (
-        <Conversation chat={chat} recent={chats.slice(0, 5)} onOpen={open} onNew={() => setId(undefined)} onAll={() => setView('list')} onSend={send} onRevise={revise} waiting={waiting} />
+        <Conversation chat={chat} recent={chats.slice(0, 5)} onOpen={open} onNew={() => setId(undefined)} onAll={() => setView('list')} onSend={send} onRevise={revise} onCanvas={setCanvas} waiting={waiting} />
       )}
     </main>
   )

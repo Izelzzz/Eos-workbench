@@ -2,7 +2,7 @@
 
 export type TaskDraft = { kind: 'task'; title: string; repo: string; workflow: string; need: string }
 /** 一个阶段。没改的只有名字；改了的写明改了什么。change 不写表示「改了内容」 */
-export type StageChange = { stage: string; summary?: string; detail?: string; change?: 'added' | 'removed' }
+export type StageChange = { stage: string; summary?: string; detail?: string; change?: 'added' | 'removed'; /** 不通过时回到哪个阶段 */ back?: string }
 export type WorkflowChange = { kind: 'workflow'; name: string; nextVersion: number; stages: StageChange[]; widens?: string }
 export const REPOS = ['eos-workbench', 'eos-docs', 'billing-service']
 export const WORKFLOWS = ['standard', 'docs-only', 'release']
@@ -30,7 +30,7 @@ export const conversations: Conversation[] = [
             { stage: '规格' },
             { stage: '开发', summary: '新增 1 条检查', detail: '改动了 src/ 下的文件时，tests/ 下也要有改动。不满足时交回开发 agent。' },
             { stage: '测试' },
-            { stage: '评审', summary: '轮数 5 → 3', detail: '最多轮数从 5 改成 3。3 轮不通过时请规格 agent 重新确认。' },
+            { stage: '评审', summary: '轮数 5 → 3', detail: '最多轮数从 5 改成 3。3 轮不通过时请规格 agent 重新确认。', back: '开发' },
             { stage: '交付' },
           ],
         },
@@ -60,7 +60,7 @@ export const conversations: Conversation[] = [
             { stage: '单元测试' },
             { stage: '集成测试' },
             { stage: '安全扫描', summary: '新增', change: 'added', detail: '运行 npm audit 和 trivy；有高危时交回开发 agent。' },
-            { stage: '评审' },
+            { stage: '评审', back: '开发' },
             { stage: '文档', summary: '删除', change: 'removed', detail: '并进开发阶段。' },
             { stage: '预发布', summary: '等待 30 → 10 分钟', detail: '预发布环境的观察时间从 30 分钟改成 10 分钟。' },
             { stage: '验收' },

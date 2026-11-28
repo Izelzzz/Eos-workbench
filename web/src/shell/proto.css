@@ -1,3 +1,6 @@
 /* 导航原型的页面底：只有盒模型和 body，颜色和字号都引用令牌 */
 *, ::before, ::after { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: var(--text-base)/1.55 var(--font-sans); }
+
+/* 画板的底：点阵。颜色引用令牌 */
+.chat-canvas { background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: calc(var(--spacing) * 6) calc(var(--spacing) * 6); }

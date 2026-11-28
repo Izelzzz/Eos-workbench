@@ -1,19 +1,40 @@
 import { useState } from 'react'
-import { Badge, Button, Field, FieldGroup, FieldLabel, InfoList, InfoRow, Input, Note, Select, Textarea, cn } from '../ui/index.ts'
+import { Badge, Button, Card, Field, FieldGroup, FieldLabel, Input, Note, Select, Textarea, cn } from '../ui/index.ts'
 import { REPOS, WORKFLOWS, type StageChange, type TaskDraft, type WorkflowChange } from './mock.ts'
 
-/** 对话里的卡片：细边框、没有阴影（一屏只有一个浮起来的东西，对话里不用 Card） */
-function ChatCard({ title, state, children }: { title: string; state: { label: string; waiting: boolean }; children: React.ReactNode }) {
+/**
+ * 对话里等你确认的卡片：和工作台的卡片一样浮起来，没有边框，里面不再套框。
+ * 确认或放弃之后收成一行浅底的记录，不再浮着。
+ */
+function ChatCard({ title, label, open, tail, children }: { title: string; label: string; open: boolean; tail?: React.ReactNode; children: React.ReactNode }) {
+  if (!open)
+    return (
+      <section className="flex min-w-0 flex-col gap-1 rounded-chat bg-fill px-4 py-3">
+        <header className="flex min-w-0 items-baseline justify-between gap-3">
+          <h3 className="m-0 min-w-0 truncate text-base font-medium text-ink-2">{title}</h3>
+          <span className="flex-none text-sm text-ink-3">{label}</span>
+        </header>
+        {tail}
+      </section>
+    )
   return (
-    <section className="flex min-w-0 flex-col gap-3.5 rounded-chat border border-line p-4">
+    <Card className="my-1 gap-4 p-5 pb-4 sm:p-6 sm:pb-5">
       <header className="flex min-w-0 items-baseline justify-between gap-3">
-        <h3 className="m-0 min-w-0 truncate text-lead font-semibold">{title}</h3>
-        <Badge variant={state.waiting ? 'accent' : 'neutral'}>{state.label}</Badge>
+        <h3 className="m-0 min-w-0 truncate text-md font-semibold">{title}</h3>
+        <Badge variant="accent">{label}</Badge>
       </header>
       {children}
-    </section>
+    </Card>
   )
 }
+
+/** 一行标签加内容，不带分隔线 */
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="flex gap-4">
+    <dt className="w-12 flex-none text-ink-3">{label}</dt>
+    <dd className="m-0 min-w-0 flex-1 wrap-anywhere">{children}</dd>
+  </div>
+)
 
 /** 代理人准备好的任务：可以直接改，点「创建任务」才建 */
 export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
@@ -22,7 +43,22 @@ export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
   const [edit, setEdit] = useState(initial)
   const id = `draft-${initial.title}`
   return (
-    <ChatCard title={`新任务：${draft.title}`} state={{ label: { pending: '待确认', editing: '修改中', created: '已创建', dropped: '没有创建' }[state], waiting: state === 'pending' || state === 'editing' }}>
+    <ChatCard
+      title={`新任务：${draft.title}`}
+      label={{ pending: '待确认', editing: '修改中', created: '已创建', dropped: '没有创建' }[state]}
+      open={state === 'pending' || state === 'editing'}
+      tail={
+        state === 'created' ? (
+          <p className="m-0 text-sm text-ink-3">
+            进度在{' '}
+            <a href="#workbench" className="text-ink-2 underline decoration-ink-3 underline-offset-4 hover:text-ink">
+              工作台
+            </a>
+            。
+          </p>
+        ) : undefined
+      }
+    >
       {state === 'editing' ? (
         <>
           <FieldGroup>
@@ -48,7 +84,7 @@ export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
             </Field>
           </FieldGroup>
           <footer className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" onClick={() => setState('pending')}>
+            <Button variant="ghost" onClick={() => setState('pending')}>
               放弃修改
             </Button>
             <Button
@@ -63,123 +99,58 @@ export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
           </footer>
         </>
       ) : (
-        <InfoList>
-          <InfoRow label="仓库">{draft.repo}</InfoRow>
-          <InfoRow label="工作流">{draft.workflow}</InfoRow>
-          <InfoRow label="需求">{draft.need}</InfoRow>
-        </InfoList>
-      )}
-      {state === 'pending' && (
-        <footer className="flex flex-wrap items-center justify-between gap-2">
-          <Button variant="ghost" onClick={() => setState('dropped')}>
-            不创建
-          </Button>
-          <span className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setEdit(draft)
-                setState('editing')
-              }}
-            >
-              修改
+        <>
+          <dl className="m-0 flex flex-col gap-2">
+            <Row label="仓库">{draft.repo}</Row>
+            <Row label="工作流">{draft.workflow}</Row>
+            <Row label="需求">{draft.need}</Row>
+          </dl>
+          <footer className="flex flex-wrap items-center justify-between gap-2">
+            <Button variant="ghost" className="-ml-4" onClick={() => setState('dropped')}>
+              不创建
             </Button>
-            <Button onClick={() => setState('created')}>创建任务</Button>
-          </span>
-        </footer>
-      )}
-      {state === 'created' && (
-        <p className="m-0 text-sm text-ink-2">
-          任务开始了，进度在{' '}
-          <a href="#workbench" className="text-ink underline decoration-ink-3 underline-offset-4 hover:decoration-ink">
-            工作台
-          </a>
-          。
-        </p>
+            <span className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEdit(draft)
+                  setState('editing')
+                }}
+              >
+                修改
+              </Button>
+              <Button onClick={() => setState('created')}>创建任务</Button>
+            </span>
+          </footer>
+        </>
       )}
     </ChatCard>
   )
 }
 
-const isChanged = (s: StageChange) => s.summary !== undefined
-
-/**
- * 阶段图：一行连起来的阶段，改到的突出显示。
- * 阶段多的时候（超过 6 个），连续两个以上没改的阶段收成一个「N 个没改」，点了展开；一行放不下就折行。
- */
-function StageFlow({ stages }: { stages: StageChange[] }) {
-  const [open, setOpen] = useState(false)
-  const long = stages.length > 6
-  type Item = { kind: 'stage'; stage: StageChange } | { kind: 'gap'; names: string[] }
-  const items: Item[] = []
-  for (let i = 0; i < stages.length; ) {
-    let j = i
-    while (j < stages.length && !isChanged(stages[j]!)) j++
-    const run = stages.slice(i, j)
-    if (long && !open && run.length >= 2) items.push({ kind: 'gap', names: run.map(s => s.stage) })
-    else for (const s of run) items.push({ kind: 'stage', stage: s })
-    if (j < stages.length) items.push({ kind: 'stage', stage: stages[j]! })
-    i = j + 1
-  }
-  const changed = stages.filter(isChanged).length
-  return (
-    <div className="flex min-w-0 flex-col gap-2.5">
-      <p className="m-0 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-3">
-        <span>
-          {stages.length} 个阶段，改了 {changed} 个
-        </span>
-        {long && open && (
-          <Button variant="link" className="h-auto px-0 text-sm text-ink-2" onClick={() => setOpen(false)}>
-            收起没改的
-          </Button>
-        )}
-      </p>
-      <ol className="m-0 flex list-none flex-wrap items-center gap-y-2 p-0">
-        {items.map((it, i) => (
-          <li key={it.kind === 'stage' ? it.stage.stage : `gap-${i}`} className="flex items-center">
-            {i > 0 && <span aria-hidden="true" className="h-px w-3 flex-none bg-line" />}
-            {it.kind === 'gap' ? (
-              <Button variant="ghost" size="sm" onClick={() => setOpen(true)} aria-label={`展开 ${it.names.length} 个没改的阶段：${it.names.join('、')}`} className="h-7 rounded-full px-2.5 text-ink-3">
-                {it.names.length} 个没改
-              </Button>
-            ) : isChanged(it.stage) ? (
-              <span
-                className={cn(
-                  'flex flex-col rounded-control border px-3 py-1.5',
-                  it.stage.change === 'removed' ? 'border-line' : 'border-ink shadow-selected',
-                  it.stage.change === 'added' && 'border-dashed shadow-none',
-                )}
-              >
-                <span className={cn('text-sm font-medium text-ink', it.stage.change === 'removed' && 'text-ink-3 line-through')}>{it.stage.stage}</span>
-                <span className="text-xs text-ink-2">{it.stage.summary}</span>
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 px-1.5 text-sm text-ink-3">
-                <span aria-hidden="true" className="size-1.5 flex-none rounded-full border border-ink-3" />
-                {it.stage.stage}
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
-    </div>
-  )
-}
+export const isChanged = (s: StageChange) => s.summary !== undefined
+const KIND = { added: '新增', removed: '删除', changed: '修改' } as const
 
 type ChangeProps = {
   change: WorkflowChange
   /** 让代理人按这句话重新提一版 */
   onRevise: (text: string) => void
+  /** 在画板里看整个流程 */
+  onCanvas: () => void
 }
 
-/** 代理人提议的修改（工作流、Agent 模板）：先看改了哪里，可以让它再改，点「保存」才生效；放宽权限时要多确认一步 */
-export function WorkflowChangeCard({ change, onRevise }: ChangeProps) {
+/**
+ * 代理人提议的修改（工作流、Agent 模板）。卡片里只列改到的阶段，一处一行；
+ * 整个流程长什么样去画板里看。可以让它再改，点「保存」才生效；放宽权限时要多确认一步。
+ */
+export function WorkflowChangeCard({ change, onRevise, onCanvas }: ChangeProps) {
   const [state, setState] = useState<'pending' | 'revising' | 'saved' | 'dropped' | 'replaced'>('pending')
   const [agreed, setAgreed] = useState(false)
-  const [full, setFull] = useState(false)
   const [ask, setAsk] = useState('')
   const open = state === 'pending' || state === 'revising'
   const label = { pending: '待确认', revising: '待确认', saved: `已保存为第 ${change.nextVersion} 版`, dropped: '没有保存', replaced: '已经有新的一版' }[state]
+  const changed = change.stages.filter(isChanged)
+  const before = (s: StageChange) => change.stages.slice(0, change.stages.indexOf(s)).findLast(x => x.change !== 'removed')?.stage
   const submit = () => {
     const text = ask.trim()
     if (text === '') return
@@ -187,17 +158,32 @@ export function WorkflowChangeCard({ change, onRevise }: ChangeProps) {
     onRevise(text)
   }
   return (
-    <ChatCard title={`修改：${change.name}`} state={{ label, waiting: open }}>
-      <StageFlow stages={change.stages} />
-      <InfoList>
-        {change.stages.filter(isChanged).map(s => (
-          <InfoRow key={s.stage} label={s.stage}>
-            {s.detail}
-          </InfoRow>
+    <ChatCard title={`修改：${change.name}`} label={label} open={open}>
+      <p className="m-0 flex flex-wrap items-center justify-between gap-2 text-sm text-ink-3">
+        <span>
+          {change.stages.length} 个阶段，改了 {changed.length} 个
+        </span>
+        <Button variant="link" className="h-auto px-0 text-sm text-ink-2" onClick={onCanvas}>
+          在画板里看整个流程
+        </Button>
+      </p>
+      <ul className="m-0 flex list-none flex-col gap-3.5 p-0">
+        {changed.map(s => (
+          <li key={s.stage} className="flex min-w-0 gap-3">
+            <Badge variant="neutral" className="mt-0.5 flex-none">
+              {KIND[s.change ?? 'changed']}
+            </Badge>
+            <div className="flex min-w-0 flex-col">
+              <span className="flex flex-wrap items-baseline gap-x-2">
+                <span className={cn('font-medium', s.change === 'removed' && 'text-ink-3 line-through')}>{s.stage}</span>
+                <span className="text-sm text-ink-3">{s.change === 'added' ? `在${before(s) ?? '最前面'}之后` : s.change === 'removed' ? '' : s.summary}</span>
+              </span>
+              <span className="wrap-anywhere text-ink-2">{s.detail}</span>
+            </div>
+          </li>
         ))}
-      </InfoList>
-      {full && <pre className="m-0 overflow-x-auto rounded-box bg-fill p-3 font-mono text-code text-ink-2">{`# 这里是完整的文本差异\n- max_rounds: 5\n+ max_rounds: 3`}</pre>}
-      {change.widens !== undefined && open && (
+      </ul>
+      {change.widens !== undefined && (
         <Note className="flex flex-col gap-2">
           <span>
             <b>这次修改会放宽权限。</b>
@@ -229,35 +215,21 @@ export function WorkflowChangeCard({ change, onRevise }: ChangeProps) {
               让它重提
             </Button>
           </div>
-          <p className="m-0 text-sm text-ink-3">
-            也可以{' '}
-            <a href="#conventions" className="text-ink-2 underline decoration-ink-3 underline-offset-4 hover:text-ink">
-              到团队约定里自己改
-            </a>
-            。
-          </p>
         </div>
       )}
-      {open && (
-        <footer className="flex flex-wrap items-center justify-between gap-2">
-          <span className="flex flex-wrap items-center gap-1">
-            <Button variant="ghost" onClick={() => setState('dropped')}>
-              不保存
-            </Button>
-            <Button variant="link" className="px-2" onClick={() => setFull(!full)}>
-              {full ? '收起完整差异' : '查看完整差异'}
-            </Button>
-          </span>
-          <span className="flex flex-wrap gap-2">
-            <Button variant="outline" aria-expanded={state === 'revising'} onClick={() => setState(state === 'revising' ? 'pending' : 'revising')}>
-              修改
-            </Button>
-            <Button disabled={change.widens !== undefined && !agreed} onClick={() => setState('saved')}>
-              保存
-            </Button>
-          </span>
-        </footer>
-      )}
+      <footer className="flex flex-wrap items-center justify-between gap-2">
+        <Button variant="ghost" className="-ml-4" onClick={() => setState('dropped')}>
+          不保存
+        </Button>
+        <span className="flex flex-wrap gap-2">
+          <Button variant="outline" aria-expanded={state === 'revising'} onClick={() => setState(state === 'revising' ? 'pending' : 'revising')}>
+            修改
+          </Button>
+          <Button disabled={change.widens !== undefined && !agreed} onClick={() => setState('saved')}>
+            保存
+          </Button>
+        </span>
+      </footer>
     </ChatCard>
   )
 }
