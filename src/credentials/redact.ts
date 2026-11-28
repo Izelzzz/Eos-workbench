@@ -21,7 +21,7 @@ export const base64Forms = (s: string): string[] => {
   })
 }
 
-/** 每个值的写法只算一次：遮蔽在每条 trace 事件的每个字符串上都要跑。已知值很少（凭据条数加上两三个），缓存不会变大多少。 */
+/** 每个值的写法只算一次：遮蔽在每条 trace 事件的每个字符串上都要跑。已知值是凭据条数、两三个启动时的值和运行时登记的短期凭据（见下面的上限），缓存的上限比它们的和大。 */
 const formCache = new Map<string, string[]>()
 
 /** 一个值可能出现的写法：原样、JSON 转义后的样子（多行的私钥在 trace 的 JSON 字符串里换行是 \n），以及 base64 编码在更长内容里的样子。 */
@@ -29,7 +29,7 @@ const forms = (s: string): string[] => {
   let f = formCache.get(s)
   if (f === undefined) {
     f = [...new Set([s, JSON.stringify(s).slice(1, -1), ...base64Forms(s)])]
-    if (formCache.size >= 256) formCache.clear()
+    if (formCache.size >= 1024) formCache.clear()
     formCache.set(s, f)
   }
   return f
@@ -61,7 +61,7 @@ const redactError = (e: unknown, redact: (s: string) => string): unknown => {
 }
 
 /**
- * 包一层执行器：回复、实时 trace 事件、回放的 trace、agent 的提问都先遮蔽再交出去。
+ * 包一层执行器：回复、实时 trace 事件、回放的 trace、agent 的提问、失败的修法都先遮蔽再交出去。接口的其余方法原样转发。
  * 平台拿到的 agent 输出都经过这里，存进任务、显示在页面和日志里的就都是遮蔽过的。
  */
 export const redacting = (ex: Executor, redact: (s: string) => string): Executor => ({
@@ -82,17 +82,51 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
     return r === undefined ? undefined : { ...r, text: redact(r.text) }
   },
   traceOf: async (key, nonce, executor) => redactDeep(await ex.traceOf(key, nonce, executor), redact),
+  // 失败的修法由执行器给（注册表按那次调用的执行器找）：照样转发，漏了的话运行时只剩通用的修法。修法是平台写的文字，也遮一遍。
+  ...(ex.failureHint === undefined
+    ? {}
+    : {
+        failureHint: (error: string, executor?: string) => {
+          const hint = ex.failureHint!(error, executor)
+          return hint === undefined ? undefined : redact(hint)
+        },
+      }),
   release: cwd => ex.release(cwd),
   close: () => ex.close(),
 })
 
-/** 平台运行时换来的短期凭据（例如 GitHub App 的安装令牌）：不在凭据存储里，用的地方登记进来。只留最近的 256 个。 */
+/** 平台运行时换来的短期凭据（GitHub 的安装令牌、用户令牌）：不在凭据存储里，用的地方登记进来。只留最近的 256 个；再登记一次算最近的。 */
 const runtime = new Set<string>()
 export const rememberSecret = (s: string): void => {
-  if (runtime.has(s)) return
+  runtime.delete(s)
   runtime.add(s)
   if (runtime.size > 256) runtime.delete(runtime.values().next().value!)
 }
+
+/**
+ * 每次调用的临时令牌（Claude Code 的一次性上游令牌、对话 agent 的 MCP 令牌）：发出时登记，返回的函数在令牌失效时调用。
+ * 有效期间一直遮（单独一张表，不挤掉上面的 GitHub 令牌）；失效后挪进「刚失效」的表，只留最近的 64 个：
+ * 调用结束、令牌撤销之后，这次调用的回复和最后几条 trace 才被遮蔽着交出去，那时还要认得它。
+ */
+const active = new Map<string, number>()
+const ended = new Set<string>()
+export const holdSecret = (s: string): (() => void) => {
+  active.set(s, (active.get(s) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const n = (active.get(s) ?? 1) - 1
+    if (n > 0) return void active.set(s, n)
+    active.delete(s)
+    ended.delete(s)
+    ended.add(s)
+    if (ended.size > 64) ended.delete(ended.values().next().value!)
+  }
+}
+
+/** 运行时登记的全部值（knownSecrets 用）。 */
+const runtimeSecrets = (): string[] => [...runtime, ...active.keys(), ...ended]
 
 /** JSON 凭据里算机密的字段：私钥、secret、令牌、密码。App id、slug、名字这些不遮（遮了会把页面和日志里的正常文字变成 ***）。 */
 const SECRET_FIELD = /key|secret|token|password|pem/i
@@ -121,7 +155,7 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
   let checkedAt = -Infinity
   let reported = false
   return () => {
-    if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...runtime, ...extra]
+    if (cache !== undefined && now() - checkedAt < 1000) return [...cache.values, ...runtimeSecrets(), ...extra]
     checkedAt = now()
     let items
     try {
@@ -130,7 +164,7 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
       // 读不了凭据列表（例如数据库损坏）：沿用上次的值，遮蔽不能让写日志的地方出错；报一次错，不悄悄降级。
       if (!reported) onError(e)
       reported = true
-      return [...(cache?.values ?? []), ...runtime, ...extra]
+      return [...(cache?.values ?? []), ...runtimeSecrets(), ...extra]
     }
     const sig = items.map(i => `${i.name}@${i.updatedAt}`).join('\n')
     if (cache?.sig !== sig)
@@ -141,6 +175,6 @@ export const knownSecrets = (credentials: Credentials, extra: readonly string[],
           return r.kind === 'ok' ? valuesOf(r.value) : []
         }),
       }
-    return [...cache.values, ...runtime, ...extra]
+    return [...cache.values, ...runtimeSecrets(), ...extra]
   }
 }
