@@ -53,7 +53,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 - **不用 `block`、`grow` 这类和现有页面类名同名的工具类**：工具类会作用到现有页面里同名的元素。用 `flex-1` 代替 `grow`。
 ### Tailwind 只扫描哪些目录
 
-- Tailwind 只扫描 `web/src/index.css` 的 `@source` 列出的目录：现在是 `web/src/ui/`（组件）和 `web/src/shell/`（导航、外壳、设置页）。**现有页面（`web/src/*.tsx`）没被扫描**：在页面里写 Tailwind 类，只有恰好也在被扫描的目录里用到的才生成样式，其余不生成、也不报错。
+- Tailwind 只扫描 `web/src/index.css` 的 `@source` 列出的目录：现在是 `web/src/ui/`（组件）、`web/src/shell/`（导航、外壳、设置页）和 `web/src/workbench/`（工作台）。**现有页面（`web/src/*.tsx`）没被扫描**：在页面里写 Tailwind 类，只有恰好也在被扫描的目录里用到的才生成样式，其余不生成、也不报错。
 - 原因：现有页面的类名（`block`、`grow` 等）和工具类同名，扫描它们会生成同名的工具类，改掉现有页面的样式。
 - 现有页面的布局继续用 `styles.css`。按新的信息结构重做页面时，新页面放进一个新目录，把它加到 `index.css` 的 `@source`。`tests/web-ui.test.ts` 从 `@source` 读检查范围，加进去就会被查。
 

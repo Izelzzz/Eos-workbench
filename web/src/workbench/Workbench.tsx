@@ -18,8 +18,8 @@ export function Workbench({ data, error }: { data: Data | undefined; error: stri
   }
   if (data === undefined) return <p className="m-0 px-4 py-5 text-ink-2 md:px-10 md:py-9">{error === undefined ? '加载中…' : `连接不上服务：${error}（自动重试中）`}</p>
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex flex-col lg:min-h-screen lg:flex-row">
+      <div className="flex min-w-0 flex-col lg:flex-1">
         <div className="mx-auto flex w-full max-w-195 flex-col gap-11 px-4 pt-5 pb-8 md:px-10 md:pt-9">
           {error !== undefined && (
             <p role="alert" className="m-0 text-sm text-destructive">
