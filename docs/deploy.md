@@ -186,7 +186,7 @@ agent 运行任务时使用的就是这个镜像。
 
 ### 用 Claude Code 执行器
 
-角色（工作流里的角色或 Agent 模板）写上 `executor: claude-code` 后，这个角色用 Claude Code 运行。没有写的角色仍用 dsh。
+角色（工作流里的角色或 Agent 模板）写上 `executor: claude-code` 后，这个角色用 Claude Code 运行。没有写的角色仍用 dsh。所有角色都用 Claude Code 时，平台启动仍然要 DeepSeek 的模型 key（默认执行器 dsh 的启动检查）。
 
 1. 准备 Anthropic API key，二选一：
    - 在 `.env` 里加一行 `ANTHROPIC_API_KEY=<你的 key>`，执行 `docker compose up -d`；
