@@ -1,6 +1,8 @@
+import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { useState } from 'react'
 import { AccentDot, Badge, Button, Card, CardDescription, CardFooter, CardHeader, CardTitle, InfoList, InfoRow, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Segmented, SegmentedItem, SegmentedList, SegmentedPanel, cn } from '../ui/index.ts'
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, XIcon } from '../ui/icons.tsx'
+import { CheckIcon, ChevronRightIcon, XIcon } from '../ui/icons.tsx'
 import { ArrowLeftIcon, MoreIcon } from '../chats/icons.tsx'
 import { fmt, fmtTok, stages, task, type Call, type Span, type Stage } from './mock.ts'
 
@@ -31,7 +33,7 @@ export function TaskDetailPage() {
 
         <section className="flex min-w-0 flex-col gap-3">
           <h2 className="m-0 text-sm font-medium text-ink-2">阶段</h2>
-          <StageStrip
+          <StageFlow
             current={stage}
             onPick={i => {
               setStage(i)
@@ -111,92 +113,156 @@ function Header() {
   )
 }
 
-const STATE_TEXT = { passed: '通过', running: '进行中', waiting: '等你', todo: '还没开始', failed: '失败' } as const
+type StageNode = Node<{ stage: Stage; index: number; current: boolean }, 'stage'>
+const NODE_W = 168
+const NODE_H = 60
+const PER_ROW = 6
+const nodeAt = (i: number) => ({ x: (i % PER_ROW) * (NODE_W + 56), y: Math.floor(i / PER_ROW) * (NODE_H + 80) })
 
-/** 阶段条：一行连起来的阶段，放不下时横向滚动。点一个阶段看它的过程 */
-function StageStrip({ current, onPick }: { current: number; onPick: (i: number) => void }) {
+function StageCard({ data }: NodeProps<StageNode>) {
+  const s = data.stage
+  const hidden = 'size-px min-h-0 min-w-0 border-0 opacity-0'
   return (
-    <ol className="task-strip m-0 flex list-none items-stretch gap-0 overflow-x-auto p-0 pb-1">
-      {stages.map((s, i) => (
-        <li key={s.name} className="flex flex-none items-center">
-          {i > 0 && <span aria-hidden="true" className="h-px w-4 flex-none bg-line" />}
-          <Button
-            variant="ghost"
-            aria-pressed={i === current}
-            onClick={() => onPick(i)}
-            className={cn('h-auto min-w-28 flex-col items-start gap-0.5 rounded-control border border-line px-3 py-2 text-left font-normal', i === current && 'border-ink bg-surface shadow-selected hover:bg-surface')}
-          >
-            <span className="flex items-center gap-1.5 font-medium text-ink">
-              {s.state === 'passed' && <CheckIcon width={13} height={13} className="text-ink-3" />}
-              {s.state === 'waiting' && <AccentDot />}
-              {s.name}
-            </span>
-            <span className={cn('text-xs text-ink-3', s.state === 'waiting' && 'text-accent')}>{s.note}</span>
-          </Button>
-        </li>
-      ))}
-    </ol>
+    <div
+      style={{ width: NODE_W, height: NODE_H }}
+      className={cn('flex cursor-pointer flex-col justify-center rounded-box bg-surface px-3.5 font-sans text-base text-ink shadow-card', data.current && 'shadow-selected', s.state === 'todo' && 'bg-transparent shadow-none')}
+    >
+      <Handle id="in" type="target" position={Position.Left} className={hidden} />
+      <Handle id="out" type="source" position={Position.Right} className={hidden} />
+      <Handle id="back-out" type="source" position={Position.Top} className={hidden} />
+      <Handle id="back-in" type="target" position={Position.Top} className={hidden} />
+      <span className="flex items-center gap-1.5 font-medium">
+        {s.state === 'passed' && <CheckIcon width={13} height={13} className="text-ink-3" />}
+        {s.state === 'waiting' && <AccentDot />}
+        {s.name}
+      </span>
+      <span className={cn('text-xs text-ink-3', s.state === 'waiting' && 'text-accent')}>{s.note}</span>
+    </div>
+  )
+}
+const nodeTypes = { stage: StageCard }
+
+/**
+ * 阶段：画板上的流程图（React Flow）。能拖动画布、能缩放；回头的环节用虚线。
+ * 点一个阶段看它的过程。阶段很多时照样放得下。
+ */
+function StageFlow({ current, onPick }: { current: number; onPick: (i: number) => void }) {
+  const nodes: StageNode[] = stages.map((s, i) => ({ id: s.name, type: 'stage', position: nodeAt(i), data: { stage: s, index: i, current: i === current }, draggable: false }))
+  const edges: Edge[] = [
+    ...stages.slice(0, -1).map((s, i) => ({ id: `${s.name}-next`, source: s.name, target: stages[i + 1]!.name, sourceHandle: 'out', targetHandle: 'in', type: 'smoothstep' })),
+    ...stages.filter(s => s.back !== undefined).map(s => ({ id: `${s.name}-back`, source: s.name, target: s.back!, sourceHandle: 'back-out', targetHandle: 'back-in', type: 'smoothstep', label: '不通过', style: { strokeDasharray: '4 4' } })),
+  ]
+  return (
+    <div className="chat-canvas h-60 overflow-hidden rounded-card border border-line">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+        minZoom={0.3}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        preventScrolling={false}
+        onNodeClick={(_, n) => onPick((n as StageNode).data.index)}
+      >
+        <Background color="var(--line)" gap={24} size={1.5} />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
   )
 }
 
 type ProcessProps = { stage: Stage; open: string[]; onToggle: (id: string) => void; picked: Span | undefined; onPick: (s: Span) => void }
 
-/** 一个阶段的过程：按轮次，每轮里是一次次调用；点开一次调用看它里面的每一步 */
+// 每一类步骤在瀑布图上的颜色：只用墨色的深浅；等你回答的时间用强调色
+const BAR: Record<Span['kind'], string> = { 模型: 'bg-ink', 工具: 'bg-ink-3', 检查: 'bg-ink-2', 提问: 'bg-accent', 回答: 'bg-accent' }
+
+/** 瀑布图上的一条：按开始时间和用时，画在这一轮共用的时间轴上 */
+function Bar({ start, ms, total, className }: { start: number; ms: number; total: number; className: string }) {
+  return (
+    <span aria-hidden="true" className="relative hidden h-4 min-w-0 flex-1 sm:flex">
+      <span className="absolute inset-x-0 top-1/2 h-px bg-line" />
+      <span className={cn('absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full', className)} style={{ left: `${(start / total) * 100}%`, width: `max(3px, ${(ms / total) * 100}%)` }} />
+    </span>
+  )
+}
+
+/**
+ * 一个阶段的过程，瀑布图：每一轮一条时间轴，从这一轮开始到结束。
+ * 一行是一次调用，横条的位置是它什么时候开始、长度是用了多久；点开看它里面的每一步，画在同一条时间轴上。
+ */
 function Process({ stage, open, onToggle, picked, onPick }: ProcessProps) {
   if (stage.rounds.length === 0) return <p className="m-0 rounded-card border border-dashed border-line px-5 py-9 text-center text-ink-3">这个阶段还没有开始。你验收通过后，平台推送分支并开 PR。</p>
   return (
-    <div className="flex flex-col gap-6">
-      {stage.rounds.map(r => (
-        <section key={r.n} className="flex flex-col">
-          <h3 className="m-0 mb-1 flex items-baseline gap-2 text-sm font-medium text-ink-2">
-            第 {r.n} 轮<span className="font-normal text-ink-3">{r.result}</span>
-          </h3>
-          <ul className="m-0 flex list-none flex-col p-0">
-            {r.calls.map(c => (
-              <CallRow key={c.id} call={c} open={open.includes(c.id)} onToggle={() => onToggle(c.id)} picked={picked} onPick={onPick} />
-            ))}
-          </ul>
-        </section>
-      ))}
+    <div className="flex flex-col gap-7">
+      {stage.rounds.map(r => {
+        const total = Math.max(r.calls.reduce((a, c) => a + c.ms, 0), 1)
+        let at = 0
+        return (
+          <section key={r.n} className="flex flex-col">
+            <header className="mb-1 flex items-baseline gap-3">
+              <h3 className="m-0 flex w-64 flex-none items-baseline gap-2 text-sm font-medium text-ink-2">
+                第 {r.n} 轮<span className="font-normal text-ink-3">{r.result}</span>
+              </h3>
+              <span aria-hidden="true" className="hidden min-w-0 flex-1 justify-between text-xs text-ink-3 tabular-nums sm:flex">
+                <span>0</span>
+                <span>{fmt(total / 2)}</span>
+                <span>{fmt(total)}</span>
+              </span>
+              <span className="w-28 flex-none" />
+            </header>
+            <ul className="m-0 flex list-none flex-col p-0">
+              {r.calls.map(c => {
+                const start = at
+                at += c.ms
+                return <CallRow key={c.id} call={c} start={start} total={total} open={open.includes(c.id)} onToggle={() => onToggle(c.id)} picked={picked} onPick={onPick} />
+              })}
+            </ul>
+          </section>
+        )
+      })}
     </div>
   )
 }
 
-function CallRow({ call, open, onToggle, picked, onPick }: { call: Call; open: boolean; onToggle: () => void; picked: Span | undefined; onPick: (s: Span) => void }) {
-  const longest = Math.max(...call.spans.map(s => s.ms), 1)
+type CallRowProps = { call: Call; start: number; total: number; open: boolean; onToggle: () => void; picked: Span | undefined; onPick: (s: Span) => void }
+
+function CallRow({ call, start, total, open, onToggle, picked, onPick }: CallRowProps) {
+  let at = start
   return (
     <li className="border-t border-line last:border-b">
-      <Button variant="ghost" aria-expanded={open} onClick={onToggle} className="h-auto w-full items-baseline justify-start gap-3 rounded-control px-0 py-2.5 text-left font-normal hover:bg-transparent aria-expanded:bg-transparent">
-        <ChevronRightIcon width={14} height={14} className={cn('flex-none self-center text-ink-3 transition-transform duration-150 motion-reduce:transition-none', open && 'rotate-90')} />
-        <span className="w-20 flex-none text-ink-3">{call.who}</span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-ink">
+      <Button variant="ghost" aria-expanded={open} onClick={onToggle} className="h-auto w-full items-center justify-start gap-3 rounded-control px-0 py-2.5 text-left font-normal hover:bg-transparent aria-expanded:bg-transparent">
+        <span className="flex w-64 min-w-0 flex-none items-center gap-2 max-sm:flex-1">
+          <ChevronRightIcon width={14} height={14} className={cn('flex-none text-ink-3 transition-transform duration-150 motion-reduce:transition-none', open && 'rotate-90')} />
+          <span className="w-18 flex-none truncate text-ink-3">{call.who}</span>
           {call.ok === false && <XIcon width={13} height={13} className="flex-none text-destructive" />}
-          <span className="min-w-0 truncate">{call.what}</span>
+          <span className="min-w-0 truncate text-ink">{call.what}</span>
         </span>
-        <span className="flex-none text-sm text-ink-3 tabular-nums">
+        <Bar start={start} ms={call.ms} total={total} className={call.ok === false ? 'bg-destructive' : 'bg-ink'} />
+        <span className="w-28 flex-none text-right text-sm text-ink-3 tabular-nums">
           {fmt(call.ms)}
           {call.tokens !== undefined && ` · ${fmtTok(call.tokens)}`}
         </span>
       </Button>
       {open && (
-        <ul className="task-enter m-0 mb-3 ml-6 flex list-none flex-col gap-0.5 p-0">
-          {call.spans.map((s, i) => (
-            <li key={i}>
-              <Button
-                variant="ghost"
-                aria-pressed={picked === s}
-                onClick={() => onPick(s)}
-                className={cn('h-8 w-full justify-start gap-3 rounded-lg px-2 text-left text-sm font-normal', picked === s && 'bg-fill text-ink')}
-              >
-                <span className="w-9 flex-none text-ink-3">{s.kind}</span>
-                <span className="min-w-0 flex-1 truncate text-ink">{s.title}</span>
-                <span aria-hidden="true" className="hidden w-24 flex-none sm:flex">
-                  <span className="h-1 rounded-full bg-ink-3" style={{ width: `${Math.max(4, (s.ms / longest) * 100)}%` }} />
-                </span>
-                <span className="w-16 flex-none text-right text-ink-3 tabular-nums">{s.ms === 0 ? '' : fmt(s.ms)}</span>
-              </Button>
-            </li>
-          ))}
+        <ul className="task-enter m-0 mb-2 flex list-none flex-col p-0">
+          {call.spans.map((s, i) => {
+            const spanStart = at
+            at += s.ms
+            return (
+              <li key={i}>
+                <Button variant="ghost" aria-pressed={picked === s} onClick={() => onPick(s)} className={cn('h-8 w-full justify-start gap-3 rounded-lg px-0 text-left text-sm font-normal', picked === s && 'bg-fill text-ink')}>
+                  <span className="flex w-64 min-w-0 flex-none items-center gap-2 pl-6 max-sm:flex-1">
+                    <span className="w-9 flex-none text-ink-3">{s.kind}</span>
+                    <span className="min-w-0 truncate text-ink">{s.title}</span>
+                  </span>
+                  <Bar start={spanStart} ms={s.ms} total={total} className={BAR[s.kind]} />
+                  <span className="w-28 flex-none pr-2 text-right text-ink-3 tabular-nums">{s.ms === 0 ? '' : fmt(s.ms)}</span>
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       )}
     </li>

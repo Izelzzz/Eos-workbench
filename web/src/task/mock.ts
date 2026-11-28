@@ -4,7 +4,7 @@ export type StageState = 'passed' | 'running' | 'waiting' | 'todo' | 'failed'
 export type Span = { kind: '模型' | '工具' | '检查' | '提问' | '回答'; title: string; ms: number; tokens?: number; input?: string; thinking?: string; output?: string }
 export type Call = { id: string; who: string; what: string; ms: number; tokens?: number; ok?: boolean; spans: Span[] }
 export type Round = { n: number; result: '通过' | '没通过' | '进行中'; calls: Call[] }
-export type Stage = { name: string; state: StageState; note: string; rounds: Round[] }
+export type Stage = { name: string; state: StageState; note: string; rounds: Round[]; /** 不通过时回到哪个阶段 */ back?: string }
 
 const sec = (s: number) => s * 1000
 export const fmt = (ms: number) => (ms >= 60000 ? `${Math.floor(ms / 60000)} 分 ${Math.round((ms % 60000) / 1000)} 秒` : `${Math.round(ms / 1000)} 秒`)
@@ -94,6 +94,7 @@ export const stages: Stage[] = [
   },
   {
     name: '测试',
+    back: '开发',
     state: 'passed',
     note: '2 轮 · 3 分钟',
     rounds: [
@@ -110,6 +111,7 @@ export const stages: Stage[] = [
   },
   {
     name: '评审',
+    back: '开发',
     state: 'passed',
     note: '1 轮 · 6 分钟',
     rounds: [
