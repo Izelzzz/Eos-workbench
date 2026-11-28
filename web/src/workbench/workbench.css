@@ -1,0 +1,82 @@
+/* 工作台原型的补充样式：只放工具类表达不了的几条（滚动条、关键帧）。颜色和尺寸都引用令牌 */
+*, ::before, ::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--text-base)/1.5 var(--font-sans); }
+
+/* 左右滑动的卡片：不显示滚动条 */
+.wb-track { scrollbar-width: none; }
+.wb-track::-webkit-scrollbar { display: none; }
+
+@keyframes wb-enter { from { opacity: 0; transform: translateX(calc(var(--spacing) * 8)); } to { opacity: 1; transform: none; } }
+.wb-enter { animation: wb-enter 240ms ease-out; }
+
+@keyframes wb-flash { from { background: var(--select); } to { background: transparent; } }
+.wb-flash { animation: wb-flash 1s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-enter, .wb-flash { animation: none; }
+  .wb-track { scroll-behavior: auto; }
+}
+
+/*
+ * 配色方案（提议）：中性的黑白灰，只有「等你处理」用一个琥珀色。
+ * 这里是为了在原型里看效果才覆盖的；采纳的话，应该改 tokens.css 里的调色板，而不是留在这里。
+ */
+:root {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --text: #18181b;
+  --muted: #62626b;
+  --line: #e4e4e7;
+  --hover: #f4f4f5;
+  --select: #f0f0f2;
+  --running: #18181b;
+  --waiting: #b45309;
+  --on-solid: #ffffff;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113;
+    --panel: #18181b;
+    --text: #ededf0;
+    --muted: #a1a1aa;
+    --line: #2a2a30;
+    --hover: #222226;
+    --select: #2a2a30;
+    --running: #ededf0;
+    --waiting: #f2b84b;
+    --on-solid: #18181b;
+  }
+}
+
+/* 单选框跟随文字颜色，不用浏览器默认的蓝色 */
+input[type="radio"] { accent-color: var(--text); }
+
+/* 查看的人明确选了亮色或暗色时，以它为准 */
+:root[data-theme="light"] {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --text: #18181b;
+  --muted: #62626b;
+  --line: #e4e4e7;
+  --hover: #f4f4f5;
+  --select: #f0f0f2;
+  --running: #18181b;
+  --waiting: #b45309;
+  --on-solid: #ffffff;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #111113;
+  --panel: #18181b;
+  --text: #ededf0;
+  --muted: #a1a1aa;
+  --line: #2a2a30;
+  --hover: #222226;
+  --select: #2a2a30;
+  --running: #ededf0;
+  --waiting: #f2b84b;
+  --on-solid: #18181b;
+  color-scheme: dark;
+}
