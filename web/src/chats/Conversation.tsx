@@ -23,7 +23,7 @@ export function Conversation({ chat, recent, onOpen, onNew, onAll, onSend, onRev
   const [text, setText] = useState('')
   const end = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    end.current?.scrollIntoView({ block: 'end' })
+    end.current?.scrollIntoView({ block: 'end', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   }, [chat?.id, chat?.messages.length, waiting])
   const send = () => {
     const said = text.trim()
@@ -83,7 +83,7 @@ export function Conversation({ chat, recent, onOpen, onNew, onAll, onSend, onRev
           // key 带上对话的 id：切换对话时卡片重新开始，不沿用上一个对话里卡片的状态
           chat.messages.map((m, i) => <Bubble key={`${chat.id}-${i}`} message={m} onRevise={onRevise} onCanvas={onCanvas} />)
         )}
-        {waiting && <p className="m-0 text-ink-3">正在回复…</p>}
+        {waiting && <p className="chat-enter m-0 text-ink-3">正在回复…</p>}
         <div ref={end} />
       </div>
 
@@ -117,10 +117,10 @@ export function Conversation({ chat, recent, onOpen, onNew, onAll, onSend, onRev
 }
 
 function Bubble({ message, onRevise, onCanvas }: { message: Message; onRevise: Props['onRevise']; onCanvas: Props['onCanvas'] }) {
-  if (message.from === 'me') return <p className="m-0 max-w-full self-end rounded-input rounded-br-sm bg-fill px-3.5 py-2 wrap-anywhere">{message.text}</p>
+  if (message.from === 'me') return <p className="chat-enter m-0 max-w-full self-end rounded-input rounded-br-sm bg-fill px-3.5 py-2 wrap-anywhere">{message.text}</p>
   return (
     <div className="flex min-w-0 flex-col gap-2.5">
-      <p className="m-0 wrap-anywhere">{message.text}</p>
+      <p className="chat-enter m-0 wrap-anywhere">{message.text}</p>
       {message.card?.kind === 'task' && <TaskDraftCard draft={message.card} />}
       {message.card?.kind === 'workflow' && <WorkflowChangeCard change={message.card} onRevise={text => onRevise(text, message.card as WorkflowChange)} onCanvas={() => onCanvas(message.card as WorkflowChange)} />}
     </div>
