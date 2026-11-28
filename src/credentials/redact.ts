@@ -61,7 +61,7 @@ const redactError = (e: unknown, redact: (s: string) => string): unknown => {
 }
 
 /**
- * 包一层执行器：回复、实时 trace 事件、回放的 trace、agent 的提问都先遮蔽再交出去。
+ * 包一层执行器：回复、实时 trace 事件、回放的 trace、agent 的提问、失败的修法都先遮蔽再交出去。接口的其余方法原样转发。
  * 平台拿到的 agent 输出都经过这里，存进任务、显示在页面和日志里的就都是遮蔽过的。
  */
 export const redacting = (ex: Executor, redact: (s: string) => string): Executor => ({
@@ -82,6 +82,15 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
     return r === undefined ? undefined : { ...r, text: redact(r.text) }
   },
   traceOf: async (key, nonce, executor) => redactDeep(await ex.traceOf(key, nonce, executor), redact),
+  // 失败的修法由执行器给（注册表按那次调用的执行器找）：照样转发，漏了的话运行时只剩通用的修法。修法是平台写的文字，也遮一遍。
+  ...(ex.failureHint === undefined
+    ? {}
+    : {
+        failureHint: (error: string, executor?: string) => {
+          const hint = ex.failureHint!(error, executor)
+          return hint === undefined ? undefined : redact(hint)
+        },
+      }),
   release: cwd => ex.release(cwd),
   close: () => ex.close(),
 })

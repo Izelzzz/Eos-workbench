@@ -8,7 +8,8 @@ import { resolveModelKey, takeKeyEnv } from '../src/credentials/model-key.ts'
 import { base64Forms, knownSecrets, MASK, redactDeep, redacting, redactText, rememberSecret } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
-import type { Executor } from '../src/executor/types.ts'
+import { EXECUTORS, Executors } from '../src/executor/registry.ts'
+import type { Executor, ExecutorContext } from '../src/executor/types.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
 
 const dirs: string[] = []
@@ -219,4 +220,25 @@ test('knownSecrets：JSON 凭据里的机密字段（例如 GitHub App 的私钥
   const minted = `ghs_${randomBytes(12).toString('hex')}`
   rememberSecret(minted)
   assert.equal(redactText(`令牌 ${minted} 和认证头 ${Buffer.from(`x-access-token:${minted}`).toString('base64')}`, secrets()).includes(minted.slice(4)), false)
+})
+
+test('包了遮蔽之后，失败的修法仍由那次调用的执行器给（和平台组装执行器的方式一样：注册表外面包一层 redacting）', () => {
+  const ctx: ExecutorContext = { root: '/nonexistent', dataDir: '/nonexistent', env: {}, modelKey: () => ({ source: 'missing' }), credentialsUsable: true }
+  const ex = redacting(new Executors(() => ctx), s => s)
+  assert.equal(typeof ex.failureHint, 'function', 'redacting 没有转发 failureHint')
+  for (const k of EXECUTORS) {
+    const hint = ex.failureHint?.('Request failed with status 401 Unauthorized', k.name) ?? ''
+    assert.ok(hint.includes(k.modelKey.env), `${k.name}：${hint}`)
+  }
+  assert.equal(ex.failureHint?.('奇怪的错误', 'dsh'), undefined)
+  // 修法的文字也遮一遍；里面的执行器没有这个方法时，包出来的也没有
+  const inner: Executor = {
+    send: async () => ({ sessionId: 's', text: '', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ms: 0 }),
+    findReply: async () => undefined,
+    traceOf: async () => [],
+    release: async () => {},
+    close: async () => {},
+  }
+  assert.equal(redacting({ ...inner, failureHint: () => `换掉 ${KEY}` }, s => redactText(s, [KEY])).failureHint?.('x'), `换掉 ${MASK}`)
+  assert.equal(redacting(inner, s => s).failureHint, undefined)
 })
