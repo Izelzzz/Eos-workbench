@@ -1,4 +1,5 @@
-/* 现有页面的样式。颜色、字体、字号、字重、圆角只引用 tokens.css 里的变量。经 index.css 引入，放在 legacy 层。 */
+/* 现有页面的样式。颜色、字体、字号、字重、圆角只引用 tokens.css 里的变量。层的顺序见 index.css。 */
+@layer legacy {
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: var(--text-base)/1.5 var(--font-sans); }
 a { color: var(--k-call); text-decoration: none; }
@@ -301,3 +302,4 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .chat-note { flex: 1 1 200px; min-width: 0; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 5px 8px; }
 .chat-usage { margin-top: 12px; font-size: var(--text-code); }
 @media (max-width: 600px) { .chat-msg.user { max-width: 100%; } }
+}
