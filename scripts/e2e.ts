@@ -1,4 +1,4 @@
-// M1 端到端验证：用真实的 deepseek-flash 跑 feature 模板，验证 M1 的完成标准。
+// M1 端到端验证：用真实模型（执行器的默认模型）跑 feature 模板，验证 M1 的完成标准。
 // 1. 在 .eos/e2e/repo 建一个示例仓库，通过 CLI 发起任务；
 // 2. agent 提问时用 `eos answer`（另一个进程）回答；
 // 3. 开发第一次完成后 SIGKILL 掉 runner，再用 `eos resume` 续跑；
@@ -8,15 +8,16 @@
 // 卡点（路线图第 5 项）：feature 后面加两个卡点。sign-off 由评审角色的 agent 验收；accept 由人验收：
 // 第一次停在卡点时 SIGKILL runner，续跑后确认不重复发起验收，再用 `eos send-back` 打回一次、改完回到卡点后 `eos accept` 通过。
 // 跑完多核对任务记下了远程仓库、数据目录里找不到令牌、远程的任务分支和本地一致、开了 PR 且再开一次会复用同一个。
+// EOS_E2E_EXECUTOR=claude-code 时三个角色都用 Claude Code 执行器（默认 dsh）；模型 key 换成那个执行器的（Anthropic API key）。
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
+import { MODEL_KEY as CLAUDE_CODE_KEY, parseLog, sessionIdFor as claudeCodeSession } from '../src/executor/claude-code.ts'
+import { MODEL_KEY as DSH_KEY, parseSessionLog, sessionIdFor } from '../src/executor/dsh.ts'
 import { filesByCall } from '../src/runner/git.ts'
 import { describePosition } from '../src/engine/machine.ts'
 import { keyOf } from '../src/runner/runner.ts'
 import { parseMasterKey, takeMasterKey } from '../src/credentials/key.ts'
-import { MODEL_KEY } from '../src/executor/dsh.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { LOCAL_OWNER } from '../src/credentials/types.ts'
 import { defaultForges, parseRemote } from '../src/forge/forges.ts'
@@ -32,15 +33,26 @@ const LOG = join(E2E, 'run.log')
 const REQUEST = [
   '在 src/math.js 里实现并导出一个求和函数，接收一个数字数组，返回总和；空数组返回 0；数组里有非数字时抛出 TypeError。',
   '为它写 node:test 测试（放在 test/ 目录），`npm test` 必须通过。',
-  '函数名还没定：规划阶段先用 ask_user_question 工具问我用 sum 还是 total。',
+  '函数名还没定：规划阶段先用提问工具问我用 sum 还是 total。',
   '（E2E 验证要求：评审第一轮必须至少提出一条 major 意见，例如补充边界情况的测试，以验证对话循环。）',
 ].join('\n')
 
-// 设置了 EOS_E2E_STORE_KEY 时，模型 key 只放进凭据存储（名为 deepseek，用 EOS_MASTER_KEY 加密），平台进程的环境里没有 DEEPSEEK_API_KEY。
+const EXECUTOR = process.env.EOS_E2E_EXECUTOR ?? 'dsh'
+if (EXECUTOR !== 'dsh' && EXECUTOR !== 'claude-code') throw new Error(`EOS_E2E_EXECUTOR 只能是 dsh 或 claude-code（现在是 ${EXECUTOR}）`)
+const MODEL_KEY = EXECUTOR === 'dsh' ? DSH_KEY : CLAUDE_CODE_KEY
+// 设置了 EOS_E2E_STORE_KEY 时，模型 key 只放进凭据存储（用 EOS_MASTER_KEY 加密），平台进程的环境里没有那个执行器的 key 变量。
+// 没有设置 key 时用占位值：这个环境里模型接口的 key 由代理注入。
 const storeKey = process.env.EOS_E2E_STORE_KEY
-const env: NodeJS.ProcessEnv = { ...process.env, NODE_USE_ENV_PROXY: '1', DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY ?? 'proxy-injected' }
+// 平台启动前检查要默认执行器（dsh）的 key，即使所有角色都用别的执行器：也给它一个（这个环境里由代理注入）。
+const env: NodeJS.ProcessEnv = {
+  ...process.env,
+  NODE_USE_ENV_PROXY: '1',
+  [DSH_KEY.env]: process.env[DSH_KEY.env] ?? 'proxy-injected',
+  [MODEL_KEY.env]: process.env[MODEL_KEY.env] ?? 'proxy-injected',
+}
+delete env.EOS_E2E_EXECUTOR
 delete env.EOS_E2E_STORE_KEY
-if (storeKey !== undefined) delete env.DEEPSEEK_API_KEY
+if (storeKey !== undefined) delete env[MODEL_KEY.env]
 const REMOTE = process.env.EOS_E2E_REPO
 const GIT_TOKEN = process.env.EOS_E2E_GIT_TOKEN
 const MASTER_KEY = process.env.EOS_MASTER_KEY
@@ -174,7 +186,9 @@ const WORKFLOW = remote === undefined ? 'feature-gate' : 'feature-pr'
     '    task: 人验收开发的改动。',
   ].join('\n')
   const deliver = '  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n'
-  const content = `${feature.replace(/^name: feature$/m, `name: ${WORKFLOW}`).trimEnd()}\n${gates}\n${remote === undefined ? '' : deliver}`
+  // 不用默认执行器时，每个角色都写上 executor
+  const roles = EXECUTOR === 'dsh' ? feature : feature.replace(/^ {2}(planner|developer|reviewer):\n/gm, `$&    executor: ${EXECUTOR}\n`)
+  const content = `${roles.replace(/^name: feature$/m, `name: ${WORKFLOW}`).trimEnd()}\n${gates}\n${remote === undefined ? '' : deliver}`
   mkdirSync(DATA, { recursive: true })
   const seedStore = new Store(join(DATA, 'eos.db'))
   const conventions = new Conventions(seedStore)
@@ -294,8 +308,27 @@ process.stdout.write(JSON.stringify({ again, openCount: Array.isArray(list) ? li
   }
 }
 
-/** dsh 会话日志里，每个会话收到过哪些调用（按消息里的 nonce）以及它的权限档位变化。 */
-const sessionLog = (session: string) => {
+/** 执行器的会话日志里，每个会话收到过哪些调用（按消息里的 nonce）、它的权限档位变化、主动提问了几次。 */
+const sessionLog = (session: string) => (EXECUTOR === 'dsh' ? dshSessionLog(session) : claudeCodeSessionLog(session))
+/** Claude Code：权限模式 default 是只读的角色（没有写文件的工具，Landlock 下写不了 worktree），acceptEdits 是可写的。 */
+const claudeCodeSessionLog = (session: string) => {
+  const sid = claudeCodeSession(keyOf(first.id, session))
+  const projects = join(DATA, 'claude-code', 'sessions', sid, '.claude', 'projects')
+  const dir = readdirSync(projects).find(d => existsSync(join(projects, d, `${sid}.jsonl`)))!
+  const entries = parseLog(readFileSync(join(projects, dir, `${sid}.jsonl`), 'utf8'))
+  const calls = entries
+    .filter(e => e.type === 'user')
+    .map(e => /eos:[^/]+\/(c\d+) -->/.exec(JSON.stringify(e.message?.content))?.[1])
+    .filter(Boolean)
+  const mode: Record<string, string> = { default: 'read-only', acceptEdits: 'workspace-write' }
+  const presets = entries.flatMap(e => {
+    const m = (e as { permissionMode?: string }).permissionMode
+    return e.type === 'user' && m !== undefined ? [mode[m] ?? m] : []
+  })
+  const asks = entries.filter(e => e.type === 'assistant' && Array.isArray(e.message?.content) && e.message.content.some(b => b.type === 'tool_use' && b.name === 'AskUserQuestion')).length
+  return { sid, calls, presets, asks }
+}
+const dshSessionLog = (session: string) => {
   const sid = sessionIdFor(keyOf(first.id, session))
   const root = join(DATA, 'dsh', 'sessions')
   const dir = readdirSync(root).find(d => existsSync(join(root, d, sid)))!
@@ -326,7 +359,7 @@ const devCalls = calls.filter(c => c.role === 'developer').map(c => c.call)
 const checks = {
   任务完成: task.status === 'done',
   '评审至少打回一次，开发回应': calls.some(c => c.purpose === 'respond'),
-  '开发的每次调用都在同一个 dsh 会话里': devCalls.length >= 2 && devCalls.every(c => sessions.build!.calls.includes(c)),
+  开发的每次调用都在同一个执行器会话里: devCalls.length >= 2 && devCalls.every(c => sessions.build!.calls.includes(c)),
   '规划和评审是只读档位，开发是 workspace-write':
     sessions.plan!.presets.at(-1) === 'read-only' && sessions.review!.presets.at(-1) === 'read-only' && sessions.build!.presets.at(-1) === 'workspace-write',
   'agent 主动提问并收到回答': task.log.some(e => e.type === 'question' && e.question.source === 'agent') && task.log.some(e => e.type === 'answer'),
@@ -340,7 +373,7 @@ const checks = {
   命令行列出等验收的任务: gatesOut.includes(first.id) && gatesOut.includes('等待验收'),
   '人打回一次（带意见）、改完回到卡点后通过': JSON.stringify(decisions.filter(d => d.node === 'accept').map(d => [d.round, d.pass, d.comment === SEND_BACK])) === '[[1,false,true],[2,true,false]]',
   打回后交回开发原来的会话修改: calls.some(c => c.purpose === 'amend' && c.node === 'accept' && c.role === 'developer' && sessions.build!.calls.includes(c.call)),
-  '修正：交给开发原来的会话（同一个 dsh 会话），在同一个 worktree 和分支上':
+  '修正：交给开发原来的会话（同一个执行器会话），在同一个 worktree 和分支上':
     correctCalls.length >= 1 &&
     correctCalls.every(c => c.node === 'build' && sessions.build!.calls.includes(c.call)) &&
     task.sessions.build === worktreeBefore.session &&
@@ -361,6 +394,7 @@ const result = {
   // 跑的是哪份代码（开头记下的）；结束时提交变了（跑的过程中有人提交）时另记 commitAtEnd，pr-checklist 会当成对不上
   ...atStart,
   ...(atEnd.commit !== atStart.commit ? { commitAtEnd: atEnd.commit } : {}),
+  executor: EXECUTOR,
   task: first.id,
   killed: first.killed,
   killedAtGate: second.killed,

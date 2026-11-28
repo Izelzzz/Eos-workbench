@@ -1,4 +1,5 @@
-// 跨执行器的接口测试：同一套用例对每个登记的执行器各跑一遍（不调模型：dsh 用假的 dsh 进程，它像 dsh 一样把会话写进会话日志）。
+// 跨执行器的接口测试：同一套用例对每个登记的执行器各跑一遍（不调模型：dsh 用假的 dsh 进程，它像 dsh 一样把会话写进会话日志；
+// Claude Code 跑真的 Claude Code，模型接口换成本机的假接口 tests/fake-anthropic.ts）。
 // 新登记一个执行器（src/executor/registry.ts 的 EXECUTORS）时，要在 FACTORIES 里给它一个不调模型的构造，否则第一个用例失败。
 // 后面是注册表本身的用例：按 executor 分派、找回时只交给调用用的执行器、没登记的名字报错。
 import assert from 'node:assert/strict'
@@ -6,17 +7,23 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
 import { zstdCompressSync } from 'node:zlib'
+import { ClaudeCodeExecutor } from '../src/executor/claude-code.ts'
 import { DshExecutor } from '../src/executor/dsh.ts'
 import { checkExecutor, EXECUTORS, Executors, healthOf, modelKeySpecs } from '../src/executor/registry.ts'
 import type { AgentSpec, Capabilities, Executor, ExecutorContext, ExecutorKind } from '../src/executor/types.ts'
 import { needsOf } from '../src/executor/types.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
+import { FakeAnthropic } from './fake-anthropic.ts'
 import { MemoryExecutor } from './memory-executor.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const dirs: string[] = []
-after(() => {
+/** Claude Code 用真的 Claude Code 进程（套着 Landlock），模型接口换成本机的假接口。 */
+const fakeAnthropic = new FakeAnthropic()
+const fakeAnthropicUrl = await fakeAnthropic.start()
+after(async () => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true })
+  await fakeAnthropic.close()
 })
 const tmp = () => {
   const d = mkdtempSync(join(ROOT, 'node_modules', '.eos-contract-'))
@@ -75,6 +82,7 @@ const FACTORIES: Record<string, () => Executor> = {
     const dshHome = tmp()
     return new DshExecutor({ dshHome, dshBin: 'dsh', modelKey: () => 'sk-contract-key', createHarness: loggingHarness(dshHome) })
   },
+  'claude-code': () => new ClaudeCodeExecutor({ home: tmp(), modelKey: () => 'sk-contract-key', target: fakeAnthropicUrl, env: process.env }),
 }
 
 test('每个登记的执行器都有接口测试的构造', () => {
@@ -159,6 +167,7 @@ const kind = (name: string, made: MemoryExecutor[], o: { fails?: boolean; sandbo
   name,
   capabilities: { ...ALL, ...o.capabilities },
   modelKey: { credential: name, env: `${name.toUpperCase()}_API_KEY`, label: `${name} key` },
+  failureHints: [{ test: /401/, fix: `${name} 的 key 无效` }],
   create: () => {
     if (o.fails) throw new Error(`${name} 没装好`)
     const ex = new MemoryExecutor(name)
@@ -193,6 +202,23 @@ test('注册表按 spec.executor 分派，不写时用第一个（默认）；�
   )
   await reg.close()
   assert.ok(made.every(m => m.closed))
+})
+
+test('失败的修法按那次调用用的执行器给；不写名字时是默认执行器，认不出时 undefined；不用为此建执行器', () => {
+  const made: MemoryExecutor[] = []
+  const reg = new Executors(ctxFor, [kind('a', made), kind('b', made)])
+  assert.equal(reg.failureHint('HTTP 401', 'b'), 'b 的 key 无效')
+  assert.equal(reg.failureHint('HTTP 401'), 'a 的 key 无效')
+  assert.equal(reg.failureHint('奇怪的错误', 'b'), undefined)
+  assert.equal(made.length, 0)
+})
+
+test('每个登记的执行器的修法都说得出它自己的 key：401 时指向它的凭据名和环境变量', () => {
+  const reg = new Executors(ctxFor)
+  for (const k of EXECUTORS) {
+    const fix = reg.failureHint('Request failed with status 401 Unauthorized', k.name) ?? ''
+    assert.ok(fix.includes(k.modelKey.credential) && fix.includes(k.modelKey.env), `${k.name}：${fix}`)
+  }
 })
 
 test('两个执行器里有同名的会话和 nonce 时，找回走调用用的那个执行器，不会认错', async () => {
@@ -289,6 +315,10 @@ test('dsh 声明的模型 key 就是现有部署用的那条：凭据 deepseek�
   assert.deepEqual(dsh.modelKey, { credential: 'deepseek', env: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key' })
   assert.deepEqual(
     modelKeySpecs().map(s => s.env),
-    ['DEEPSEEK_API_KEY'],
+    ['DEEPSEEK_API_KEY', 'ANTHROPIC_API_KEY'],
   )
+})
+
+test('Claude Code 声明的模型 key：凭据 anthropic、环境变量 ANTHROPIC_API_KEY', () => {
+  assert.deepEqual(EXECUTORS.find(k => k.name === 'claude-code')!.modelKey, { credential: 'anthropic', env: 'ANTHROPIC_API_KEY', label: 'Anthropic API key' })
 })

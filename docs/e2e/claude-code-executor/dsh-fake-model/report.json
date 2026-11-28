@@ -1,0 +1,125 @@
+{
+  "commit": "504d2eb752d418bb19595efb22e333a458f26460",
+  "uncommitted": [],
+  "executor": "dsh",
+  "task": "t261127174606975",
+  "killed": true,
+  "killedAtGate": true,
+  "gateLog": [
+    "accept#1 SIGKILL",
+    "accept#1 send-back",
+    "accept#2 accept"
+  ],
+  "atGate": {
+    "status": "waiting_accept",
+    "gate": {
+      "node": "accept",
+      "round": 1,
+      "cycle": 1,
+      "phase": "decide",
+      "fixes": 0,
+      "formatRetries": 0
+    },
+    "calls": 8
+  },
+  "correction": {
+    "before": {
+      "worktree": "/home/user/Eos-workbench/.eos/e2e/data/worktrees/t261127174606975",
+      "branch": "eos/t261127174606975",
+      "session": "session-07a53c1f718620699a6a214d3281fc79",
+      "status": "done"
+    },
+    "calls": [
+      "c10"
+    ],
+    "files": [
+      "README.md"
+    ]
+  },
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个执行器会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true,
+    "agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位": true,
+    "停在人验收的卡点上：状态是等待验收，不挂任何工作": true,
+    "卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）": true,
+    "命令行列出等验收的任务": true,
+    "人打回一次（带意见）、改完回到卡点后通过": true,
+    "打回后交回开发原来的会话修改": true,
+    "修正：交给开发原来的会话（同一个执行器会话），在同一个 worktree 和分支上": true,
+    "修正之后只重跑程序检查：没有再请评审或验收，没有重跑别的节点": true,
+    "修正完成，任务回到完成；能看出是第几次修正、改了哪些文件": true,
+    "卡点打回之后没有再请评审 agent": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "session-d4596287e79b09abf2c7bbd326066fb9",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "session-07a53c1f718620699a6a214d3281fc79",
+      "calls": [
+        "c2",
+        "c4",
+        "c7",
+        "c9",
+        "c10"
+      ],
+      "presets": [
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "session-c2231b77162fe1fb5dc8bf09eb25527b",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    },
+    "sign-off": {
+      "sid": "session-203151c32d18f489babb30d8fc446c41",
+      "calls": [
+        "c6",
+        "c8"
+      ],
+      "presets": [
+        "workspace-write",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 1139ms",
+    "c2 produce@build 486ms",
+    "c3 critique@review#1 482ms",
+    "c4 respond@review#1 460ms",
+    "c5 critique@review#2 208ms",
+    "c6 accept@sign-off#1 471ms",
+    "c7 amend@sign-off#2 483ms",
+    "c8 accept@sign-off#2 150ms",
+    "c9 amend@accept#2 487ms",
+    "c10 correct@build#1 521ms"
+  ],
+  "commits": "0b7e640 eos: build correct (c10)\nf0c590c eos: review respond (c4)\n6df38dd eos: build produce (c2)\n",
+  "npmTest": "est\n> node --test\n\nTAP version 13\n# Subtest: 求和\nok 1 - 求和\n  ---\n  duration_ms: 0.926871\n  type: 'test'\n  ...\n# Subtest: 空数组返回 0\nok 2 - 空数组返回 0\n  ---\n  duration_ms: 0.156059\n  type: 'test'\n  ...\n# Subtest: 有非数字时抛 TypeError\nok 3 - 有非数字时抛 TypeError\n  ---\n  duration_ms: 0.611067\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 71.904183\n"
+}

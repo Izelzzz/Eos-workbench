@@ -53,6 +53,10 @@ test('常见错误都有对应的修法，认不出的让人看日志', () => {
   assert.ok(RULES.length >= 7)
 })
 
+test('通用的修法不提某个执行器或模型服务：具体的 key、主机由执行器给（ExecutorKind.failureHints）', () => {
+  for (const r of RULES) assert.doesNotMatch(r.fix, /deepseek|anthropic|claude|dsh|DEEPSEEK_|ANTHROPIC_/i, r.fix)
+})
+
 test('失败原因写清哪一步、什么原因、怎么修；日志路径不存进失败原因', () => {
   assert.equal(
     explain({ where: '[build] dev · produce（调用 c2）', error: '429 Too Many Requests', task: 't1' }),

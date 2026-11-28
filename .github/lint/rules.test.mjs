@@ -43,6 +43,21 @@ test('dsh 的包和客户端只在 src/executor/dsh.ts 里用', async () => {
   }
 })
 
+test('Claude Agent SDK 只在 src/executor/claude-code.ts 里用；Landlock 启动器只在 landlock.ts（和 dsh.ts）里用', async () => {
+  const sdk = `import { query } from '@anthropic-ai/claude-agent-sdk'\nexport const a = query\n`
+  const landlock = `import { probe } from '@deepseek-ai/node-addon-system/landlock-run'\nexport const a = probe\n`
+  const dshPkg = `import { x } from '@deepseek-ai/dsh-session'\nexport const a = x\n`
+  assert.deepEqual(await rules('src/executor/claude-code.ts', sdk), [])
+  for (const path of ['src/executor/dsh.ts', 'src/executor/landlock.ts', 'src/executor/claude-code-upstream.ts', 'src/runner/x.ts', 'src/cli.ts', 'web/src/x.tsx']) {
+    assert.deepEqual(await rules(path, sdk), restricted, `${path} @anthropic-ai`)
+  }
+  assert.deepEqual(await rules('src/runner/x.ts', "export const a = () => import('@anthropic-ai/claude-agent-sdk')\n"), ['no-restricted-syntax'])
+  assert.deepEqual(await rules('src/executor/landlock.ts', landlock), [])
+  assert.deepEqual(await rules('src/executor/landlock.ts', dshPkg), restricted)
+  assert.deepEqual(await rules('src/executor/claude-code.ts', landlock), restricted)
+  assert.deepEqual(await rules('src/executor/claude-code.ts', dshPkg), restricted)
+})
+
 test('执行器的实现只被 src/executor/ 和 src/cli.ts 引用；别处只认 types.ts', async () => {
   const impl = `import { DshExecutor } from '../executor/dsh.ts'\nexport const a = DshExecutor\n`
   const types = `import type { Executor } from '../executor/types.ts'\nexport type A = Executor\n`

@@ -24,7 +24,22 @@ import type { ModelKey } from '../credentials/model-key.ts'
 import { AGENT_USER_ENV, asUser, type CheckUser } from '../runner/check-user.ts'
 import type { TraceEvent } from '../trace/types.ts'
 import type { ToolGroup } from '../workflow/types.ts'
-import type { AgentMcp, AgentProfile, AgentQuestion, AgentSpec, AskHandler, Capabilities, Executor, ExecutorContext, ExecutorKind, Health, HealthItem, ModelKeySpec, Reply } from './types.ts'
+import type {
+  AgentMcp,
+  AgentProfile,
+  AgentQuestion,
+  AgentSpec,
+  AskHandler,
+  Capabilities,
+  Executor,
+  ExecutorContext,
+  ExecutorKind,
+  FailureHint,
+  Health,
+  HealthItem,
+  ModelKeySpec,
+  Reply,
+} from './types.ts'
 import { isHttpMcp } from './types.ts'
 
 export const PROVIDER = 'deepseek-official'
@@ -1117,10 +1132,25 @@ const currentKey = (ctx: ExecutorContext): string => {
   throw new Error(k.source === 'error' ? `模型 API key 读不出来：${k.error}` : `没有可用的模型 API key：凭据存储里没有 ${MODEL_KEY_CREDENTIAL}，也没有设置 ${MODEL_KEY_ENV}`)
 }
 
+/** dsh 的错误怎么修：key 在哪设置、模型接口是哪个主机。 */
+export const FAILURE_HINTS: FailureHint[] = [
+  {
+    test: /\b401\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|authentication/i,
+    fix: `DeepSeek API key 无效或过期：在 Web 的「凭据」页更新 ${MODEL_KEY_CREDENTIAL}，或改启动平台的环境变量 ${MODEL_KEY_ENV} 后重启平台`,
+  },
+  { test: /\b402\b|insufficient[ _]balance|余额/i, fix: 'DeepSeek 账户余额不足：充值后重试' },
+  {
+    test: /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|network|(connection|socket|other side) closed/i,
+    fix: `连不上模型服务：检查平台所在机器的网络和代理设置（能否访问 ${OFFICIAL_MODEL_HOST}，或 EOS_MODEL_BASE_URL 指向的地址）`,
+  },
+  { test: /runtime exited|process (exited|terminated)|exited with code|SIGKILL|SIGTERM|进程(退出|崩溃)|进程.*被关闭/i, fix: 'agent 进程意外退出：直接重试；反复出现时看日志里 dsh 的报错' },
+]
+
 export const dsh: ExecutorKind = {
   name: 'dsh',
   capabilities: CAPABILITIES,
   modelKey: MODEL_KEY,
+  failureHints: FAILURE_HINTS,
   create: ctx => {
     const bin = dshEntry(ctx.env, ctx.root)
     if (bin === undefined) throw new Error('找不到 dsh，先在仓库目录运行 npm install')

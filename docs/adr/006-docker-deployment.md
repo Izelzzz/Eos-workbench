@@ -35,14 +35,18 @@ flowchart TB
     plat["平台<br/>用户 eos<br/>带 SETUID、SETGID、KILL"]
     plat -- "切换用户，清掉能力" --> dsh["dsh<br/>用户 eos-agent"]
     plat -- "切换用户，清掉能力" --> chk["检查命令<br/>用户 eos-check"]
+    plat -- "切换用户，清掉能力，套 Landlock" --> cc["Claude Code<br/>用户 eos-agent"]
+    cc -- "一次性令牌" --> up["平台的本机上游<br/>127.0.0.1"]
     dsh --> agent["agent<br/>Landlock：只能写自己的 worktree 和 /tmp"]
+    cc --> agent
     dsh --> mcp["MCP 服务<br/>沙箱外，用户 eos-agent"]
     plat <--> data[("/data 数据卷<br/>eos.db、dsh、worktrees、repos")]
     agent -- "只能写自己任务的" --> wt["/data/worktrees<br/>各任务的 worktree"]
     chk -- "能写所有任务的 worktree" --> wt
     mcp -- "能写所有任务的 worktree" --> wt
   end
-  dsh -- "带模型 key" --> model["模型 API"]
+  dsh -- "带 DeepSeek key" --> model["模型 API"]
+  up -- "换上 Anthropic key" --> model
   plat --> gh["GitHub"]
 ```
 
@@ -93,7 +97,7 @@ Landlock 挡住的是对域外进程的 ptrace 类访问。对照：沙箱外同
 
 #### 模型 key 的保护依赖沙箱生效
 
-这一版 dsh 只能从进程环境里得到模型 key，所以模型 key 在 dsh 进程的环境里。
+这一版 dsh 只能从进程环境里得到模型 key，所以 DeepSeek 的 key 在 dsh 进程的环境里。Anthropic 的 key 不在 Claude Code 进程里：Claude Code 和 agent 拿到的只是一次调用有效的令牌（ADR-005「模型 key 的来源」）。
 
 - 验证过的配置：本镜像、这份 compose、内核 6.18。在这个配置下 Landlock 挡住了 agent 读取 dsh 和平台进程的环境。
 - Landlock 没有生效时（内核不支持，或以别的方式运行而没有经过沙箱），同一用户的 agent 能读到模型 key。
@@ -141,9 +145,9 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | 用户 | 运行什么 | 能读 | 能写 |
 |---|---|---|---|
 | root | 只有 1 号进程（`docker-init`），以及 `docker compose exec` 不加 `-u` 时的命令 | 只有 `SETUID`、`SETGID`、`KILL` 三个能力，读写不了别的用户的文件 | 同左 |
-| `eos` | 平台、git；平台进程自己带着 `SETUID`、`SETGID`、`KILL` | `/data` 全部（dsh 的会话日志以 `eos-agent` 的身份读）、自己进程的环境（主密钥） | `/data` 全部，`/data/dsh` 里 dsh 自己建的 0700 目录除外 |
-| `eos-agent` | dsh、agent、dsh 启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、dsh 进程的环境（模型 key；agent 在 Landlock 里读不到）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；agent 在 Landlock 里只能写自己的 worktree 和 `/tmp` |
-| `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
+| `eos` | 平台、git；平台进程自己带着 `SETUID`、`SETGID`、`KILL` | `/data` 全部（dsh 和 Claude Code 的会话日志以 `eos-agent` 的身份读）、自己进程的环境（主密钥） | `/data` 全部，`/data/dsh` 里 dsh 自己建的 0700 目录、`/data/claude-code/sessions/` 除外 |
+| `eos-agent` | dsh、Claude Code、agent、它们启动的 MCP 服务 | 世界可读的文件、`/data/dsh`、`/data/claude-code`、dsh 进程的环境（DeepSeek key；agent 在 Landlock 里读不到）、Claude Code 进程的环境（只有这次调用的令牌）；读不到 `eos` 和 root 进程的环境 | dsh：`/data/dsh`（共用组 `eos-dsh`）、worktree（共用组 `eos-work`）、自己的家目录、`/tmp`。dsh 的 agent 在 Landlock 里只能写自己的 worktree 和 `/tmp`。Claude Code 和它的 agent 在 Landlock 里只能写这个会话在 `/data/claude-code/sessions/` 下的目录和 `/tmp`，可写的角色还能写自己的 worktree |
+| `eos-check` | 检查命令 | 世界可读的文件，包括 `/data` 下大部分（`eos.db`、仓库、worktree）；读不到别的用户进程的环境，进不了 `/data/dsh`、`/data/claude-code` | worktree（共用组 `eos-work`）、自己的家目录、`/tmp`；写不了 `eos.db`、`repos/`、`eos` 的家目录 |
 
 **为什么分成三个普通用户**
 
@@ -159,7 +163,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 
 - compose 去掉全部能力，只加回 `SETUID`、`SETGID`、`KILL`。`no-new-privileges` 保持生效。
 - `eos` 命令以 root 启动，降到 `eos` 时保留这三个能力（ambient）。
-- 平台用 `SETUID`、`SETGID` 把检查命令切换到 `eos-check`、把 dsh 切换到 `eos-agent`；用 `KILL` 给 dsh 的进程发信号（关闭 dsh），以及结束超时的辅助命令（平台借别的用户身份运行的那些）。
+- 平台用 `SETUID`、`SETGID` 把检查命令切换到 `eos-check`、把 dsh 和 Claude Code 切换到 `eos-agent`；用 `KILL` 给 dsh 的进程发信号（关闭 dsh），以及结束超时的辅助命令（平台借别的用户身份运行的那些）。
 - 切换时清掉全部能力，所以检查命令和 dsh 不能切换回 `eos` 或 root。
 - 派生镜像不能加 `USER eos`：容器必须以 root 启动，`eos` 命令才能降到平台用户并保留这三个能力。
 
@@ -176,6 +180,7 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | 进程 | 启动方式 | 是否带能力 |
 |---|---|---|
 | dsh、agent、dsh 在沙箱外启动的 MCP 服务 | `deploy/dsh-launch.mjs`：清掉能力并切换到 `eos-agent` | 否 |
+| Claude Code、它的 agent 和 MCP 服务 | 平台用 `setpriv` 切换到 `eos-agent`、清掉能力，再套 Landlock（`src/executor/claude-code.ts`） | 否 |
 | git | `/usr/local/bin/git`（`deploy/git`） | 否 |
 | 检查命令 | 切换到 `eos-check` 时清掉能力 | 否 |
 | 平台借 `eos-check`、`eos-agent` 的身份运行的辅助命令 | 切换用户时清掉能力 | 否 |
@@ -199,6 +204,8 @@ agent 能写 `/tmp`。平台和 dsh 会加载的缓存如果放在那里，agent
 | `/data/dsh/eos-profiles/`（能力面）、`/data/dsh/eos-process-cwd/`（dsh 进程的工作目录） | 平台启动时创建，2755 | `eos-agent` 只读。上一级 `/data/dsh` 的 sticky 位使它不能改名或删除这两个目录；平台写入前还核对它们不是符号链接 |
 | `/data/dsh/mcp-cwd/` | 属于 `eos-agent` | MCP 服务在里面写缓存和日志；平台不往里写 |
 | dsh 创建的会话目录 | 0700，只有 `eos-agent` 能读 | 平台以 `eos-agent` 的身份读取（`src/executor/dsh.ts` 的 `readSessionLogAs`） |
+| `/data/claude-code` | 和 `/data/dsh` 一样：`eos`、组 `eos-dsh`、3770；`eos-profiles/` 由平台启动时创建，2755 | Claude Code 以 `eos-agent` 运行；平台往 `eos-profiles/` 写技能，写入前核对它是平台自己的真目录 |
+| `/data/claude-code/sessions/` 和其中每个会话的目录 | `eos-agent` 创建，2700（setgid 从上一级继承） | 会话的 HOME、配置和会话日志。Claude Code 在 Landlock 下只能写自己这个会话的目录、`/tmp`，可写的角色还能写 worktree。平台以 `eos-agent` 的身份建目录、读日志 |
 | `/data/worktrees` | 2755，带 setgid，组 `eos-work` | 目录本身组内不可写：检查命令不能把别的任务的 worktree 改名或换成符号链接 |
 | 各任务的 worktree | 组 `eos-work`，平台的 umask 是 002 | 检查命令能写 agent 改过的文件 |
 
@@ -395,6 +402,8 @@ GitHub Actions 把镜像发布到 ghcr（`.github/workflows/image.yml`）。目�
 | agent 能读整个 `/data` | Landlock 只限制写。见「沙箱不限制什么」 |
 | 任务共用 `/tmp` 和依赖缓存 | 任务之间可以互相读临时文件、污染缓存。见「沙箱不限制什么」 |
 | 宿主机内核必须支持 Landlock | Linux 5.13 以上并启用 landlock。不支持时任务失败，不会不受限制地运行 |
+| Claude Code 的 agent 能改自己会话的记录 | Claude Code 要写自己的会话目录（配置、会话日志），Landlock 下 agent 的命令也能写它。平台按这份日志找回崩溃前的回复、回放 trace：agent 能伪造自己这个会话里的内容，碰不到别的会话 |
+| 调用期间 agent 能借平台的 Anthropic key 调模型 | agent 读得到这次调用的令牌，调用结束前能经平台的上游发模型请求（只有 `POST /v1/messages`）。用额度受限的 key |
 | 没有登录 | 网络上能连到端口的人都能使用。默认只绑定 `127.0.0.1` |
 | 镜像约 2.6GB | 其中 dsh 的依赖约 930MB，编译工具链和 Python 约几百 MB |
 
@@ -415,8 +424,8 @@ GitHub Actions 把镜像发布到 ghcr（`.github/workflows/image.yml`）。目�
 | 范围 | 文件 |
 |---|---|
 | 镜像和 compose | `Dockerfile`、`.dockerignore`、`compose.yaml` |
-| 启动和降权 | `deploy/eos`（降权入口，准备和迁移 `/data/dsh`）、`deploy/dsh-launch.mjs`（清掉能力并切换到 `eos-agent`）、`deploy/git`（清掉能力） |
-| 平台代码 | `src/cli.ts`、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`、`src/runner/git.ts`（清掉能力、撤销时核对路径）、`src/runner/supervisor.ts`、`src/runner/runner.ts`、`src/runner/mirror.ts`、`src/executor/dsh.ts`、`src/credentials/model-key.ts` |
+| 启动和降权 | `deploy/eos`（降权入口，准备和迁移 `/data/dsh`，准备 `/data/claude-code`）、`deploy/dsh-launch.mjs`（清掉能力并切换到 `eos-agent`）、`deploy/git`（清掉能力） |
+| 平台代码 | `src/cli.ts`、`src/runner/check-user.ts`、`src/runner/checks.ts`、`src/runner/doctor.ts`、`src/runner/git.ts`（清掉能力、撤销时核对路径）、`src/runner/supervisor.ts`、`src/runner/runner.ts`、`src/runner/mirror.ts`、`src/executor/dsh.ts`、`src/executor/claude-code.ts`、`src/executor/claude-code-upstream.ts`、`src/executor/landlock.ts`、`src/credentials/model-key.ts` |
 | 镜像发布 | `.github/workflows/image.yml`、`.github/scripts/` 下的 `image-tags.ts`、`image-build.sh`、`image-push.sh`、`image-probe.ts`、`image-probe-checks.json`、`image-scan.sh`，以及 `.trivyignore.yaml` |
 | 文档和验证 | `docs/deploy.md`、`scripts/deploy-e2e.ts` |
 
@@ -441,4 +450,5 @@ GitHub Actions 把镜像发布到 ghcr（`.github/workflows/image.yml`）。目�
 | 镜像表和探针清单一致 | `tests/image-probe.test.ts` |
 | dsh 的环境白名单 | `tests/agent-env-contract.test.ts` |
 | doctor 报告实际使用的沙箱 | `docs/e2e/deploy-3a-doctor/` |
+| Claude Code 在镜像里：Landlock 可用、以 `eos-agent` 运行、写入范围、读不到真 key 和主密钥、会话目录的权限 | `docs/e2e/claude-code-executor/docker-probe.log` |
 | 检查命令读不到 `eos` 和 root 进程的环境，切换不回 `eos` 或 root | `docs/e2e/deploy-3b-check-user/` |

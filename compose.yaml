@@ -1,5 +1,5 @@
 # Eos 的 Docker Compose 部署。用法、限制和升级步骤见 docs/deploy.md。
-# 机密从同目录的 .env 读（chmod 600，不要提交）：DEEPSEEK_API_KEY、EOS_MASTER_KEY。
+# 机密从同目录的 .env 读（chmod 600，不要提交）：DEEPSEEK_API_KEY、EOS_MASTER_KEY，用 Claude Code 执行器时还有 ANTHROPIC_API_KEY。
 services:
   eos:
     build: .
@@ -10,6 +10,8 @@ services:
     environment:
       # 模型 key：第一次启动从这里读。之后可以改存到 Web 的凭据页（名字 deepseek），再从 .env 删掉；两边都没有时平台不启动。
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # 角色用 Claude Code 执行器（executor: claude-code）时的模型 key；也可以存到凭据页（名字 anthropic）。只交给平台，不交给 Claude Code 进程。
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       EOS_MASTER_KEY: ${EOS_MASTER_KEY:-}
       # 浏览器用 localhost:4317 以外的地址访问时设置，例如 https://eos.example.com（见 docs/deploy.md「访问」）。
       EOS_PUBLIC_URL: ${EOS_PUBLIC_URL:-}

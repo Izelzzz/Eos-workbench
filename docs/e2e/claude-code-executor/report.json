@@ -1,0 +1,122 @@
+{
+  "commit": "a7f13e41b7da363ac2cf1e9f43cfd64fc8c814c6",
+  "uncommitted": [],
+  "executor": "claude-code",
+  "task": "t261127172355uno",
+  "killed": true,
+  "killedAtGate": true,
+  "gateLog": [
+    "accept#1 SIGKILL",
+    "accept#1 send-back",
+    "accept#2 accept"
+  ],
+  "atGate": {
+    "status": "waiting_accept",
+    "gate": {
+      "node": "accept",
+      "round": 1,
+      "cycle": 1,
+      "phase": "decide",
+      "fixes": 0,
+      "formatRetries": 0
+    },
+    "calls": 6
+  },
+  "correction": {
+    "before": {
+      "worktree": "/home/user/Eos-workbench/.eos/e2e/data/worktrees/t261127172355uno",
+      "branch": "eos/t261127172355uno",
+      "session": "528430b9-394e-4887-a7bf-89946b246c71",
+      "status": "done"
+    },
+    "calls": [
+      "c8"
+    ],
+    "files": [
+      "README.md"
+    ]
+  },
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个执行器会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true,
+    "agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位": true,
+    "停在人验收的卡点上：状态是等待验收，不挂任何工作": true,
+    "卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）": true,
+    "命令行列出等验收的任务": true,
+    "人打回一次（带意见）、改完回到卡点后通过": true,
+    "打回后交回开发原来的会话修改": true,
+    "修正：交给开发原来的会话（同一个执行器会话），在同一个 worktree 和分支上": true,
+    "修正之后只重跑程序检查：没有再请评审或验收，没有重跑别的节点": true,
+    "修正完成，任务回到完成；能看出是第几次修正、改了哪些文件": true,
+    "卡点打回之后没有再请评审 agent": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "55adffc8-44f8-4654-a059-e5223ae9fd10",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "528430b9-394e-4887-a7bf-89946b246c71",
+      "calls": [
+        "c2",
+        "c4",
+        "c7",
+        "c8"
+      ],
+      "presets": [
+        "workspace-write",
+        "workspace-write",
+        "workspace-write",
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "a2a33007-85e6-4325-af5f-fd91bf0dafd2",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "read-only",
+        "read-only"
+      ],
+      "asks": 0
+    },
+    "sign-off": {
+      "sid": "33f0bea5-f12a-4263-a86d-b1c8e1ea67c4",
+      "calls": [
+        "c6"
+      ],
+      "presets": [
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 14785ms",
+    "c2 produce@build 8500ms",
+    "c3 critique@review#1 13258ms",
+    "c4 respond@review#1 9615ms",
+    "c5 critique@review#2 3769ms",
+    "c6 accept@sign-off#1 6689ms",
+    "c7 amend@accept#2 4986ms",
+    "c8 correct@build#1 5202ms"
+  ],
+  "commits": "3e0a6c0 eos: build correct (c8)\na68335f eos: accept amend (c7)\n0640c5d eos: review respond (c4)\n9624bd4 eos: build produce (c2)\n",
+  "npmTest": ".\n# Subtest: 非法元素在首、中、尾\nok 7 - 非法元素在首、中、尾\n  ---\n  duration_ms: 0.152696\n  type: 'test'\n  ...\n# Subtest: 稀疏数组抛 TypeError\nok 8 - 稀疏数组抛 TypeError\n  ---\n  duration_ms: 0.075802\n  type: 'test'\n  ...\n# Subtest: 非数组输入抛 TypeError\nok 9 - 非数组输入抛 TypeError\n  ---\n  duration_ms: 0.232856\n  type: 'test'\n  ...\n1..9\n# tests 9\n# suites 0\n# pass 9\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 71.019569\n"
+}

@@ -67,11 +67,11 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
   const log = o.log ?? (() => {})
   const dispatch = (event: Parameters<Store['dispatch']>[1], actor: 'runner' | 'executor' = 'executor') => o.store.dispatch(id, event, now(), actor)
   /** 这一步失败：终端打一行，日志文件记完整信息，任务的失败原因写清哪一步、什么原因、怎么修。 */
-  const fail = (where: string, callId: Call['id'] | CheckRun['id'], reason: string, e?: unknown) => {
+  const fail = (where: string, callId: Call['id'] | CheckRun['id'], reason: string, e?: unknown, fix?: string) => {
     const first = (o.redact ?? (t => t))(reason.trim().split('\n')[0]!)
     log(`✗ ${where}：${first}`)
     if (e !== undefined) o.detail?.(`✗ ${where} 的完整错误：\n${fullError(e)}`)
-    dispatch({ kind: 'call_failed', call: callId, error: explain({ where, error: first, task: id }) })
+    dispatch({ kind: 'call_failed', call: callId, error: explain({ where, error: first, task: id, ...(fix === undefined ? {} : { fix }) }) })
   }
 
   /** agent 中途提问：记成问题，等 `eos answer` 写入回答。崩溃前已经提过的同一个问题直接复用。 */
@@ -144,7 +144,9 @@ export const runTask = async (id: string, o: RunnerOptions): Promise<Task> => {
           },
         })
       } catch (e) {
-        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, keyLine((e as Error).message), e)
+        const reason = keyLine((e as Error).message)
+        // 这个角色用的执行器认得这个错误时，修法由它给（具体到它的 key、模型接口）
+        fail(`${label(task, call)}（调用 ${call.id}）`, call.id, reason, e, o.executor.failureHint?.(reason, role.executor))
         return
       }
     }
