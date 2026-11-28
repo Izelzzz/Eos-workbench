@@ -132,11 +132,19 @@ function turnFor(role: Role, isFirstTurn: boolean, prompt: string): Turn {
   }
 }
 
-/** 发来请求的是不是 Claude Code：它的工具名是大写开头的（Write、Bash），dsh 的是小写（write、bash）。 */
-export const isClaudeCode = (req: Request): boolean => (req.tools ?? []).some(t => t.name === 'Write' || t.name === 'Bash')
+/** Claude Code 自带的工具名（大写开头）；dsh 的是小写（write、bash）。只读、去掉了命令的角色也至少有其中几个（Read、Glob、Grep、AskUserQuestion）。 */
+const CLAUDE_CODE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'AskUserQuestion', 'Skill'])
+export const isClaudeCode = (req: Request): boolean => (req.tools ?? []).some(t => CLAUDE_CODE_TOOLS.has(t.name))
 
 /** Claude Code 在请求里写明工作目录（「Primary working directory: <路径>」）；它的 Write 要绝对路径。 */
-export const workingDirectory = (req: Request): string | undefined => /Primary working directory: ([^\s\\"]+)/.exec(JSON.stringify({ system: req.system, messages: req.messages }))?.[1]
+export const workingDirectory = (req: Request): string | undefined => {
+  const text = [req.system, ...req.messages.map(m => m.content)]
+    .flat(2)
+    .map(b => (typeof b === 'string' ? b : typeof (b as { text?: unknown })?.text === 'string' ? (b as { text: string }).text : ''))
+    .join('\n')
+  // 到行尾为止（路径里可以有空格）
+  return /Primary working directory: ([^\n]+)/.exec(text)?.[1]?.trim()
+}
 
 /** 剧本里的工具调用换成这个执行器的：dsh 原样；Claude Code 换工具名和参数（Write 用绝对路径，AskUserQuestion 的问题带 header、选项带说明）。 */
 export function toolFor(req: Request, r: Extract<Reply, { kind: 'tool' }>): Reply {

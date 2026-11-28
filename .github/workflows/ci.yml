@@ -1,5 +1,6 @@
 # 类型检查、单元测试、构建网页、确定性 E2E、lint、格式化。见 docs/roadmap.md 的 CI 一项。
 # job 名字（typecheck、unit-test、build-web、e2e-fake-model、lint、format）会设成必需检查，改名前先改分支保护。
+# e2e-fake-model-claude-code（Claude Code 的确定性 E2E）是不是必需检查，在分支保护里设。
 name: CI
 
 on:

@@ -10,7 +10,8 @@ import { join } from 'node:path'
 import { startFakeModel } from './fake-model/server.ts'
 
 const ROOT = join(import.meta.dirname, '..')
-const EXECUTOR = process.argv[2] ?? 'dsh'
+// 不写参数时也认 EOS_E2E_EXECUTOR（scripts/e2e.ts 的开关），免得以为跑了 Claude Code、其实跑的是 dsh
+const EXECUTOR = process.argv[2] ?? process.env.EOS_E2E_EXECUTOR ?? 'dsh'
 if (EXECUTOR !== 'dsh' && EXECUTOR !== 'claude-code') throw new Error(`执行器只能是 dsh 或 claude-code（现在是 ${EXECUTOR}）`)
 const OUT = join(ROOT, '.eos', 'e2e-ci')
 const LOG = join(OUT, 'fake-model.log')
