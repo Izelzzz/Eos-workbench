@@ -1,5 +1,5 @@
 // 对话 agent 提议建任务：agent 给出仓库、工作流、需求，平台检查后记成「待确认」的任务提议。
-// 提议不建任务：这里只写 chat_task_proposals 表。建任务只能由人确认（命令行 eos chat create，或网页），见 create.ts；
+// 提议不建任务：这里只写 chat_task_proposals 表。建任务只能由人确认（命令行 eos chat create），见 create.ts；
 // agent 能触发的模块都不引用 create.ts（tests/chat-tasks.test.ts 核对）。
 // 仓库只能是平台上的任务用过的（list_repos 列出的）：agent 不能拿任意路径试探服务器上有什么。别的仓库由人在确认时改。
 import { z } from 'zod'
