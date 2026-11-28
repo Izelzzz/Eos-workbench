@@ -19,7 +19,7 @@ export function SegmentedItem({ className, ...props }: Tabs.Tab.Props) {
     <Tabs.Tab
       data-slot="segmented-item"
       className={cn(
-        'h-7 cursor-pointer rounded-md border-0 bg-transparent px-3.5 py-0 font-sans text-sm text-ink-2 outline-hidden transition duration-150 motion-reduce:transition-none hover:bg-transparent hover:text-ink',
+        'h-7 cursor-pointer rounded-segment border-0 bg-transparent px-3.5 py-0 font-sans text-sm text-ink-2 outline-hidden transition duration-150 motion-reduce:transition-none hover:bg-transparent hover:text-ink',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink focus-visible:outline-solid',
         'aria-selected:bg-surface aria-selected:font-medium aria-selected:text-ink aria-selected:shadow-segment',
         className,

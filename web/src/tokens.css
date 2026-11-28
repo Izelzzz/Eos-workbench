@@ -111,10 +111,14 @@
   --radius-full: 999px;
   /* 设计稿的档位（按用途起名） */
   --radius-control: 10px; /* 按钮、导航项、任务行、分段切换的外框 */
+  --radius-segment: 7px; /* 分段切换里选中的那一段 */
   --radius-box: 12px; /* 选项、说明块、浮层 */
   --radius-chat: 14px; /* 对话里的卡片 */
   --radius-input: 16px; /* 对话的输入区 */
   --radius-card: 18px; /* 当前卡片、空状态的虚线框 */
+
+  /* 边框宽度：默认 1px；选项右边的圆圈是 1.5px */
+  --border-width-tick: 1.5px;
 
   --leading-none: 1;
   --leading-tight: 1.3;

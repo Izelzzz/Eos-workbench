@@ -18,7 +18,7 @@ export function MenuContent({ className, align = 'end', children, ...props }: Me
       <MenuPrimitive.Positioner sideOffset={6} align={align} className="isolate z-50">
         <MenuPrimitive.Popup
           data-slot="menu-content"
-          className={cn('flex max-w-sm min-w-65 flex-col gap-px rounded-box border border-line bg-surface p-1.5 text-base text-ink shadow-popover outline-hidden', className)}
+          className={cn('flex max-w-90 min-w-65 flex-col gap-px rounded-box border border-line bg-surface p-1.5 text-base text-ink shadow-popover outline-hidden', className)}
           {...props}
         >
           {children}

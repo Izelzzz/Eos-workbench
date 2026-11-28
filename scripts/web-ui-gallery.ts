@@ -95,23 +95,37 @@ for (const scheme of ['light', 'dark'] as const) {
     check(`${tag}：不横向滚动`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     await page.screenshot({ path: join(out, `gallery-${scheme}-${width}.png`), fullPage: true })
 
-    const taskRow = page.locator('[data-slot=task-row] > *').first()
+    const taskRow = page.locator('[data-slot=task-row] > div > *').first()
     check(`${tag}：任务行高 44px`, (await style(taskRow, 'height')) === '44px')
-    const progressShown = (await style(page.locator('[data-slot=task-row] > * > span[aria-hidden]').first(), 'display')) !== 'none'
-    check(`${tag}：任务行的五段进度${width < 640 ? '在窄屏下隐藏' : '显示'}`, progressShown === width >= 640)
+    const progressShown = (await style(page.locator('[data-slot=task-row] > div > * > span[aria-hidden]').first(), 'display')) !== 'none'
+    check(`${tag}：任务行的进度${width < 640 ? '在窄屏下隐藏' : '显示'}`, progressShown === width >= 640)
+    // 分隔线和清单同宽，悬停的那一行比清单左右各宽 12px；鼠标移上去时这一行上下的线隐去
+    const list = await page.locator('[data-slot=task-list]').first().boundingBox()
+    const second = page.locator('[data-slot=task-row]').nth(1)
+    const li = await second.boundingBox()
+    const inner = await second.locator('> div > *').boundingBox()
+    check(`${tag}：任务行的分隔线和清单同宽，行的悬停底色左右各宽 12px`, li.x === list.x && li.width === list.width && inner.x === list.x - 12 && inner.width === list.width + 24)
+    if (width >= 640) {
+      await page.locator('[data-slot=task-row]').nth(2).hover()
+      await page.waitForTimeout(300)
+      const third = await style(page.locator('[data-slot=task-row]').nth(2), 'border-top-color')
+      const fourth = await style(page.locator('[data-slot=task-row]').nth(3), 'border-top-color')
+      check(`${tag}：悬停的那一行上下的分隔线隐去`, third === 'rgba(0, 0, 0, 0)' && fourth === 'rgba(0, 0, 0, 0)')
+      await page.mouse.move(0, 0)
+    }
 
     if (scheme === 'light') {
       // 选项：点击选中，选中的是墨色边框和实心的勾；键盘下键选下一个
       const options = page.locator('[data-slot=option]')
       await options.nth(1).click()
       await page.waitForTimeout(300) // 边框颜色有 150ms 的过渡
-      const second = page.locator('input[name=scope]').nth(1)
-      check(`${tag}：点选项能选中`, await second.isChecked())
+      const secondOption = page.locator('input[name=scope]').nth(1)
+      check(`${tag}：点选项能选中`, await secondOption.isChecked())
       check(
         `${tag}：选中的选项是墨色边框、勾是墨色实心`,
         (await style(options.nth(1), 'border-top-color')) === toRgb(vars.ink) && (await style(options.nth(1).locator('span[aria-hidden]'), 'background-color')) === toRgb(vars.ink),
       )
-      await second.focus()
+      await secondOption.focus()
       await page.keyboard.press('ArrowDown')
       check(`${tag}：键盘下键选中下一个选项`, await page.locator('input[name=scope]').nth(2).isChecked())
 
