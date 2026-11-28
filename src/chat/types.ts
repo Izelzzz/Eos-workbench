@@ -74,3 +74,31 @@ export type ChatMetrics = { purpose: typeof CHAT_PURPOSE; calls: number; failed:
  */
 export type ProposalState = 'pending' | 'unanswered' | 'stale' | 'voided' | 'saved'
 export type ProposalView = { proposal: ChatProposal; state: ProposalState; current?: { version: number; content: string }; permissions: string[]; code?: string }
+
+/** 建一个任务要的三项：仓库、工作流、需求。 */
+export type TaskInput = { repo: string; workflow: string; request: string }
+
+/**
+ * 对话里 agent 提出的新任务，只记录、不创建。title：卡片上的标题。input：agent 提的三项。
+ * voided：那一轮被作废的原因，作废的不能创建。created：人确认创建后的记录。
+ */
+export type TaskProposal = {
+  id: number
+  chatId: string
+  call: string
+  at: number
+  title: string
+  input: TaskInput
+  voided?: string
+  created?: TaskCreated
+}
+
+/** 人确认创建的记录：建成的任务、操作人、时间，以及实际用的三项（人可能在卡片上改过）。一条提议只创建一次。 */
+export type TaskCreated = { taskId: string; actor: ChatActor; at: number; input: TaskInput }
+
+/**
+ * 一条任务提议现在的状态（命令行和网页共用）：created / voided：创建过、作废了；unanswered：所在那一轮还没有回复，现在不能创建；pending：可以创建。
+ */
+export type TaskProposalState = 'pending' | 'unanswered' | 'voided' | 'created'
+/** code：确认码，只在 pending 时给：命令行 eos chat create 要带上它，人得先在 eos chat show 里看过这条提议。 */
+export type TaskProposalView = { proposal: TaskProposal; state: TaskProposalState; code?: string }

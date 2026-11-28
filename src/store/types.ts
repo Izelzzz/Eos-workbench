@@ -25,9 +25,9 @@ export type SkillSnapshot = { name: string; version: number; content: string }
 
 /**
  * repo：worktree 所在的仓库（远程仓库时是平台数据目录里的镜像）。remote：任务来自托管平台上的仓库时，它是哪个仓库；
- * baseBranch：那时远程的默认分支（基线提交在它上面，开 PR 时作为目标分支）。
+ * baseBranch：那时远程的默认分支（基线提交在它上面，开 PR 时作为目标分支）。origin：任务从哪里来（对话里的提议），直接建的没有。
  */
-export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string; remote?: RemoteRepo; baseBranch?: string; conventions?: ConventionsUsed; skills?: SkillSnapshot[] }
+export type TaskMeta = { repo: string; worktree: string; branch: string; baseSha: string; remote?: RemoteRepo; baseBranch?: string; conventions?: ConventionsUsed; skills?: SkillSnapshot[]; origin?: string }
 
 export type ConventionKind = 'workflow' | 'doc' | 'template' | 'skill'
 

@@ -1,11 +1,13 @@
-// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace、chat_proposals）。消息和 trace 只追加；提议只改作废、保存记录和确认码的随机值。
+// 对话的存储：和任务共用一个 SQLite 文件，表是自己的（chats、chat_messages、chat_trace、chat_proposals、chat_task_proposals）。
+// 消息和 trace 只追加；提议只改作废、保存记录和确认码的随机值；任务提议只改作废和创建记录。
 // 平台重启后从这里读出对话记录接着聊；agent 那一侧的会话由执行器按对话 id 续接。
 import { randomBytes } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { addUsage, zeroUsage } from '../engine/types.ts'
 import type { TraceEvent } from '../trace/types.ts'
-import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind, ProposalSaved } from './types.ts'
+import type { ChatActor, ChatCall, ChatDetail, ChatMessage, ChatMetrics, ChatProposal, ChatSummary, ChatTraceRow, ProposalKind, ProposalSaved, TaskCreated, TaskInput, TaskProposal } from './types.ts'
 import { PROPOSE_TOOL } from './proposals.ts'
+import { PROPOSE_TASK_TOOL } from './tasks.ts'
 import { CHAT_PURPOSE } from './types.ts'
 
 const SCHEMA = `
@@ -49,6 +51,22 @@ CREATE TABLE IF NOT EXISTS chat_proposals (
   saved_version INTEGER,
   saved_actor TEXT,
   saved_at INTEGER,
+  confirm_salt TEXT
+);
+CREATE TABLE IF NOT EXISTS chat_task_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL REFERENCES chats(id),
+  call_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  workflow TEXT NOT NULL,
+  request TEXT NOT NULL,
+  voided TEXT,
+  task_id TEXT,
+  task_actor TEXT,
+  task_at INTEGER,
+  task_input TEXT,
   confirm_salt TEXT
 );`
 
@@ -202,9 +220,44 @@ export class ChatStore {
     )
   }
 
-  /** 作废一次调用里记下的提议（那一轮被作废时）。 */
+  /** 这一轮没有得到回复：这一轮记下的提议（约定和任务）都作废。已经保存、创建过的不会是这一轮的（那一轮还没有回复时不能保存、创建）。 */
   voidProposals(call: string, reason: string): void {
     this.db.prepare('UPDATE chat_proposals SET voided = ? WHERE call_id = ? AND voided IS NULL').run(reason, call)
+    this.db.prepare('UPDATE chat_task_proposals SET voided = ? WHERE call_id = ? AND voided IS NULL AND task_id IS NULL').run(reason, call)
+  }
+
+  /** 记下一条任务提议（只追加）。它不建任务。 */
+  addTaskProposal(p: Omit<TaskProposal, 'id' | 'at' | 'voided' | 'created'>, at: number): TaskProposal {
+    const r = this.db
+      .prepare('INSERT INTO chat_task_proposals (chat_id, call_id, created_at, title, repo, workflow, request) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(p.chatId, p.call, at, p.title, p.input.repo, p.input.workflow, p.input.request)
+    return this.taskProposal(Number(r.lastInsertRowid))!
+  }
+
+  taskProposal(id: number): TaskProposal | undefined {
+    const r = this.db.prepare('SELECT * FROM chat_task_proposals WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    return r === undefined ? undefined : taskProposalRow(r)
+  }
+
+  /** 一个对话的任务提议，先提的在前。 */
+  taskProposals(chatId: string): TaskProposal[] {
+    return (this.db.prepare('SELECT * FROM chat_task_proposals WHERE chat_id = ? ORDER BY id').all(chatId) as Record<string, unknown>[]).map(taskProposalRow)
+  }
+
+  /** 任务提议的确认码用的随机值（只由 create.ts 用），和约定提议的 confirmSalt 一样：第一次要时生成，不进 agent 能看到的任何结果。 */
+  taskConfirmSalt(id: number): string {
+    this.db.prepare('UPDATE chat_task_proposals SET confirm_salt = ? WHERE id = ? AND confirm_salt IS NULL').run(randomBytes(16).toString('hex'), id)
+    const r = this.db.prepare('SELECT confirm_salt FROM chat_task_proposals WHERE id = ?').get(id) as { confirm_salt: string } | undefined
+    if (r === undefined) throw new Error(`没有任务提议 #${id}`)
+    return r.confirm_salt
+  }
+
+  /** 记下任务提议已创建（只由 create.ts 用）。已经创建过或者作废了就不记，返回 false。 */
+  markTaskCreated(id: number, c: TaskCreated): boolean {
+    const r = this.db
+      .prepare('UPDATE chat_task_proposals SET task_id = ?, task_actor = ?, task_at = ?, task_input = ? WHERE id = ? AND task_id IS NULL AND voided IS NULL')
+      .run(c.taskId, c.actor, c.at, JSON.stringify(c.input), id)
+    return Number(r.changes) === 1
   }
 
   proposal(id: number): ChatProposal | undefined {
@@ -227,7 +280,7 @@ export class ChatStore {
       usage: calls.reduce((u, c) => addUsage(u, c.usage), zeroUsage()),
       agentMs: calls.reduce((n, c) => n + c.ms, 0),
       // 读数据的次数：不算提议。
-      reads: calls.reduce((n, c) => n + c.reads.filter(r => r.tool !== PROPOSE_TOOL).length, 0),
+      reads: calls.reduce((n, c) => n + c.reads.filter(r => r.tool !== PROPOSE_TOOL && r.tool !== PROPOSE_TASK_TOOL).length, 0),
     }
   }
 }
@@ -245,4 +298,15 @@ const proposalRow = (r: Record<string, unknown>): ChatProposal => ({
   permissions: JSON.parse(String(r.permissions)) as string[],
   ...(r.voided === null ? {} : { voided: String(r.voided) }),
   ...(r.saved_version === null ? {} : { saved: { version: Number(r.saved_version), actor: r.saved_actor as ChatActor, at: Number(r.saved_at) } }),
+})
+
+const taskProposalRow = (r: Record<string, unknown>): TaskProposal => ({
+  id: Number(r.id),
+  chatId: String(r.chat_id),
+  call: String(r.call_id),
+  at: Number(r.created_at),
+  title: String(r.title),
+  input: { repo: String(r.repo), workflow: String(r.workflow), request: String(r.request) },
+  ...(r.voided === null ? {} : { voided: String(r.voided) }),
+  ...(r.task_id === null ? {} : { created: { taskId: String(r.task_id), actor: r.task_actor as ChatActor, at: Number(r.task_at), input: JSON.parse(String(r.task_input)) as TaskInput } }),
 })

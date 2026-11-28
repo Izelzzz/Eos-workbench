@@ -477,7 +477,7 @@ test('agent templates and skills are listed, validated without saving, saved as 
     assert.deepEqual(
       list.templates.map((t: { name: string; version: number; write?: string; description?: string }) => [t.name, t.version, t.write, t.description]),
       [
-        ['assistant', 1, 'none', '对话：和用户多轮对话，回答关于平台上的工作流、约定、模板、技能和任务的问题。只能读平台数据，不能改任何东西。'],
+        ['assistant', 1, 'none', '对话：和用户多轮对话，回答关于平台上的工作流、约定、模板、技能和任务的问题。只能读平台数据和提议，不能直接改或建任何东西。'],
         ['developer', 1, 'worktree', '开发：按规格实现并补测试，只改代码、测试和改动说明。'],
         ['improver', 1, 'none', '改进：从任务里程序归纳的证据出发，提出团队约定（模板、技能、约定文档、工作流）的修改提案，只读、不用工具。'],
         ['reviewer', 1, 'none', '评审：独立核对改动是否满足规格，只读。'],

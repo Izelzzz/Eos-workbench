@@ -32,8 +32,8 @@ export const confirmationCode = (salt: string, p: ChatProposal, permissions: str
     .digest('hex')
     .slice(0, 8)
 
-/** 提议所在的那一轮已经做完、得到了回复：这一句用户的话之后的第一条记录是助手的回复。 */
-export const turnAnswered = (p: ChatProposal, chats: ChatStore): boolean => {
+/** 提议（约定或任务）所在的那一轮已经做完、得到了回复：这一句用户的话之后的第一条记录是助手的回复。 */
+export const turnAnswered = (p: Pick<ChatProposal, 'call' | 'chatId'>, chats: ChatStore): boolean => {
   const turn = turnOf(p.call)
   if (turn === undefined || turn.chat !== p.chatId) return false
   return chats.log(p.chatId).find(m => m.seq > turn.seq)?.role === 'assistant'

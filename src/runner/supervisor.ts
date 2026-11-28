@@ -7,7 +7,6 @@ import { Conventions } from '../conventions/conventions.ts'
 import { redactDeep, rememberSecret } from '../credentials/redact.ts'
 import type { CheckResult, Task } from '../engine/types.ts'
 import type { Executor, ExecutorCheck } from '../executor/types.ts'
-import { needsOf } from '../executor/types.ts'
 import type { Store } from '../store/store.ts'
 import { role as roleOf, type Check } from '../workflow/types.ts'
 import { runChecks } from './checks.ts'
@@ -21,9 +20,11 @@ import { addWorktree, commitInScope, contextFor, createWorktree, scopeOfBranch, 
 import { MirrorError, pushBranch, type RemoteAuth, remoteDefaultBranch, scrub, secretsOf, syncMirror } from './mirror.ts'
 import { acquire, holder } from './lock.ts'
 import { appendLog, taskLogPath } from './logs.ts'
-import { roleProfile, runTask } from './runner.ts'
+import { runTask } from './runner.ts'
+import { workflowProblem } from './workflow-check.ts'
 
-export type CreateInput = { repo: string; workflow: string; request: string }
+/** origin：任务从哪里来（例如「来自对话 <id> 的提议 #<n>」），记进任务的 meta；直接建的没有。 */
+export type CreateInput = { repo: string; workflow: string; request: string; origin?: string }
 export type Created = { ok: true; id: string } | { ok: false; error: string }
 export type Started = { ok: true; done: Promise<Task> } | { ok: false; error: string }
 
@@ -104,10 +105,8 @@ export class Supervisor {
     // 先校验工作流，再访问网络。
     const resolved = this.conventions.resolve(input.workflow.trim())
     if (!resolved.ok) return resolved
-    for (const [key, r] of Object.entries(resolved.workflow.roles)) {
-      const problem = this.o.checkExecutor?.(r.executor, needsOf({ ...roleProfile(r), skills: r.skills }))
-      if (problem !== undefined) return { ok: false, error: `工作流 ${resolved.workflow.name} 的角色 ${key}：${problem}` }
-    }
+    const problem = workflowProblem(resolved.workflow, this.o.checkExecutor)
+    if (problem !== undefined) return { ok: false, error: problem }
     const id = newId()
     let w: Worktree
     let baseBranch: string | undefined
@@ -131,7 +130,7 @@ export class Supervisor {
         workflow: resolved.workflow,
         workflowSource: resolved.source,
         docs: resolved.docs,
-        meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), ...(baseBranch === undefined ? {} : { baseBranch }), conventions: resolved.used, skills: resolved.skills },
+        meta: { ...w, ...(remote === undefined ? {} : { remote: remote.repo }), ...(baseBranch === undefined ? {} : { baseBranch }), conventions: resolved.used, skills: resolved.skills, ...(input.origin === undefined ? {} : { origin: input.origin }) },
       },
       Date.now(),
       this.o.actor ?? 'cli',

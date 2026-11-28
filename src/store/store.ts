@@ -200,6 +200,15 @@ export class Store {
     return JSON.parse(row.meta) as TaskMeta
   }
 
+  /** 每个任务用的仓库（只读 meta 里的这两项，不解析整个 meta），新的在前：repo 是 worktree 所在的仓库，remote 是托管平台上的网页地址。 */
+  taskRepos(): { repo: string; remote?: string; createdAt: number }[] {
+    return (
+      this.db.prepare("SELECT json_extract(meta, '$.repo') AS repo, json_extract(meta, '$.remote.webUrl') AS remote, created_at FROM tasks ORDER BY created_at DESC").all() as Record<string, unknown>[]
+    )
+      .filter(r => typeof r.repo === 'string')
+      .map(r => ({ repo: String(r.repo), ...(typeof r.remote === 'string' ? { remote: r.remote } : {}), createdAt: Number(r.created_at) }))
+  }
+
   list(): TaskSummary[] {
     return (this.db.prepare('SELECT id, status, request, workflow_name, created_at, updated_at FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[]).map(r => ({
       id: String(r.id),
