@@ -104,7 +104,7 @@ jobs:
       - run: npm ci
       - run: npm run build:web
 
-  # 确定性 E2E：用假模型（scripts/fake-model/）代替真实模型，跑一遍 scripts/e2e.ts 的全部核对项。不需要模型 key 和外网。
+  # 确定性 E2E：用假模型（scripts/fake-model/）代替真实模型，跑一遍 scripts/e2e.ts 的全部核对项。不需要模型 key 和外网。这个 job 用默认执行器 dsh。
   # 覆盖平台、dsh、沙箱、git、检查命令；不覆盖模型本身的行为（提示词、技能、模板），那部分仍要真实模型的 E2E。
   e2e-fake-model:
     name: e2e-fake-model
@@ -149,6 +149,58 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-fake-model
+          path: |
+            .eos/e2e/report.json
+            .eos/e2e/run.log
+            .eos/e2e-ci/fake-model.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 同一个确定性 E2E，三个角色都用 Claude Code（scripts/e2e-ci.ts claude-code）：平台经 EOS_ANTHROPIC_BASE_URL 让 Claude Code 的上游连同一个假模型。
+  # 跑的是真的 Claude Code，套着 Landlock；Landlock 用不了时执行器拒绝调用，这个 job 失败（不跳过）。
+  e2e-fake-model-claude-code:
+    name: e2e-fake-model-claude-code
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # 记下这台机器上 Claude Code 的沙箱（Landlock）和安装情况，排查时用
+      - name: 沙箱
+        run: node --import tsx src/cli.ts doctor --data "$RUNNER_TEMP/eos-doctor" || true
+      # 依赖装好后断开外网，只留本机：确定性 E2E 一个请求也不许发到真实的模型接口（或任何外部服务）
+      - name: 断开外网
+        run: |
+          for t in iptables ip6tables; do
+            sudo $t -A OUTPUT -o lo -j ACCEPT
+            sudo $t -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+            sudo $t -A OUTPUT -j REJECT
+          done
+          if curl -sS --max-time 5 https://api.anthropic.com >/dev/null 2>&1; then echo '外网还通，没断开'; exit 1; fi
+      - name: 确定性 E2E
+        run: node --import tsx scripts/e2e-ci.ts claude-code
+      # 恢复外网：后面上传 artifact、setup-node 保存缓存都要连 GitHub。E2E 失败也要恢复
+      - name: 恢复外网
+        if: always()
+        run: |
+          for t in iptables ip6tables; do
+            sudo $t -D OUTPUT -j REJECT || true
+            sudo $t -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
+            sudo $t -D OUTPUT -o lo -j ACCEPT || true
+          done
+      - name: 保存报告和日志
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-fake-model-claude-code
           path: |
             .eos/e2e/report.json
             .eos/e2e/run.log

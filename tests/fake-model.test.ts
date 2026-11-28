@@ -127,3 +127,46 @@ test('dsh 没提供剧本要用的工具时说明是哪个，不往下走；工�
   const next = decide(req(prompt(ROLE.developer), { role: 'assistant', content: [{ type: 'tool_use', id: 'w', name: 'write', input: {} }] }, withNote))
   assert.equal(next.kind === 'tool' && next.input.file_path, 'test/math.test.js')
 })
+
+// ---- Claude Code 发来的请求：工具名大写开头，Write 要绝对路径，工作目录写在请求里 ----
+
+const CC_TOOLS = ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'AskUserQuestion'].map(name => ({ name }))
+const ccReq = (...messages: Message[]): Request => ({
+  model: 'claude-sonnet-5-5',
+  messages,
+  tools: CC_TOOLS,
+  system: [{ type: 'text', text: 'Environment:\n - Primary working directory: /data/worktrees/t1\n' }],
+})
+
+test('Claude Code：同一个剧本换成它的工具名和参数——Write 用绝对路径，Bash 原样，提问带 header 和选项说明', () => {
+  const ask = decide(ccReq(prompt(ROLE.planner)))
+  assert.equal(ask.kind === 'tool' && ask.name, 'AskUserQuestion')
+  assert.deepEqual(ask.kind === 'tool' && ask.input, {
+    questions: [
+      {
+        question: '函数名用 sum 还是 total？',
+        header: '问题',
+        multiSelect: false,
+        options: [
+          { label: 'sum', description: 'sum' },
+          { label: 'total', description: 'total' },
+        ],
+      },
+    ],
+  })
+  const steps: string[] = []
+  let h: Message[] = [prompt(ROLE.developer)]
+  for (let i = 0; i < 4; i++) {
+    const r = decide(ccReq(...h))
+    steps.push(r.kind === 'tool' ? `${r.name}:${String(r.input.file_path ?? r.input.command)}` : 'text')
+    if (r.kind === 'tool') h = [...h, ...called(r.name, `c${i}`)]
+  }
+  assert.deepEqual(steps, ['Write:/data/worktrees/t1/src/math.js', 'Write:/data/worktrees/t1/test/math.test.js', 'Bash:npm test', 'text'])
+})
+
+test('Claude Code：请求里找不到工作目录时说明原因，不往下走；dsh 的请求照旧用 dsh 的工具名', () => {
+  const r = decide({ ...ccReq(prompt(ROLE.developer)), system: [] })
+  assert.match(r.kind === 'text' ? r.text : '', /找不到工作目录/)
+  const dsh = decide({ model: 'm', messages: [prompt(ROLE.developer)], tools: [{ name: 'write' }, { name: 'bash' }] })
+  assert.deepEqual(dsh.kind === 'tool' && [dsh.name, dsh.input.file_path], ['write', 'src/math.js'])
+})

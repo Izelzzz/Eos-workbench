@@ -125,7 +125,7 @@ test('四个工作流里的 changes job 除了名字完全一样（改一处要�
 
 test('重的 job 都依赖 changes，条件是「没取消且 docs_only 不等于 true」：changes 出错（输出为空）时照跑', () => {
   const heavy: Record<string, string[]> = {
-    'ci.yml': ['typecheck', 'unit-test', 'build-web', 'e2e-fake-model', 'lint', 'format'],
+    'ci.yml': ['typecheck', 'unit-test', 'build-web', 'e2e-fake-model', 'e2e-fake-model-claude-code', 'lint', 'format'],
     'image.yml': ['image-build'],
     'codeql.yml': ['codeql-analyze'],
     'dependency-review.yml': ['dependency-review'],
