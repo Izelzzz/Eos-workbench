@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds as boundsOf } from '../../src/trace/build.ts'
 import type { ConventionKind, Span, TaskDetail, TaskSummary } from './api.ts'
-import { getTask, listTasks, taskAction } from './api.ts'
+import { getTask, getWorkbench, listTasks, taskAction, type Workbench as WorkbenchData } from './api.ts'
 import { Answer } from './Answer.tsx'
 import { Chat, parseChatRoute } from './Chat.tsx'
 import { Changes } from './Changes.tsx'
@@ -14,6 +14,7 @@ import { Insights } from './Insights.tsx'
 import { NewTask } from './NewTask.tsx'
 import { Settings, parseSettingsRoute } from './shell/Settings.tsx'
 import { Shell } from './shell/Shell.tsx'
+import { Workbench } from './workbench/Workbench.tsx'
 import { Stages } from './Stages.tsx'
 import { ago, duration, STATUS, statusClass, tokens } from './format.ts'
 import { defaultOpen, TraceTree, visibleRows } from './Trace.tsx'
@@ -215,7 +216,7 @@ function TaskPage(props: { id: string }) {
     <div className="task-page">
       <section className="summary">
         <div className="summary-head">
-          <a href="#/" className="back">
+          <a href="#/tasks" className="back">
             ← 任务列表
           </a>
           <h1>{task.id}</h1>
@@ -399,15 +400,38 @@ function TaskPage(props: { id: string }) {
   )
 }
 
+/** 工作台的数据：每 5 秒刷新一次。导航的小圆点和工作台页面共用这一份 */
+const useWorkbench = () => {
+  const [data, setData] = useState<WorkbenchData>()
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    const load = () =>
+      getWorkbench().then(
+        d => {
+          setData(d)
+          setError(undefined)
+        },
+        e => setError(String(e.message)),
+      )
+    void load()
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
+  }, [])
+  return { data, error }
+}
+
 export function App() {
   const hash = useHash()
+  const wb = useWorkbench()
   const id = /^#\/tasks\/([\w-]+)/.exec(hash)?.[1]
   const conv = parseConventionRoute(hash)
   const improve = parseImproveRoute(hash)
   const settings = parseSettingsRoute(hash)
   const chat = parseChatRoute(hash)
+  const tasks = hash === '#/tasks'
+  const home = conv === undefined && chat === undefined && improve === undefined && hash !== '#/insights' && settings === undefined && hash !== '#/new' && !tasks && id === undefined
   return (
-    <Shell hash={hash}>
+    <Shell hash={hash} waiting={wb.data?.pending.length ?? 0} bleed={home}>
       {conv !== undefined ? (
         <Conventions route={conv} />
       ) : chat !== undefined ? (
@@ -420,10 +444,12 @@ export function App() {
         <Settings {...settings} />
       ) : hash === '#/new' ? (
         <NewTask />
-      ) : id === undefined ? (
+      ) : tasks ? (
         <TaskList />
-      ) : (
+      ) : id !== undefined ? (
         <TaskPage key={id} id={id} />
+      ) : (
+        <Workbench {...wb} />
       )}
     </Shell>
   )

@@ -53,7 +53,7 @@ export function NewTask() {
         void submit()
       }}
     >
-      <a href="#/" className="back">
+      <a href="#/tasks" className="back">
         ← 任务列表
       </a>
       <h1>新建任务</h1>

@@ -12,4 +12,5 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 @source "./ui";
 @source "./shell";
+@source "./workbench";
 @import "./tokens.css";

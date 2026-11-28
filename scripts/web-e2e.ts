@@ -69,7 +69,7 @@ page.on('pageerror', (e: Error) => errors.push(e.message))
 let shot = 0
 const snap = async (name: string) => page.screenshot({ path: join(OUT, `${String(++shot).padStart(2, '0')}-${name}.png`) })
 
-await page.goto(`${base}/#/`)
+await page.goto(`${base}/#/tasks`)
 await page.getByRole('link', { name: '新建任务' }).click()
 await page.getByRole('form', { name: '新建任务' }).waitFor()
 await page.getByPlaceholder(/path\/to\/your\/repo/).fill(REPO)

@@ -154,3 +154,6 @@ export const sendChat = async (body: { chat?: string; text: string }, onLine: (l
     return { type: 'done', ok: false, error: `请求失败：${(e as Error).message}` }
   }
 }
+
+export type { Workbench, WorkbenchItem, WorkbenchTask } from '../../src/web/workbench.ts'
+export const getWorkbench = () => get<import('../../src/web/workbench.ts').Workbench>('/api/workbench')

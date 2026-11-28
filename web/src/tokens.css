@@ -133,9 +133,10 @@
   --container-md: 448px;
   --container-lead: 62ch;
 
-  /* 窄屏和宽屏的分界：sm: 从 640px 起，md: 从 768px 起。界面要在 390 宽下可用 */
+  /* 窄屏和宽屏的分界：sm: 从 640px 起，md: 从 768px 起，lg: 从 900px 起（工作台分成左右两栏，按设计稿）。界面要在 390 宽下可用 */
   --breakpoint-sm: 640px;
   --breakpoint-md: 768px;
+  --breakpoint-lg: 900px;
 
   /* 间距的单位：p-2 = 8px，gap-3 = 12px */
   --spacing: 4px;
