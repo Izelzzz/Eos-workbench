@@ -230,6 +230,7 @@ const run = async (id: string | ((sup: Supervisor) => Promise<string>)) => {
 const commands: Record<string, () => Promise<void> | void> = {
   async run() {
     if (values.repo === undefined) fail('需要 --repo <仓库路径或 https://github.com/<owner>/<repo>>')
+    if (values.request !== undefined) fail('eos run 的需求直接写在命令最后，不用 --request')
     await run(async sup => {
       const created = await sup.create({ repo: values.repo!, workflow: values.workflow ?? 'standard', request: positionals.slice(1).join(' ') })
       if (!created.ok) return fail(created.error)

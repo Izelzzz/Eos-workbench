@@ -12,11 +12,23 @@ export const PROPOSE_TASK_TOOL = 'propose_task'
 export const MAX_TASK_PROPOSALS_PER_CALL = 5
 export const MAX_REQUEST_CHARS = 20_000
 
+/**
+ * 控制字符（换行、制表符以外）不收：命令行原样打印提议，终端的控制序列能把一部分需求擦掉或盖住，人看到的就不是任务会拿到的。
+ * 标题、仓库、工作流是一行，换行也不收。
+ */
+/** 码点是不是控制字符：C0（allowLine 时放过换行和制表符）、DEL、C1。 */
+const hasControl = (s: string, allowLine: boolean): boolean =>
+  [...s].some(ch => {
+    const c = ch.codePointAt(0)!
+    if (allowLine && (c === 0x0a || c === 0x09)) return false
+    return c < 0x20 || (c >= 0x7f && c <= 0x9f)
+  })
+const line = (max: number) => z.string().min(1).max(max).refine(s => !hasControl(s, false), '不能有换行和控制字符')
 const input = z.object({
-  title: z.string().min(1).max(80),
-  repo: z.string().min(1).max(512),
-  workflow: z.string().min(1).max(64),
-  request: z.string().min(1).max(MAX_REQUEST_CHARS),
+  title: line(80),
+  repo: line(512),
+  workflow: line(64),
+  request: z.string().min(1).max(MAX_REQUEST_CHARS).refine(s => !hasControl(s, true), '不能有控制字符（换行、制表符以外）'),
 })
 
 export const proposeTaskToolSpec = () => ({
@@ -27,14 +39,17 @@ export const proposeTaskToolSpec = () => ({
   inputSchema: z.toJSONSchema(input),
 })
 
-/** 平台上的任务用过的仓库，最近用过的在前：远程仓库是网页地址，本机仓库是路径。这两种写法建任务时都认。 */
+/**
+ * 平台上的任务用过的仓库，最近用过的在前：远程仓库是网页地址，本机仓库是路径。这两种写法建任务时都认。
+ * 远程仓库的名字不分大小写（GitHub 是这样），按小写合并，用最近一次的写法。
+ */
 export const usedRepos = (store: Store): { repo: string; tasks: number; lastUsedAt: number }[] => {
   const seen = new Map<string, { repo: string; tasks: number; lastUsedAt: number }>()
-  for (const t of store.list()) {
-    const meta = store.meta(t.id)
-    const repo = meta.remote?.webUrl ?? meta.repo
-    const row = seen.get(repo)
-    if (row === undefined) seen.set(repo, { repo, tasks: 1, lastUsedAt: t.createdAt })
+  for (const r of store.taskRepos()) {
+    const repo = r.remote ?? r.repo
+    const key = r.remote === undefined ? repo : repo.toLowerCase()
+    const row = seen.get(key)
+    if (row === undefined) seen.set(key, { repo, tasks: 1, lastUsedAt: r.createdAt })
     else row.tasks++
   }
   return [...seen.values()]
@@ -73,6 +88,6 @@ export const taskProposer = (o: {
     if (problem !== undefined) return fail(`工作流「${p.workflow}」不能用来建任务：${problem}`)
     count++
     const row = o.record({ chatId: o.chatId, call: o.call, title: p.title, input: { repo: p.repo, workflow: p.workflow, request: p.request } }, o.now())
-    return { text: `任务提议 #${row.id} 已记下：「${p.title}」。任务还没有创建，要等用户确认（用户可以改仓库、工作流和需求）后才会创建。`, isError: false }
+    return { text: `任务提议 #${row.id} 已记下：「${p.title}」。任务还没有创建，要等用户确认（用户可以改仓库、工作流和需求）后才会创建：现在在命令行用 eos chat create ${row.id} 确认。`, isError: false }
   }
 }

@@ -219,7 +219,6 @@ export class ChatStore {
     )
   }
 
-  /** 作废一次调用里记下的提议（那一轮被作废时）。 */
   /** 这一轮没有得到回复：这一轮记下的提议（约定和任务）都作废。已经保存、创建过的不会是这一轮的（那一轮还没有回复时不能保存、创建）。 */
   voidProposals(call: string, reason: string): void {
     this.db.prepare('UPDATE chat_proposals SET voided = ? WHERE call_id = ? AND voided IS NULL').run(reason, call)

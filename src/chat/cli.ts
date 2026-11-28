@@ -125,6 +125,8 @@ export const chatCommand = async (
   }
   if (sub === 'create') {
     const id = /^\d{1,15}$/.test(rest[0] ?? '') ? Number(rest[0]) : o.fail(`需要任务提议号（数字），见 eos chat show <对话>\n${usage}`)
+    // 多出来的文字不能悄悄丢掉：人可能以为它是新的需求。
+    if (rest.length > 1) return o.fail(`要改需求请用 --request "<需求>"\n${usage}`)
     const runTask = o.runTask ?? o.fail('这里不能建任务')
     return runTask(async create => {
       const r = await createFromProposal({ chats: o.chats, create, dataDir: o.dataDir, redact: o.redact, id, actor: 'cli', ...(o.edits === undefined ? {} : { edits: o.edits }), now: o.now })

@@ -89,7 +89,7 @@ npm run eos -- run --repo <仓库路径或 GitHub 地址> "<需求>"
 | `doctor` | 检查运行环境 |
 | `web` | 启动网页 |
 | `improve`、`proposals`、`approve`、`reject` | 生成、查看、批准、拒绝改进提案 |
-| `chat new`、`chat send`、`chat list`、`chat show`、`chat save` | 和对话 agent 对话；查看它的提议和差异，确认保存 |
+| `chat new`、`chat send`、`chat list`、`chat show`、`chat save`、`chat create` | 和对话 agent 对话；查看它的提议和差异，确认保存；按它提议的任务创建任务（可以先改仓库、工作流、需求） |
 
 完整的参数见 `npm run eos -- --help`。
 
