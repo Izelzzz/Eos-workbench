@@ -112,7 +112,7 @@ const overflow = (page: any): Promise<{ scrollWidth: number; innerWidth: number 
 const shot = (page: any, name: string) => page.screenshot({ path: join(out, name), fullPage: true })
 
 const page = await open(1280)
-await page.goto(`${base}/#/`)
+await page.goto(`${base}/#/tasks`)
 await page.waitForSelector('table.tasks tbody tr')
 const listBanner = await page.locator('.gate-filter span').innerText()
 const awaitingRows = await page.locator('tr.awaiting').count()
@@ -146,7 +146,7 @@ const round2Text = await page.locator('section.gate').innerText()
 await shot(page, '4-gate-round2.png')
 
 const narrow = await open(390)
-await narrow.goto(`${base}/#/`)
+await narrow.goto(`${base}/#/tasks`)
 await narrow.waitForSelector('table.tasks tbody tr')
 const narrowList = await overflow(narrow)
 await shot(narrow, '5-list-390.png')
@@ -158,7 +158,7 @@ await shot(narrow, '7-task-390.png')
 
 // 另一个标签页开着「只看等验收的」：任务被通过之后（没有等验收的了），还要能切回显示全部。
 const filtered = await open(1280)
-await filtered.goto(`${base}/#/`)
+await filtered.goto(`${base}/#/tasks`)
 await filtered.getByRole('button', { name: '只看等验收的' }).click()
 await page.getByRole('button', { name: '通过' }).click()
 await until('通过后任务完成', () => store.get(id)?.status === 'done')

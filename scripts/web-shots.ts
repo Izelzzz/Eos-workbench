@@ -20,7 +20,7 @@ page.on('console', (m: any) => {
 })
 page.on('pageerror', (e: Error) => errors.push(`pageerror: ${e.message}`))
 
-await page.goto(`${base}/#/`)
+await page.goto(`${base}/#/tasks`)
 await page.waitForSelector('table.tasks tbody tr')
 await page.screenshot({ path: join(out, '1-list.png') })
 

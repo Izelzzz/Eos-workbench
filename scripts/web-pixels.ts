@@ -131,7 +131,8 @@ if (taskId === undefined) throw new Error('数据目录里没有任务')
 // 每个页面：名字、地址、等哪个元素出现、截图前要做的操作
 type Shot = { name: string; hash: string; ready: string; act?: (page: any) => Promise<void> }
 const shots: Shot[] = [
-  { name: 'tasks', hash: '#/', ready: 'table.tasks tbody tr' },
+  { name: 'workbench', hash: '#/', ready: 'main section' },
+  { name: 'tasks', hash: '#/tasks', ready: 'table.tasks tbody tr' },
   { name: 'new', hash: '#/new', ready: 'main form' },
   { name: 'detail', hash: `#/tasks/${taskId}`, ready: '.trace-row' },
   {

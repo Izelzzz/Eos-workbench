@@ -77,7 +77,8 @@ const noHScroll = async (page: any) => page.evaluate(() => document.documentElem
 const labelShown = async (link: any) => link.locator('span[aria-hidden="true"]').evaluate((s: HTMLElement) => getComputedStyle(s).display !== 'none' && Number(getComputedStyle(s).opacity) > 0.99)
 
 const ROUTES: [string, string][] = [
-  ['#/', '任务'],
+  ['#/', '工作台'],
+  ['#/tasks', '任务'],
   ['#/new', '任务'],
   [`#/tasks/${taskId}`, '任务'],
   ['#/chat', '对话'],
@@ -92,11 +93,11 @@ const ROUTES: [string, string][] = [
 {
   const page = await open(1440)
   await page.goto(`${base}/#/`)
-  await page.waitForSelector('table.tasks tbody tr')
+  await page.waitForSelector('main section')
   const names = await nav(page)
     .locator('a')
     .evaluateAll((as: Element[]) => as.map(a => a.getAttribute('aria-label')))
-  check('宽屏：导航按顺序是 对话、任务、统计、改进、团队约定、设置，没有「工作台」', JSON.stringify(names) === JSON.stringify(['对话', '任务', '统计', '改进', '团队约定', '设置']))
+  check('宽屏：导航按顺序是 工作台、对话、任务、统计、改进、团队约定、设置', JSON.stringify(names) === JSON.stringify(['工作台', '对话', '任务', '统计', '改进', '团队约定', '设置']))
   const box = await nav(page).boundingBox()
   check('宽屏：导航是左边一条 56px 宽、和窗口一样高', box.x === 0 && box.width === 56 && box.height === 900)
   const settings = await nav(page).getByRole('link', { name: '设置' }).boundingBox()
@@ -109,7 +110,7 @@ const ROUTES: [string, string][] = [
     await page.goto(`${base}/${hash}`)
     await page.waitForSelector('main')
     await page.waitForTimeout(150)
-    check(`宽屏：打开 ${hash} 时当前项是「${want}」`, (await current(page)) === want)
+    check(`宽屏：打开 ${hash} 时当前项是「${want}」`, (await current(page))?.split('，')[0] === want)
   }
   // 当前项有 fill-2 的底，其余没有底
   await page.goto(`${base}/#/insights`)
@@ -127,7 +128,7 @@ const ROUTES: [string, string][] = [
     d.remove()
     return c
   })
-  check('宽屏：当前项（统计）的底是 fill-2，其余透明', bg[2] === fill2 && bg.filter((c: string, i: number) => i !== 2).every((c: string) => c === 'rgba(0, 0, 0, 0)'))
+  check('宽屏：当前项（统计）的底是 fill-2，其余透明', bg[3] === fill2 && bg.filter((c: string, i: number) => i !== 3).every((c: string) => c === 'rgba(0, 0, 0, 0)'))
   // 悬停和键盘聚焦显示名字
   const chat = nav(page).getByRole('link', { name: '对话' })
   check('宽屏：没悬停时不显示名字', !(await labelShown(chat)))
@@ -142,7 +143,7 @@ const ROUTES: [string, string][] = [
   await page.keyboard.press('Tab')
   const focused = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))
   await page.waitForTimeout(250)
-  check('宽屏：Tab 第一下聚焦到导航的第一项，并显示名字', focused === '对话' && (await labelShown(chat)))
+  check('宽屏：Tab 第一下聚焦到导航的第一项（工作台），并显示名字', focused?.startsWith('工作台') === true && (await labelShown(nav(page).locator('a').first())))
   await page.screenshot({ path: join(out, 'focus-light-1440.png'), clip: { x: 0, y: 0, width: 360, height: 320 } })
   // 名字的浮层盖在页面内容上面（团队约定页左栏是 sticky，会形成层叠）
   await page.goto(`${base}/#/conventions`)
@@ -198,7 +199,7 @@ const ROUTES: [string, string][] = [
 {
   const page = await open(390)
   await page.goto(`${base}/#/`)
-  await page.waitForSelector('table.tasks tbody tr')
+  await page.waitForSelector('main section')
   const box = await nav(page).boundingBox()
   check('窄屏：导航是顶上的一行', box.y === 0 && box.width === 390 && box.height < 60)
   const xs = await nav(page)
@@ -213,7 +214,7 @@ const ROUTES: [string, string][] = [
     await page.goto(`${base}/${hash}`)
     await page.waitForSelector('main')
     await page.waitForTimeout(150)
-    check(`窄屏：${hash} 当前项是「${want}」，页面不横向滚动`, (await current(page)) === want && (await noHScroll(page)))
+    check(`窄屏：${hash} 当前项是「${want}」，页面不横向滚动`, (await current(page))?.split('，')[0] === want && (await noHScroll(page)))
   }
   await page.context().close()
 }
@@ -224,13 +225,17 @@ const pairs: string[] = []
 for (const scheme of ['light', 'dark'] as const) {
   for (const width of [1440, 390]) {
     for (const [name, hash, protoItem] of [
-      ['tasks', '#/', '任务'],
+      ['tasks', '#/tasks', '任务'],
+      ['workbench', '#/', '工作台'],
       ['settings', '#/credentials', '设置'],
     ] as const) {
       const a = await open(width, scheme)
       await a.goto(proto)
       await a.waitForSelector('nav')
-      await a.getByRole('navigation').getByRole('link', { name: protoItem, exact: true }).click()
+      await a
+        .getByRole('navigation')
+        .getByRole('link', protoItem === '工作台' ? { name: /^工作台/ } : { name: protoItem, exact: true })
+        .click()
       await a.mouse.move(width - 5, 895)
       await a.waitForTimeout(250)
       const left: Buffer = await a.screenshot()

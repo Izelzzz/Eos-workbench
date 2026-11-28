@@ -1,25 +1,27 @@
 import type { ComponentType, ComponentProps } from 'react'
 import { AccentDot, cn } from '../ui/index.ts'
-import { ChatIcon, ConventionsIcon, ImproveIcon, InsightsIcon, SettingsIcon, TasksIcon } from './icons.tsx'
+import { ChatIcon, ConventionsIcon, ImproveIcon, InsightsIcon, SettingsIcon, TasksIcon, WorkbenchIcon } from './icons.tsx'
 
 export type NavId = 'workbench' | 'chats' | 'tasks' | 'insights' | 'improve' | 'conventions' | 'settings'
 export type NavItem = { id: NavId; label: string; href: string; icon: ComponentType<ComponentProps<'svg'>> }
 
 /**
  * 导航里有哪几项、按什么顺序，只在这里定。上面一组是日常用的页面，下面一组固定在左下角。
- * 工作台页面做好后，在最前面加上 { id: 'workbench', label: '工作台', href: …, icon: WorkbenchIcon }。
  */
 export const NAV_MAIN: NavItem[] = [
+  { id: 'workbench', label: '工作台', href: '#/', icon: WorkbenchIcon },
   { id: 'chats', label: '对话', href: '#/chat', icon: ChatIcon },
-  { id: 'tasks', label: '任务', href: '#/', icon: TasksIcon },
+  { id: 'tasks', label: '任务', href: '#/tasks', icon: TasksIcon },
   { id: 'insights', label: '统计', href: '#/insights', icon: InsightsIcon },
   { id: 'improve', label: '改进', href: '#/improve', icon: ImproveIcon },
   { id: 'conventions', label: '团队约定', href: '#/conventions', icon: ConventionsIcon },
 ]
 export const NAV_FOOT: NavItem[] = [{ id: 'settings', label: '设置', href: '#/credentials', icon: SettingsIcon }]
 
-/** 地址（location.hash）对应导航里的哪一项：按第一段路径查表，查不到的（首页、新建任务、任务详情）都算「任务」 */
+/** 地址（location.hash）对应导航里的哪一项：按第一段路径查表，查不到的（首页和不认识的地址）算「工作台」 */
 const SECTION: Record<string, NavId> = {
+  tasks: 'tasks',
+  new: 'tasks',
   chat: 'chats',
   insights: 'insights',
   improve: 'improve',
@@ -27,7 +29,7 @@ const SECTION: Record<string, NavId> = {
   credentials: 'settings',
   forges: 'settings',
 }
-export const navOf = (hash: string): NavId => SECTION[/^#\/([\w-]+)/.exec(hash)?.[1] ?? ''] ?? 'tasks'
+export const navOf = (hash: string): NavId => SECTION[/^#\/([\w-]+)/.exec(hash)?.[1] ?? ''] ?? 'workbench'
 
 type Props = {
   current: NavId
