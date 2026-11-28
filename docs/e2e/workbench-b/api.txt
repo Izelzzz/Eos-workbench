@@ -1,6 +1,6 @@
-# e61f37694f731f9d0c0e3599970b650353a5c39a 在 scripts/e2e-ci.ts 跑完后的数据目录（副本）上启动 eos web，请求 GET /api/workbench 和 /api/tasks
+# 代码提交 a912d8f（之后只改了证据）在 scripts/e2e-ci.ts 跑完后的数据目录（副本）上启动 eos web，请求 GET /api/workbench 和 /api/tasks
 ## /api/tasks
-
+[{"id":"t2611281432425hy","status":"done","request":"在 src/math.js 里实现并导出一个求和函数，接收一个数字数组，返回总和；空数组返回 0；数组里有非数字时抛出 TypeError。\n为它写 node:test 测试（放在 test/ 目录），`npm test` 必须通过。\n函数名还没定：规划阶段先用提问工具问我用 sum 还是 total。\n（E2E 验证要求：评审第一轮必须至少提出一条 major 意见，例如补充边界情况的测试，以验证对话循环。）","workflow":"feature-gate","createdAt":1795876362459,"updatedAt":1795876386728}]
 ## /api/workbench
-
-HTTP 000
+{"pending":[],"active":[],"activeTotal":0}
+HTTP 200
