@@ -82,12 +82,12 @@ export const taskProposer = (o: {
     const repos = o.check.repos()
     if (!repos.includes(p.repo))
       return fail(
-        `仓库「${p.repo}」不是平台上的任务用过的仓库，不能提议。用过的仓库：${repos.join('、') || '（还没有）'}。用户要用别的仓库时，请提议一个用过的，并在回复里请用户在确认时改仓库`,
+        `仓库「${p.repo}」不是平台上的任务用过的仓库，不能提议。最近用过的仓库：${repos.slice(0, 50).join('、') || '（还没有）'}${repos.length > 50 ? `（共 ${repos.length} 个）` : ''}。用户要用别的仓库时，请提议一个用过的，并在回复里请用户在确认时改仓库`,
       )
     const problem = o.check.workflow(p.workflow)
     if (problem !== undefined) return fail(`工作流「${p.workflow}」不能用来建任务：${problem}`)
     count++
     const row = o.record({ chatId: o.chatId, call: o.call, title: p.title, input: { repo: p.repo, workflow: p.workflow, request: p.request } }, o.now())
-    return { text: `任务提议 #${row.id} 已记下：「${p.title}」。任务还没有创建，要等用户确认（用户可以改仓库、工作流和需求）后才会创建：现在在命令行用 eos chat create ${row.id} 确认。`, isError: false }
+    return { text: `任务提议 #${row.id} 已记下：「${p.title}」。任务还没有创建：用户要先看过这条提议（可以改仓库、工作流和需求）再确认，才会创建。不要在回答里给出创建的命令，请用户去看这条提议。`, isError: false }
   }
 }

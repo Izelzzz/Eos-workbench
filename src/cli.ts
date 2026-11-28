@@ -72,6 +72,7 @@ const { values, positionals } = parseArgs({
     help: { type: 'boolean', short: 'h' },
     tasks: { type: 'string' },
     'allow-permissions': { type: 'string' },
+    confirm: { type: 'string' },
     note: { type: 'string' },
   },
 })
@@ -418,6 +419,7 @@ const commands: Record<string, () => Promise<void> | void> = {
     conventions.seed(Date.now())
     await chatCommand(positionals.slice(1), {
       ...(values['allow-permissions'] === undefined ? {} : { confirm: values['allow-permissions'] }),
+      ...(values.confirm === undefined ? {} : { taskConfirm: values.confirm }),
       ...(values.note === undefined ? {} : { note: values.note }),
       edits: { ...(values.repo === undefined ? {} : { repo: values.repo }), ...(values.workflow === undefined ? {} : { workflow: values.workflow }), ...(values.request === undefined ? {} : { request: values.request }) },
       // 按任务提议建任务之后和 eos run 一样在本进程里运行它。

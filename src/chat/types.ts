@@ -100,4 +100,5 @@ export type TaskCreated = { taskId: string; actor: ChatActor; at: number; input:
  * 一条任务提议现在的状态（命令行和网页共用）：created / voided：创建过、作废了；unanswered：所在那一轮还没有回复，现在不能创建；pending：可以创建。
  */
 export type TaskProposalState = 'pending' | 'unanswered' | 'voided' | 'created'
-export type TaskProposalView = { proposal: TaskProposal; state: TaskProposalState }
+/** code：确认码，只在 pending 时给：命令行 eos chat create 要带上它，人得先在 eos chat show 里看过这条提议。 */
+export type TaskProposalView = { proposal: TaskProposal; state: TaskProposalState; code?: string }

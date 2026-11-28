@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { Chats, MCP_NAME, type ChatOptions } from '../src/chat/chat.ts'
 import { chatCommand } from '../src/chat/cli.ts'
-import { createFromProposal } from '../src/chat/create.ts'
+import { createFromProposal, viewTaskProposal } from '../src/chat/create.ts'
+import { acquire } from '../src/runner/lock.ts'
 import { ChatStore } from '../src/chat/store.ts'
 import { MAX_TASK_PROPOSALS_PER_CALL, PROPOSE_TASK_TOOL, usedRepos } from '../src/chat/tasks.ts'
 import type { DataSource } from '../src/chat/tools.ts'
@@ -56,9 +57,14 @@ const platform = (checkExecutor?: ChatOptions['checkExecutor']) => {
     created.push(input)
     return sup.create(input)
   }
-  const createTask = (id: number, edits?: Partial<TaskInput>, actor: 'cli' | 'web' = 'cli') =>
-    createFromProposal({ chats, create, dataDir: data, redact, id, actor, ...(edits === undefined ? {} : { edits }), now: () => 300 })
-  return { dir, repo, data, store, conventions, chats, opts, created, create, createTask, redact, source }
+  /** 人看过之后创建：确认码取自 show 用的同一个 viewTaskProposal（还不能创建时没有确认码）。 */
+  const codeOf = (id: number) => {
+    const t = chats.taskProposal(id)
+    return t === undefined ? undefined : viewTaskProposal(t, chats).code
+  }
+  const createTask = (id: number, edits?: Partial<TaskInput>, actor: 'cli' | 'web' = 'cli', confirm = codeOf(id)) =>
+    createFromProposal({ chats, create, dataDir: data, redact, id, actor, ...(edits === undefined ? {} : { edits }), ...(confirm === undefined ? {} : { confirm }), now: () => 300 })
+  return { dir, repo, data, store, conventions, chats, opts, created, create, createTask, codeOf, redact, source }
 }
 
 const tool = `mcp__${MCP_NAME}__${PROPOSE_TASK_TOOL}`
@@ -102,7 +108,8 @@ test('list_repos lists the repos earlier tasks used, newest first: a remote repo
 test('a valid task proposal is recorded as pending and creates no task', async () => {
   const p = platform()
   const r = await propose(p, { title: '补测试', repo: p.repo, workflow: 'standard', request: '给 README 补一段说明' })
-  assert.match(r.reply, /任务提议 #1 已记下：「补测试」。任务还没有创建.*eos chat create 1 确认/)
+  assert.match(r.reply, /任务提议 #1 已记下：「补测试」。任务还没有创建/)
+  assert.ok(!/chat create/.test(r.reply), 'the agent is not handed a create command')
   const [row] = p.chats.taskProposals(r.chat.id)
   assert.deepEqual(row!.input, { repo: p.repo, workflow: 'standard', request: '给 README 补一段说明' })
   assert.equal(row!.call, `chat/${r.chat.id}/1`)
@@ -118,7 +125,7 @@ test('task proposals the platform refuses go back to the agent as errors, and no
   const p = platform()
   const ok = { title: '补测试', repo: p.repo, workflow: 'standard', request: '补测试' }
   const cases: [Record<string, unknown>, RegExp][] = [
-    [{ ...ok, repo: join(p.dir, 'elsewhere') }, /不是平台上的任务用过的仓库，不能提议。用过的仓库：https:\/\/github\.com\/acme\/app、/],
+    [{ ...ok, repo: join(p.dir, 'elsewhere') }, /不是平台上的任务用过的仓库，不能提议。最近用过的仓库：https:\/\/github\.com\/acme\/app、/],
     [{ ...ok, workflow: 'nope' }, /工作流「nope」不能用来建任务：平台上没有这个工作流。现有：/],
     // 文件路径：建任务的 --workflow 认路径，agent 不能用。
     [{ ...ok, workflow: join(import.meta.dirname, '..', 'src', 'workflow', 'templates', 'standard.yaml') }, /平台上没有这个工作流/],
@@ -229,7 +236,7 @@ test('eos chat show lists task proposals with the create command; eos chat creat
   const id = p.chats.taskProposals(r.chat.id)[0]!.id
   const out: string[] = []
   const ran: string[] = []
-  const run = (args: string[], edits?: Partial<TaskInput>) =>
+  const run = (args: string[], edits?: Partial<TaskInput>, confirm?: string) =>
     chatCommand(args, {
       chats: p.chats,
       data: p.source,
@@ -245,14 +252,18 @@ test('eos chat show lists task proposals with the create command; eos chat creat
         throw new Error(s)
       },
       ...(edits === undefined ? {} : { edits }),
+      ...(confirm === undefined ? {} : { taskConfirm: confirm }),
       runTask: async make => void ran.push(await make(p.create)),
     })
   await run(['show', r.chat.id])
   const text = out.join('\n')
   assert.match(text, new RegExp(`任务提议 #${id} {2}补测试\\n {6}状态：待确认，还没有创建\\n {6}仓库：.*repo\\n {6}工作流：standard\\n {6}需求：\\n {8}补测试\\n {8}第二行`))
-  assert.match(text, new RegExp(`创建：npm run eos -- chat create ${id}`))
+  const code = new RegExp(`创建：npm run eos -- chat create ${id} --confirm ([0-9a-f]{8})`).exec(text)?.[1]
+  assert.ok(code !== undefined, text)
+  await assert.rejects(run(['create', String(id)]), /要带确认码/)
+  await assert.rejects(run(['show', r.chat.id], { request: 'x' }), /只用于 eos chat create/)
   out.length = 0
-  await run(['create', String(id)], { workflow: 'standard', request: '只补测试' })
+  await run(['create', String(id)], { workflow: 'standard', request: '只补测试' }, code)
   assert.equal(ran.length, 1)
   assert.equal(p.store.get(ran[0]!)!.request, '只补测试')
   assert.match(out.join('\n'), new RegExp(`已创建任务 ${ran[0]}（来自对话 ${r.chat.id} 的任务提议 #${id}），工作流 standard`))
@@ -271,4 +282,45 @@ test('the modules the agent can trigger never import the create path', () => {
     assert.ok(!/(from|import\()\s*['"]\.\/create(\.ts)?['"]/.test(src), `src/chat/${f} imports the create path`)
     assert.ok(!/(from|import\()\s*['"]\.\.\/runner\/supervisor(\.ts)?['"]/.test(src.replace(/^import type .*$/gm, '')), `src/chat/${f} imports the supervisor`)
   }
+})
+
+test('creating needs the confirmation code that only eos chat show gives: the agent never sees it, a missing or wrong code is refused', async () => {
+  const p = platform()
+  const r = await propose(p, { title: '补测试', repo: p.repo, workflow: 'standard', request: '补测试' })
+  const id = p.chats.taskProposals(r.chat.id)[0]!.id
+  const code = p.codeOf(id)!
+  assert.match(code, /^[0-9a-f]{8}$/)
+  // agent 能看到的：它的工具返回（回复里拼的就是工具返回）、对话记录、对话 trace。
+  assert.ok(!JSON.stringify([r.reply, p.chats.log(r.chat.id), p.chats.trace(r.chat.id), p.chats.taskProposals(r.chat.id)]).includes(code))
+  for (const [confirm, re] of [
+    [undefined, /要带确认码才能创建：先用 eos chat show/],
+    ['00000000', /确认码对不上/],
+  ] as const) {
+    const c = await createFromProposal({ chats: p.chats, create: p.create, dataDir: p.data, redact: p.redact, id, actor: 'cli', ...(confirm === undefined ? {} : { confirm }), now: () => 300 })
+    assert.ok(!c.ok)
+    assert.match(c.error, re)
+  }
+  assert.equal(p.created.length, 0)
+  // 另一条提议的确认码对不上这一条。
+  const r2 = await propose(p, { title: '补测试', repo: p.repo, workflow: 'standard', request: '补测试' })
+  const other = p.chats.taskProposals(r2.chat.id)[0]!.id
+  const cross = await p.createTask(id, undefined, 'cli', p.codeOf(other))
+  assert.ok(!cross.ok)
+  assert.ok((await p.createTask(id)).ok)
+})
+
+test('while another process is creating from the same proposal, creating is refused', async () => {
+  const p = platform()
+  const r = await propose(p, { title: '补测试', repo: p.repo, workflow: 'standard', request: '补测试' })
+  const id = p.chats.taskProposals(r.chat.id)[0]!.id
+  const held = acquire(join(p.data, 'locks'), `chat-task-${id}`)
+  assert.ok(!('heldBy' in held))
+  try {
+    const c = await p.createTask(id)
+    assert.ok(!c.ok)
+    assert.match(c.error, /正在被进程 \d+ 创建/)
+  } finally {
+    held.release()
+  }
+  assert.equal(p.created.length, 0)
 })

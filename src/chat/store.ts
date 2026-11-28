@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS chat_task_proposals (
   task_id TEXT,
   task_actor TEXT,
   task_at INTEGER,
-  task_input TEXT
+  task_input TEXT,
+  confirm_salt TEXT
 );`
 
 /** 标题取第一条消息的开头。 */
@@ -241,6 +242,14 @@ export class ChatStore {
   /** 一个对话的任务提议，先提的在前。 */
   taskProposals(chatId: string): TaskProposal[] {
     return (this.db.prepare('SELECT * FROM chat_task_proposals WHERE chat_id = ? ORDER BY id').all(chatId) as Record<string, unknown>[]).map(taskProposalRow)
+  }
+
+  /** 任务提议的确认码用的随机值（只由 create.ts 用），和约定提议的 confirmSalt 一样：第一次要时生成，不进 agent 能看到的任何结果。 */
+  taskConfirmSalt(id: number): string {
+    this.db.prepare('UPDATE chat_task_proposals SET confirm_salt = ? WHERE id = ? AND confirm_salt IS NULL').run(randomBytes(16).toString('hex'), id)
+    const r = this.db.prepare('SELECT confirm_salt FROM chat_task_proposals WHERE id = ?').get(id) as { confirm_salt: string } | undefined
+    if (r === undefined) throw new Error(`没有任务提议 #${id}`)
+    return r.confirm_salt
   }
 
   /** 记下任务提议已创建（只由 create.ts 用）。已经创建过或者作废了就不记，返回 false。 */

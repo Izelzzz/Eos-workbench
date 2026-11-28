@@ -3,7 +3,8 @@
 // - 发给模型的工具表里有 list_repos 和 propose_task，全是平台工具；agent 用了 list_repos 和 propose_task；
 // - 记下了一条没有作废的任务提议：仓库是 list_repos 列出的 demo 仓库，工作流 standard；任务表一行都没多；
 // - eos chat show 列出任务提议和创建命令；
-// - 人改了需求之后创建（和 eos chat create 同一个函数，只建不运行：运行任务要再调模型）：任务的需求是改过的，meta 记下来源；
+// - 命令行 eos chat create 不带确认码被拒绝；确认码不在对话记录和对话 trace 里（agent 给不出能直接用的命令）；
+// - 人改了需求、带上 show 给的确认码创建（和 eos chat create 同一个函数，只建不运行：运行任务要再调模型）：任务的需求是改过的，meta 记下来源；
 //   之后用命令行 eos chat create 再建一次被拒绝；
 // - 平台持有的模型 key 不在对话记录、任务提议、对话 trace 和命令输出里。
 // 用法：node --import tsx scripts/chat-task-e2e.ts [--fake]
@@ -112,6 +113,7 @@ const id = /chat send (c[0-9a-z]+)/.exec(first.out)?.[1]
 const show = id === undefined ? { code: 1, out: '' } : await eos('chat', 'show', id)
 await model?.close()
 const beforeCreate = tasksDump()
+const code = /chat create \d+ --confirm ([0-9a-f]{8})/.exec(show.out)?.[1]
 
 const store = new Store(join(DATA, 'eos.db'))
 const chats = new ChatStore(store.db)
@@ -119,8 +121,10 @@ const proposals = id === undefined ? [] : chats.taskProposals(id)
 const target = proposals.find(p => p.voided === undefined)
 // 人确认：改了需求再创建。和 eos chat create 同一个函数、同一个 Supervisor.create，只是不运行任务（运行要再调模型）。
 const sup = new Supervisor({ store, executor: { send: () => Promise.reject(new Error('不运行')), findReply: async () => undefined, traceOf: async () => [], release: async () => {}, close: async () => {} }, dataDir: DATA })
-const created = target === undefined ? undefined : await createFromProposal({ chats, create: i => sup.create(i), dataDir: DATA, redact: s => s.split(KEY).join('***'), id: target.id, actor: 'cli', edits: { request: EDITED }, now: Date.now })
-const again = target === undefined ? { code: 0, out: '' } : await eos('chat', 'create', String(target.id))
+const noCode = target === undefined ? { code: 0, out: '' } : await eos('chat', 'create', String(target.id))
+const afterNoCode = tasksDump()
+const created = target === undefined || code === undefined ? undefined : await createFromProposal({ chats, create: i => sup.create(i), dataDir: DATA, redact: s => s.split(KEY).join('***'), id: target.id, actor: 'cli', edits: { request: EDITED }, confirm: code, now: Date.now })
+const again = target === undefined ? { code: 0, out: '' } : await eos('chat', 'create', String(target.id), '--confirm', code ?? '00000000')
 const showAfter = id === undefined ? { code: 1, out: '' } : await eos('chat', 'show', id)
 
 const db = new DatabaseSync(join(DATA, 'eos.db'))
@@ -142,7 +146,9 @@ const checks: [string, boolean, unknown][] = [
   ['agent 用了 list_repos 和 propose_task', reads.some(r => r.tool === 'list_repos') && reads.some(r => r.tool === PROPOSE_TASK_TOOL), reads],
   ['记下一条没有作废的任务提议：仓库是 demo，工作流 standard', target?.input.repo === demo && target.input.workflow === 'standard', proposals],
   ['创建之前任务表一行都没多', beforeCreate === before, undefined],
-  ['eos chat show 列出任务提议和创建命令', target !== undefined && show.out.includes(`任务提议 #${target.id}`) && show.out.includes(`chat create ${target.id}`), show.out.split('\n').filter(l => l.includes('任务提议') || l.includes('create'))],
+  ['eos chat show 列出任务提议和带确认码的创建命令', target !== undefined && show.out.includes(`任务提议 #${target.id}`) && code !== undefined, show.out.split('\n').filter(l => l.includes('任务提议') || l.includes('create'))],
+  ['不带确认码的 eos chat create 被拒绝，任务表不变', noCode.code !== 0 && noCode.out.includes('要带确认码') && afterNoCode === before, noCode.out.slice(-300)],
+  ['确认码不在对话记录和对话 trace 里', code !== undefined && !JSON.stringify([messages, chatTrace]).includes(code), undefined],
   [
     '人改了需求后创建：任务的需求是改过的，meta 记下来源，提议记下建成的任务',
     created?.ok === true && task?.request === EDITED && meta?.origin === `来自对话 ${id} 的任务提议 #${target?.id}` && chats.taskProposal(target!.id)?.created?.taskId === created.taskId,

@@ -204,7 +204,9 @@ export class Store {
   taskRepos(): { repo: string; remote?: string; createdAt: number }[] {
     return (
       this.db.prepare("SELECT json_extract(meta, '$.repo') AS repo, json_extract(meta, '$.remote.webUrl') AS remote, created_at FROM tasks ORDER BY created_at DESC").all() as Record<string, unknown>[]
-    ).map(r => ({ repo: String(r.repo), ...(r.remote === null ? {} : { remote: String(r.remote) }), createdAt: Number(r.created_at) }))
+    )
+      .filter(r => typeof r.repo === 'string')
+      .map(r => ({ repo: String(r.repo), ...(typeof r.remote === 'string' ? { remote: r.remote } : {}), createdAt: Number(r.created_at) }))
   }
 
   list(): TaskSummary[] {

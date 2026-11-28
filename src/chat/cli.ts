@@ -13,7 +13,7 @@ export const CHAT_HELP = `  eos chat new "<话>"                                
   eos chat list                                           列出历史对话
   eos chat show <对话>                                    查看对话记录、用量，和 agent 的提议（与当前版本的差异）
   eos chat save <提议号> [--allow-permissions <确认码>] [--note "<备注>"]  确认保存一条提议，成为约定的新版本（涉及权限的要带 show 显示的确认码）
-  eos chat create <任务提议号> [--repo <仓库>] [--workflow <工作流>] [--request "<需求>"]  按任务提议创建任务并运行（可以改这三项）`
+  eos chat create <任务提议号> --confirm <确认码> [--repo <仓库>] [--workflow <工作流>] [--request "<需求>"]  按任务提议创建任务并运行（确认码见 show；可以改这三项）`
 
 const time = (at: number) => new Date(at).toISOString().replace('T', ' ').slice(0, 19)
 
@@ -60,7 +60,7 @@ const taskText = (v: TaskProposalView): string => {
   }[v.state]()
   const input = p.created?.input ?? p.input
   const out = [`  任务提议 #${p.id}  ${p.title}`, `      状态：${state}`, `      仓库：${input.repo}`, `      工作流：${input.workflow}`, '      需求：', ...input.request.split('\n').map(l => `        ${l}`)]
-  if (v.state === 'pending') out.push(`      创建：npm run eos -- chat create ${p.id}（要改的话加 --repo、--workflow、--request "<需求>"）`)
+  if (v.state === 'pending') out.push(`      创建：npm run eos -- chat create ${p.id} --confirm ${v.code}（要改的话加 --repo、--workflow、--request "<需求>"）`)
   return out.join('\n')
 }
 
@@ -79,12 +79,16 @@ export const chatCommand = async (
     note?: string
     /** eos chat create 时人改过的项。 */
     edits?: Partial<TaskInput>
+    /** eos chat create 的确认码。 */
+    taskConfirm?: string
     /** 建任务并在本进程里运行它（和 eos run 一样）：make 用给它的 create 建任务，返回任务 id。 */
     runTask?: (make: (create: (input: CreateInput) => Promise<Created>) => Promise<string>) => Promise<void>
   },
 ): Promise<void> => {
   const [sub, ...rest] = args
   const usage = `用法：\n${CHAT_HELP}`
+  // 只有 create 用这几个参数：别的子命令带了就报错，不悄悄忽略。
+  if (sub !== 'create' && (Object.keys(o.edits ?? {}).length > 0 || o.taskConfirm !== undefined)) return o.fail(`--repo、--workflow、--request、--confirm 只用于 eos chat create\n${usage}`)
   if (sub === 'list') {
     const all = o.chats.list()
     if (all.length === 0) return o.say('还没有对话')
@@ -129,7 +133,17 @@ export const chatCommand = async (
     if (rest.length > 1) return o.fail(`要改需求请用 --request "<需求>"\n${usage}`)
     const runTask = o.runTask ?? o.fail('这里不能建任务')
     return runTask(async create => {
-      const r = await createFromProposal({ chats: o.chats, create, dataDir: o.dataDir, redact: o.redact, id, actor: 'cli', ...(o.edits === undefined ? {} : { edits: o.edits }), now: o.now })
+      const r = await createFromProposal({
+        chats: o.chats,
+        create,
+        dataDir: o.dataDir,
+        redact: o.redact,
+        id,
+        actor: 'cli',
+        ...(o.edits === undefined ? {} : { edits: o.edits }),
+        ...(o.taskConfirm === undefined ? {} : { confirm: o.taskConfirm }),
+        now: o.now,
+      })
       if (!r.ok) return o.fail(r.error)
       o.say(`已创建任务 ${r.taskId}（来自对话 ${r.proposal.chatId} 的任务提议 #${r.proposal.id}），工作流 ${r.proposal.created!.input.workflow}`)
       return r.taskId
