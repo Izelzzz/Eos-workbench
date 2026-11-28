@@ -2,13 +2,14 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import type { ComponentProps } from 'react'
 import { cn } from './cn.ts'
 
-export const alertVariants = cva('relative grid w-full gap-0.5 rounded-lg border px-3 py-2 text-left text-sm', {
+// 没有边框，靠底色区分
+export const alertVariants = cva('relative grid w-full gap-0.5 rounded-box px-3.5 py-3 text-left text-control', {
   variants: {
     variant: {
-      default: 'border-border bg-card text-card-foreground',
-      success: 'border-success/40 bg-success/10 text-foreground',
-      warning: 'border-warning/45 bg-warning/12 text-foreground',
-      destructive: 'border-destructive/40 bg-destructive/10 text-destructive',
+      default: 'bg-fill text-ink-2',
+      success: 'bg-success/10 text-ink',
+      warning: 'bg-warning/12 text-ink',
+      destructive: 'bg-destructive/10 text-destructive',
     },
   },
   defaultVariants: { variant: 'default' },
@@ -25,9 +26,9 @@ export function Alert({ className, variant, role, ...props }: AlertProps) {
 }
 
 export function AlertTitle({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="alert-title" className={cn('font-semibold', className)} {...props} />
+  return <div data-slot="alert-title" className={cn('font-medium', className)} {...props} />
 }
 
 export function AlertDescription({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="alert-description" className={cn('text-sm wrap-anywhere whitespace-pre-wrap', className)} {...props} />
+  return <div data-slot="alert-description" className={cn('wrap-anywhere whitespace-pre-wrap', className)} {...props} />
 }
