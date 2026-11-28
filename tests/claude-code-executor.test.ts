@@ -264,6 +264,26 @@ describe('真的启动 Claude Code', () => {
     await ex.close()
   })
 
+  test('MCP 的令牌和环境不在 Claude Code 的命令行和环境里（本机任何用户都能读命令行）；平台给的 MCP 照常能用', async () => {
+    const { ws, ex } = make()
+    let result = ''
+    fake.reply = script(
+      () => [{ tool: 'Bash', input: { command: `{ tr '\\0' ' ' < /proc/$PPID/cmdline; tr '\\0' '\\n' < /proc/$PPID/environ; } > ${ws}/cc.txt 2>&1; echo ok` } }],
+      () => [{ tool: 'mcp__probe__get_codeword', input: {} }],
+      r => ((result = lastToolResult(r)), [{ text: '完成' }]),
+    )
+    const mcp = [
+      { name: 'probe', command: process.execPath, args: [join(ROOT, 'tests', 'fixtures', 'codeword-mcp.mjs')], env: { CODEWORD: 'MCP-ENV-SECRET-7Q' } },
+      { name: 'remote', url: 'http://127.0.0.1:9/mcp', headers: { authorization: 'Bearer MCP-HEADER-SECRET-9K' } },
+    ]
+    await ex.send({ key: 'k/mcp', spec: spec(ws, { mcp }), prompt: '读命令行', nonce: 'n1', ask: async () => '' })
+    const seen = readFileSync(join(ws, 'cc.txt'), 'utf8')
+    assert.ok(seen.includes('claude'), '读到了 Claude Code 进程的命令行')
+    assert.doesNotMatch(seen, /MCP-HEADER-SECRET-9K|MCP-ENV-SECRET-7Q/)
+    assert.match(result, /MCP-ENV-SECRET-7Q/, 'MCP 服务拿到了平台给的环境，工具能用')
+    await ex.close()
+  })
+
   test('写入范围：可写的角色只能写 worktree、自己的会话目录和 /tmp；只读的角色连 worktree 也写不了', async () => {
     const { root, ws, ex } = make()
     const cmd = `echo x > ${ws}/in.txt; echo x > ${root}/out.txt; echo x > ${ROOT}/eos-cc-escape.txt; echo done`

@@ -517,9 +517,11 @@ export class ClaudeCodeExecutor implements Executor {
     const ac = new AbortController()
     let finish!: () => void
     const entry = { ac, done: new Promise<void>(ok => (finish = ok)) }
-    const set = this.running.get(spec.cwd) ?? new Set()
+    // 按解析过链接的路径记：release 给的路径和调用时的写法可能不一样
+    const where = real(spec.cwd)
+    const set = this.running.get(where) ?? new Set()
     set.add(entry)
-    this.running.set(spec.cwd, set)
+    this.running.set(where, set)
     const grant = this.upstream.grant(this.o.modelKey)
     const stderr = { tail: '' }
     const exited: Promise<void>[] = []
@@ -541,6 +543,10 @@ export class ClaudeCodeExecutor implements Executor {
         ...(log === undefined ? { sessionId: id } : { resume: id }),
         ...(plugin === undefined ? {} : { plugins: [{ type: 'local' as const, path: plugin }], skills: spec.profile.skills.map(s => `${PLUGIN}:${s.name}`) }),
         mcpServers: this.mcpServers(spec.profile.mcp),
+        // MCP 的配置（HTTP 端点的请求头里有这次调用的令牌）经控制通道交给 Claude Code，不放在命令行上：
+        // 命令行（/proc/<pid>/cmdline）本机任何用户都能读。只用平台给的 MCP，不读会话目录、worktree 里的 MCP 配置文件。
+        mcpServersDelivery: 'initialize',
+        strictMcpConfig: true,
         hooks: { PreToolUse: [{ hooks: [gate(tools, mcpNames, spec.profile.background)] }] },
         canUseTool: answer(p.ask),
         abortController: ac,
@@ -566,7 +572,7 @@ export class ClaudeCodeExecutor implements Executor {
       // SDK 在 query 结束时关掉进程（先关 stdin，约 2 秒后强制结束）：等它真的退出
       await Promise.all(exited)
       set.delete(entry)
-      if (set.size === 0) this.running.delete(spec.cwd)
+      if (set.size === 0) this.running.delete(where)
       finish()
     }
   }
@@ -587,7 +593,7 @@ export class ClaudeCodeExecutor implements Executor {
    * runner 在这之后放开任务锁，下一个 runner 续接会话时旧进程已经不在。之后的调用照常可用，会话从日志续接。
    */
   async release(cwd: string): Promise<void> {
-    const calls = [...(this.running.get(cwd) ?? [])]
+    const calls = [...(this.running.get(real(cwd)) ?? [])]
     for (const c of calls) c.ac.abort()
     await Promise.allSettled(calls.map(c => c.done))
   }

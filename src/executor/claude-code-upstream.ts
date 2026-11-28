@@ -131,7 +131,7 @@ export class Upstream {
       const headers: Record<string, string> = {}
       for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string' && !DROP_REQUEST.test(k)) headers[k] = v
       headers['x-api-key'] = key()
-      const r = await fetch(`${this.target}${u.pathname}${u.search}`, { method: 'POST', headers, signal: ac.signal, body: new Uint8Array(body) })
+      const r = await fetch(`${this.target}${u.pathname}${u.search}`, { method: 'POST', headers, signal: ac.signal, redirect: 'error', body: new Uint8Array(body) })
       const out: Record<string, string> = {}
       r.headers.forEach((v, k) => {
         if (!DROP_RESPONSE.test(k)) out[k] = v
