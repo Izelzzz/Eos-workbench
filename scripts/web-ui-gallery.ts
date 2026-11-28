@@ -76,6 +76,8 @@ for (const scheme of ['light', 'dark'] as const) {
     // 键盘聚焦时画出 2px 墨色外框
     await page.locator('#g-org').focus()
     await page.keyboard.press('Tab')
+    // 按钮的颜色过渡 150ms（外框颜色也在里面），等它走完再读
+    await page.waitForTimeout(300)
     const focused = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement
       const st = getComputedStyle(el)
