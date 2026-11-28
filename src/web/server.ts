@@ -25,6 +25,7 @@ import { committedChanges, fileDiff, filesByCall, onBranch } from '../runner/git
 import type { Supervisor } from '../runner/supervisor.ts'
 import type { Store } from '../store/store.ts'
 import type { WebChats } from './chat.ts'
+import { readWorkbench } from './workbench.ts'
 import type { SaveOutcome } from '../chat/save.ts'
 import { buildTrace } from '../trace/build.ts'
 import type { TraceEvent } from '../trace/types.ts'
@@ -842,6 +843,7 @@ export const createWebServer = (o: {
         return d === undefined ? json(res, 404, { error: `没有对话 ${id}` }) : json(res, 200, d)
       }
       if (url.pathname === '/api/tasks') return json(res, 200, o.store.list())
+      if (url.pathname === '/api/workbench') return json(res, 200, readWorkbench(o.store))
       if (url.pathname === '/api/improve/proposals') return json(res, 200, o.store.proposals().map(proposalInfo))
       if (url.pathname === '/api/improve/comparisons') return json(res, 200, comparisons())
       const prop = PROPOSAL.exec(url.pathname)
