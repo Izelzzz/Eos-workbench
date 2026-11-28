@@ -53,16 +53,16 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 - **不用 `block`、`grow` 这类和现有页面类名同名的工具类**：工具类会作用到现有页面里同名的元素。用 `flex-1` 代替 `grow`。
 ### Tailwind 只扫描哪些目录
 
-- Tailwind 现在只扫描 `web/src/ui/`（`web/src/index.css` 的 `@source`）。**现有页面（`web/src/*.tsx`）没被扫描**：在页面里写 Tailwind 类，只有恰好也在 `ui/` 里用到的才生成样式，其余不生成、也不报错。
+- Tailwind 只扫描 `web/src/index.css` 的 `@source` 列出的目录：现在是 `web/src/ui/`（组件）和 `web/src/shell/`（导航、外壳、设置页）。**现有页面（`web/src/*.tsx`）没被扫描**：在页面里写 Tailwind 类，只有恰好也在被扫描的目录里用到的才生成样式，其余不生成、也不报错。
 - 原因：现有页面的类名（`block`、`grow` 等）和工具类同名，扫描它们会生成同名的工具类，改掉现有页面的样式。
-- 现有页面的布局继续用 `styles.css`。按新的信息结构重做页面时，新页面放进一个新目录，把它加到 `index.css` 的 `@source`，并把这个目录加进 `tests/web-ui.test.ts` 的检查范围（现在只查 `ui/`）。
+- 现有页面的布局继续用 `styles.css`。按新的信息结构重做页面时，新页面放进一个新目录，把它加到 `index.css` 的 `@source`。`tests/web-ui.test.ts` 从 `@source` 读检查范围，加进去就会被查。
 
 ### `npm test` 查什么
 
 | 测试 | 查什么 | 查不出什么 |
 |---|---|---|
 | `tests/web-tokens.test.ts` | `web/src` 里 `tokens.css` 以外直接写的颜色、字号、字重、字体、圆角，CSS 变量声明，任意值，默认调色板 | `styles.css` 里直接写的间距；写在声明下一行的颜色名等少数写法 |
-| `tests/web-ui.test.ts` | `web/src/ui/` 里带值的类是否生成了样式（缺令牌会被查出），以及有没有和现有页面类名同名的工具类 | 根部分拼错的类名（`itmes-center`）；`ui/` 以外的目录；函数返回的页面类名 |
+| `tests/web-ui.test.ts` | `@source` 列出的目录（`ui/`、`shell/`）里带值的类是否生成了样式（缺令牌会被查出），以及有没有和现有页面类名同名的工具类 | 根部分拼错的类名（`itmes-center`）；没被扫描的目录；函数返回的页面类名 |
 
 手写按钮、表单，用了 `dark:`，这类问题测试查不出来，靠评审。
 
