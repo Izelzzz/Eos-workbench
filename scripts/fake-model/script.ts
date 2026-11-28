@@ -1,6 +1,7 @@
 // 假模型的剧本：给 CI 里的确定性 E2E 用（scripts/e2e-ci.ts），不调真实模型也能把平台、dsh、沙箱、git、检查命令整条链路跑一遍。
 // 剧本对应 scripts/e2e.ts 的需求（sum 函数 + 测试）和 feature 模板的三个角色，按「角色 × 这一轮进行到哪一步」决定回复。
-// 这里是纯逻辑：输入 dsh 发来的请求体（Anthropic Messages 格式），输出一次回复（一次工具调用或一段文字）。
+// 这里是纯逻辑：输入执行器发来的请求体（Anthropic Messages 格式），输出一次回复（一次工具调用或一段文字）。
+// dsh 和 Claude Code 都发这种请求，工具名和参数不一样：剧本按 dsh 的工具写，发出去之前按请求里的工具表换成那个执行器的（toolFor）。
 
 /** dsh 发来的请求里用到的部分 */
 export type Block =
@@ -10,7 +11,7 @@ export type Block =
   | { type: string }
 /** content 在协议里也可以是一个字符串；服务入口（server.ts）先统一成块的数组 */
 export type Message = { role: 'user' | 'assistant' | 'system'; content: Block[] }
-export type Request = { model: string; messages: Message[]; tools?: { name: string }[] }
+export type Request = { model: string; messages: Message[]; tools?: { name: string }[]; system?: unknown }
 
 /** 一次回复：调一个工具，或者回一段文字（结束这一轮） */
 export type Reply = { kind: 'tool'; name: string; input: Record<string, unknown> } | { kind: 'text'; text: string }
@@ -131,6 +132,43 @@ function turnFor(role: Role, isFirstTurn: boolean, prompt: string): Turn {
   }
 }
 
+/** Claude Code 自带的工具名（大写开头）；dsh 的是小写（write、bash）。只读、去掉了命令的角色也至少有其中几个（Read、Glob、Grep、AskUserQuestion）。 */
+const CLAUDE_CODE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'AskUserQuestion', 'Skill'])
+export const isClaudeCode = (req: Request): boolean => (req.tools ?? []).some(t => CLAUDE_CODE_TOOLS.has(t.name))
+
+/** Claude Code 在请求里写明工作目录（「Primary working directory: <路径>」）；它的 Write 要绝对路径。 */
+export const workingDirectory = (req: Request): string | undefined => {
+  const text = [req.system, ...req.messages.map(m => m.content)]
+    .flat(2)
+    .map(b => (typeof b === 'string' ? b : typeof (b as { text?: unknown })?.text === 'string' ? (b as { text: string }).text : ''))
+    .join('\n')
+  // 到行尾为止（路径里可以有空格）
+  return /Primary working directory: ([^\n]+)/.exec(text)?.[1]?.trim()
+}
+
+/** 剧本里的工具调用换成这个执行器的：dsh 原样；Claude Code 换工具名和参数（Write 用绝对路径，AskUserQuestion 的问题带 header、选项带说明）。 */
+export function toolFor(req: Request, r: Extract<Reply, { kind: 'tool' }>): Reply {
+  if (!isClaudeCode(req)) return r
+  switch (r.name) {
+    case 'write': {
+      const cwd = workingDirectory(req)
+      const path = String(r.input.file_path)
+      if (cwd === undefined) return { kind: 'text', text: '假模型：Claude Code 的请求里找不到工作目录（Primary working directory），没法给 Write 绝对路径' }
+      return tool('Write', { file_path: path.startsWith('/') ? path : `${cwd}/${path}`, content: r.input.content })
+    }
+    case 'bash':
+      return tool('Bash', r.input)
+    case 'ask_user_question': {
+      const qs = r.input.questions as { question: string; options: { label: string }[] }[]
+      return tool('AskUserQuestion', {
+        questions: qs.map(q => ({ question: q.question, header: '问题', multiSelect: false, options: q.options.map(o => ({ label: o.label, description: o.label })) })),
+      })
+    }
+    default:
+      return r
+  }
+}
+
 /** 剧本的入口：认不出角色时回一段说明文字，平台会把它当成解析失败，E2E 因此失败而不是卡住 */
 export function decide(req: Request): Reply {
   const role = roleOf(req)
@@ -138,9 +176,10 @@ export function decide(req: Request): Reply {
   const turn = turnOf(req)
   const isFirstTurn = !req.messages.slice(0, turn.index).some(m => m.role === 'assistant')
   const plan = turnFor(role, isFirstTurn, turn.prompt)
-  const next = turn.toolsDone.length < plan.tools.length ? plan.tools[turn.toolsDone.length]! : { kind: 'text' as const, text: plan.final }
+  const step = turn.toolsDone.length < plan.tools.length ? plan.tools[turn.toolsDone.length]! : { kind: 'text' as const, text: plan.final }
+  const next = step.kind === 'tool' ? toolFor(req, step) : step
   if (next.kind === 'tool' && req.tools !== undefined && !req.tools.some(t => t.name === next.name)) {
-    return { kind: 'text', text: `假模型：dsh 没有提供 ${next.name} 工具（改名了？要同步改 scripts/fake-model/script.ts）` }
+    return { kind: 'text', text: `假模型：执行器没有提供 ${next.name} 工具（改名了？要同步改 scripts/fake-model/script.ts）` }
   }
   return next
 }

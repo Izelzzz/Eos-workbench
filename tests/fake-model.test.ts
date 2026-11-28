@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { decide, roleOf, type Message, type Request } from '../scripts/fake-model/script.ts'
-import { sse } from '../scripts/fake-model/server.ts'
+import { sse, startFakeModel } from '../scripts/fake-model/server.ts'
+import { toolsFor } from '../src/executor/claude-code.ts'
 import { parseWorkflow } from '../src/workflow/parse.ts'
 import { critiquePrompt } from '../src/engine/prompts.ts'
 import { newTask } from '../src/engine/machine.ts'
@@ -126,4 +127,65 @@ test('dsh 没提供剧本要用的工具时说明是哪个，不往下走；工�
   }
   const next = decide(req(prompt(ROLE.developer), { role: 'assistant', content: [{ type: 'tool_use', id: 'w', name: 'write', input: {} }] }, withNote))
   assert.equal(next.kind === 'tool' && next.input.file_path, 'test/math.test.js')
+})
+
+// ---- Claude Code 发来的请求：工具名大写开头，Write 要绝对路径，工作目录写在请求里 ----
+
+/** 每个角色在 Claude Code 里实际拿到的工具表（和执行器换算的一样：只读的角色没有写文件的工具）。 */
+const ccTools = (write: 'none' | 'worktree') => toolsFor({ builtinTools: 'standard', denyTools: [], skills: [], mcp: [], background: false }, write).map(name => ({ name }))
+const ccReq = (write: 'none' | 'worktree', ...messages: Message[]): Request => ({
+  model: 'claude-sonnet-5-5',
+  messages,
+  tools: ccTools(write),
+  system: [{ type: 'text', text: 'Environment:\n - Primary working directory: /data/my worktrees/t1\n - Is a git repository: true' }],
+})
+
+test('Claude Code：规划（只读，工具表里没有 Write）也认得出；提问换成 AskUserQuestion，带 header 和选项说明', () => {
+  const ask = decide(ccReq('none', prompt(ROLE.planner)))
+  assert.equal(ask.kind === 'tool' && ask.name, 'AskUserQuestion')
+  assert.deepEqual(ask.kind === 'tool' && ask.input, {
+    questions: [
+      {
+        question: '函数名用 sum 还是 total？',
+        header: '问题',
+        multiSelect: false,
+        options: [
+          { label: 'sum', description: 'sum' },
+          { label: 'total', description: 'total' },
+        ],
+      },
+    ],
+  })
+  // 只读、去掉命令的角色：工具表里只有 Read、Glob、Grep 这类，也认作 Claude Code
+  const bare = decide({ model: 'm', messages: [prompt(ROLE.planner)], tools: [{ name: 'Read' }, { name: 'Glob' }, { name: 'AskUserQuestion' }] })
+  assert.equal(bare.kind === 'tool' && bare.name, 'AskUserQuestion')
+})
+
+test('Claude Code：开发的 Write 用绝对路径（工作目录里可以有空格），Bash 原样；评审用 Bash', () => {
+  const steps: string[] = []
+  let h: Message[] = [prompt(ROLE.developer)]
+  for (let i = 0; i < 4; i++) {
+    const r = decide(ccReq('worktree', ...h))
+    steps.push(r.kind === 'tool' ? `${r.name}:${String(r.input.file_path ?? r.input.command)}` : 'text')
+    if (r.kind === 'tool') h = [...h, ...called(r.name, `c${i}`)]
+  }
+  assert.deepEqual(steps, ['Write:/data/my worktrees/t1/src/math.js', 'Write:/data/my worktrees/t1/test/math.test.js', 'Bash:npm test', 'text'])
+  const review = decide(ccReq('none', prompt(ROLE.reviewer)))
+  assert.equal(review.kind === 'tool' && review.name, 'Bash')
+})
+
+test('Claude Code：请求里找不到工作目录时说明原因，不往下走；dsh 的请求照旧用 dsh 的工具名', () => {
+  const r = decide({ ...ccReq('worktree', prompt(ROLE.developer)), system: [] })
+  assert.match(r.kind === 'text' ? r.text : '', /找不到工作目录/)
+  const dsh = decide({ model: 'm', messages: [prompt(ROLE.developer)], tools: [{ name: 'write' }, { name: 'bash' }] })
+  assert.deepEqual(dsh.kind === 'tool' && [dsh.name, dsh.input.file_path], ['write', 'src/math.js'])
+})
+
+test('假模型服务：不流式的请求一次给完同一个回复；数 token 的请求回固定的数', async () => {
+  const model = await startFakeModel(undefined, () => ({ kind: 'text', text: '好' }))
+  const post = (path: string, body: object) => fetch(`${model.baseUrl}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const plain = (await (await post('/v1/messages', { model: 'm', messages: [{ role: 'user', content: 'hi' }] })).json()) as { content: { text: string }[]; stop_reason: string }
+  assert.deepEqual([plain.content[0]!.text, plain.stop_reason], ['好', 'end_turn'])
+  assert.deepEqual(await (await post('/v1/messages/count_tokens', { model: 'm', messages: [] })).json(), { input_tokens: 100 })
+  await model.close()
 })
