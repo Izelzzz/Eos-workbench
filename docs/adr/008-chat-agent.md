@@ -180,7 +180,7 @@ dsh 的翻译只写在 `src/executor/dsh.ts`：
 
 ### 令牌在 dsh 配置里的处理
 
-Claude Code 经 SDK 的控制通道拿到 MCP 的配置，令牌不落盘，也不在它的命令行和环境里（ADR-009）。dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据目录>/dsh/eos-profiles/ephemeral/<指纹>/cordis.patch.yml`。
+Claude Code 经 SDK 的控制通道拿到 MCP 的配置，令牌不在它的命令行和环境里（ADR-009）。dsh 只能从配置文件读 MCP 的请求头，所以令牌会写进 `<数据目录>/dsh/eos-profiles/ephemeral/<指纹>/cordis.patch.yml`。
 
 | 处理 | 做法 |
 |---|---|

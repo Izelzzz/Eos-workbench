@@ -30,13 +30,13 @@ flowchart TB
   runner["runner、supervisor"] --> red["redacting()<br/>遮蔽凭据"]
   chat["对话 agent、改进提案"] --> red
   red --> reg
-  creds[("凭据存储<br/>+ 启动时取走的环境变量")] -- "ModelKeySpec" --> reg
+  reg -- "按 ModelKeySpec 取 key" --> creds[("凭据存储<br/>+ 启动时取走的环境变量")]
   reg -- "建（第一次用到时）" --> dsh["dsh 执行器<br/>dsh.ts"]
   reg -- "建（第一次用到时）" --> cc["Claude Code 执行器<br/>claude-code.ts"]
   dsh --> dshp["dsh 进程<br/>环境里有 DeepSeek key"]
   dshp --> a1["agent（dsh 的 Landlock 或 bwrap）"]
   cc --> up["本机上游<br/>claude-code-upstream.ts"]
-  cc --> ccp["Claude Code 进程（Landlock）<br/>只有一次性令牌"]
+  cc --> ccp["Claude Code 进程（Landlock）<br/>没有模型 key，只有一次性令牌"]
   ccp --> a2["agent 的命令（同一个 Landlock）"]
   ccp -- "令牌" --> up
   up -- "换上 Anthropic key" --> ant["Anthropic 模型接口"]
@@ -75,7 +75,7 @@ flowchart TB
 - 执行器没有的工具组算已经满足（例如 Claude Code 没有 todo、goal 两组）；`fixed` 的一律拒绝。
 - 每个执行器把能力面翻译成自己的配置：dsh 是 profile 补丁和技能目录（ADR-003）；Claude Code 是 `tools` 白名单、本地插件里的技能、`mcpServers`，加上每次工具调用前的检查（`PreToolUse` hook）。
 
-**为什么用白名单**：Claude Code 不限制时的工具表里有跨会话消息（`SendMessage`、`ListAgents`）、换工作目录（`EnterWorktree`）这类工具，新版本还会加。只给白名单里的，新工具默认拿不到。
+**为什么用白名单**：Claude Code 不限制时的工具表里有跨会话消息（`SendMessage`、`ListAgents`）、换工作目录（`EnterWorktree`）这类工具，SDK 升级时工具表会变。只给白名单里的，新出现的工具拿不到。
 
 ### 模型 key
 
@@ -87,8 +87,9 @@ flowchart TB
 ### 自检和失败的修法
 
 - `health` 返回 `eos doctor` 的几项（`ok`、`warn`、`fail`）、agent 是否在沙箱里、设置了 agent 的用户时能不能以它运行。
-- 启动前检查里，`fail` 拦下平台启动，`warn` 只提示；标了 `doctorOnly` 的只在 `eos doctor` 里列出。
-- 默认执行器的模型 key 缺失时是 `fail`：平台不启动。Claude Code 没准备好（没装好、没有 key、没有 Landlock）只在 `eos doctor` 里显示 ⚠，用它的角色在调用时报错。所有角色都用 Claude Code 时，平台启动仍然要 DeepSeek key。
+- 启动前检查（启动 Web 和会跑 agent 的命令之前）里，`fail` 拦下，`warn` 只提示；标了 `doctorOnly` 的只在 `eos doctor` 里列出。
+- dsh 的各项（模型 key、安装、沙箱、`EOS_MODEL_BASE_URL`）没准备好时是 `fail`，平台不启动。所有角色都用 Claude Code 时也一样。
+- Claude Code 没准备好（没装好、没有 key、没有 Landlock）只在 `eos doctor` 里显示 ⚠，用它的角色在调用时报错。`EOS_ANTHROPIC_BASE_URL` 不合法时是 `fail`。
 - 调用失败时，runner 先问那次调用用的执行器（`failureHint`，来自 `ExecutorKind.failureHints`），执行器认不出时才用 `src/engine/failure.ts` 的通用说法。具体的凭据名、环境变量、模型接口主机只出现在执行器给的修法里。
 
 **为什么 Claude Code 没准备好不拦下启动**：不是每个部署都用 Claude Code。总会出现的 ⚠ 会让人习惯性忽略真正的提示，所以只在 `eos doctor` 里列出。
@@ -100,7 +101,7 @@ flowchart TB
 | 进程 | 每个（worktree、模型路由、能力面）一个 dsh 进程，跨调用常驻 | 每次调用一个 Claude Code 进程（`query()`），这一轮结束就退出 |
 | 会话 id | 由 key 算出 | 由 key 算出的 UUID；第一次新建，之后续接 |
 | 能力面 | profile 补丁，按指纹分进程 | 按调用给：`tools` 白名单、插件、`mcpServers`；`settingSources: []`，不读仓库和用户目录的设置、指令文件 |
-| 沙箱 | dsh 自己的 bwrap，用不了时 Landlock | 整个 Claude Code 进程套平台的 Landlock 启动器（`landlock.ts`）：只能写自己的会话目录和 `/tmp`，可写的角色加上 worktree。Landlock 用不了时拒绝调用 |
+| 沙箱 | dsh 自己的 bwrap，用不了时 Landlock | 平台的 Landlock 启动器（`landlock.ts`）套住整个 Claude Code 进程，用不了时拒绝调用。可写的范围见「agent 在哪里运行」 |
 | 模型 key | 经环境变量交给 dsh 进程 | 不交给 Claude Code，见下一节 |
 | 提问 | `ask_user_question`，可以长时间挂起 | `AskUserQuestion` 经 `canUseTool` 交给平台，等待期间进程一直挂着 |
 | 会话日志 | zstd 多帧的 jsonl，在 dsh 的数据目录 | 普通 jsonl，在 `<数据目录>/claude-code/sessions/<会话 id>/` 下 |
@@ -111,28 +112,32 @@ flowchart TB
 
 ### 谁能读到模型 key 和 MCP 令牌
 
-模型 key 和 MCP 令牌都只由平台持有，但交给执行器的方式不同。下表按部署镜像（ADR-006）的用户写；不用 Docker 部署时，这些进程和平台是同一个用户，同一个用户的进程能互相读环境（ADR-005）。
+模型 key 和 MCP 令牌都只由平台持有，交给执行器的方式不同。这一节说的令牌有两种：Claude Code 每次调用的一次性令牌（上游只认它），对话 agent 每次调用的 MCP 令牌（ADR-008）。两种都只在那次调用期间有用。
+
+**部署镜像里**（ADR-006 的用户）：
 
 | 进程 | 用户 | 能读到的 | 读不到的 |
 |---|---|---|---|
-| 平台（含 Claude Code 的本机上游） | `eos` | 全部模型 key（解开的凭据存储、启动时取走的环境变量）、对话的 MCP 令牌（自己发的） | — |
-| dsh 进程 | `eos-agent` | DeepSeek key（环境变量）；对话的 MCP 令牌（dsh 只能从配置文件读请求头，写在 `dsh/eos-profiles/ephemeral/` 下，组 `eos-dsh` 可读，ADR-008） | Anthropic key |
-| dsh 在沙箱外启动的 stdio MCP 服务 | `eos-agent` | DeepSeek key（继承 dsh 的环境，ADR-006） | — |
-| dsh 的 agent（工具子进程） | `eos-agent`，在沙箱里 | 正在进行的对话的 MCP 令牌（见表下第二条） | 模型 key：沙箱挡住读别的进程的环境 |
-| Claude Code 进程 | `eos-agent`，在 Landlock 里 | 这次调用的一次性令牌（环境变量 `ANTHROPIC_API_KEY`）；对话的 MCP 令牌（经 SDK 的控制通道交给它，不在命令行和环境里） | Anthropic key、DeepSeek key |
-| Claude Code 的 agent 的命令、它启动的 stdio MCP 服务 | `eos-agent`，同一个 Landlock | 这次调用的令牌（继承 Claude Code 的环境，见「已知限制」）；正在进行的对话的 MCP 令牌（见表下第二条） | 真 key；别的任务的一次性令牌（别的 Landlock 域） |
-| 检查命令 | `eos-check` | 都读不到：环境是白名单，读不到别的用户进程的环境 | 全部 |
+| 平台（含 Claude Code 的本机上游） | `eos` | 主密钥、全部模型 key、两种令牌（都是它发的） | — |
+| dsh 进程 | `eos-agent`，不在沙箱里 | DeepSeek key（环境变量）；对话用 dsh 时的 MCP 令牌（配置文件，见表下第一条）；正在跑的 Claude Code 进程的一次性令牌（同一个用户，读得到它的 `/proc/<pid>/environ`） | Anthropic key、主密钥 |
+| dsh 在沙箱外启动的 stdio MCP 服务 | `eos-agent`，不在沙箱里 | 和 dsh 进程一样（继承 dsh 的环境，ADR-006） | Anthropic key、主密钥 |
+| dsh 的 agent（工具子进程） | `eos-agent`，在沙箱里 | 对话用 dsh 时的 MCP 令牌（配置文件） | 模型 key、一次性令牌：沙箱挡住读别的进程的环境 |
+| Claude Code 进程 | `eos-agent`，在 Landlock 里 | 这次调用的一次性令牌（环境变量 `ANTHROPIC_API_KEY`）；对话用 Claude Code 时的 MCP 令牌（经 SDK 的控制通道交给它，不在命令行和环境里） | 模型 key、主密钥 |
+| Claude Code 的 agent 的命令、它启动的 stdio MCP 服务 | `eos-agent`，同一个 Landlock | 这次调用的一次性令牌（继承 Claude Code 的环境）；对话用 dsh 时的 MCP 令牌（配置文件） | 模型 key、主密钥；别的调用的一次性令牌（别的 Landlock 域） |
+| 检查命令 | `eos-check` | 都读不到：环境是白名单，不是别的进程的用户，也不在 `eos-dsh` 组里 | 全部 |
 
-- 对话 agent 是唯一拿到 HTTP MCP 端点（和它的令牌）的 agent，它没有任何自带工具（`builtinTools: 'none'`），自己运行不了命令。任务里的角色只有模板写的 stdio MCP 服务，不带密钥（ADR-003）。
-- 对话用 dsh 时，令牌在调用期间写在 `dsh/eos-profiles/ephemeral/<指纹>/cordis.patch.yml`（0640，组 `eos-dsh`，ADR-008）。所有 agent 都以 `eos-agent` 运行、在 `eos-dsh` 组里，沙箱只限制写：同时在跑的任务的 agent，命令能读到这个文件，在对话的这次调用结束前用这个令牌调对话的 MCP 工具（读遮蔽过的平台数据、提议约定；提议要人确认才保存）。这是 ADR-008「已知限制」里的一条，和路线图「任务之间的隔离」是同一个问题。对话用 Claude Code 时令牌不落盘。
-- Claude Code 的一次性令牌只在本机上游登记。上游只听 127.0.0.1，定长比较，调用结束就撤销；只转发 `POST /v1/messages`（和 `count_tokens`）到配置的 Anthropic 地址，不跟随重定向，请求体和回复各有上限。调用期间，agent 能经上游调模型（这正是它的工作），但拿不到真 key，调用结束后令牌没用。
-- 模型 key 和令牌不出现在 trace 和日志里：执行器的输出都经过 `redacting()`。
+- 对话用 dsh 时，MCP 令牌在调用期间写在 `dsh/eos-profiles/ephemeral/<指纹>/cordis.patch.yml`（0640，组 `eos-dsh`）。所有以 `eos-agent` 运行的进程都在这个组里，沙箱只限制写，所以都读得到。这是 ADR-008「已知限制」里的一条。
+- 对话 agent 是唯一拿到 HTTP MCP 端点的 agent，它没有自带工具（`builtinTools: 'none'`），自己运行不了命令。任务里的角色只有模板写的 stdio MCP 服务，不带密钥（ADR-003）。
+- 一次性令牌只在本机上游登记。上游只听 127.0.0.1，定长比较，调用结束就撤销；只转发 `POST /v1/messages`（和 `count_tokens`）到配置的 Anthropic 地址，不跟随重定向，请求体和回复各有上限。拿到令牌的进程在那次调用结束前能经上游调模型，拿不到真 key。
+- `redacting()` 遮住模型 key、主密钥、凭据存储里的凭据和平台登记过的 Git 令牌。两种令牌不在其中：agent 把环境打印出来时，一次性令牌会出现在 trace 里。执行器自己的会话日志（`dsh/`、`claude-code/sessions/` 下）不经过遮蔽。
+
+**不用 Docker 部署时**：所有这些进程和平台是同一个用户。平台启动时从 `process.env` 里删掉主密钥和模型 key，但进程的初始环境（`/proc/<pid>/environ`）里还在（ADR-005）。所以不在沙箱里的进程——dsh 进程、dsh 在沙箱外启动的 MCP 服务、检查命令——读得到主密钥，能解开凭据存储，等于读得到全部模型 key 和令牌。在沙箱里的进程（dsh 的 agent、Claude Code 和它的命令）仍然读不到别的进程的环境。
 
 **为什么 Claude Code 的 key 走本机上游**：交给 Claude Code 进程的 key，agent 的命令能从自己的环境和 Claude Code 进程的环境里读到（`poc/claude-code/README.md`）。dsh 做不到这一点：这一版 dsh 只能从环境变量拿模型 key（ADR-005），所以 dsh 那边靠沙箱挡住 agent。
 
 ### agent 在哪里运行
 
-每个执行器自己决定它的进程怎么起：在平台所在的机器上起；部署镜像里切换到 `eos-agent`、清掉能力；套什么沙箱（dsh 用它自己的 bwrap 或 Landlock，Claude Code 用平台的 Landlock 启动器）。接口里没有「沙箱」或「运行位置」这一层：同一台机器上的任务共用用户、`/tmp` 和依赖缓存（ADR-006「沙箱不限制什么」）。
+每个执行器自己决定它的进程怎么起：在平台所在的机器上起；部署镜像里切换到 `eos-agent`、清掉能力；套什么沙箱（dsh 用它自己的 bwrap 或 Landlock，Claude Code 用平台的 Landlock 启动器）。Claude Code 和它起的命令只能写自己的会话目录和 `/tmp`，可写的角色还能写 worktree。接口里没有「沙箱」或「运行位置」这一层：同一台机器上的任务共用用户、`/tmp` 和依赖缓存（ADR-006「沙箱不限制什么」）。
 
 ### 约束怎么保持
 
@@ -151,7 +156,7 @@ flowchart TB
 3. 在 `tests/executor-contract.test.ts` 的 `FACTORIES` 里给它一个不调模型的构造。
 4. 在 ESLint 规则里把它的包限定在它自己的文件里，名字加进执行器名字的清单。
 5. 凭据：按「谁能读到模型 key 和 MCP 令牌」的标准决定 key 怎么交给它；它的会话日志、数据目录在部署里属于谁（`deploy/eos`）。
-6. 让 `scripts/fake-model/script.ts` 认得它的工具名，在 CI 里加一个确定性 E2E 的 job。
+6. 让 `scripts/fake-model/script.ts` 认得它的工具名，在 `scripts/e2e-ci.ts`、`scripts/e2e.ts` 可选的执行器里加上它，在 CI 里加一个确定性 E2E 的 job。
 
 ## 没有采用的方案
 
@@ -169,18 +174,17 @@ flowchart TB
 | 限制 | 说明 |
 |---|---|
 | 所有角色都用 Claude Code 时平台启动仍要 DeepSeek key | 默认执行器的启动检查照旧 |
-| 对话用 dsh 时，同时在跑的任务的 agent 能读到对话的 MCP 令牌 | 见 ADR-008「已知限制」。对话用 Claude Code 时令牌不落盘 |
+| 对话用 dsh 时，同时在跑的任务的 agent 能读到对话的 MCP 令牌 | 见 ADR-008「已知限制」 |
+| dsh 进程和它在沙箱外起的 MCP 服务读得到正在跑的 Claude Code 的一次性令牌 | 同一个用户、不在沙箱里；能在那次调用结束前经上游调模型，拿不到真 key。和路线图第 16 项「任务之间的隔离」是同一个问题 |
+| 两种令牌不在遮蔽的范围里 | 一次性令牌会出现在 agent 打印环境的 trace 里；调用结束后没用 |
+| 对话用 Claude Code 时 MCP 令牌是否写到磁盘 | 测过不在命令行和环境里；没有核对 Claude Code 会不会把 MCP 的请求头写进它的配置目录 |
 | 调用期间 agent 能借令牌调模型 | 用额度受限的 Anthropic key（ADR-006「已知限制」） |
-| Claude Code 的 agent 能改自己会话的记录 | 它要写自己的会话目录；碰不到别的会话（ADR-006「已知限制」） |
+| Claude Code 的 agent 能改自己会话的记录 | 它要写自己的会话目录；写不了别的会话，但读得到所有会话的日志（ADR-006「已知限制」） |
 | Claude Code 只在 Linux 上可用 | 依赖 Landlock；macOS 上拒绝调用 |
 | Claude Code 起的 stdio MCP 服务能读到这次调用的令牌 | 它们继承 Claude Code 的环境，和 agent 的命令在同一个 Landlock 里；调用结束前能经上游调模型，拿不到真 key。和路线图第 16 项「任务之间的隔离」是同一个问题 |
 | Claude Code 的提问期间进程一直挂着 | 用户迟迟不回答时占着一个进程 |
 | 实时 trace 里每一步的输出 token 不准 | SDK 的实时消息带的是流开始时的用量；会话日志回放和调用记录里的是最终值 |
 | `landlock.ts` 用的启动器来自 dsh 依赖的 `@deepseek-ai/node-addon-system` | 在 `package.json` 里单独声明；升级 dsh 时可能跟着换版本 |
-
-## 重新评估的条件
-
-- 路线图第 16 项「任务之间的隔离」定下每个任务一个独立的沙箱（例如每个任务一个容器）时：进程在哪里起、套什么沙箱从各执行器里拆出来，成为执行器以外的一个接口；「谁能读到模型 key 和 MCP 令牌」一节按新的边界重写。
 
 ## 涉及的文件
 
@@ -188,10 +192,14 @@ flowchart TB
 |---|---|
 | 接口和注册表 | `src/executor/types.ts`、`src/executor/registry.ts` |
 | 执行器 | `src/executor/dsh.ts`；`src/executor/claude-code.ts`、`src/executor/claude-code-upstream.ts`、`src/executor/landlock.ts` |
-| 用接口的地方 | `src/cli.ts`、`src/runner/supervisor.ts`、`src/runner/runner.ts`、`src/runner/doctor.ts`、`src/chat/chat.ts`、`src/credentials/redact.ts`、`src/credentials/model-key.ts`、`src/engine/failure.ts` |
+| 用接口的地方 | `src/cli.ts`、`src/runner/supervisor.ts`、`src/runner/runner.ts`、`src/runner/doctor.ts`、`src/chat/chat.ts`、`src/web/chat.ts`、`src/credentials/redact.ts`、`src/credentials/model-key.ts`、`src/engine/failure.ts` |
 | 部署 | `deploy/eos`（`/data/claude-code`）、`compose.yaml` |
 | 约束和测试 | `.github/lint/eslint.config.mjs`、`tests/executor-contract.test.ts`、`tests/claude-code-executor.test.ts`、`scripts/fake-model/`、`scripts/e2e-ci.ts`、`.github/workflows/ci.yml` |
 | 文档 | `docs/deploy.md`「用 Claude Code 执行器」 |
+
+## 重新评估的条件
+
+- 路线图第 16 项「任务之间的隔离」定下每个任务一个独立的沙箱（例如每个任务一个容器）时：进程在哪里起、套什么沙箱从各执行器里拆出来，成为执行器以外的一个接口；「谁能读到模型 key 和 MCP 令牌」一节按新的边界重写。
 
 ## 证据
 
