@@ -1,0 +1,27 @@
+{
+ "ok": true,
+ "commit": "31e4ec0dfddf48ad3b9df02a8d4e24b07e9ff8d8",
+ "uncommitted": [],
+ "checks": {
+  "首页 #/ 是工作台，导航当前项是「工作台」": true,
+  "导航「工作台」的读屏名字带上件数，有小圆点": true,
+  "等你处理：3 件，按出现先后（提案、验收、提问）": true,
+  "进行中的任务：6 个，等你处理的两个在前": true,
+  "进行中的任务：等你处理的两行有强调色圆点": true,
+  "进度按工作流节点数分段：带卡点的任务 4 段，其余 3 段": true,
+  "宽屏两栏：右栏 600px 宽、在左栏右边、通到页面底": true,
+  "点一行任务打开任务详情": true,
+  "「全部」到任务列表 #/tasks，导航当前项是「任务」": true,
+  "等你处理里的提问链到任务详情": true,
+  "窄屏：上下排，进行中的任务在等你处理下面": true,
+  "窄屏：不横向滚动": true
+ },
+ "errors": [],
+ "shots": [
+  "workbench-light-1440.png",
+  "workbench-light-390.png",
+  "workbench-dark-1440.png",
+  "workbench-dark-390.png",
+  "vs-design-light-1440.png"
+ ]
+}
