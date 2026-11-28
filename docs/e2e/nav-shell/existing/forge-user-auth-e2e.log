@@ -1,0 +1,23 @@
+(node:14262) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "checks": {
+    "授权后页面显示授权人 @octo": true,
+    "授权页的回调地址是注册时登记的那个": true,
+    "显示结果后地址回到 #/forges（不留 code 和 state）": true,
+    "凭据存储里有授权人的令牌和刷新令牌": true,
+    "任务完成，开了 PR #1": true,
+    "克隆、推送都用授权人的令牌": true,
+    "开 PR 用授权人的令牌（PR 作者是授权人）": true,
+    "撤销后 GitHub 上的授权也撤销了": true,
+    "撤销后平台不再存令牌": true,
+    "390 宽没有横向滚动": true,
+    "接口响应里没有用户令牌和刷新令牌": true,
+    "数据目录里没有用户令牌和刷新令牌的明文": true,
+    "任务日志里没有用户令牌": true,
+    "页面没有报错": true
+  },
+  "passed": 14,
+  "total": 14,
+  "errors": []
+}

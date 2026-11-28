@@ -46,6 +46,8 @@ import {
 
 const WEB = join(import.meta.dirname, '..', 'web', 'src')
 const UI = join(WEB, 'ui')
+// 用 Tailwind 的目录：从 index.css 的 @source 读，新加的目录自动进检查范围
+const TAILWIND_DIRS = [...readFileSync(join(WEB, 'index.css'), 'utf8').matchAll(/^@source "\.\/([\w-]+)";$/gm)].map(m => join(WEB, m[1]!))
 // 现有页面用的类名：styles.css 里的类选择器，和页面文件里 className 字符串中的词。
 // 组件用到同名的工具类时，工具类会作用到现有页面里同名的元素
 const legacyClasses = (): Set<string> => {
@@ -61,7 +63,7 @@ const legacyClasses = (): Set<string> => {
   return names
 }
 
-test('组件里的每个 Tailwind 类都生成了样式（取值来自令牌）', async () => {
+test('组件和页面外壳里的每个 Tailwind 类都生成了样式（取值来自令牌）', async () => {
   const ds = await __unstable__loadDesignSystem(readFileSync(join(WEB, 'index.css'), 'utf8'), { base: WEB })
   const legacy = legacyClasses()
   assert.ok(
@@ -70,8 +72,11 @@ test('组件里的每个 Tailwind 类都生成了样式（取值来自令牌）'
   )
   const missing: string[] = []
   const collisions: string[] = []
-  for (const f of readdirSync(UI).filter(n => n.endsWith('.tsx') || n.endsWith('.ts'))) {
-    const candidates = new Scanner({}).scanFiles([{ content: readFileSync(join(UI, f), 'utf8'), extension: f.split('.').pop()! }])
+  const files = TAILWIND_DIRS.flatMap(d => readdirSync(d).filter(n => n.endsWith('.tsx') || n.endsWith('.ts')).map(n => join(d, n)))
+  assert.ok(TAILWIND_DIRS.includes(UI) && TAILWIND_DIRS.length >= 2, '没读到 index.css 的 @source')
+  for (const path of files) {
+    const f = path.slice(WEB.length + 1)
+    const candidates = new Scanner({}).scanFiles([{ content: readFileSync(path, 'utf8'), extension: f.split('.').pop()! }])
     for (const c of candidates) {
       // 去掉变体前缀（hover:、sm:、data-[x]: 等）后，是 Tailwind 认得的工具类才算类名；data-slot、button 这类普通字符串跳过
       const utility = c.split(/:(?![^[]*\])/).at(-1)!

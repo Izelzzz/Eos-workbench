@@ -1,0 +1,18 @@
+(node:14729) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ 导航里有「对话」，点进去是对话页
+✓ 回复完成之前，页面上已经显示 agent 读了什么（按步推送）
+✓ 回复完成后跳到这个对话，回复上列出读了哪些数据
+✓ 至少一条提议可以保存
+✓ 保存之前约定表一行都没变
+✓ 提议显示差异（新建显示全文）和醒目的权限警告
+✓ 没勾确认之前「保存」不可用
+✓ 勾上确认之后保存成第 1 版：操作人 web，备注写明对话、提议和确认了的权限，内容就是提议的内容
+✓ 保存后显示「已保存」、不再有保存按钮
+✓ 在对话里接着说，记录变成 4 条
+✓ 历史对话列表里有这个对话
+✓ 390 宽不横向滚动（待确认的提议、对话、列表）
+✓ 平台持有的模型 key 不在页面、对话记录和服务输出里
+✓ 页面没有脚本错误
+
+14/14 项通过。报告：/home/user/Eos-workbench/.eos/chat-web-e2e/report.json

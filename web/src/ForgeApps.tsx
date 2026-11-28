@@ -92,7 +92,6 @@ export function ForgeApps({ query }: { query: string }) {
   const justDone = data?.apps.find(a => a.name === registered)
   return (
     <div className="credentials">
-      <h1>代码托管</h1>
       <p className="muted">
         先注册一个 App 并装到要用的仓库，再用 GitHub 账号授权：平台以授权人的身份克隆、推送、开 PR。没人授权时用 App 自己的身份；App 没装到某个仓库时，改用凭据页里的 Git 令牌。App
         的私钥和授权的令牌都加密存在凭据存储里，只由平台使用。
