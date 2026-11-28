@@ -1,0 +1,132 @@
+{
+  "commit": "9d94c0cc7c50843f7ae6216b8add94ac2a972207",
+  "uncommitted": [
+    "docs/e2e/executor-ci/dsh/fake-model.log",
+    "docs/e2e/executor-ci/dsh/report.json",
+    "docs/e2e/executor-ci/dsh/summary.txt"
+  ],
+  "executor": "claude-code",
+  "task": "t261128054328ivu",
+  "killed": true,
+  "killedAtGate": true,
+  "gateLog": [
+    "accept#1 SIGKILL",
+    "accept#1 send-back",
+    "accept#2 accept"
+  ],
+  "atGate": {
+    "status": "waiting_accept",
+    "gate": {
+      "node": "accept",
+      "round": 1,
+      "cycle": 1,
+      "phase": "decide",
+      "fixes": 0,
+      "formatRetries": 0
+    },
+    "calls": 8
+  },
+  "correction": {
+    "before": {
+      "worktree": "/home/user/Eos-workbench/.eos/e2e/data/worktrees/t261128054328ivu",
+      "branch": "eos/t261128054328ivu",
+      "session": "7e049a3e-d6e3-473a-a304-cf2ed04ef3e5",
+      "status": "done"
+    },
+    "calls": [
+      "c10"
+    ],
+    "files": [
+      "README.md"
+    ]
+  },
+  "checks": {
+    "任务完成": true,
+    "评审至少打回一次，开发回应": true,
+    "开发的每次调用都在同一个执行器会话里": true,
+    "规划和评审是只读档位，开发是 workspace-write": true,
+    "agent 主动提问并收到回答": true,
+    "杀进程后续跑：没有重复记录同一个调用": true,
+    "耗时和 token 都有记录": true,
+    "worktree 里 npm test 通过": true,
+    "agent 验收（sign-off）：结论按评审格式解析，最后一次通过，会话是只读档位": true,
+    "停在人验收的卡点上：状态是等待验收，不挂任何工作": true,
+    "卡点上杀进程后续跑：同一次验收只发起一次（第 1、2 次各一条）": true,
+    "命令行列出等验收的任务": true,
+    "人打回一次（带意见）、改完回到卡点后通过": true,
+    "打回后交回开发原来的会话修改": true,
+    "修正：交给开发原来的会话（同一个执行器会话），在同一个 worktree 和分支上": true,
+    "修正之后只重跑程序检查：没有再请评审或验收，没有重跑别的节点": true,
+    "修正完成，任务回到完成；能看出是第几次修正、改了哪些文件": true,
+    "卡点打回之后没有再请评审 agent": true
+  },
+  "sessions": {
+    "plan": {
+      "sid": "fd862255-ba29-46ee-a523-d1d120913f2e",
+      "calls": [
+        "c1"
+      ],
+      "presets": [
+        "read-only"
+      ],
+      "asks": 1
+    },
+    "build": {
+      "sid": "7e049a3e-d6e3-473a-a304-cf2ed04ef3e5",
+      "calls": [
+        "c2",
+        "c4",
+        "c7",
+        "c9",
+        "c10"
+      ],
+      "presets": [
+        "workspace-write",
+        "workspace-write",
+        "workspace-write",
+        "workspace-write",
+        "workspace-write"
+      ],
+      "asks": 0
+    },
+    "review": {
+      "sid": "ffe716d5-9ef4-484f-accc-4c94dbe1790f",
+      "calls": [
+        "c3",
+        "c5"
+      ],
+      "presets": [
+        "read-only",
+        "read-only"
+      ],
+      "asks": 0
+    },
+    "sign-off": {
+      "sid": "951f5769-d33b-47e4-a556-68ffce9fe5dd",
+      "calls": [
+        "c6",
+        "c8"
+      ],
+      "presets": [
+        "read-only",
+        "read-only"
+      ],
+      "asks": 0
+    }
+  },
+  "rejectedReplies": 0,
+  "calls": [
+    "c1 produce@plan 1144ms",
+    "c2 produce@build 563ms",
+    "c3 critique@review#1 473ms",
+    "c4 respond@review#1 323ms",
+    "c5 critique@review#2 169ms",
+    "c6 accept@sign-off#1 509ms",
+    "c7 amend@sign-off#2 375ms",
+    "c8 accept@sign-off#2 136ms",
+    "c9 amend@accept#2 370ms",
+    "c10 correct@build#1 326ms"
+  ],
+  "commits": "48c2a56 eos: build correct (c10)\n8b2cd0c eos: review respond (c4)\n96bb4eb eos: build produce (c2)\n",
+  "npmTest": "est\n> node --test\n\nTAP version 13\n# Subtest: 求和\nok 1 - 求和\n  ---\n  duration_ms: 0.585683\n  type: 'test'\n  ...\n# Subtest: 空数组返回 0\nok 2 - 空数组返回 0\n  ---\n  duration_ms: 0.079354\n  type: 'test'\n  ...\n# Subtest: 有非数字时抛 TypeError\nok 3 - 有非数字时抛 TypeError\n  ---\n  duration_ms: 0.253619\n  type: 'test'\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 50.667257\n"
+}
