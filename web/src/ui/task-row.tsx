@@ -2,10 +2,14 @@ import type { ComponentProps, ReactNode } from 'react'
 import { cn } from './cn.ts'
 import { AccentDot } from './info.tsx'
 
-/** 任务清单：行与行之间一条细线，和清单同宽；鼠标移到一行上时，这一行上下的线隐去 */
+/** 任务清单：行与行之间一条细线，和清单同宽；鼠标移到能点的一行上时，这一行上下的线隐去 */
 export function TaskList({ className, ...props }: ComponentProps<'ul'>) {
   return (
-    <ul data-slot="task-list" className={cn('m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-line [&>li:hover]:border-transparent [&>li:hover+li]:border-transparent', className)} {...props} />
+    <ul
+      data-slot="task-list"
+      className={cn('m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-line [&>li:has(button:hover)]:border-transparent [&>li:has(button:hover)+li]:border-transparent', className)}
+      {...props}
+    />
   )
 }
 
@@ -25,8 +29,8 @@ export type TaskRowProps = {
 
 /** 一行任务：左边任务名，中间一小段一小段的进度，右边状态（148px 宽，右对齐）。窄屏下不显示进度；读屏读「进度 几 / 几」 */
 export function TaskRow({ name, state, total, done, waiting = false, onSelect, className }: TaskRowProps) {
-  const segments = Math.max(1, Math.trunc(total))
-  const reached = Math.max(0, Math.min(segments, Math.trunc(done)))
+  const segments = Number.isFinite(total) ? Math.max(1, Math.trunc(total)) : 1
+  const reached = Number.isFinite(done) ? Math.max(0, Math.min(segments, Math.trunc(done))) : 0
   const steps = Array.from({ length: segments }, (_, i) => (i < reached ? 'done' : i === reached ? 'current' : 'todo'))
   const body = (
     <>

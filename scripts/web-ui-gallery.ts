@@ -111,6 +111,10 @@ for (const scheme of ['light', 'dark'] as const) {
       const third = await style(page.locator('[data-slot=task-row]').nth(2), 'border-top-color')
       const fourth = await style(page.locator('[data-slot=task-row]').nth(3), 'border-top-color')
       check(`${tag}：悬停的那一行上下的分隔线隐去`, third === 'rgba(0, 0, 0, 0)' && fourth === 'rgba(0, 0, 0, 0)')
+      // 不能点的行没有悬停底色，分隔线也不隐去
+      await page.locator('[data-slot=task-row]').nth(1).hover()
+      await page.waitForTimeout(300)
+      check(`${tag}：鼠标移到不能点的行上，分隔线不变`, (await style(page.locator('[data-slot=task-row]').nth(1), 'border-top-color')) !== 'rgba(0, 0, 0, 0)')
       await page.mouse.move(0, 0)
     }
 

@@ -235,6 +235,10 @@ test('TaskRow：按工作流节点数分段，读屏读进度；等人处理时�
   const three = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: 3, done: 1 })))
   assert.equal((three.match(/<i /g) ?? []).length, 3)
   assert.match(three, /进度 1 \/ 3/)
+  // 段数、进度不是有限数时按 1 段、0 段算，不读出 NaN
+  const bad = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: Number.NaN, done: Number.NaN })))
+  assert.equal((bad.match(/<i /g) ?? []).length, 1)
+  assert.match(bad, /进度 0 \/ 1/)
 })
 
 test('InfoRow、Note、Segmented：信息行是 dt/dd，说明块是浅底，分段切换是页签', () => {

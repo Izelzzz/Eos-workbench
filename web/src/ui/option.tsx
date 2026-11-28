@@ -2,7 +2,7 @@ import { createContext, useContext, useId, useState, type ComponentProps, type R
 import { cn } from './cn.ts'
 import { CheckIcon } from './icons.tsx'
 
-/** 一组选项的答案：选了某个选项，或在「其他」里写了字。两者只能有一个，没有答案时是 undefined */
+/** 一组选项的答案：选了某个选项，或在「其他」里写了字（原样保留，提交时只有空白的要当成没回答）。两者只能有一个，没有答案时是 undefined */
 export type OptionAnswer = { kind: 'option'; value: string } | { kind: 'other'; text: string }
 
 type Group = {
@@ -102,7 +102,7 @@ export function OptionOther({ className, ...props }: Omit<ComponentProps<'input'
       data-slot="option-other"
       aria-label="其他"
       value={g.answer?.kind === 'other' ? g.answer.text : ''}
-      onChange={e => g.set(e.target.value.trim() === '' ? undefined : { kind: 'other', text: e.target.value })}
+      onChange={e => g.set(e.target.value === '' ? undefined : { kind: 'other', text: e.target.value })}
       className={cn(
         'h-11 w-full min-w-0 rounded-box border border-dashed border-line bg-transparent px-3.5 font-sans text-lg text-ink outline-hidden placeholder:text-ink-3 focus:border-solid focus:border-ink sm:text-base',
         className,
