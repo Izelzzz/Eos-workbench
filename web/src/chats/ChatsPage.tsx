@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChatList } from './ChatList.tsx'
 import { Conversation } from './Conversation.tsx'
-import { conversations as seed, type Conversation as Chat } from './mock.ts'
+import { conversations as seed, type Conversation as Chat, type WorkflowChange } from './mock.ts'
 
 /** 对话页：一个居中的对话，或者全部对话的列表。不依赖页面上的其他部分 */
 export function ChatsPage() {
@@ -35,6 +35,19 @@ export function ChatsPage() {
     }, 700)
   }
 
+  // 原型：重新提的一版只是在原来的基础上标一处「按你说的改了」
+  const revise = (text: string, of: WorkflowChange) => {
+    const cid = id
+    setChats(cs => cs.map(c => (c.id === cid ? { ...c, messages: [...c.messages, { from: 'me', text }] } : c)))
+    setWaiting(true)
+    setTimeout(() => {
+      setWaiting(false)
+      const last = of.stages.findLast(s => s.summary !== undefined)
+      const stages = of.stages.map(s => (s === last ? { ...s, summary: '按你说的改了', detail: `按「${text}」调整。` } : s))
+      setChats(cs => cs.map(c => (c.id === cid ? { ...c, messages: [...c.messages, { from: 'agent', text: '改好了，这是新的一版。', card: { ...of, stages } }] } : c)))
+    }, 700)
+  }
+
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface max-md:min-h-screen">
       {view === 'list' ? (
@@ -52,7 +65,7 @@ export function ChatsPage() {
           onBack={() => setView('chat')}
         />
       ) : (
-        <Conversation chat={chat} recent={chats.slice(0, 5)} onOpen={open} onNew={() => setId(undefined)} onAll={() => setView('list')} onSend={send} waiting={waiting} />
+        <Conversation chat={chat} recent={chats.slice(0, 5)} onOpen={open} onNew={() => setId(undefined)} onAll={() => setView('list')} onSend={send} onRevise={revise} waiting={waiting} />
       )}
     </main>
   )

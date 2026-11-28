@@ -1,12 +1,14 @@
 // 对话页原型的假数据。正式页面里这些来自平台接口
 
 export type TaskDraft = { kind: 'task'; title: string; repo: string; workflow: string; need: string }
-export type StageChange = { stage: string; summary?: string; detail?: string }
+/** 一个阶段。没改的只有名字；改了的写明改了什么。change 不写表示「改了内容」 */
+export type StageChange = { stage: string; summary?: string; detail?: string; change?: 'added' | 'removed' }
 export type WorkflowChange = { kind: 'workflow'; name: string; nextVersion: number; stages: StageChange[]; widens?: string }
+export const REPOS = ['eos-workbench', 'eos-docs', 'billing-service']
+export const WORKFLOWS = ['standard', 'docs-only', 'release']
 export type Message = { from: 'me'; text: string } | { from: 'agent'; text: string; card?: TaskDraft | WorkflowChange }
 export type Conversation = { id: string; title: string; when: string; group: '最近 7 天' | '更早'; outcome: string; messages: Message[] }
 
-export const STAGES = ['规格', '开发', '测试', '评审', '交付']
 
 export const conversations: Conversation[] = [
   {
@@ -29,6 +31,39 @@ export const conversations: Conversation[] = [
             { stage: '开发', summary: '新增 1 条检查', detail: '改动了 src/ 下的文件时，tests/ 下也要有改动。不满足时交回开发 agent。' },
             { stage: '测试' },
             { stage: '评审', summary: '轮数 5 → 3', detail: '最多轮数从 5 改成 3。3 轮不通过时请规格 agent 重新确认。' },
+            { stage: '交付' },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    id: 'c7',
+    title: '发布流程加一步安全扫描',
+    when: '昨天',
+    group: '最近 7 天',
+    outcome: '提议修改 release 工作流，还没保存',
+    messages: [
+      { from: 'me', text: 'release 流程在集成测试后面加一步安全扫描；文档那一步去掉，合到开发里；预发布的等待从 30 分钟改成 10 分钟。' },
+      {
+        from: 'agent',
+        text: '可以。release 一共 12 个阶段，这次动 4 个。',
+        card: {
+          kind: 'workflow',
+          name: 'release',
+          nextVersion: 8,
+          stages: [
+            { stage: '需求澄清' },
+            { stage: '规格' },
+            { stage: '设计评审' },
+            { stage: '开发', summary: '多交一份文档', detail: '开发阶段的产出增加 docs/changes.md 以外的使用说明。' },
+            { stage: '单元测试' },
+            { stage: '集成测试' },
+            { stage: '安全扫描', summary: '新增', change: 'added', detail: '运行 npm audit 和 trivy；有高危时交回开发 agent。' },
+            { stage: '评审' },
+            { stage: '文档', summary: '删除', change: 'removed', detail: '并进开发阶段。' },
+            { stage: '预发布', summary: '等待 30 → 10 分钟', detail: '预发布环境的观察时间从 30 分钟改成 10 分钟。' },
+            { stage: '验收' },
             { stage: '交付' },
           ],
         },
