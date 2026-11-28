@@ -11,7 +11,7 @@ import type { ProposalRow } from '../src/store/types.ts'
 import { createWebServer } from '../src/web/server.ts'
 import { ACTIVE_LIMIT, readWorkbench, titleOf, workbench, type Workbench } from '../src/web/workbench.ts'
 import { FakeExecutor } from './fake-executor.ts'
-import { PASS, workflow } from './helpers.ts'
+import { CHANGES, PASS, workflow } from './helpers.ts'
 
 const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 const META = { repo: '/data/mirrors/acme-app/', worktree: '/data/wt/x', branch: 'eos/x', baseSha: 'abc' }
@@ -35,7 +35,16 @@ test('工作台：提问和人的验收进「等你处理」，按出现先后�
     const plain = workflow({ maxRounds: 1, escalate: false })
     const gated = workflow({ maxRounds: 1, escalate: false, gate: 'human' })
     store.create({ id: 't1', request: '导出任务列表为 CSV\n细节……', workflow: plain, workflowSource: 'y', meta: META }, 1000)
-    store.create({ id: 't2', request: '任务列表支持按状态筛选', workflow: gated, workflowSource: 'y', meta: { ...META, remote: { host: 'github.com', owner: 'acme', name: 'app', webUrl: 'https://github.com/acme/app' } } as never }, 1100)
+    store.create(
+      {
+        id: 't2',
+        request: '任务列表支持按状态筛选',
+        workflow: gated,
+        workflowSource: 'y',
+        meta: { ...META, remote: { host: 'github.com', owner: 'acme', name: 'app', webUrl: 'https://github.com/acme/app' } } as never,
+      },
+      1100,
+    )
     store.create({ id: 't3', request: '还在规划', workflow: plain, workflowSource: 'y', meta: META }, 1200)
     // t2 走到人验收的卡点；t1 在开发时 agent 提问（比 t2 晚）
     reply(store, 't2', ['方案', '实现 v1', PASS], 2000)
@@ -70,7 +79,7 @@ test('工作台：提问和人的验收进「等你处理」，按出现先后�
       ],
     )
     assert.equal(w.active[0]!.state, 'build · 等你回答')
-    assert.equal(w.active[1]!.state, 'accept · 等你验收')
+    assert.equal(w.active[1]!.state, 'accept 第 1 次验收 · 等你验收')
     assert.equal(w.active[2]!.state, 'plan')
     assert.equal(w.activeTotal, 3)
   }))
@@ -101,12 +110,16 @@ test(`工作台：进行中的任务最多 ${ACTIVE_LIMIT} 个，按更新时间
     const w = readWorkbench(store)
     assert.equal(w.activeTotal, ACTIVE_LIMIT + 2)
     assert.equal(w.active.length, ACTIVE_LIMIT)
-    assert.deepEqual(w.active.slice(0, 2).map(t => t.id), [`t${ACTIVE_LIMIT + 1}`, `t${ACTIVE_LIMIT}`])
+    assert.deepEqual(
+      w.active.slice(0, 2).map(t => t.id),
+      [`t${ACTIVE_LIMIT + 1}`, `t${ACTIVE_LIMIT}`],
+    )
   }))
 
 test('工作台：标题是需求的第一行', () => {
   assert.equal(titleOf('  导出 CSV  \n第二行'), '导出 CSV')
   assert.equal(titleOf(''), '')
+  assert.equal(titleOf('\n\n  导出 CSV\n第二行'), '导出 CSV', '开头的空行跳过')
 })
 
 test('接口：GET /api/workbench 返回工作台的数据', async () => {
@@ -130,3 +143,17 @@ test('接口：GET /api/workbench 返回工作台的数据', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('工作台：对话循环走到尽头要人指示时，状态保留第几轮', () =>
+  withStore(store => {
+    store.create({ id: 't1', request: '需求', workflow: workflow({ maxRounds: 1, escalate: false }), workflowSource: 'y', meta: META }, 1000)
+    reply(store, 't1', ['方案', '实现', CHANGES], 1100)
+    const w = readWorkbench(store)
+    assert.equal(store.get('t1')!.status, 'waiting_user')
+    assert.deepEqual(
+      w.pending.map(p => p.kind),
+      ['question'],
+    )
+    assert.equal(w.active[0]!.waiting, 'question')
+    assert.match(w.active[0]!.state, /^review 第 1\/1 轮 · .* · 等你回答$/)
+  }))

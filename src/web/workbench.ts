@@ -31,8 +31,12 @@ const LIVE = new Set(['running', 'waiting_user', 'waiting_accept'])
 
 export type WorkbenchInput = { tasks: { summary: TaskSummary; task: Task; meta: TaskMeta }[]; proposals: ProposalRow[] }
 
-/** 任务的标题：需求的第一行 */
-export const titleOf = (request: string) => request.split('\n')[0]!.trim()
+/** 任务的标题：需求的第一个非空行 */
+export const titleOf = (request: string) =>
+  request
+    .split('\n')
+    .map(l => l.trim())
+    .find(l => l !== '') ?? ''
 
 /** 仓库的显示名：托管平台上的仓库写 owner/name，本地仓库写目录名 */
 const repoOf = (meta: TaskMeta) => (meta.remote === undefined ? (meta.repo.replace(/\/+$/, '').split('/').at(-1) ?? meta.repo) : `${meta.remote.owner}/${meta.remote.name}`)
@@ -45,6 +49,19 @@ const waitingOf = (task: Task): WorkbenchTask['waiting'] => {
     if (n?.kind === 'gate' && n.by.kind === 'human') return 'gate'
   }
   return undefined
+}
+
+/**
+ * 状态文字。等你回答时写提问的节点；在修正或对话循环里时保留 describePosition 的说明（第几次修正、第几轮）。
+ * 等你验收时写卡点和第几次验收。
+ */
+const stateOf = (task: Task, waiting: WorkbenchTask['waiting']): string => {
+  if (waiting === 'gate') return `${task.gate!.node} 第 ${task.gate!.round} 次验收 · 等你验收`
+  if (waiting === 'question') {
+    if (task.correction !== undefined || task.dialog !== undefined) return `${describePosition(task)} · 等你回答`
+    return `${task.question!.node ?? task.workflow.nodes[task.cursor]?.id ?? ''} · 等你回答`
+  }
+  return describePosition(task)
 }
 
 export function workbench({ tasks, proposals }: WorkbenchInput): Workbench {
@@ -62,14 +79,13 @@ export function workbench({ tasks, proposals }: WorkbenchInput): Workbench {
     } else if (waiting === 'gate') {
       pending.push({ kind: 'gate', taskId: task.id, title, repo, node: task.gate!.node, round: task.gate!.round, at: summary.updatedAt })
     }
-    const node = task.workflow.nodes[task.cursor]?.id
     live.push({
       id: task.id,
       title,
       repo,
       total: task.workflow.nodes.length,
       done: Math.min(task.cursor, task.workflow.nodes.length),
-      state: waiting === undefined ? describePosition(task) : `${node ?? ''} · ${waiting === 'question' ? '等你回答' : '等你验收'}`,
+      state: stateOf(task, waiting),
       ...(waiting === undefined ? {} : { waiting }),
       updatedAt: summary.updatedAt,
     })
