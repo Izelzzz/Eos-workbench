@@ -1,26 +1,69 @@
+import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { Badge, Button, cn } from '../ui/index.ts'
 import { isChanged } from './ChatCards.tsx'
 import { ArrowLeftIcon } from './icons.tsx'
-import type { WorkflowChange } from './mock.ts'
+import type { StageChange, WorkflowChange } from './mock.ts'
 
-// 画板上节点的位置是数据，不是样式：每行 4 个，从左到右、从上到下
+// 节点的初始位置：每行 4 个，从左到右、从上到下。打开之后可以拖
 const W = 184
 const H = 68
-const GX = 64
-const GY = 84
 const PER_ROW = 4
-const PAD = 48
-const at = (i: number) => ({ x: PAD + (i % PER_ROW) * (W + GX), y: PAD + 28 + Math.floor(i / PER_ROW) * (H + GY) })
+const at = (i: number) => ({ x: (i % PER_ROW) * (W + 72), y: Math.floor(i / PER_ROW) * (H + 92) })
+
+type StageNode = Node<{ stage: StageChange }, 'stage'>
+
+/** 画板上的一个阶段：样子和页面上别的卡片一致，用的是我们自己的组件和令牌 */
+function StageCard({ data }: NodeProps<StageNode>) {
+  const s = data.stage
+  const hidden = 'size-px min-h-0 min-w-0 border-0 opacity-0'
+  return (
+    <div
+      style={{ width: W, height: H }}
+      className={cn('flex flex-col justify-center rounded-box bg-surface px-3.5 font-sans text-base text-ink shadow-card', s.change === 'removed' && 'bg-transparent shadow-none', isChanged(s) && s.change !== 'removed' && 'shadow-selected')}
+    >
+      <Handle id="in" type="target" position={Position.Left} className={hidden} />
+      <Handle id="out" type="source" position={Position.Right} className={hidden} />
+      <Handle id="back-out" type="source" position={Position.Top} className={hidden} />
+      <Handle id="back-in-top" type="target" position={Position.Top} className={hidden} />
+      <Handle id="back-in-bottom" type="target" position={Position.Bottom} className={hidden} />
+      <span className="flex items-center justify-between gap-2">
+        <span className={cn('truncate font-medium', !isChanged(s) && 'font-normal text-ink-2', s.change === 'removed' && 'text-ink-3 line-through')}>{s.stage}</span>
+        {isChanged(s) && <Badge variant="neutral">{s.change === 'added' ? '新增' : s.change === 'removed' ? '删除' : '修改'}</Badge>}
+      </span>
+      {isChanged(s) && s.change === undefined && <span className="truncate text-xs text-ink-3">{s.summary}</span>}
+    </div>
+  )
+}
+const nodeTypes = { stage: StageCard }
 
 /**
- * 画板（示意）：装得下很长、带回头环节的流程。
- * 正式的画板是以后的功能（拖动、缩放、直接在上面改）；这里只画出节点和连线，区域可以上下左右滚动。
+ * 画板：看整个流程。用开源的 React Flow（@xyflow/react，MIT）承载拖动、缩放和连线，
+ * 节点是我们自己的组件，颜色通过它的 CSS 变量接到令牌上（见 shell/proto.css 的 .chat-canvas）。
+ * 这一版只读：能拖、能缩放，不能改流程。
  */
 export function FlowCanvas({ change, onBack }: { change: WorkflowChange; onBack: () => void }) {
   const stages = change.stages
-  const rows = Math.ceil(stages.length / PER_ROW)
-  const width = PAD * 2 + PER_ROW * W + (PER_ROW - 1) * GX
-  const height = PAD * 2 + 28 + rows * H + (rows - 1) * GY
+  const nodes: StageNode[] = stages.map((s, i) => ({ id: s.stage, type: 'stage', position: at(i), data: { stage: s } }))
+  const edges: Edge[] = [
+    ...stages.slice(0, -1).map((s, i) => ({ id: `${s.stage}-next`, source: s.stage, target: stages[i + 1]!.stage, sourceHandle: 'out', targetHandle: 'in', type: 'smoothstep' })),
+    ...stages
+      .filter(s => s.back !== undefined)
+      .map(s => {
+        const from = at(stages.indexOf(s))
+        const to = at(stages.findIndex(x => x.stage === s.back))
+        return {
+          id: `${s.stage}-back`,
+          source: s.stage,
+          target: s.back!,
+          sourceHandle: 'back-out',
+          targetHandle: from.x === to.x && to.y < from.y ? 'back-in-bottom' : 'back-in-top',
+          type: 'smoothstep',
+          label: '不通过',
+          style: { strokeDasharray: '4 4' },
+        }
+      }),
+  ]
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
       <header className="flex flex-none flex-wrap items-center justify-between gap-2 px-4 py-3">
@@ -32,62 +75,12 @@ export function FlowCanvas({ change, onBack }: { change: WorkflowChange; onBack:
           {change.name} · {stages.length} 个阶段，改了 {stages.filter(isChanged).length} 个
         </span>
       </header>
-      <div className="chat-canvas relative min-h-0 flex-1 overflow-auto border-t border-line bg-bg">
-        <div className="relative" style={{ width, height }}>
-          <svg aria-hidden="true" width={width} height={height} className="absolute inset-0 text-ink-3" fill="none" stroke="currentColor" strokeWidth={1.2}>
-            {stages.slice(0, -1).map((s, i) => {
-              const a = at(i)
-              const b = at(i + 1)
-              // 同一行：一条横线；换行：从右边下来，绕到下一行的开头
-              const d =
-                a.y === b.y
-                  ? `M${a.x + W} ${a.y + H / 2} H${b.x}`
-                  : `M${a.x + W} ${a.y + H / 2} h${GX / 2} v${(H + GY) / 2} H${b.x - GX / 2} v${(H + GY) / 2} h${GX / 2}`
-              return <path key={s.stage} d={d} />
-            })}
-            {stages.map((s, i) => {
-              if (s.back === undefined) return null
-              const from = at(i)
-              const to = at(stages.findIndex(x => x.stage === s.back))
-              const top = Math.min(from.y, to.y) - 30
-              // 正上方就是目标时直接连上去；否则从上面绕过去
-              const d = from.x === to.x ? `M${from.x + W / 2} ${from.y} V${to.y + H}` : `M${from.x + W / 2} ${from.y} V${top} H${to.x + W / 2} V${to.y}`
-              return <path key={`back-${s.stage}`} strokeDasharray="4 4" d={d} />
-            })}
-          </svg>
-          {stages.map((s, i) => {
-            const p = at(i)
-            return (
-              <div
-                key={s.stage}
-                style={{ left: p.x, top: p.y, width: W, height: H }}
-                className={cn(
-                  'absolute flex flex-col justify-center rounded-box bg-surface px-3.5 shadow-card',
-                  s.change === 'removed' && 'bg-transparent shadow-none',
-                  isChanged(s) && s.change !== 'removed' && 'shadow-selected',
-                )}
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className={cn('truncate font-medium', !isChanged(s) && 'font-normal text-ink-2', s.change === 'removed' && 'text-ink-3 line-through')}>{s.stage}</span>
-                  {isChanged(s) && <Badge variant="neutral">{s.change === 'added' ? '新增' : s.change === 'removed' ? '删除' : '修改'}</Badge>}
-                </span>
-                {isChanged(s) && s.change === undefined && <span className="truncate text-xs text-ink-3">{s.summary}</span>}
-              </div>
-            )
-          })}
-          {stages.map((s, i) => {
-            if (s.back === undefined) return null
-            const from = at(i)
-            const to = at(stages.findIndex(x => x.stage === s.back))
-            return (
-              <span key={`label-${s.stage}`} className="absolute bg-bg px-1.5 text-xs text-ink-3" style={from.x === to.x ? { left: from.x + W / 2 + 10, top: (from.y + to.y + H) / 2 - 9 } : { left: (from.x + to.x) / 2 + W / 2 - 24, top: Math.min(from.y, to.y) - 39 }}>
-                不通过
-              </span>
-            )
-          })}
-        </div>
+      <div className="chat-canvas min-h-96 flex-1 border-t border-line">
+        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.3} nodesConnectable={false} elementsSelectable={false}>
+          <Background color="var(--line)" gap={24} size={1.5} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
       </div>
-      <p className="m-0 flex-none border-t border-line px-5 py-2.5 text-sm text-ink-3">示意：正式的画板可以拖动、缩放，并且直接在上面改流程。这是以后的功能。</p>
     </div>
   )
 }

@@ -3,25 +3,15 @@ import { Badge, Button, Card, Field, FieldGroup, FieldLabel, Input, Note, Select
 import { REPOS, WORKFLOWS, type StageChange, type TaskDraft, type WorkflowChange } from './mock.ts'
 
 /**
- * 对话里等你确认的卡片：和工作台的卡片一样浮起来，没有边框，里面不再套框。
- * 确认或放弃之后收成一行浅底的记录，不再浮着。
+ * 对话里的卡片。等你确认时和工作台的卡片一样浮起来；
+ * 确认或放弃之后内容原样留着，但卡片沉下去（没有阴影、浅底、字变淡），按钮收起，看得出已经处理过、不能再点。
  */
-function ChatCard({ title, label, open, tail, children }: { title: string; label: string; open: boolean; tail?: React.ReactNode; children: React.ReactNode }) {
-  if (!open)
-    return (
-      <section className="flex min-w-0 flex-col gap-1 rounded-chat bg-fill px-4 py-3">
-        <header className="flex min-w-0 items-baseline justify-between gap-3">
-          <h3 className="m-0 min-w-0 truncate text-base font-medium text-ink-2">{title}</h3>
-          <span className="flex-none text-sm text-ink-3">{label}</span>
-        </header>
-        {tail}
-      </section>
-    )
+function ChatCard({ title, label, open, children }: { title: string; label: string; open: boolean; children: React.ReactNode }) {
   return (
-    <Card className="my-1 gap-4 p-5 pb-4 sm:p-6 sm:pb-5">
+    <Card className={cn('my-1 gap-4 p-5 pb-4 sm:p-6 sm:pb-5', !open && 'bg-fill pb-5 text-ink-2 shadow-none sm:pb-6')}>
       <header className="flex min-w-0 items-baseline justify-between gap-3">
-        <h3 className="m-0 min-w-0 truncate text-md font-semibold">{title}</h3>
-        <Badge variant="accent">{label}</Badge>
+        <h3 className={cn('m-0 min-w-0 truncate text-md font-semibold', !open && 'font-medium')}>{title}</h3>
+        <Badge variant={open ? 'accent' : 'outline'}>{label}</Badge>
       </header>
       {children}
     </Card>
@@ -47,17 +37,6 @@ export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
       title={`新任务：${draft.title}`}
       label={{ pending: '待确认', editing: '修改中', created: '已创建', dropped: '没有创建' }[state]}
       open={state === 'pending' || state === 'editing'}
-      tail={
-        state === 'created' ? (
-          <p className="m-0 text-sm text-ink-3">
-            进度在{' '}
-            <a href="#workbench" className="text-ink-2 underline decoration-ink-3 underline-offset-4 hover:text-ink">
-              工作台
-            </a>
-            。
-          </p>
-        ) : undefined
-      }
     >
       {state === 'editing' ? (
         <>
@@ -105,7 +84,16 @@ export function TaskDraftCard({ draft: initial }: { draft: TaskDraft }) {
             <Row label="工作流">{draft.workflow}</Row>
             <Row label="需求">{draft.need}</Row>
           </dl>
-          <footer className="flex flex-wrap items-center justify-between gap-2">
+          {state === 'created' && (
+            <p className="m-0 text-sm text-ink-3">
+              任务开始了，进度在{' '}
+              <a href="#workbench" className="text-ink-2 underline decoration-ink-3 underline-offset-4 hover:text-ink">
+                工作台
+              </a>
+              。
+            </p>
+          )}
+          <footer className={cn('flex flex-wrap items-center justify-between gap-2', state !== 'pending' && 'hidden')}>
             <Button variant="ghost" className="-ml-4" onClick={() => setState('dropped')}>
               不创建
             </Button>
@@ -175,7 +163,7 @@ export function WorkflowChangeCard({ change, onRevise, onCanvas }: ChangeProps) 
             </Badge>
             <div className="flex min-w-0 flex-col">
               <span className="flex flex-wrap items-baseline gap-x-2">
-                <span className={cn('font-medium', s.change === 'removed' && 'text-ink-3 line-through')}>{s.stage}</span>
+                <span className={cn('font-medium', open && 'text-ink', s.change === 'removed' && 'text-ink-3 line-through')}>{s.stage}</span>
                 <span className="text-sm text-ink-3">{s.change === 'added' ? `在${before(s) ?? '最前面'}之后` : s.change === 'removed' ? '' : s.summary}</span>
               </span>
               <span className="wrap-anywhere text-ink-2">{s.detail}</span>
@@ -184,15 +172,17 @@ export function WorkflowChangeCard({ change, onRevise, onCanvas }: ChangeProps) 
         ))}
       </ul>
       {change.widens !== undefined && (
-        <Note className="flex flex-col gap-2">
+        <Note className={cn('flex flex-col gap-2', !open && 'bg-surface')}>
           <span>
             <b>这次修改会放宽权限。</b>
             {change.widens}
           </span>
-          <label className="flex cursor-pointer items-center gap-2 text-ink">
-            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="size-4 accent-ink" />
-            我看过上面的权限改动，确认要这样改
-          </label>
+          {open && (
+            <label className="flex cursor-pointer items-center gap-2 text-ink">
+              <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="size-4 accent-ink" />
+              我看过上面的权限改动，确认要这样改
+            </label>
+          )}
         </Note>
       )}
       {state === 'revising' && (
@@ -217,7 +207,7 @@ export function WorkflowChangeCard({ change, onRevise, onCanvas }: ChangeProps) 
           </div>
         </div>
       )}
-      <footer className="flex flex-wrap items-center justify-between gap-2">
+      <footer className={cn('flex flex-wrap items-center justify-between gap-2', !open && 'hidden')}>
         <Button variant="ghost" className="-ml-4" onClick={() => setState('dropped')}>
           不保存
         </Button>
