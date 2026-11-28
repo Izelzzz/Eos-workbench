@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Eos 工作台设计稿</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* 布局：窄图标栏 | 等你处理（卡片上下滚动，高度固定） | 进行中的任务。对话是单独的一页。几乎只有黑白灰，一个晨色只用在「等你」上。 */
+:root {
+  --bg: #f6f6f4; --surface: #ffffff; --ink: #191918; --ink-2: #5d5d58; --ink-3: #93938d;
+  --line: #e8e8e4; --fill: #f0f0ed; --fill-2: #e6e6e2; --accent: #c8611a; --accent-soft: #fbefe5;
+  --shadow: 0 1px 2px rgba(25,25,24,.04), 0 8px 28px rgba(25,25,24,.07);
+  --shadow-pop: 0 2px 6px rgba(25,25,24,.06), 0 16px 40px rgba(25,25,24,.14);
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111110; --surface: #191918; --ink: #ecece8; --ink-2: #a4a49e; --ink-3: #6e6e69;
+  --line: #292927; --fill: #212120; --fill-2: #2b2b29; --accent: #e9955c; --accent-soft: #2b211a;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35); --shadow-pop: 0 2px 6px rgba(0,0,0,.3), 0 16px 40px rgba(0,0,0,.5); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111110; --surface: #191918; --ink: #ecece8; --ink-2: #a4a49e; --ink-3: #6e6e69;
+  --line: #292927; --fill: #212120; --fill-2: #2b2b29; --accent: #e9955c; --accent-soft: #2b211a;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.35); --shadow-pop: 0 2px 6px rgba(0,0,0,.3), 0 16px 40px rgba(0,0,0,.5); color-scheme: dark }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.55 var(--font); -webkit-font-smoothing: antialiased; }
+button, input, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 6px; }
+.num { font-variant-numeric: tabular-nums; }
+svg { flex: none; }
+
+.app { display: flex; height: 100%; min-height: 0; }
+
+/* 图标栏 */
+.rail { flex: none; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 14px 0; }
+.brand { width: 28px; height: 28px; border-radius: 8px; background: var(--ink); color: var(--surface); display: grid; place-items: center; font-weight: 600; font-size: 13px; margin-bottom: 14px; }
+.rail a { position: relative; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; color: var(--ink-3); }
+.rail a:hover { background: var(--fill); color: var(--ink); }
+.rail a[aria-current] { background: var(--fill-2); color: var(--ink); }
+.rail a::after { content: attr(data-tip); position: absolute; left: 48px; top: 50%; transform: translateY(-50%); background: var(--ink); color: var(--surface); font-size: 12px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 20; }
+.rail a:hover::after, .rail a:focus-visible::after { opacity: 1; }
+.rail .gap { flex: 1; }
+
+/* 工作区 */
+.work { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#pending { flex: 1; min-height: 0; width: 100%; max-width: 780px; margin: 0 auto; padding: 36px 40px 0; display: flex; flex-direction: column; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; min-height: 32px; }
+.sec-title { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink-2); display: flex; align-items: center; gap: 8px; letter-spacing: .02em; }
+.count { color: var(--ink-3); font-weight: 400; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+.ghost { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: 13px; max-width: 100%; min-width: 0; }
+a.ghost { text-decoration: none; }
+.ghost:hover, .ghost[aria-expanded="true"] { background: var(--fill); color: var(--ink); }
+.ghost.icon { width: 32px; padding: 0; justify-content: center; }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pop-wrap { position: relative; min-width: 0; display: flex; }
+.pop { position: absolute; top: calc(100% + 6px); z-index: 30; min-width: 260px; max-width: min(360px, 86vw); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+.pop.right { right: 0; } .pop.left { left: 0; }
+.pop button, .pop a { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; }
+.pop button:hover, .pop a:hover { background: var(--fill); }
+.pop .on { background: var(--fill); }
+.pop .k { flex: none; font-size: 12px; color: var(--ink-3); width: 28px; }
+.pop .w { flex: none; margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.pop hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+
+/* 等你处理：左右滑动的卡片 */
+.deck { position: relative; flex: 1; min-height: 0; margin: 0 -40px; }
+.track { height: 100%; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; padding: 6px 40px 0; scroll-padding-top: 6px; }
+.track::-webkit-scrollbar { display: none; }
+.card { flex: none; scroll-snap-align: start; background: var(--surface); border-radius: 18px; box-shadow: var(--shadow); padding: 28px 28px 22px; transition: opacity .25s, transform .25s; }
+.card:not(.active) { opacity: .5; cursor: pointer; }
+.card:not(.active) * { pointer-events: none; }
+.card.leaving { opacity: 0; transform: translateY(-28px) scale(.98); }
+.card.entering { animation: enter .3s ease-out; }
+@keyframes enter { from { opacity: .3; transform: translateY(28px); } }
+.tail { flex: none; height: 85%; }
+.deck .fade { position: absolute; left: 0; right: 0; bottom: 0; height: 120px; background: linear-gradient(to top, var(--bg) 15%, transparent); pointer-events: none; }
+
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12.5px; color: var(--ink-3); }
+.kind { color: var(--accent); font-weight: 500; }
+.sep::before { content: "·"; margin-right: 8px; }
+.card h2 { margin: 8px 0 0; font-size: 21px; line-height: 1.3; font-weight: 600; letter-spacing: -.01em; text-wrap: balance; }
+.lead { margin: 10px 0 0; color: var(--ink-2); font-size: 14.5px; max-width: 62ch; }
+.link { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.link:hover { color: var(--ink); text-decoration-color: var(--ink-3); }
+
+.steps { display: flex; align-items: center; gap: 4px; margin: 22px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.steps button { height: 28px; padding: 0 10px; border-radius: 14px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; }
+.steps button:hover { color: var(--ink); }
+.steps .cur button { background: var(--fill); color: var(--ink); font-weight: 500; }
+.steps .done button { color: var(--ink-2); }
+.steps .bar { width: 14px; height: 1px; background: var(--line); }
+
+.q { margin: 18px 0 10px; font-size: 15px; font-weight: 600; }
+.opts { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.opt { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer; transition: background .12s, border-color .12s; }
+.opt:hover { background: var(--fill); }
+.opt input { position: absolute; opacity: 0; }
+.opt:has(input:checked) { border-color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 .5px var(--ink); }
+.opt:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+.opt .t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.opt .t b { font-weight: 500; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.opt .t span { color: var(--ink-3); font-size: 13px; }
+.rec { font-size: 11.5px; font-weight: 500; color: var(--ink-2); background: var(--fill); border-radius: 5px; padding: 0 6px; }
+.tick { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; color: transparent; }
+.opt:has(input:checked) .tick { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.other { width: 100%; height: 44px; padding: 0 14px; border-radius: 12px; border: 1px dashed var(--line); background: transparent; outline: none; }
+.other::placeholder { color: var(--ink-3); }
+.other:focus { border: 1px solid var(--ink); }
+
+.sum { margin: 18px 0 0; display: flex; flex-direction: column; }
+.sum div { display: flex; gap: 20px; padding: 11px 0; border-top: 1px solid var(--line); }
+.sum div:last-child { border-bottom: 1px solid var(--line); }
+.sum dt { flex: none; width: 56px; color: var(--ink-3); } .sum dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.note { margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--fill); color: var(--ink-2); font-size: 13.5px; }
+.note b { color: var(--ink); font-weight: 500; }
+
+.foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 22px; }
+.foot .r { display: flex; gap: 8px; margin-left: auto; }
+.btn { height: 36px; padding: 0 16px; border-radius: 10px; font-weight: 500; font-size: 13.5px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn.primary { background: var(--ink); color: var(--surface); }
+.btn.primary:hover { opacity: .86; }
+.btn.quiet { color: var(--ink-2); border: 1px solid var(--line); }
+.btn.quiet:hover { background: var(--fill); color: var(--ink); }
+.btn[disabled] { opacity: .35; cursor: default; }
+.empty { padding: 36px 20px; text-align: center; color: var(--ink-3); border: 1px dashed var(--line); border-radius: 18px; }
+
+/* 进行中的任务 */
+.tasks { list-style: none; margin: 0; padding: 0; }
+.task { width: 100%; display: flex; align-items: center; gap: 16px; padding: 0 12px; margin: 0 -12px; height: 44px; border-radius: 10px; text-align: left; width: calc(100% + 24px); }
+.task:hover { background: var(--fill); }
+.task + .task, li + li .task { }
+.tasks li + li { border-top: 1px solid var(--line); }
+.tasks li:hover, .tasks li:hover + li { border-color: transparent; }
+.task .name { flex: 1; min-width: 0; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.task .state { flex: none; width: 148px; text-align: right; color: var(--ink-3); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task.wait .state { color: var(--accent); }
+.prog { flex: none; display: flex; gap: 3px; }
+.prog i { width: 14px; height: 3px; border-radius: 2px; background: var(--fill-2); }
+.prog i.d { background: var(--ink); } .prog i.c { background: var(--ink-3); } .task.wait .prog i.c { background: var(--accent); }
+.task.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: var(--accent-soft); } }
+
+/* 右栏：对话 / 任务详情 */
+.col { flex: .85 1 460px; max-width: 600px; min-width: 0; min-height: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+#tasks { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 36px 32px 40px; }
+#tasks::-webkit-scrollbar { display: none; }
+.side { flex: 1; min-width: 0; min-height: 0; background: var(--surface); display: flex; flex-direction: column; align-items: center; }
+.side > * { width: 100%; max-width: 760px; }
+.side-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 12px 12px 12px 14px; }
+.side-head .l { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.side-head .title { font-weight: 600; font-size: 14px; color: var(--ink); }
+.thread { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; display: flex; flex-direction: column; gap: 14px; }
+.thread .push { flex: 1; }
+.hello { text-align: center; color: var(--ink-3); padding: 0 20px 28px; }
+.me { align-self: flex-end; max-width: 88%; background: var(--fill); padding: 9px 14px; border-radius: 16px 16px 4px 16px; overflow-wrap: anywhere; }
+.agent { overflow-wrap: anywhere; }
+.draft { border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-top: 10px; }
+.draft h3 { margin: 0 0 4px; font-size: 14.5px; font-weight: 600; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.draft h3 small { font-size: 12px; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.draft h3 small.ok { color: var(--ink-3); }
+.draft .sum div { padding: 8px 0; } .draft .sum dt { width: 44px; }
+.composer { flex: none; margin: 0 14px 14px; border: 1px solid var(--line); border-radius: 16px; padding: 12px 12px 10px 14px; background: var(--surface); box-shadow: 0 1px 2px rgba(25,25,24,.03); }
+.composer:focus-within { border-color: var(--ink-3); }
+.composer textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; min-height: 44px; display: block; }
+.composer textarea::placeholder { color: var(--ink-3); }
+.composer .row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.send { width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--surface); display: grid; place-items: center; }
+.send[disabled] { background: var(--fill-2); color: var(--ink-3); cursor: default; }
+
+.pane { animation: slide .22s ease-out; display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--surface); }
+@keyframes slide { from { opacity: 0; transform: translateX(16px); } }
+.pane-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+.stages { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.stages li { flex: 1; text-align: center; font-size: 12.5px; color: var(--ink-3); padding-top: 8px; border-top: 2px solid var(--fill-2); }
+.stages li.d { border-color: var(--ink); color: var(--ink-2); } .stages li.c { border-color: var(--accent); color: var(--ink); font-weight: 500; }
+.tabs { display: flex; gap: 2px; background: var(--fill); padding: 3px; border-radius: 10px; align-self: flex-start; }
+.tabs button { height: 28px; padding: 0 14px; border-radius: 7px; color: var(--ink-2); font-size: 13px; }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgba(25,25,24,.08); }
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.log small { color: var(--ink-3); font-size: 12px; display: block; margin-bottom: 2px; }
+.log p { margin: 0; overflow-wrap: anywhere; }
+.files { list-style: none; margin: 0; padding: 0; }
+.files li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; }
+.files li span:first-child { min-width: 0; overflow-wrap: anywhere; } .files li span:last-child { color: var(--ink-3); white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .app { flex-direction: column; height: auto; min-height: 100%; }
+  .rail { width: 100%; flex-direction: row; padding: 8px max(16px, env(safe-area-inset-left, 0px)); gap: 2px; }
+  .brand { margin: 0 10px 0 0; } .rail .gap { flex: 1; } .rail a::after { display: none; }
+  .work { flex: none; } #pending { padding: 20px 16px 0; }
+  .deck { margin: 0 -16px; height: 70vh; flex: none; } .track { padding: 6px 16px 0; } .card { padding: 22px 18px 18px; }
+  .col { max-width: none; border-left: 0; border-top: 1px solid var(--line); flex: none; } #tasks { padding: 24px 16px 32px; overflow: visible; }
+  .task .prog { display: none; } .task .state { width: auto; max-width: 46%; }
+  .side { min-height: 80vh; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .track { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <nav class="rail" aria-label="主导航" id="rail"></nav>
+  <main class="work" id="work"><section id="pending" aria-label="等你处理"></section></main>
+  <aside class="col" id="col"><section id="tasks" aria-label="进行中的任务"></section></aside>
+  <section class="side" id="side" aria-label="对话" hidden></section>
+</div>
+
+<script>
+const I = (d, s = 16) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ic = {
+  home: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  tasks: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  trend: '<path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/>',
+  book: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  set: '<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>',
+  down: '<path d="m6 9 6 6 6-6"/>', left: '<path d="m15 18-6-6 6-6"/>', right: '<path d="m9 18 6-6-6-6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>', plus: '<path d="M5 12h14"/><path d="M12 5v14"/>', x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  max: '<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>',
+  close: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/>',
+  open: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/>',
+  up: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>', cu: '<path d="m18 15-6-6-6 6"/>', back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const KIND = { question: '提问', accept: '验收', proposal: '提案' };
+const STAGES = ['规格', '开发', '测试', '评审', '交付'];
+
+const S = {
+  idx: 0, menu: null, pane: null, chatOpen: true, focus: false, flash: null, waiting: false,
+  pending: [
+    { kind: 'question', id: 'p1', task: 't1', title: '导出任务列表为 CSV', meta: ['eos-workbench', '规格阶段', '12 分钟前'],
+      lead: '规格 agent 在写验收标准。你的需求里有两处没有说：导出的范围，和文件的编码。', step: 0, pick: [0, 0], other: ['', ''], after: '规格 · 继续中',
+      steps: [
+        { tab: '范围', q: '导出时要不要包含已中止的任务？', opts: [['包含，并加一列「状态」', '和列表页看到的一致；要排除时在表格里按状态筛掉', 1], ['不包含', '导出的行数会和列表页不一样'], ['导出时让人选', '多一个选项，范围变大']] },
+        { tab: '编码', q: '文件用什么编码？', opts: [['带 BOM 的 UTF-8', 'Excel 直接打开，中文不乱码', 1], ['UTF-8', '给脚本读更干净；Excel 打开中文可能乱码']] },
+      ] },
+    { kind: 'accept', id: 'p2', task: 't2', title: '任务列表支持按状态筛选', meta: ['eos-workbench', '评审通过', '1 小时前'], after: '交付 · 正在开 PR',
+      facts: [['改动', '6 个文件，+142 −18'], ['测试', '通过，第 2 轮'], ['评审', '通过，第 1 轮']],
+      note: '筛选条件没有保存到地址里，刷新后会丢。规格没有要求，评审也没有提。' },
+    { kind: 'proposal', id: 'p3', title: '开发阶段增加「改动要有对应测试」', meta: ['standard 工作流', '昨天'],
+      lead: '最近 4 个任务在评审时才发现没有补测试，各多返工了一轮。批准后成为 standard 的第 13 版，对新建的任务生效。' },
+  ],
+  tasks: [
+    ['t1', '导出任务列表为 CSV', 0, '规格 · 等你回答', 1], ['t2', '任务列表支持按状态筛选', 4, '评审通过 · 等你验收', 1],
+    ['t3', '统计页增加按仓库筛选', 2, '测试 · 第 2 轮'], ['t4', '修复凭据页在窄屏下溢出', 1, '开发 · 第 1 轮'], ['t5', 'doctor 的输出支持 JSON', 3, '评审 · 第 1 轮'],
+    ['t6', '改进页的提案按工作流分组', 1, '开发 · 第 2 轮'], ['t7', '凭据页支持批量删除', 0, '规格'], ['t8', '任务日志下载改成流式', 2, '测试 · 第 1 轮'],
+    ['t9', 'README 补充命令行示例', 3, '评审 · 第 2 轮'], ['t10', '升级 vite 到最新的小版本', 4, '交付 · 正在推送'], ['t11', '统计页的图表支持暗色', 1, '开发 · 第 1 轮'], ['t12', '对话页支持粘贴图片', 0, '规格'],
+  ].map(([id, title, done, state, wait]) => ({ id, title, done, state, wait: !!wait })),
+  chat: { id: 'new', title: '新对话', msgs: [] },
+  chats: [
+    { id: 'c1', title: '统计页导出周报', when: '2 天前', msgs: [{ me: '统计页加一个导出周报的按钮，导出成 Markdown，包含本周完成的任务和每个阶段的平均耗时。' }, { agent: '我按这个需求准备了一个任务。', draft: { title: '统计页导出周报', need: '统计页增加「导出周报」按钮，导出 Markdown：本周完成的任务，和每个阶段的平均耗时。', state: 'pending' } }] },
+    { id: 'c2', title: '给开发阶段加一条检查', when: '昨天', msgs: [{ me: '最近好几个任务评审时才发现没写测试，能不能在开发阶段就拦住？' }, { agent: '可以。我看了最近 4 个被评审打回的任务，都是开发阶段没有补测试。我提了一条改进提案，在「等你处理」里。' }] },
+    { id: 'c3', title: '上周为什么评审不通过的多', when: '5 天前', msgs: [{ me: '上周为什么评审不通过的这么多？' }, { agent: '上周 9 个任务里有 4 个在评审被打回，原因都是改动没有对应的测试。' }] },
+  ],
+};
+const $ = id => document.getElementById(id);
+
+/* ---------- 图标栏 ---------- */
+function rail() {
+  const top = [['工作台', 'home'], ['对话', 'chat'], ['任务', 'tasks'], ['统计', 'chart'], ['改进', 'trend'], ['团队约定', 'book']], bottom = [['设置', 'set']];
+  const cur = S.focus ? '对话' : '工作台';
+  const a = ([t, i]) => `<a href="#" data-tip="${t}" aria-label="${t}" ${t === cur ? 'aria-current="page"' : ''} ${t === '工作台' ? 'data-act="focus" data-v="0"' : t === '对话' ? 'data-act="focus" data-v="1"' : ''}>${I(ic[i], 18)}</a>`;
+  $('rail').innerHTML = `<div class="brand" aria-hidden="true">E</div>${top.map(a).join('')}<span class="gap"></span>${bottom.map(a).join('')}`;
+}
+
+/* ---------- 等你处理 ---------- */
+const answer = (p, i) => p.other[i].trim() || p.steps[i].opts[p.pick[i]][0];
+function cardBody(p) {
+  if (p.kind === 'question') {
+    const n = p.steps.length, tabs = [...p.steps.map(s => s.tab), '汇总'];
+    const steps = tabs.map((t, i) => `${i ? '<li class="bar" aria-hidden="true"></li>' : ''}<li class="${i === p.step ? 'cur' : i < p.step ? 'done' : ''}"><button type="button" data-act="step" data-i="${i}">${i < p.step ? I(ic.check, 13) : ''}${t}</button></li>`).join('');
+    let body;
+    if (p.step < n) {
+      const st = p.steps[p.step], typed = p.other[p.step].trim() !== '';
+      body = `<p class="q">${st.q}</p><fieldset class="opts"><legend hidden>${st.q}</legend>${st.opts.map(([l, d, r], i) => `<label class="opt"><input type="radio" name="${p.id}-${p.step}" data-act="pick" data-i="${i}" ${!typed && p.pick[p.step] === i ? 'checked' : ''}><span class="t"><b>${l}${r ? '<span class="rec">推荐</span>' : ''}</b><span>${d}</span></span><span class="tick">${I(ic.check, 12)}</span></label>`).join('')}<input class="other" data-act="other" aria-label="其他回答" placeholder="其他…" value="${esc(p.other[p.step])}"></fieldset>`;
+    } else body = `<dl class="sum">${p.steps.map((s, i) => `<div><dt>${s.tab}</dt><dd>${esc(answer(p, i))}</dd></div>`).join('')}</dl>`;
+    const next = p.step < n ? `<button type="button" class="btn primary" data-act="step" data-i="${p.step + 1}">${p.step + 1 < n ? '继续' : '看汇总'}${I(ic.right, 14)}</button>` : `<button type="button" class="btn primary" data-act="resolve">交给规格 agent</button>`;
+    return `<p class="lead">${p.lead} <button type="button" class="link" data-act="pane" data-tab="process">看原话</button></p><ol class="steps">${steps}</ol>${body}<div class="foot"><span></span><span class="r">${p.step ? `<button type="button" class="btn quiet" data-act="step" data-i="${p.step - 1}">上一步</button>` : ''}${next}</span></div>`;
+  }
+  if (p.kind === 'accept') return `<dl class="sum">${p.facts.map(([k, v]) => `<div><dt>${k}</dt><dd class="num">${v}</dd></div>`).join('')}</dl><p class="note"><b>代理人看下来：</b>${p.note}</p><div class="foot"><button type="button" class="btn quiet" data-act="pane" data-tab="diff">查看改动</button><span class="r"><button type="button" class="btn quiet">打回</button><button type="button" class="btn primary" data-act="resolve">通过并开 PR</button></span></div>`;
+  return `<p class="lead">${p.lead}</p><div class="foot"><span></span><span class="r"><button type="button" class="btn quiet">拒绝</button><button type="button" class="btn primary" data-act="resolve">批准</button></span></div>`;
+}
+function pending(entering) {
+  const el = $('pending'), n = S.pending.length;
+  S.idx = Math.max(0, Math.min(S.idx, n - 1));
+  const cur = S.pending[S.idx];
+  const head = `<div class="sec-head"><h1 class="sec-title">${n ? '<span class="dot"></span>' : ''}等你处理 <span class="count num">${n || ''}</span></h1>${n > 1 ? `<div class="pop-wrap"><button type="button" class="ghost" data-act="menu" data-m="jump" aria-haspopup="listbox" aria-expanded="${S.menu === 'jump'}"><span class="num" id="pager">${S.idx + 1} / ${n}</span><span class="trunc" id="pager-t">${cur.title}</span>${I(ic.down, 14)}</button><button type="button" class="ghost icon" aria-label="上一件" data-act="jump" data-i="${S.idx - 1}" ${S.idx === 0 ? 'disabled style="opacity:.3"' : ''}>${I(ic.cu)}</button><button type="button" class="ghost icon" aria-label="下一件" data-act="jump" data-i="${S.idx + 1}" ${S.idx >= n - 1 ? 'disabled style="opacity:.3"' : ''}>${I(ic.down)}</button>${S.menu === 'jump' ? `<div class="pop right" role="listbox" aria-label="跳到某一件">${S.pending.map((p, i) => `<button type="button" role="option" aria-selected="${i === S.idx}" class="${i === S.idx ? 'on' : ''}" data-act="jump" data-i="${i}"><span class="k">${KIND[p.kind]}</span><span>${p.title}</span></button>`).join('')}</div>` : ''}</div>` : ''}</div>`;
+  if (!n) { el.innerHTML = head + `<p class="empty">都处理完了。任务需要你时会出现在这里。</p>`; return; }
+  el.innerHTML = head + `<div class="deck"><div class="track ${n === 1 ? 'single' : ''}" id="track">${S.pending.map((p, i) => `<article class="card ${i === S.idx ? 'active' : ''} ${entering === p.id ? 'entering' : ''}" data-id="${p.id}" data-i="${i}" ${i === S.idx ? '' : 'inert'}><div class="meta"><span class="kind">${KIND[p.kind]}</span>${p.meta.map(m => `<span class="sep">${m}</span>`).join('')}</div><h2>${p.title}</h2>${cardBody(p)}</article>`).join('')}<div class="tail" aria-hidden="true"></div></div><div class="fade" aria-hidden="true"></div></div>`;
+  const tr = $('track'), c = tr.children[S.idx];
+  tr.scrollTop = c.offsetTop - tr.children[0].offsetTop;
+  wireTrack(tr);
+}
+function go(i) {
+  const tr = $('track'); if (!tr || i < 0 || i >= S.pending.length) return;
+  const from = tr.scrollTop; S.idx = i; S.menu = null;
+  pending(); const t2 = $('track'), top = t2.scrollTop; t2.scrollTop = from; t2.scrollTo({ top, behavior: 'smooth' });
+}
+function wireTrack(tr) {
+  let t;
+  const cards = () => [...tr.querySelectorAll('.card')];
+  const nearest = () => cards().reduce((b, c, i, a) => Math.abs(c.offsetTop - a[0].offsetTop - tr.scrollTop) < Math.abs(a[b].offsetTop - a[0].offsetTop - tr.scrollTop) ? i : b, 0);
+  tr.addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(() => { const i = nearest(); if (i !== S.idx) { const keep = tr.scrollTop; S.idx = i; pending(); $('track').scrollTop = keep; } }, 160); });
+  tr.addEventListener('click', e => { const c = e.target.closest('.card'); if (c && !c.classList.contains('active')) go(+c.dataset.i); });
+}
+
+/* ---------- 进行中的任务 ---------- */
+function tasks() {
+  if (S.pane) { paneView(); return; }
+  const shown = S.tasks.slice(0, 10);
+  $('tasks').innerHTML = `<div class="sec-head"><h2 class="sec-title">进行中的任务 <span class="count num">${S.tasks.length}</span></h2>${S.tasks.length > shown.length ? `<a href="#" class="ghost">全部${I(ic.right, 14)}</a>` : ''}</div><ul class="tasks">${shown.map(t => `<li><button type="button" class="task ${t.wait ? 'wait' : ''} ${S.flash === t.id ? 'flash' : ''}" data-act="pane" data-task="${t.id}" data-tab="process"><span class="name">${t.wait ? '<span class="dot"></span>' : ''}<span class="trunc">${t.title}</span></span><span class="prog" role="img" aria-label="5 个阶段，完成了 ${t.done} 个">${STAGES.map((_, i) => `<i class="${i < t.done ? 'd' : i === t.done ? 'c' : ''}"></i>`).join('')}</span><span class="state">${t.state}</span></button></li>`).join('')}</ul>`;
+}
+function paneView() {
+  const t = S.tasks.find(x => x.id === S.pane.task);
+  const body = S.pane.tab === 'process'
+    ? `<ol class="log"><li><small>规格 agent · 提问 · 12 分钟前</small><p>导出的 CSV 是否包含已中止的任务？列表页现在是显示的。另外，文件编码用 UTF-8 还是带 BOM 的 UTF-8？</p></li><li><small>规格 agent · 读了 3 个文件 · 14 分钟前</small><p>web/src/App.tsx、src/web/server.ts、src/store/store.ts</p></li><li><small>你 · 需求 · 16 分钟前</small><p>任务列表加一个导出 CSV 的按钮。</p></li></ol>`
+    : `<ul class="files">${[['web/src/App.tsx', '+48 −12'], ['web/src/api.ts', '+9 −2'], ['src/web/server.ts', '+21 −4'], ['tests/web.tasks-filter.test.ts', '+64']].map(([f, c]) => `<li><span>${f}</span><span class="num">${c}</span></li>`).join('')}</ul>`;
+  $('tasks').innerHTML = `<div class="pane" style="background:transparent"><div class="sec-head"><button type="button" class="ghost" style="margin-left:-10px" data-act="closepane">${I(ic.back)}进行中的任务</button><button type="button" class="ghost icon" aria-label="放大成整页" title="放大成整页">${I(ic.max)}</button></div><div style="display:flex;flex-direction:column;gap:20px"><h2 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.01em">${t.title}</h2><ol class="stages">${STAGES.map((s, i) => `<li class="${i < t.done ? 'd' : i === t.done ? 'c' : ''}">${s}</li>`).join('')}</ol><div class="tabs" role="tablist"><button type="button" role="tab" aria-selected="${S.pane.tab === 'process'}" data-act="panetab" data-tab="process">过程</button><button type="button" role="tab" aria-selected="${S.pane.tab === 'diff'}" data-act="panetab" data-tab="diff">改动</button></div>${body}</div></div>`;
+}
+
+/* ---------- 右栏 ---------- */
+function side() {
+  const el = $('side');
+  el.hidden = !S.focus; $('work').hidden = S.focus; $('col').hidden = S.focus;
+  if (!S.focus) return;
+  const c = S.chat;
+  const msgs = c.msgs.map((m, i) => m.me ? `<div class="me">${esc(m.me)}</div>` : `<div class="agent">${m.agent}${m.draft ? `<div class="draft"><h3><span class="trunc">新任务：${esc(m.draft.title)}</span><small class="${m.draft.state === 'pending' ? '' : 'ok'}">${{ pending: '待确认', created: '已创建', dropped: '没有创建' }[m.draft.state]}</small></h3><dl class="sum"><div><dt>仓库</dt><dd>eos-workbench</dd></div><div><dt>工作流</dt><dd>standard</dd></div><div><dt>需求</dt><dd>${esc(m.draft.need)}</dd></div></dl>${m.draft.state === 'pending' ? `<div class="foot"><span></span><span class="r"><button type="button" class="btn quiet" data-act="draft" data-i="${i}" data-s="dropped">不创建</button><button type="button" class="btn primary" data-act="draft" data-i="${i}" data-s="created">创建任务</button></span></div>` : ''}</div>` : ''}</div>`).join('');
+  el.innerHTML = `<div class="side-head"><div class="l">${S.focus ? `<button type="button" class="ghost" data-act="focus" data-v="0">${I(ic.back)}工作台${S.pending.length ? `<span class="dot"></span><span class="num">${S.pending.length}</span>` : ''}</button>` : ''}<div class="pop-wrap"><button type="button" class="ghost title" data-act="menu" data-m="chat" aria-haspopup="menu" aria-expanded="${S.menu === 'chat'}"><span class="trunc">${esc(c.title)}</span>${I(ic.down, 14)}</button>${S.menu === 'chat' ? `<div class="pop left" role="menu" aria-label="切换对话">${S.chats.map(x => `<button type="button" role="menuitem" class="${x.id === c.id ? 'on' : ''}" data-act="chat" data-id="${x.id}"><span>${x.title}</span><span class="w">${x.when}</span></button>`).join('')}<hr><a href="#" role="menuitem" style="color:var(--ink-2)">全部对话</a></div>` : ''}</div></div><div style="display:flex"><button type="button" class="ghost icon" aria-label="新对话" title="新对话" data-act="newchat">${I(ic.plus)}</button></div></div><div class="thread" id="thread"><span class="push"></span>${c.msgs.length ? msgs : `<p class="hello">说一句需求，问一个任务的进展，<br>或者让它改工作流。</p>`}${S.waiting ? `<div class="agent" style="color:var(--ink-3)">正在回复…</div>` : ''}</div><div class="composer"><label for="say" hidden>对代理人说</label><textarea id="say" rows="2" placeholder="提需求、问进展、改工作流"></textarea><div class="row"><button type="button" class="ghost" style="margin-left:-8px">eos-workbench${I(ic.down, 14)}</button><button type="button" class="send" id="send" aria-label="发送" data-act="send" disabled>${I(ic.up)}</button></div></div>`;
+  const th = $('thread'); th.scrollTop = th.scrollHeight;
+}
+function send() {
+  const ta = $('say'), said = ta.value.trim(); if (!said || S.waiting) return;
+  if (!S.chat.msgs.length) S.chat = { ...S.chat, title: said.slice(0, 14) };
+  S.chat.msgs.push({ me: said }); S.waiting = true; side();
+  setTimeout(() => { S.waiting = false; S.chat.msgs.push({ agent: '我按这个需求准备了一个任务。', draft: { title: said.slice(0, 14), need: said, state: 'pending' } }); side(); }, 700);
+}
+
+/* ---------- 事件 ---------- */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) { if (S.menu && !e.target.closest('.pop')) { S.menu = null; pending(); side(); } return; }
+  const a = b.dataset.act, p = S.pending[S.idx];
+  if (a === 'menu') { S.menu = S.menu === b.dataset.m ? null : b.dataset.m; pending(); side(); }
+  else if (a === 'jump') { if (!b.disabled) go(+b.dataset.i); }
+  else if (a === 'step') { p.step = +b.dataset.i; pending(); }
+  else if (a === 'pick') { p.pick[p.step] = +b.dataset.i; p.other[p.step] = ''; pending(); }
+  else if (a === 'resolve') {
+    const card = b.closest('.card'); card.classList.add('leaving');
+    setTimeout(() => {
+      S.pending = S.pending.filter(x => x.id !== p.id);
+      const t = S.tasks.find(x => x.id === p.task); if (t) { t.wait = false; t.state = p.after; S.flash = t.id; setTimeout(() => { S.flash = null; }, 1300); }
+      S.idx = Math.min(S.idx, S.pending.length - 1); const nx = S.pending[S.idx];
+      pending(nx && nx.id); tasks(); side();
+    }, 240);
+  }
+  else if (a === 'pane') { S.pane = { task: b.dataset.task || p.task, tab: b.dataset.tab }; tasks(); }
+  else if (a === 'panetab') { S.pane.tab = b.dataset.tab; tasks(); }
+  else if (a === 'closepane') { S.pane = null; tasks(); }
+  else if (a === 'chatclose') { S.chatOpen = false; side(); }
+  else if (a === 'chatopen') { S.chatOpen = true; side(); }
+  else if (a === 'focus') { e.preventDefault(); S.focus = b.dataset.v === '1'; rail(); side(); if (!S.focus) { pending(); tasks(); } }
+  else if (a === 'newchat') { S.chat = { id: 'new', title: '新对话', msgs: [] }; S.menu = null; side(); }
+  else if (a === 'chat') { S.chat = S.chats.find(x => x.id === b.dataset.id); S.menu = null; side(); }
+  else if (a === 'draft') { S.chat.msgs[+b.dataset.i].draft.state = b.dataset.s; side(); }
+  else if (a === 'send') send();
+});
+document.addEventListener('input', e => {
+  if (e.target.dataset.act === 'other') { const p = S.pending[S.idx]; p.other[p.step] = e.target.value; e.target.closest('.opts').querySelectorAll('input[type=radio]').forEach((r, i) => { r.checked = !e.target.value.trim() && i === p.pick[p.step]; }); }
+  if (e.target.id === 'say') $('send').disabled = !e.target.value.trim();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.menu) { S.menu = null; pending(); side(); }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.id === 'say') send();
+});
+rail(); pending(); tasks(); side();
+</script>
+</body>
+</html>
