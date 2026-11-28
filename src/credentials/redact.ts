@@ -95,7 +95,10 @@ export const redacting = (ex: Executor, redact: (s: string) => string): Executor
   close: () => ex.close(),
 })
 
-/** 平台运行时换来的短期凭据（例如 GitHub App 的安装令牌）：不在凭据存储里，用的地方登记进来。只留最近的 256 个。 */
+/**
+ * 平台运行时换来的短期凭据：不在凭据存储里，用的地方登记进来。GitHub App 的安装令牌、Claude Code 每次调用的一次性令牌、
+ * 对话 agent 每次调用的 MCP 令牌。只留最近的 256 个：失效的令牌不用一直遮，表也不会无限变大。
+ */
 const runtime = new Set<string>()
 export const rememberSecret = (s: string): void => {
   if (runtime.has(s)) return
