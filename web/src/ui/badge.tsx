@@ -2,20 +2,23 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import type { ComponentProps } from 'react'
 import { cn } from './cn.ts'
 
-// 状态用实色：和任务列表里现有的状态标签一致（进行中、成功、等待、失败、未开始）
-export const badgeVariants = cva('inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-full border border-transparent px-2 text-xs font-semibold whitespace-nowrap', {
+export const badgeVariants = cva('inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-sm px-1.5 text-xs font-medium whitespace-nowrap', {
   variants: {
     variant: {
-      running: 'bg-primary text-primary-foreground',
-      success: 'bg-success text-primary-foreground',
-      warning: 'bg-warning text-primary-foreground',
-      destructive: 'bg-destructive text-primary-foreground',
-      pending: 'bg-pending text-primary-foreground',
-      secondary: 'bg-secondary text-secondary-foreground',
-      outline: 'border-border text-muted-foreground',
+      // 普通的小标签（例如选项旁的「推荐」）
+      neutral: 'bg-fill text-ink-2',
+      // 只用于「等你处理」
+      accent: 'bg-accent-soft text-accent',
+      outline: 'border border-line text-ink-2',
+      // 状态用实色，和现有页面的状态标签一致。设计稿还没定状态色，重做页面时再改
+      running: 'rounded-full bg-running px-2 text-on-solid',
+      success: 'rounded-full bg-success px-2 text-on-solid',
+      warning: 'rounded-full bg-warning px-2 text-on-solid',
+      destructive: 'rounded-full bg-destructive px-2 text-on-solid',
+      pending: 'rounded-full bg-pending px-2 text-on-solid',
     },
   },
-  defaultVariants: { variant: 'secondary' },
+  defaultVariants: { variant: 'neutral' },
 })
 
 export type BadgeProps = ComponentProps<'span'> & VariantProps<typeof badgeVariants>

@@ -21,7 +21,7 @@ const CSS_RULES: Rule[] = [
   { what: '字号', pattern: /font-size\s*:(?!\s*(var\(|inherit))/ },
   { what: '字重', pattern: /font-weight\s*:(?!\s*(var\(|inherit))/ },
   { what: '字体', pattern: /font-family\s*:(?!\s*(var\(|inherit))/ },
-  { what: 'font 简写', pattern: /(^|[{;\s])font\s*:(?!\s*(inherit|var\(--text-[\w-]+\)\/[\d.]+\s+var\(--font-[\w-]+\))\s*[;}])/ },
+  { what: 'font 简写', pattern: /(^|[{;\s])font\s*:(?!\s*(inherit|var\(--text-[\w-]+\)\/([\d.]+|var\(--leading-[\w-]+\))\s+var\(--font-[\w-]+\))\s*[;}])/ },
   { what: '圆角', pattern: /border(-[a-z]+)*-radius\s*:[^;}]*\d(px|rem|em)\b/ },
   { what: '引入整个 Tailwind（含 preflight 和默认主题）', pattern: /@import\s+["']tailwindcss(\/preflight|\/theme)?(\.css)?["']/ },
 ]
@@ -73,7 +73,7 @@ test('tokens.css 定义了亮色和暗色的调色板，以及字号、圆角、
   const darkStart = t.indexOf('@media (prefers-color-scheme: dark)')
   assert.ok(darkStart > 0, '缺暗色调色板')
   const dark = t.slice(darkStart, t.indexOf('}', darkStart))
-  for (const name of ['--bg', '--panel', '--text', '--muted', '--line', '--hover', '--select']) {
+  for (const name of ['--bg', '--surface', '--ink', '--ink-2', '--ink-3', '--line', '--fill', '--fill-2', '--accent', '--accent-soft', '--card-shadow', '--popover-shadow']) {
     assert.match(light, new RegExp(`${name}:`), `亮色缺 ${name}`)
     assert.match(dark, new RegExp(`${name}:`), `暗色缺 ${name}`)
   }
@@ -83,12 +83,14 @@ test('tokens.css 定义了亮色和暗色的调色板，以及字号、圆角、
     '--text-base',
     '--radius-md',
     '--spacing',
-    '--color-primary',
-    '--color-primary-foreground',
-    '--color-muted-foreground',
+    '--color-surface',
+    '--color-ink',
+    '--color-ink-2',
+    '--color-line',
+    '--color-accent',
     '--color-destructive',
-    '--color-border',
-    '--color-ring',
+    '--shadow-card',
+    '--shadow-popover',
   ]) {
     assert.match(t, new RegExp(`${name}:`), `缺 ${name}`)
   }
@@ -151,7 +153,7 @@ test('检查能发现直接写的值', () => {
     '.a { color: var(--text); border-radius: 50%; font: inherit; }',
     '/* #fff 13px */',
     '<a href="#/tasks/123">#123</a>',
-    '<p className="text-sm text-muted-foreground p-2 rounded-md bg-primary" />',
+    '<p className="text-sm text-ink-2 p-2 rounded-card bg-surface shadow-card" />',
     '<span style={{ paddingLeft: depth * 16 }} />',
     'type Label = { color: string }',
     '#add-btn { color: var(--text); }',

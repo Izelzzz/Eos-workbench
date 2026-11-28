@@ -1,5 +1,5 @@
 // 基础组件的浏览器验证：构建 scripts/ui-gallery（样式和网页相同），在 Chromium 里按亮色、暗色和 1440、390 宽截图，并核对：
-// - 组件的样式真的生效（主按钮是主色底、输入框有边框、表单控件用页面字体、现有页面的 button 规则没有盖过组件）；
+// - 组件的样式真的生效（键盘聚焦有外框、主按钮是主色底、输入框有边框、表单控件用页面字体、现有页面的 button 规则没有盖过组件）；
 // - 390 宽不横向滚动；
 // - 对话框：点开后焦点在对话框里，Esc 关闭并把焦点还给触发按钮；点「删除」执行并关闭；
 // - 页面没有脚本错误。
@@ -50,7 +50,7 @@ for (const scheme of ['light', 'dark'] as const) {
     const style = (sel: any, prop: string) => sel.evaluate((el: Element, p: string) => getComputedStyle(el).getPropertyValue(p), prop)
     const vars = await page.evaluate(() => {
       const s = getComputedStyle(document.documentElement)
-      return { running: s.getPropertyValue('--running').trim(), line: s.getPropertyValue('--line').trim(), panel: s.getPropertyValue('--panel').trim() }
+      return { ink: s.getPropertyValue('--ink').trim(), line: s.getPropertyValue('--line').trim(), surface: s.getPropertyValue('--surface').trim() }
     })
     const toRgb = (hex: string) => {
       // 压缩后的 CSS 会把 #ffffff 写成 #fff
@@ -59,15 +59,33 @@ for (const scheme of ['light', 'dark'] as const) {
       return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
     }
     const primary = page.getByRole('button', { name: '保存', exact: true })
-    check(`${tag}：主按钮的底色是令牌 --running`, (await style(primary, 'background-color')) === toRgb(vars.running))
-    check(`${tag}：主按钮高 32px（组件样式盖过了现有页面的 button 规则）`, (await style(primary, 'height')) === '32px')
+    check(`${tag}：主按钮的底色是令牌 --ink`, (await style(primary, 'background-color')) === toRgb(vars.ink))
+    check(`${tag}：主按钮高 36px（组件样式盖过了现有页面的 button 规则）`, (await style(primary, 'height')) === '36px')
     check(`${tag}：输入框的边框是令牌 --line`, (await style(page.locator('#g-name'), 'border-top-color')) === toRgb(vars.line))
-    check(`${tag}：面板底色是令牌 --panel`, (await style(page.locator('[data-slot=card]').first(), 'background-color')) === toRgb(vars.panel))
+    check(
+      `${tag}：卡片底色是令牌 --surface、没有边框、有阴影`,
+      (await style(page.locator('[data-slot=card]').first(), 'background-color')) === toRgb(vars.surface) &&
+        (await style(page.locator('[data-slot=card]').first(), 'border-top-width')) === '0px' &&
+        (await style(page.locator('[data-slot=card]').first(), 'box-shadow')) !== 'none',
+    )
     const bodyFont = await style(page.locator('body'), 'font-family')
     check(
       `${tag}：输入框、多行输入框、下拉、按钮用页面字体（不是浏览器默认的表单字体）`,
       (await Promise.all(['#g-name', '#g-req', '#g-flow', '[data-slot=button]'].map(s => style(page.locator(s).first(), 'font-family')))).every(f => f === bodyFont),
     )
+    // 键盘聚焦时画出 2px 墨色外框
+    await page.locator('#g-org').focus()
+    await page.keyboard.press('Tab')
+    // 按钮的颜色过渡 150ms（外框颜色也在里面），等它走完再读
+    await page.waitForTimeout(300)
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement
+      const st = getComputedStyle(el)
+      return { style: st.outlineStyle, width: st.outlineWidth, offset: st.outlineOffset, color: st.outlineColor, ink: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() }
+    })
+    check(`${tag}：键盘聚焦的按钮有 2px 墨色外框、离元素 2px`, focused.style === 'solid' && focused.width === '2px' && focused.offset === '2px' && focused.color === toRgb(focused.ink))
+    // 截图前移开焦点，免得截图里的按钮带着聚焦外框
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     for (const id of ['#bare-ghost', '#bare-link']) {
       check(`${tag}：页面底色上的 ${id.slice(1)} 按钮没有底色（现有 button 规则的底色没漏进来）`, (await style(page.locator(id), 'background-color')) === 'rgba(0, 0, 0, 0)')
     }

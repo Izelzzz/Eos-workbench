@@ -16,7 +16,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 | 布局（排列、间距、宽度） | Tailwind 的工具类：`flex gap-2`、`p-4`、`w-full`（只在被扫描的目录里生效，见下面「Tailwind 只扫描哪些目录」） | — |
 
 - **新代码不手写按钮、表单、标签、提示的样式。** 组件里没有的，先在 `web/src/ui/` 加组件，再在页面里用。
-- **只用语义颜色**：`bg-primary`、`text-muted-foreground`、`border-border`、`bg-destructive/10`。不写色值，不用 Tailwind 自带的调色板（`bg-blue-500` 不会生成）。
+- **只用令牌里的颜色名**：`bg-surface`、`text-ink`、`text-ink-2`、`border-line`、`bg-fill`、`text-accent`，状态用 `bg-destructive/10` 这类。不写色值，不用 Tailwind 自带的调色板（`bg-blue-500` 不会生成）。
 - **不写任意值**：`text-[13px]`、`p-[7px]`、`bg-[#fff]` 都不行。缺的值加到 `tokens.css`；颜色要同时给亮色和暗色（字号、圆角、间距只有一套）。
 - **不写 `dark:`**：令牌按系统设置自动切换亮暗色。
 - **不用 `block`、`grow` 这类和现有页面类名同名的工具类**：工具类会作用到现有页面里同名的元素。用 `flex-1` 代替 `grow`。
@@ -43,7 +43,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 | 次要操作、取消 | `Button variant="outline"` 或 `"ghost"` |
 | 删除、覆盖、放宽权限 | `Button variant="destructive"`，点了先开 `Dialog` 确认 |
 | 跳到别处 | 链接（`<a>`），不是按钮。`Button variant="link"` 是长得像链接的按钮，只用于不跳转的动作（例如「展开日志」） |
-| 任务、节点的状态 | `Badge`：`running` 进行中、`success` 完成、`warning` 等人处理、`destructive` 失败、`pending` 未开始 |
+| 任务、节点的状态 | `Badge`：`running` 进行中、`success` 完成、`warning` 等验收这类等待中的状态、`destructive` 失败、`pending` 未开始。提醒当前用户「这件事等你处理」用 `accent`（只用于这个意思）；普通小标签（例如「推荐」）用默认的 `neutral` |
 | 操作结果、需要注意的限制、失败原因 | `Alert`：`success`、`warning`、`destructive` |
 | 表单 | `FieldGroup` 里放 `Field`，每个 `Field` 里是 `FieldLabel`、控件、需要时加 `FieldDescription` 或 `FieldError` |
 | 选项 2～5 个、要一眼看到全部 | 一组 `Button`；更多选项用 `Select` |
