@@ -6,7 +6,7 @@ import { cn } from './cn.ts'
 // font-sans：不引入 preflight 时，浏览器给表单控件用自己的字体（textarea 是等宽字体）。
 // 窄屏用 16px 字：iOS Safari 在字号小于 16px 的输入框获得焦点时会放大页面
 export const fieldControl =
-  'w-full min-w-0 rounded-control border border-line bg-surface px-3 py-1 font-sans text-lg text-ink outline-none transition duration-150 motion-reduce:transition-none placeholder:text-ink-3 focus-visible:border-ink disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive sm:text-base'
+  'w-full min-w-0 rounded-control border border-line bg-surface px-3 py-1 font-sans text-lg text-ink outline-none transition duration-150 motion-reduce:transition-none placeholder:text-ink-3 focus-visible:border-ink disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-35 aria-invalid:border-destructive sm:text-base'
 
 export function Input({ className, type, ...props }: ComponentProps<'input'>) {
   return <InputPrimitive type={type} data-slot="input" className={cn(fieldControl, 'h-9', className)} {...props} />

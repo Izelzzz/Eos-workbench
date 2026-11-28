@@ -21,6 +21,8 @@
   --card-shadow: 0 1px 2px rgba(25, 25, 24, 0.04), 0 8px 28px rgba(25, 25, 24, 0.07);
   --popover-shadow: 0 2px 6px rgba(25, 25, 24, 0.06), 0 16px 40px rgba(25, 25, 24, 0.14);
   --overlay: rgba(25, 25, 24, 0.32); /* 对话框后面的遮罩 */
+  --segment-shadow: 0 1px 2px rgba(25, 25, 24, 0.08); /* 分段切换里选中的那一段 */
+  --selected-ring: inset 0 0 0 0.5px var(--ink); /* 选中的选项：加在 1px 墨色边框里面，看起来约 1.5px */
 
   /* 状态色：设计稿这一版还没定，沿用旧界面的取值，只用于状态标签、trace 和阶段图 */
   --ok: #1f9d55;
@@ -62,6 +64,7 @@
     --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.35);
     --popover-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.5);
     --overlay: rgba(0, 0, 0, 0.5);
+    --segment-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --k-node: #9aa0ae;
     --k-call: #6c9bff;
     --k-model: #a888f0;
@@ -157,4 +160,6 @@
 
   --shadow-card: var(--card-shadow);
   --shadow-popover: var(--popover-shadow);
+  --shadow-segment: var(--segment-shadow);
+  --shadow-selected: var(--selected-ring);
 }

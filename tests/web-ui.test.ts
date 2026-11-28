@@ -22,12 +22,25 @@ import {
   FieldDescription,
   FieldError,
   FieldLabel,
+  InfoList,
+  InfoRow,
   Input,
+  Note,
+  Option,
+  OptionGroup,
+  OptionOther,
+  Segmented,
+  SegmentedItem,
+  SegmentedList,
+  SegmentedPanel,
   Select,
+  Steps,
   Table,
   TableBody,
   TableCell,
   TableRow,
+  TaskList,
+  TaskRow,
   Textarea,
 } from '../web/src/ui/index.ts'
 
@@ -146,4 +159,71 @@ test('Card、Table：面板有标题层级，表格放在可横向滚动的容�
   assert.match(renderToStaticMarkup(h(Card, null, h(CardTitle, null, '凭据'), h(CardContent, null, '…'))), /<section data-slot="card"[^>]*><h2 data-slot="card-title"/)
   const table = renderToStaticMarkup(h(Table, null, h(TableBody, null, h(TableRow, null, h(TableCell, null, '1')))))
   assert.match(table, /^<div data-slot="table-container" class="[^"]*overflow-x-auto/)
+})
+
+test('Option：原生单选，同组同 name；标题、说明、标签都在 label 里，勾是装饰', () => {
+  const html = renderToStaticMarkup(
+    h(
+      OptionGroup,
+      { legend: '导出时要不要包含已中止的任务？' },
+      h(Option, { name: 'scope', value: 'all', defaultChecked: true, title: '包含', description: '和列表页一致', badge: h(Badge, null, '推荐') }),
+      h(Option, { name: 'scope', value: 'none', title: '不包含' }),
+      h(OptionOther, { placeholder: '其他…', 'aria-label': '其他' }),
+    ),
+  )
+  assert.match(html, /^<fieldset data-slot="option-group"[^>]*><legend[^>]*>导出时要不要包含已中止的任务？<\/legend>/)
+  assert.equal((html.match(/<input type="radio"[^>]*name="scope"/g) ?? []).length, 2)
+  assert.match(html, /<input type="radio"[^>]*name="scope"[^>]*checked=""[^>]*value="all"/)
+  assert.match(html, /<label data-slot="option"[^>]*>.*包含.*推荐.*和列表页一致.*<\/label>/)
+  assert.match(html, /<span aria-hidden="true" class="grid size-4\.5/)
+  assert.match(html, /<input type="text" data-slot="option-other"[^>]*border-dashed/)
+})
+
+test('Steps：当前步骤标 aria-current="step"，走过的有勾；不传 onSelect 时只是文字，传了是按钮', () => {
+  const steps = [
+    { key: 'scope', label: '范围', state: 'done' as const },
+    { key: 'enc', label: '编码', state: 'current' as const },
+    { key: 'sum', label: '汇总', state: 'todo' as const },
+  ]
+  const html = renderToStaticMarkup(h(Steps, { steps }))
+  assert.match(html, /^<ol data-slot="steps"/)
+  assert.equal((html.match(/<li/g) ?? []).length, 3)
+  assert.doesNotMatch(html, /<button/)
+  assert.match(html, /<span class="[^"]*"><svg[^>]*>.*?<\/svg>范围<\/span>/)
+  assert.match(html, /<span aria-current="step"[^>]*>编码</)
+  assert.equal((html.match(/aria-current/g) ?? []).length, 1)
+  const clickable = renderToStaticMarkup(h(Steps, { steps, onSelect: () => {} }))
+  assert.equal((clickable.match(/<button type="button"/g) ?? []).length, 3)
+})
+
+test('TaskRow：五小段进度，等人处理时有强调色圆点、当前段和状态用强调色', () => {
+  const waiting = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '导出任务列表为 CSV', state: '规格 · 等你回答', done: 0, waiting: true })))
+  assert.match(waiting, /data-waiting="true"/)
+  assert.match(waiting, /data-slot="waiting-dot"/)
+  assert.equal((waiting.match(/<i /g) ?? []).length, 5)
+  assert.equal((waiting.match(/bg-accent"/g) ?? []).length, 2) // 圆点和当前那一段
+  assert.match(waiting, /text-accent">规格 · 等你回答</)
+  const running = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '升级 vite', state: '交付 · 正在推送', done: 4, onSelect: () => {} })))
+  assert.match(running, /<button type="button"/)
+  assert.doesNotMatch(waiting, /<button/) // 没传 onSelect：只是文字
+  // 超出范围的进度按边界算
+  const over = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: 7 })))
+  assert.equal((over.match(/bg-ink"/g) ?? []).length, 5)
+  const under = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: -1 })))
+  assert.equal((under.match(/bg-ink-3"/g) ?? []).length, 1)
+  assert.doesNotMatch(running, /waiting-dot|bg-accent|text-accent/)
+  assert.equal((running.match(/bg-ink"/g) ?? []).length, 4)
+  assert.equal((running.match(/bg-ink-3"/g) ?? []).length, 1)
+})
+
+test('InfoRow、Note、Segmented：信息行是 dt/dd，说明块是浅底，分段切换是页签', () => {
+  const info = renderToStaticMarkup(h(InfoList, null, h(InfoRow, { label: '改动', children: '6 个文件，+142 −18' })))
+  assert.match(info, /^<dl data-slot="info-list"[^>]*><div data-slot="info-row"[^>]*><dt class="w-14[^"]*">改动<\/dt><dd[^>]*>6 个文件/)
+  assert.match(renderToStaticMarkup(h(Note, null, '说明')), /^<div data-slot="note" class="rounded-box bg-fill/)
+  const seg = renderToStaticMarkup(
+    h(Segmented, { defaultValue: 'log' }, h(SegmentedList, null, h(SegmentedItem, { value: 'log' }, '过程'), h(SegmentedItem, { value: 'diff' }, '改动')), h(SegmentedPanel, { value: 'log' }, '…')),
+  )
+  assert.match(seg, /role="tablist"/)
+  assert.match(seg, /role="tab"[^>]*aria-selected="true"[^>]*>过程</)
+  assert.match(seg, /role="tab"[^>]*aria-selected="false"[^>]*>改动</)
 })

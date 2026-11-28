@@ -39,6 +39,26 @@ import {
   TableHeader,
   TableRow,
   Textarea,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  InfoList,
+  InfoRow,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+  Note,
+  Option,
+  OptionGroup,
+  OptionOther,
+  Segmented,
+  SegmentedItem,
+  SegmentedList,
+  SegmentedPanel,
+  Steps,
+  TaskList,
+  TaskRow,
 } from '../../web/src/ui/index.ts'
 
 // 样张本身的布局用内联样式（scripts/ 不在 Tailwind 的扫描范围里），取值引用令牌
@@ -65,33 +85,119 @@ function Gallery() {
       <Card>
         <CardHeader>
           <div style={meta}>
-            <Badge variant="accent">提问</Badge>
+            <span style={{ color: 'var(--accent)' }}>提问</span>
+            <span>·</span>
             <span>eos-workbench</span>
+            <span>·</span>
             <span>规格阶段</span>
+            <span>·</span>
             <span>12 分钟前</span>
           </div>
           <CardTitle>导出任务列表为 CSV</CardTitle>
           <CardDescription>规格 agent 在写验收标准。你的需求里有两处没有说：导出的范围，和文件的编码。</CardDescription>
         </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="g-name">App 名字</FieldLabel>
-              <Input id="g-name" defaultValue="eos-team" spellCheck={false} />
-              <FieldDescription>最多 34 个字符，不能和 GitHub 上已有的 App 重名。</FieldDescription>
-            </Field>
-            <Field data-invalid>
-              <FieldLabel htmlFor="g-org">组织</FieldLabel>
-              <Input id="g-org" aria-invalid defaultValue="no such org" />
-              <FieldError>找不到这个组织，检查拼写或留空。</FieldError>
-            </Field>
-          </FieldGroup>
+        <CardContent style={stack}>
+          <Steps
+            steps={[
+              { key: 'scope', label: '范围', state: 'current' },
+              { key: 'enc', label: '编码', state: 'todo' },
+              { key: 'sum', label: '汇总', state: 'todo' },
+            ]}
+          />
+          <OptionGroup legend="导出时要不要包含已中止的任务？">
+            <Option name="scope" value="all" defaultChecked title="包含，并加一列「状态」" badge={<Badge>推荐</Badge>} description="和列表页看到的一致；要排除时在表格里按状态筛掉" />
+            <Option name="scope" value="none" title="不包含" description="导出的行数会和列表页不一样" />
+            <Option name="scope" value="ask" title="导出时让人选" description="多一个选项，范围变大" />
+            <OptionOther placeholder="其他…" aria-label="其他" />
+          </OptionGroup>
         </CardContent>
         <CardFooter>
-          <Button variant="outline">稍后</Button>
-          <Button>保存</Button>
+          <Button>
+            继续
+            <ChevronRightIcon />
+          </Button>
         </CardFooter>
       </Card>
+
+      <Section title="下拉、分段切换">
+        <div style={row}>
+          <Menu>
+            <MenuTrigger render={<Button variant="ghost" size="sm" />}>
+              1 / 3 导出任务列表为 CSV
+              <ChevronDownIcon />
+            </MenuTrigger>
+            <MenuContent>
+              <MenuItem lead="1" current>
+                导出任务列表为 CSV
+              </MenuItem>
+              <MenuItem lead="2" trail="评审通过">
+                任务列表支持按状态筛选
+              </MenuItem>
+              <MenuItem lead="3">doctor 的输出支持 JSON</MenuItem>
+              <MenuSeparator />
+              <MenuItem>全部任务</MenuItem>
+            </MenuContent>
+          </Menu>
+        </div>
+        <Segmented defaultValue="log">
+          <SegmentedList>
+            <SegmentedItem value="log">过程</SegmentedItem>
+            <SegmentedItem value="diff">改动</SegmentedItem>
+          </SegmentedList>
+          <SegmentedPanel value="log">
+            <InfoList>
+              <InfoRow label="改动">6 个文件，+142 −18</InfoRow>
+              <InfoRow label="测试">通过，第 2 轮</InfoRow>
+              <InfoRow label="评审">通过，提了 2 条建议，都已改</InfoRow>
+            </InfoList>
+          </SegmentedPanel>
+          <SegmentedPanel value="diff">
+            <Note>
+              改了 <b>src/tasks/export.ts</b> 和它的测试。
+            </Note>
+          </SegmentedPanel>
+        </Segmented>
+      </Section>
+
+      <Section title="进行中的任务">
+        <TaskList>
+          <TaskRow name="导出任务列表为 CSV" done={0} waiting state="规格 · 等你回答" onSelect={() => {}} />
+          <TaskRow name="任务列表支持按状态筛选" done={4} waiting state="评审通过 · 等你验收" />
+          <TaskRow name="统计页增加按仓库筛选" done={2} state="测试 · 第 2 轮" onSelect={() => {}} />
+          <TaskRow name="升级 vite 到最新的小版本" done={4} state="交付 · 正在推送" />
+        </TaskList>
+      </Section>
+
+      <Section title="表单">
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="g-name">App 名字</FieldLabel>
+            <Input id="g-name" defaultValue="eos-team" spellCheck={false} />
+            <FieldDescription>最多 34 个字符，不能和 GitHub 上已有的 App 重名。</FieldDescription>
+          </Field>
+          <Field data-invalid>
+            <FieldLabel htmlFor="g-org">组织</FieldLabel>
+            <Input id="g-org" aria-invalid defaultValue="no such org" />
+            <FieldError>找不到这个组织，检查拼写或留空。</FieldError>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="g-flow">工作流</FieldLabel>
+            <Select id="g-flow" defaultValue="feature">
+              <option value="feature">feature</option>
+              <option value="feature-pr">feature-pr</option>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="g-req">需求</FieldLabel>
+            <Textarea id="g-req" rows={3} placeholder="例如：给 sum 加上参数校验…" />
+          </Field>
+        </FieldGroup>
+        <div style={row}>
+          <Button variant="outline">稍后</Button>
+          <Button>保存</Button>
+        </div>
+      </Section>
 
       <Section title="按钮">
         <div style={row}>
@@ -117,22 +223,6 @@ function Gallery() {
           <Badge variant="destructive">失败</Badge>
           <Badge variant="pending">未开始</Badge>
         </div>
-      </Section>
-
-      <Section title="表单">
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="g-flow">工作流</FieldLabel>
-            <Select id="g-flow" defaultValue="feature">
-              <option value="feature">feature</option>
-              <option value="feature-pr">feature-pr</option>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="g-req">需求</FieldLabel>
-            <Textarea id="g-req" rows={3} placeholder="例如：给 sum 加上参数校验…" />
-          </Field>
-        </FieldGroup>
       </Section>
 
       <Section title="提示">
