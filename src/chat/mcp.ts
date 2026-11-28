@@ -5,7 +5,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { rememberSecret } from '../credentials/redact.ts'
+import { holdSecret } from '../credentials/redact.ts'
 import type { HttpMcp } from '../executor/types.ts'
 import type { ToolOutcome } from './tools.ts'
 import type { ChatRead } from './types.ts'
@@ -61,7 +61,7 @@ const readBody = (req: IncomingMessage): Promise<string | undefined> =>
 export const openEndpoint = async (o: { name: string; tools: McpTool[]; call: (name: string, args: unknown) => ToolOutcome; maxCalls?: number }): Promise<McpEndpoint> => {
   const token = randomBytes(32).toString('base64url')
   // 令牌会经执行器交给 agent 的那一侧（ADR-009）：登记进遮蔽，万一出现在 trace、日志里是遮住的
-  rememberSecret(token)
+  const forget = holdSecret(token)
   const expected = digest(`Bearer ${token}`)
   const session = randomUUID()
   const max = o.maxCalls ?? MAX_TOOL_CALLS
@@ -136,6 +136,8 @@ export const openEndpoint = async (o: { name: string; tools: McpTool[]; call: (n
     reads: () => [...reads],
     close: () =>
       new Promise<void>(resolve => {
+        // 端点关掉，令牌就没用了：从「有效期间一直遮」挪到「刚失效」
+        forget()
         server.close(() => resolve())
         server.closeAllConnections()
       }),

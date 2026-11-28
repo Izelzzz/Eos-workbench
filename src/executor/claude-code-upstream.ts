@@ -6,7 +6,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { rememberSecret } from '../credentials/redact.ts'
+import { holdSecret } from '../credentials/redact.ts'
 
 /** 请求体的上限：模型请求带着整段对话，正常远小于这个值。 */
 const MAX_BODY_BYTES = 64 * 1024 * 1024
@@ -86,9 +86,15 @@ export class Upstream {
   grant(key: () => string): { token: string; revoke: () => void } {
     const token = `sk-ant-eos-${randomBytes(24).toString('hex')}`
     // agent 能读到这个令牌（它在 Claude Code 的环境里）：登记进遮蔽，agent 把环境打印出来时 trace、日志里是遮住的
-    rememberSecret(token)
+    const forget = holdSecret(token)
     this.grants.set(token, key)
-    return { token, revoke: () => void this.grants.delete(token) }
+    return {
+      token,
+      revoke: () => {
+        this.grants.delete(token)
+        forget()
+      },
+    }
   }
 
   get active(): number {

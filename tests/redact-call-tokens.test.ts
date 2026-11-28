@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { after, test } from 'node:test'
 import { openEndpoint } from '../src/chat/mcp.ts'
 import { parseMasterKey } from '../src/credentials/key.ts'
-import { knownSecrets, MASK, redacting, redactText } from '../src/credentials/redact.ts'
+import { holdSecret, knownSecrets, MASK, redacting, redactText, rememberSecret } from '../src/credentials/redact.ts'
 import { Credentials } from '../src/credentials/store.ts'
 import { ClaudeCodeExecutor } from '../src/executor/claude-code.ts'
 import type { TraceEvent } from '../src/trace/types.ts'
@@ -80,10 +80,27 @@ test('Claude Code 的一次性令牌：agent 把环境打印出来时，实时 t
 
 test('对话 agent 的 MCP 令牌：端点开着时，平台的遮蔽认得它（单独出现、在请求头里都遮住）', async () => {
   const redact = platformRedact()
-  const ep = await openEndpoint({ name: 'eos', tools: [], call: () => ({ ok: true, text: '' }) as never })
+  const ep = await openEndpoint({ name: 'eos', tools: [], call: () => ({ text: '', isError: false }) })
   const header = ep.mcp.headers.Authorization!
   const token = header.replace(/^Bearer /, '')
   assert.equal(redact(`令牌是 ${token}`), `令牌是 ${MASK}`)
   assert.ok(!redact(`authorization: ${header}`).includes(token))
   await ep.close()
+})
+
+test('临时令牌不挤掉 GitHub 令牌；有效期间一直遮，不管之后又发了多少个；失效后只留最近的 64 个', () => {
+  const redact = platformRedact()
+  const git = `ghs_${randomBytes(18).toString('hex')}`
+  rememberSecret(git)
+  const longCall = `sk-ant-eos-${randomBytes(24).toString('hex')}`
+  const releaseLong = holdSecret(longCall)
+  const first = `sk-ant-eos-${randomBytes(24).toString('hex')}`
+  holdSecret(first)()
+  // 之后又有 300 次调用：各发一个、用完失效
+  for (let i = 0; i < 300; i++) holdSecret(`sk-ant-eos-${randomBytes(24).toString('hex')}`)()
+  assert.equal(redact(git), MASK, 'GitHub 令牌还在遮')
+  assert.equal(redact(longCall), MASK, '还在进行的调用的令牌还在遮')
+  assert.equal(redact(first), first, '早就失效的令牌不再遮（表不会无限变大）')
+  releaseLong()
+  assert.equal(redact(longCall), MASK, '刚失效的还认得：调用结束后交出去的回复也是遮住的')
 })

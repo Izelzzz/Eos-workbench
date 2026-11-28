@@ -129,7 +129,7 @@ flowchart TB
 - 对话用 dsh 时，MCP 令牌在调用期间写在 `dsh/eos-profiles/ephemeral/<指纹>/cordis.patch.yml`（0640，组 `eos-dsh`）。所有以 `eos-agent` 运行的进程都在这个组里，沙箱只限制写，所以都读得到。这是 ADR-008「已知限制」里的一条。
 - 对话 agent 是唯一拿到 HTTP MCP 端点的 agent，它没有自带工具（`builtinTools: 'none'`），自己运行不了命令。任务里的角色只有模板写的 stdio MCP 服务，不带密钥（ADR-003）。
 - 一次性令牌只在本机上游登记。上游只听 127.0.0.1，定长比较，调用结束就撤销；只转发 `POST /v1/messages`（和 `count_tokens`）到配置的 Anthropic 地址，不跟随重定向，请求体和回复各有上限。拿到令牌的进程在那次调用结束前能经上游调模型，拿不到真 key。
-- `redacting()` 遮住模型 key、主密钥、凭据存储里的凭据，以及运行时登记的短期凭据：Git 令牌、两种令牌（发出时登记，`rememberSecret`，只留最近的 256 个）。agent 把环境打印出来时，trace、回复、日志里的令牌是遮住的。执行器自己的会话日志（`dsh/`、`claude-code/sessions/` 下）不经过遮蔽；平台重启之后，回放重启前那次调用的 trace 时，那次的令牌已经不在登记里。
+- `redacting()` 遮住模型 key、主密钥、凭据存储里的凭据，以及运行时登记的短期凭据：GitHub 令牌（最近的 256 个），两种令牌（`holdSecret`：发出时登记，有效期间一直遮；失效后只留最近的 64 个，调用结束时交出去的回复也是遮住的）。agent 把环境打印出来时，trace、回复、日志里的令牌是遮住的。执行器自己的会话日志（`dsh/`、`claude-code/sessions/` 下）不经过遮蔽；平台重启之后，回放重启前那次调用的 trace 时，那次的令牌已经不在登记里。
 
 **不用 Docker 部署时**：所有这些进程和平台是同一个用户。平台启动时从 `process.env` 里删掉主密钥和模型 key，但进程的初始环境（`/proc/<pid>/environ`）里还在（ADR-005）。所以不在沙箱里的进程——dsh 进程、dsh 在沙箱外启动的 MCP 服务、检查命令——读得到主密钥，能解开凭据存储，等于读得到全部模型 key 和令牌。在沙箱里的进程（dsh 的 agent、Claude Code 和它的命令）仍然读不到别的进程的环境。
 
