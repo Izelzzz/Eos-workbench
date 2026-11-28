@@ -13,15 +13,27 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 |---|---|---|
 | 颜色、字号、字重、圆角、间距、阴影、断点 | 令牌，只在这一个文件里定义 | `web/src/tokens.css` |
 | 按钮、输入框、多行输入框、下拉、表单项、状态标签、面板、提示、表格、对话框 | 基础组件，从 `index.ts` 引入 | `web/src/ui/` |
-| 布局（排列、间距、宽度） | Tailwind 的工具类：`flex gap-2`、`p-4`、`w-full` | — |
+| 布局（排列、间距、宽度） | Tailwind 的工具类：`flex gap-2`、`p-4`、`w-full`（只在被扫描的目录里生效，见下面「Tailwind 只扫描哪些目录」） | — |
 
 - **新代码不手写按钮、表单、标签、提示的样式。** 组件里没有的，先在 `web/src/ui/` 加组件，再在页面里用。
 - **只用语义颜色**：`bg-primary`、`text-muted-foreground`、`border-border`、`bg-destructive/10`。不写色值，不用 Tailwind 自带的调色板（`bg-blue-500` 不会生成）。
-- **不写任意值**：`text-[13px]`、`p-[7px]`、`bg-[#fff]` 都不行。缺的值加到 `tokens.css`，亮色和暗色都要给。
+- **不写任意值**：`text-[13px]`、`p-[7px]`、`bg-[#fff]` 都不行。缺的值加到 `tokens.css`；颜色要同时给亮色和暗色（字号、圆角、间距只有一套）。
 - **不写 `dark:`**：令牌按系统设置自动切换亮暗色。
 - **不用 `block`、`grow` 这类和现有页面类名同名的工具类**：工具类会作用到现有页面里同名的元素。用 `flex-1` 代替 `grow`。
-- **用 Tailwind 的代码放在 `web/src/ui/` 下**：Tailwind 只扫描这个目录（见 `web/src/index.css`），别处写的类不会生成样式。
-- `npm test` 会查：`tests/web-tokens.test.ts` 查直接写的颜色、字号、字重、字体、圆角、任意值和默认调色板；`tests/web-ui.test.ts` 查 `web/src/ui/` 里每个类都生成了样式、没有和现有页面同名的类。手写按钮、表单这类问题查不出来，靠评审。
+### Tailwind 只扫描哪些目录
+
+- Tailwind 现在只扫描 `web/src/ui/`（`web/src/index.css` 的 `@source`）。**现有页面（`web/src/*.tsx`）没被扫描**：在页面里写 Tailwind 类，只有恰好也在 `ui/` 里用到的才生成样式，其余不生成、也不报错。
+- 原因：现有页面的类名（`block`、`grow` 等）和工具类同名，扫描它们会生成同名的工具类，改掉现有页面的样式。
+- 现有页面的布局继续用 `styles.css`。按新的信息结构重做页面时，新页面放进一个新目录，把它加到 `index.css` 的 `@source`，并把这个目录加进 `tests/web-ui.test.ts` 的检查范围（现在只查 `ui/`）。
+
+### `npm test` 查什么
+
+| 测试 | 查什么 | 查不出什么 |
+|---|---|---|
+| `tests/web-tokens.test.ts` | `web/src` 里 `tokens.css` 以外直接写的颜色、字号、字重、字体、圆角，CSS 变量声明，任意值，默认调色板 | `styles.css` 里直接写的间距；写在声明下一行的颜色名等少数写法 |
+| `tests/web-ui.test.ts` | `web/src/ui/` 里带值的类是否生成了样式（缺令牌会被查出），以及有没有和现有页面类名同名的工具类 | 根部分拼错的类名（`itmes-center`）；`ui/` 以外的目录；函数返回的页面类名 |
+
+手写按钮、表单，用了 `dark:`，这类问题测试查不出来，靠评审。
 
 ### 组件怎么选
 
@@ -30,7 +42,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 | 一个页面的主操作 | `Button`（默认变体），一组按钮里只有一个 |
 | 次要操作、取消 | `Button variant="outline"` 或 `"ghost"` |
 | 删除、覆盖、放宽权限 | `Button variant="destructive"`，点了先开 `Dialog` 确认 |
-| 跳到别处 | 链接（`<a>`），不是按钮 |
+| 跳到别处 | 链接（`<a>`），不是按钮。`Button variant="link"` 是长得像链接的按钮，只用于不跳转的动作（例如「展开日志」） |
 | 任务、节点的状态 | `Badge`：`running` 进行中、`success` 完成、`warning` 等人处理、`destructive` 失败、`pending` 未开始 |
 | 操作结果、需要注意的限制、失败原因 | `Alert`：`success`、`warning`、`destructive` |
 | 表单 | `FieldGroup` 里放 `Field`，每个 `Field` 里是 `FieldLabel`、控件、需要时加 `FieldDescription` 或 `FieldError` |
@@ -45,7 +57,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 - **数字列**：右对齐，加 `tabular-nums`。
 - **长内容**：文本容器要能处理很长的输入（`wrap-anywhere`、`truncate`），flex 子元素加 `min-w-0` 才能截断。
 - **空状态**：不显示空表格，写一句现在是什么情况和下一步做什么。
-- **焦点**：可点的元素要有看得见的焦点样式（组件已带 `focus-visible`），不要去掉。
+- **焦点**：可点的元素要有看得见的焦点样式。`Button` 和输入框、下拉已经带了；页面里自己写的链接和可点元素要自己加。
 
 ## 第二步：写界面上的文字
 
@@ -100,18 +112,18 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 
 ## 第四步：截图并附在 PR 里
 
-改了界面外观的 PR 都要附截图。截图放在 `docs/e2e/<这次的目录>/` 下，PR 描述的「能用证据证明的」里写路径。
+改了界面外观的 PR 都要附截图。截图放在 `docs/e2e/<这次的目录>/` 下，PR 描述的「能用证据证明的」里写路径。截图不代替 E2E：改 `web/` 仍要按 `CLAUDE.md` 自检第 3 条做端到端验证。
 
 | 改了什么 | 怎么截 | 要有哪些 |
 |---|---|---|
-| 页面 | Playwright 打开页面截图，参考 `scripts/web-pixels.ts` 的页面清单和稳定截图的做法 | 改到的每个页面：1440 宽和 390 宽，亮色和暗色 |
-| 组件 | `node --import tsx scripts/web-ui-gallery.ts <输出目录>`，样张在 `scripts/ui-gallery/` | 新组件或改了的组件加进样张；报告和截图（亮暗色 × 1440/390 宽，加对话框打开时） |
-| 只改底层、页面不应该变 | `scripts/web-pixels.ts` 用同一份数据接连截改动前后的构建，再 `compare` | 40 张逐像素相同的比较结果 |
+| 页面 | Playwright 打开页面截图，参考 `scripts/web-pixels.ts` 的做法；它的页面清单只有 10 个页面，改到清单外的视图（例如卡点、对比）要自己加 | 改到的每个页面：1440 宽和 390 宽，亮色和暗色 |
+| 组件 | `node --import tsx scripts/web-ui-gallery.ts <输出目录>`，样张在 `scripts/ui-gallery/` | 新组件或改了的组件加进样张；`gallery-report.json` 和截图（亮暗色 × 1440/390 宽，另有亮色下对话框打开时的两张） |
+| 只改底层、页面不应该变 | 先跑 `scripts/e2e-ci.ts` 得到数据目录 `.eos/e2e/data`；用它接连截改动前、改动后的构建（每次先 `npm run build:web`），再 `scripts/web-pixels.ts compare` | 比较结果（存进 `docs/e2e/`），清单里的全部截图逐像素相同 |
 
-- **390 宽必须截**，并确认不横向滚动（`document.documentElement.scrollWidth <= window.innerWidth`）。
-- 截图前等页面稳定：固定时钟，等数据加载完，连续两次截图相同再保存（`scripts/web-pixels.ts` 已经这样做）。
+- **390 宽必须截**，并确认不横向滚动（`document.documentElement.scrollWidth <= window.innerWidth`）。`web-ui-gallery.ts` 会查；`web-pixels.ts` 不查，要自己看。
+- 截图前等页面稳定：固定时钟，等数据加载完，连续两次截图相同再保存（`scripts/web-pixels.ts` 是这样做的）。
 - 自己先看一遍截图再交：文字截断、重叠、对比度不够、暗色下看不清，都在这一步发现。
-- 浏览器 E2E 按页面结构定位元素（类名、按钮文字）。改了这些，同一个 PR 里改对应的脚本，并跑一遍。
+- 浏览器 E2E 按页面结构定位元素（类名、按钮文字）。改了这些，同一个 PR 里改对应的脚本并跑一遍。`web-e2e.ts`、`improve-web-e2e.ts`、不带 `--fake` 的 `chat-web-e2e.ts` 调用真实模型，算进每个 PR 最多 1 次的限制。
 
 ## 规则的来源
 
