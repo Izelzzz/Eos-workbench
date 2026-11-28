@@ -14,9 +14,9 @@ type Rule = { what: string; pattern: RegExp }
 // .css 文件：写在 CSS 声明里的值
 const CSS_RULES: Rule[] = [
   { what: '声明 CSS 变量', pattern: /(^|[{;\s])--[\w-]+\s*:/ },
-  // 只查声明的值（冒号后面），选择器里的 #id 不算
-  { what: '颜色值', pattern: /:[^;{}]*(#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\()/ },
-  { what: '颜色名', pattern: /(color|background|border|outline|fill|stroke|shadow)[\w-]*\s*:[^;{}]*\b(red|orange|yellow|green|blue|purple|pink|white|black|gray|grey|silver)\b/ },
+  // 选择器里的 #id（后面跟 {、, 或别的选择器）不算；值可以写在声明的下一行，所以不要求同一行有冒号
+  { what: '颜色值', pattern: /#[0-9a-fA-F]{3,8}(?![\w-])(?!\s*[{,.:#[>+~])|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/ },
+  { what: '颜色名', pattern: /(color|background|border|outline|fill|stroke|shadow)[\w-]*\s*:[^;{}]*(?<![-\w])(red|orange|yellow|green|blue|purple|pink|white|black|gray|grey|silver|navy)\b/i },
   // 字号、字重、字体只能是 var(--…) 或 inherit；font 简写里的字号和字体都要引用令牌
   { what: '字号', pattern: /font-size\s*:(?!\s*(var\(|inherit))/ },
   { what: '字重', pattern: /font-weight\s*:(?!\s*(var\(|inherit))/ },
@@ -129,6 +129,8 @@ test('检查能发现直接写的值', () => {
     '.m { background: white; }',
     '.n { border-top-left-radius: 6px; }',
     '.o { color: color(srgb 1 0 0); }',
+    '  #fff;',
+    '.q { color: Red; }',
   ]
   for (const line of css) assert.ok(violations('x.css', line).length > 0, line)
   const tsx = [
@@ -153,6 +155,7 @@ test('检查能发现直接写的值', () => {
     '<span style={{ paddingLeft: depth * 16 }} />',
     'type Label = { color: string }',
     '#add-btn { color: var(--text); }',
+    '.a:hover #add-btn, #fade { color: var(--color-green); border: 1px solid var(--red); }',
     '.p { background: transparent; color: currentColor; }',
     '.b { font: var(--text-sm)/1.5 var(--font-mono); font-weight: var(--font-weight-semibold); }',
   ]
