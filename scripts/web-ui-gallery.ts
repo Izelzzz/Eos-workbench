@@ -1,5 +1,5 @@
 // 基础组件的浏览器验证：构建 scripts/ui-gallery（样式和网页相同），在 Chromium 里按亮色、暗色和 1440、390 宽截图，并核对：
-// - 组件的样式真的生效（主按钮是主色底、输入框有边框、表单控件用页面字体、现有页面的 button 规则没有盖过组件）；
+// - 组件的样式真的生效（键盘聚焦有外框、主按钮是主色底、输入框有边框、表单控件用页面字体、现有页面的 button 规则没有盖过组件）；
 // - 390 宽不横向滚动；
 // - 对话框：点开后焦点在对话框里，Esc 关闭并把焦点还给触发按钮；点「删除」执行并关闭；
 // - 页面没有脚本错误。
@@ -73,6 +73,15 @@ for (const scheme of ['light', 'dark'] as const) {
       `${tag}：输入框、多行输入框、下拉、按钮用页面字体（不是浏览器默认的表单字体）`,
       (await Promise.all(['#g-name', '#g-req', '#g-flow', '[data-slot=button]'].map(s => style(page.locator(s).first(), 'font-family')))).every(f => f === bodyFont),
     )
+    // 键盘聚焦时画出 2px 墨色外框
+    await page.locator('#g-org').focus()
+    await page.keyboard.press('Tab')
+    const focused = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement
+      const st = getComputedStyle(el)
+      return { text: el.textContent, style: st.outlineStyle, width: st.outlineWidth }
+    })
+    check(`${tag}：键盘聚焦的按钮有 2px 外框`, focused.style === 'solid' && focused.width === '2px')
     for (const id of ['#bare-ghost', '#bare-link']) {
       check(`${tag}：页面底色上的 ${id.slice(1)} 按钮没有底色（现有 button 规则的底色没漏进来）`, (await style(page.locator(id), 'background-color')) === 'rgba(0, 0, 0, 0)')
     }

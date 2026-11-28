@@ -23,7 +23,7 @@ export function TableRow({ className, ...props }: ComponentProps<'tr'>) {
 }
 
 export function TableHead({ className, ...props }: ComponentProps<'th'>) {
-  return <th data-slot="table-head" className={cn('h-9 px-3 text-left align-middle text-sm font-medium whitespace-nowrap text-ink-3', className)} {...props} />
+  return <th data-slot="table-head" className={cn('h-9 px-3 text-left align-middle text-sm font-medium whitespace-nowrap text-ink-2', className)} {...props} />
 }
 
 /** 数字列加 tabular-nums 并右对齐 */

@@ -87,7 +87,13 @@ test('cn：调用方的类覆盖组件默认的同类工具类，令牌字号不
   assert.equal(cn('p-2 text-sm', 'p-4'), 'text-sm p-4')
   assert.equal(cn('text-code text-muted-foreground'), 'text-code text-muted-foreground')
   assert.equal(cn('text-md', 'text-sm'), 'text-sm')
-  assert.equal(cn('border-transparent', 'border-border'), 'border-border')
+  assert.equal(cn('border-transparent', 'border-line'), 'border-line')
+  // 令牌里另起了名字的字号、圆角、阴影：和颜色类不互相覆盖，和同类互相覆盖
+  assert.equal(cn('text-lead text-ink-2'), 'text-lead text-ink-2')
+  assert.equal(cn('text-title', 'text-control'), 'text-control')
+  assert.equal(cn('rounded-control', 'rounded-card'), 'rounded-card')
+  assert.equal(cn('shadow-card', 'shadow-popover'), 'shadow-popover')
+  assert.equal(cn('shadow-card bg-surface'), 'shadow-card bg-surface')
 })
 
 test('Button：默认是主按钮，变体换样式，禁用时不可点，调用方的类追加在后面', () => {

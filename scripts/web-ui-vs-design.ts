@@ -21,9 +21,9 @@ const design = pathToFileURL(join(ROOT, 'docs', 'design', 'workbench.html')).hre
 const browser = await chromium.launch()
 for (const scheme of ['light', 'dark'] as const) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme })
-  await page.goto(design)
-  // 设计稿会从 Google Fonts 取 Inter；取不到时用系统字体，和网页一致
-  await page.waitForLoadState('networkidle').catch(() => {})
+  // 设计稿会从 Google Fonts 取 Inter。拦掉这个请求：网页只用系统字体（不连外网取字体），对照时两边用同样的字体，也不依赖网络
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (route: any) => route.abort())
+  await page.goto(design, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(500)
   const designShot: Buffer = await page.screenshot()
   const gallery = readFileSync(join(shots, `gallery-${scheme}-1440.png`))

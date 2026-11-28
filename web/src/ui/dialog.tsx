@@ -34,7 +34,7 @@ export function DialogContent({ className, children, showCloseButton = true, ...
       >
         {children}
         {showCloseButton && (
-          <DialogPrimitive.Close data-slot="dialog-close" aria-label="关闭" render={<Button variant="ghost" size="icon-sm" className="absolute top-2 right-2" />}>
+          <DialogPrimitive.Close data-slot="dialog-close" aria-label="关闭" render={<Button variant="ghost" size="icon-sm" className="absolute top-4 right-4" />}>
             <XIcon />
           </DialogPrimitive.Close>
         )}

@@ -26,7 +26,7 @@ export function FieldLabel({ className, ...props }: ComponentProps<'label'>) {
 
 /** 说明文字：只在选择不明显、有限制、有后果或有下一步时才写（见界面 skill 的文案规则） */
 export function FieldDescription({ className, ...props }: ComponentProps<'p'>) {
-  return <p data-slot="field-description" className={cn('m-0 text-xs leading-normal text-ink-3', className)} {...props} />
+  return <p data-slot="field-description" className={cn('m-0 text-xs leading-normal text-ink-2', className)} {...props} />
 }
 
 /** 错误：说清楚哪里不对、怎么改。传文字；没有错误时传 undefined、null、false 或空字符串，不渲染 */

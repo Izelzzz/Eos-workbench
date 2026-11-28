@@ -3,7 +3,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from './cn.ts'
 
 // 聚焦样式：2px 墨色外框，离元素 2px。别的组件也用这一套
-export const focusRing = 'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink'
+// focus-visible:outline-solid 要写出来：outline-hidden 会把外框样式变量设成 none，只加 outline-2 画不出外框
+export const focusRing = 'outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ink'
 
 // 每个变体都显式设底色和内边距：现有页面的 styles.css 给所有 button 设了底色、内边距和悬停底色，
 // 组件没设的属性会沿用它们
@@ -23,7 +24,7 @@ export const buttonVariants = cva(
         // 文字按钮、图标按钮：没有边框
         ghost: 'bg-transparent text-ink-2 hover:bg-fill hover:text-ink aria-expanded:bg-fill',
         destructive: 'border-line bg-transparent text-destructive hover:bg-destructive/10',
-        link: 'bg-transparent px-0 text-ink-2 underline decoration-line underline-offset-4 hover:bg-transparent hover:text-ink',
+        link: 'bg-transparent px-0 text-ink underline decoration-ink-3 underline-offset-4 hover:bg-transparent hover:decoration-ink',
       },
       size: {
         default: 'h-9 px-3.5',
