@@ -8,8 +8,9 @@
     "exactOptionalPropertyTypes": false,
     "allowImportingTsExtensions": true,
     "noEmit": true,
+    "jsx": "react-jsx",
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "scripts", "vendor"]
+  "include": ["src", "tests", "scripts", "vendor", "web/src/ui"]
 }
