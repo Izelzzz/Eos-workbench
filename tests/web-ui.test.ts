@@ -29,6 +29,7 @@ import {
   Option,
   OptionGroup,
   OptionOther,
+  type OptionAnswer,
   Segmented,
   SegmentedItem,
   SegmentedList,
@@ -170,22 +171,37 @@ test('Card、Table：面板有标题层级，表格放在可横向滚动的容�
   assert.match(table, /^<div data-slot="table-container" class="[^"]*overflow-x-auto/)
 })
 
-test('Option：原生单选，同组同 name；标题、说明、标签都在 label 里，勾是装饰', () => {
+test('Option：原生单选，同组同 name；标题、说明、标签都在 label 里，勾是装饰；「其他」默认读作「其他」', () => {
   const html = renderToStaticMarkup(
     h(
       OptionGroup,
-      { legend: '导出时要不要包含已中止的任务？' },
-      h(Option, { name: 'scope', value: 'all', defaultChecked: true, title: '包含', description: '和列表页一致', badge: h(Badge, null, '推荐') }),
-      h(Option, { name: 'scope', value: 'none', title: '不包含' }),
-      h(OptionOther, { placeholder: '其他…', 'aria-label': '其他' }),
+      { name: 'scope', legend: '导出时要不要包含已中止的任务？', defaultValue: { kind: 'option', value: 'all' } },
+      h(Option, { value: 'all', title: '包含', description: '和列表页一致', badge: h(Badge, null, '推荐') }),
+      h(Option, { value: 'none', title: '不包含' }),
+      h(OptionOther, { placeholder: '其他…' }),
     ),
   )
   assert.match(html, /^<fieldset data-slot="option-group"[^>]*><legend[^>]*>导出时要不要包含已中止的任务？<\/legend>/)
   assert.equal((html.match(/<input type="radio"[^>]*name="scope"/g) ?? []).length, 2)
   assert.match(html, /<input type="radio"[^>]*name="scope"[^>]*checked=""[^>]*value="all"/)
   assert.match(html, /<label data-slot="option"[^>]*>.*包含.*推荐.*和列表页一致.*<\/label>/)
-  assert.match(html, /<span aria-hidden="true" class="grid size-4\.5/)
-  assert.match(html, /<input type="text" data-slot="option-other"[^>]*border-dashed/)
+  assert.match(html, /<span aria-hidden="true" class="grid size-4\.5[^"]*border-tick border-line/)
+  assert.match(html, /<input type="text" data-slot="option-other" aria-label="其他"[^>]*border-dashed[^>]*value=""/)
+})
+
+test('Option：答案只有一个，受控用法下也由组件保证（选项和「其他」互斥）', () => {
+  const render = (value: OptionAnswer | undefined) =>
+    renderToStaticMarkup(h(OptionGroup, { legend: 'q', value, onValueChange: () => {} }, h(Option, { value: 'a', title: 'A' }), h(Option, { value: 'b', title: 'B' }), h(OptionOther, {})))
+  const picked = render({ kind: 'option', value: 'b' })
+  assert.equal((picked.match(/checked=""/g) ?? []).length, 1)
+  assert.match(picked, /checked="" value="b"/)
+  assert.match(picked, /data-slot="option-other"[^>]*value=""/)
+  const other = render({ kind: 'other', text: '都要' })
+  assert.doesNotMatch(other, /checked=""/)
+  assert.match(other, /data-slot="option-other"[^>]*value="都要"/)
+  assert.doesNotMatch(render(undefined), /checked=""/)
+  // 不放在 OptionGroup 里会直接报错，而不是悄悄失去互斥
+  assert.throws(() => renderToStaticMarkup(h(Option, { value: 'a', title: 'A' })), /OptionGroup/)
 })
 
 test('Steps：当前步骤标 aria-current="step"，走过的有勾；不传 onSelect 时只是文字，传了是按钮', () => {
@@ -205,24 +221,33 @@ test('Steps：当前步骤标 aria-current="step"，走过的有勾；不传 onS
   assert.equal((clickable.match(/<button type="button"/g) ?? []).length, 3)
 })
 
-test('TaskRow：五小段进度，等人处理时有强调色圆点、当前段和状态用强调色', () => {
-  const waiting = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '导出任务列表为 CSV', state: '规格 · 等你回答', done: 0, waiting: true })))
+test('TaskRow：按工作流节点数分段，读屏读进度；等人处理时有强调色圆点、当前段和状态用强调色', () => {
+  const waiting = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '导出任务列表为 CSV', state: '规格 · 等你回答', total: 5, done: 0, waiting: true })))
   assert.match(waiting, /data-waiting="true"/)
   assert.match(waiting, /data-slot="waiting-dot"/)
   assert.equal((waiting.match(/<i /g) ?? []).length, 5)
   assert.equal((waiting.match(/bg-accent"/g) ?? []).length, 2) // 圆点和当前那一段
   assert.match(waiting, /text-accent">规格 · 等你回答</)
-  const running = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '升级 vite', state: '交付 · 正在推送', done: 4, onSelect: () => {} })))
+  const running = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '升级 vite', state: '交付 · 正在推送', total: 5, done: 4, onSelect: () => {} })))
   assert.match(running, /<button type="button"/)
   assert.doesNotMatch(waiting, /<button/) // 没传 onSelect：只是文字
   // 超出范围的进度按边界算
-  const over = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: 7 })))
+  const over = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: 5, done: 7 })))
   assert.equal((over.match(/bg-ink"/g) ?? []).length, 5)
-  const under = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: -1 })))
+  const under = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: 5, done: -1 })))
   assert.equal((under.match(/bg-ink-3"/g) ?? []).length, 1)
   assert.doesNotMatch(running, /waiting-dot|bg-accent|text-accent/)
   assert.equal((running.match(/bg-ink"/g) ?? []).length, 4)
   assert.equal((running.match(/bg-ink-3"/g) ?? []).length, 1)
+  assert.match(running, /<span class="sr-only">，进度 4 \/ 5<\/span>/)
+  // 段数跟着工作流走：三个节点就是三段
+  const three = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: 3, done: 1 })))
+  assert.equal((three.match(/<i /g) ?? []).length, 3)
+  assert.match(three, /进度 1 \/ 3/)
+  // 段数、进度不是有限数时按 1 段、0 段算，不读出 NaN
+  const bad = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', total: Number.NaN, done: Number.NaN })))
+  assert.equal((bad.match(/<i /g) ?? []).length, 1)
+  assert.match(bad, /进度 0 \/ 1/)
 })
 
 test('InfoRow、Note、Segmented：信息行是 dt/dd，说明块是浅底，分段切换是页签', () => {
