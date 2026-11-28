@@ -14,13 +14,15 @@ type Rule = { what: string; pattern: RegExp }
 // .css 文件：写在 CSS 声明里的值
 const CSS_RULES: Rule[] = [
   { what: '声明 CSS 变量', pattern: /(^|[{;\s])--[\w-]+\s*:/ },
-  { what: '颜色值', pattern: /#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/ },
+  // 只查声明的值（冒号后面），选择器里的 #id 不算
+  { what: '颜色值', pattern: /:[^;{}]*(#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\()/ },
+  { what: '颜色名', pattern: /(color|background|border|outline|fill|stroke|shadow)[\w-]*\s*:[^;{}]*\b(red|orange|yellow|green|blue|purple|pink|white|black|gray|grey|silver)\b/ },
   // 字号、字重、字体只能是 var(--…) 或 inherit；font 简写里的字号和字体都要引用令牌
   { what: '字号', pattern: /font-size\s*:(?!\s*(var\(|inherit))/ },
   { what: '字重', pattern: /font-weight\s*:(?!\s*(var\(|inherit))/ },
   { what: '字体', pattern: /font-family\s*:(?!\s*(var\(|inherit))/ },
   { what: 'font 简写', pattern: /(^|[{;\s])font\s*:(?!\s*(inherit|var\(--text-[\w-]+\)\/[\d.]+\s+var\(--font-[\w-]+\))\s*[;}])/ },
-  { what: '圆角', pattern: /border-radius\s*:[^;}]*\d(px|rem|em)\b/ },
+  { what: '圆角', pattern: /border(-[a-z]+)*-radius\s*:[^;}]*\d(px|rem|em)\b/ },
   { what: '引入整个 Tailwind（含 preflight 和默认主题）', pattern: /@import\s+["']tailwindcss(\/preflight|\/theme)?(\.css)?["']/ },
 ]
 
@@ -30,6 +32,7 @@ const TS_RULES: Rule[] = [
   { what: '颜色值', pattern: /['"`]#[0-9a-fA-F]{3,8}['"`]|\[#[0-9a-fA-F]{3,8}\]|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/ },
   { what: '内联样式里的字体、字号、字重、圆角、颜色', pattern: /style=\{\{[^}]*\b(font|fontSize|fontWeight|fontFamily|borderRadius|color|background|backgroundColor|borderColor)\s*:/ },
   { what: 'Tailwind 任意属性', pattern: /\[[a-z-]+:[^\]]+\]/ },
+  { what: 'Tailwind 引用任意变量', pattern: /\b[a-z-]+-\((--|[a-z]+:--)/ },
   { what: 'Tailwind 任意值（字号、颜色、字重、字体、圆角）', pattern: /\b(text|bg|border|ring|outline|fill|stroke|font|rounded(-[trbl]{1,2})?|shadow|leading|tracking)-\[/ },
   { what: 'Tailwind 任意值（间距、尺寸）', pattern: new RegExp(`(^|[\\s"'\`:])-?(${SPACING})-\\[`) },
   {
@@ -99,6 +102,13 @@ test('样式入口不引入 preflight，现有页面的样式在组件和工具�
   assert.doesNotMatch(index, /preflight|tailwindcss\/theme|@import "tailwindcss"|styles\.css/)
   const styles = stripCssComments(readFileSync(join(WEB, 'styles.css'), 'utf8')).trim()
   assert.ok(styles.startsWith('@layer legacy {') && styles.endsWith('}'), 'styles.css 的全部规则要在 @layer legacy { } 里')
+  // 括号配平：第一个 { 只在文件末尾闭合，层后面不能再有规则
+  let depth = 0
+  for (let i = 0; i < styles.length; i++) {
+    if (styles[i] === '{') depth++
+    if (styles[i] === '}' && --depth === 0) assert.equal(i, styles.length - 1, 'legacy 层闭合之后还有规则，它们不在层里，会盖过组件的工具类')
+  }
+  assert.match(index, /@import "\.\/tokens\.css";/)
   assert.match(readFileSync(join(WEB, 'main.tsx'), 'utf8'), /import '\.\/index\.css'\nimport '\.\/styles\.css'/)
 })
 
@@ -115,6 +125,10 @@ test('检查能发现直接写的值', () => {
     '.i { font-size: small; }',
     '.j { font: bold 13px Arial; }',
     '.k { font: var(--text-sm)/1.5 Arial; }',
+    '.l { color: red; }',
+    '.m { background: white; }',
+    '.n { border-top-left-radius: 6px; }',
+    '.o { color: color(srgb 1 0 0); }',
   ]
   for (const line of css) assert.ok(violations('x.css', line).length > 0, line)
   const tsx = [
@@ -127,6 +141,8 @@ test('检查能发现直接写的值', () => {
     "const c = '#ff0000'",
     '<p className="[font-size:13px]" />',
     `<a href={'//docs'} className="text-[13px]" />`,
+    '<p className="bg-(--x)" />',
+    '<p className="text-(length:--x)" />',
   ]
   for (const line of tsx) assert.ok(violations('x.tsx', line).length > 0, line)
   const ok = [
@@ -136,6 +152,8 @@ test('检查能发现直接写的值', () => {
     '<p className="text-sm text-muted-foreground p-2 rounded-md bg-primary" />',
     '<span style={{ paddingLeft: depth * 16 }} />',
     'type Label = { color: string }',
+    '#add-btn { color: var(--text); }',
+    '.p { background: transparent; color: currentColor; }',
     '.b { font: var(--text-sm)/1.5 var(--font-mono); font-weight: var(--font-weight-semibold); }',
   ]
   for (const line of ok) assert.deepEqual(violations(line.startsWith('.') ? 'x.css' : 'x.tsx', line), [], line)

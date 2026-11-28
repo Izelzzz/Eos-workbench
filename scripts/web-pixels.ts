@@ -59,6 +59,11 @@ if (mode === 'compare') {
   const left = names(a)
   const right = names(b)
   const all = [...new Set([...left, ...right])].sort()
+  if (all.length === 0) throw new Error('两边都没有截图')
+  // 两次截图要用同一个任务和同一个固定时钟，否则比较没有意义
+  const meta = (d: string) => JSON.parse(readFileSync(join(d, 'shots.json'), 'utf8')) as { taskId: string; fixedTime: string }
+  const [ma, mb] = [meta(a), meta(b)]
+  if (ma.taskId !== mb.taskId || ma.fixedTime !== mb.fixedTime) throw new Error(`两次截图的任务或时钟不同：${JSON.stringify([ma, mb])}`)
   const browser = await chromium.launch()
   const page = await browser.newPage()
   const result = []
