@@ -1,0 +1,51 @@
+{
+  "commit": "229a8d57c4e9416ff193be766a54e24ea074f0f7",
+  "uncommitted": [
+    "?? docs/e2e/ui-components/gallery/dialog-1440.png",
+    "?? docs/e2e/ui-components/gallery/dialog-390.png",
+    "?? docs/e2e/ui-components/gallery/gallery-dark-1440.png",
+    "?? docs/e2e/ui-components/gallery/gallery-dark-390.png",
+    "?? docs/e2e/ui-components/gallery/gallery-light-1440.png",
+    "?? docs/e2e/ui-components/gallery/gallery-light-390.png",
+    "?? docs/e2e/ui-components/gallery/gallery-report.json"
+  ],
+  "task": "t261128073311oii",
+  "checks": {
+    "列表能看出等验收的任务（提示条、行标记），能筛出只看等验收的": true,
+    "任务页显示卡点：第几次、验收对象和验收人、被验收的产出": true,
+    "任务页的改动里有被验收的文件": true,
+    "不写意见打回：页面提示要写意见": true,
+    "页面上打回后交回开发修改，改完回到卡点（第 2 次），页面显示打回记录和新的产出": true,
+    "页面上通过后任务完成": true,
+    "结论来自网页（actor 是 web），先打回后通过": true,
+    "修改提交到了任务分支": true,
+    "390 宽度：任务列表没有横向滚动": true,
+    "390 宽度：任务页没有横向滚动": true,
+    "筛选打开时任务被通过（没有等验收的了）：还能切回显示全部": true,
+    "页面上提交修正：交给 build 原来的会话，改完回到完成；修正记录显示第几次、交给谁、内容、完成、改到的文件": true,
+    "390 宽度：有修正记录的任务页没有横向滚动": true,
+    "页面没有报错": true
+  },
+  "round2Text": "卡点「accept」· 第 2 次验收\n验收「build」，验收人：任何能访问平台的人\n\n等待验收：请查看下面的产出和改动，然后通过或打回。\n\n人验收：确认 sum 的实现和注释都清楚。\n\n「build」的产出\n按验收意见在 sum 上方补了 JSDoc 注释。\n查看改动 ↓\n打回 第 1 次 · 人\n请在 sum 上方补一段 JSDoc 注释，写明参数、返回值和会抛出的错误。\n通过\n打回修改",
+  "correctionText": "修正\n第 1 次修正\n交给「build」\n完成\n\n补充：在 README.md 里写一段 sum 的用法示例。\n\n本次修正不经评审：改完只重跑程序检查，不再请评审或验收。\n\n「build」的回复（1 次）\n\n改动的文件：README.md\n\n任务已完成。发现要改正或补充的地方，写在这里：交给选中的节点在原来的会话和工作目录里继续做（不是重新跑一遍），改完重跑程序检查。\n\n交给\nplan\nbuild\n提交修正",
+  "narrowCorrection": {
+    "scrollWidth": 390,
+    "innerWidth": 390
+  },
+  "narrowList": {
+    "scrollWidth": 390,
+    "innerWidth": 390
+  },
+  "narrowTask": {
+    "scrollWidth": 390,
+    "innerWidth": 390
+  },
+  "errors": [],
+  "calls": [
+    "c1 produce@plan",
+    "c2 produce@build",
+    "c3 critique@review",
+    "c4 amend@accept",
+    "c5 correct@build"
+  ]
+}

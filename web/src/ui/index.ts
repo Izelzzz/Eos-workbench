@@ -1,0 +1,11 @@
+// 基础组件。页面只从这里引入，不直接用 @base-ui/react。用法见各组件文件里的注释
+export { Alert, AlertDescription, AlertTitle, alertVariants } from './alert.tsx'
+export { Badge, badgeVariants } from './badge.tsx'
+export { Button, buttonVariants } from './button.tsx'
+export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card.tsx'
+export { cn } from './cn.ts'
+export { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './dialog.tsx'
+export { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from './field.tsx'
+export { Input, Textarea } from './input.tsx'
+export { Select } from './select.tsx'
+export { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from './table.tsx'

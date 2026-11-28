@@ -4,6 +4,8 @@
 //   node --import tsx scripts/web-pixels.ts shoot <数据目录> <输出目录>   截图（用当前的 web/dist，先 npm run build:web）
 //   node --import tsx scripts/web-pixels.ts compare <目录A> <目录B>       逐像素比较两次截图，有不同就退出码 1
 // 数据目录可以用确定性 E2E（scripts/e2e-ci.ts）跑完后的 .eos/e2e/data；脚本会先复制一份，不改原目录。
+// 任务记着 worktree 的绝对路径：原来的 .eos/e2e 被清掉（例如又跑了一次 E2E）后，任务页会显示「读不到改动」。
+// 所以改动前后的两次截图要用同一时刻的数据接连截，不要拿以前截的图比较。
 import { spawn, type ChildProcess } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
