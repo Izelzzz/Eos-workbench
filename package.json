@@ -31,10 +31,12 @@
   },
   "devDependencies": {
     "@deepseek-ai/dsh-sandbox-local": "0.2.2-rc.5",
+    "@tailwindcss/vite": "4.3.5",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "tailwindcss": "4.3.5",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.8"

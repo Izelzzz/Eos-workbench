@@ -1,0 +1,10 @@
+/*
+ * 样式入口。层的顺序决定谁覆盖谁：后面的层覆盖前面的层。
+ * 不引入 Tailwind 的 preflight（全局样式重置）和默认主题：重置会改掉现有页面的样式，默认主题会带进令牌以外的颜色和字号。
+ * styles.css 是现有页面的样式，放在 legacy 层：它的元素选择器（例如 button）不会盖过组件上的 Tailwind 类。
+ */
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./tokens.css";
+@import "./styles.css" layer(legacy);
