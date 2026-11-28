@@ -1,0 +1,112 @@
+/*
+ * 设计令牌：颜色、字体、字号、字重、圆角、间距只在这个文件里定义。
+ * 别的样式和组件只引用这里的变量（tests/web-tokens.test.ts 检查）。
+ */
+
+/* 调色板：亮色 */
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --text: #1c1d21;
+  --muted: #6b6f7a;
+  --line: #e4e5ea;
+  --hover: #f1f2f5;
+  --select: #e8efff;
+  --ok: #1f9d55;
+  --error: #d64545;
+  --running: #2f6fed;
+  --waiting: #c98a00;
+  --pending: #a3a7b1;
+  /* trace 里各类 span 的颜色 */
+  --k-node: #5b6170;
+  --k-call: #2f6fed;
+  --k-model: #7a4fd6;
+  --k-tool: #11865b;
+  --k-question: #c98a00;
+  --k-answer: #0f8a8a;
+  --k-note: #8a8f9a;
+  --k-check: #b8571f;
+  --diff-add: #e6f6ec;
+  --diff-del: #fdecec;
+  /* 实色背景（主按钮、状态标签）上的文字 */
+  --on-solid: #ffffff;
+  /* 进行中的进度条上的斜纹 */
+  --stripe: rgba(255, 255, 255, 0.28);
+  color-scheme: light;
+}
+
+/* 调色板：暗色（跟随系统） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111215;
+    --panel: #18191d;
+    --text: #e7e8ec;
+    --muted: #979ba6;
+    --line: #2a2c33;
+    --hover: #202228;
+    --select: #1d2a45;
+    --k-node: #9aa0ae;
+    --k-call: #6c9bff;
+    --k-model: #a888f0;
+    --k-tool: #3cc48b;
+    --k-check: #e8894f;
+    --diff-add: #15301f;
+    --diff-del: #3a1b1b;
+    color-scheme: dark;
+  }
+}
+
+/* 字体、字号、字重、圆角、间距。static：不管有没有用到都输出成 :root 上的变量，styles.css 直接引用 */
+@theme static {
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-code: 12.5px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --radius-2xs: 2px;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 9px;
+  --radius-full: 999px;
+
+  /* 间距的单位：p-2 = 8px，gap-3 = 12px */
+  --spacing: 4px;
+}
+
+/* 语义颜色：组件只用这些名字（bg-primary、text-muted-foreground），取值来自上面的调色板，亮暗色自动跟随 */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--running);
+  --color-primary-foreground: var(--on-solid);
+  --color-secondary: var(--hover);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--hover);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--select);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--error);
+  --color-success: var(--ok);
+  --color-warning: var(--waiting);
+  --color-pending: var(--pending);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--running);
+}

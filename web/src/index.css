@@ -1,0 +1,14 @@
+/*
+ * 样式入口。层的顺序决定谁覆盖谁：后面的层覆盖前面的层。
+ * 不引入 Tailwind 的 preflight（全局样式重置）和默认主题：重置会改掉现有页面的样式，默认主题会带进令牌以外的颜色和字号。
+ * styles.css 是现有页面的样式，自己声明在 legacy 层：它的元素选择器（例如 button）不会盖过组件上的 Tailwind 类。
+ * 它由 main.tsx 在本文件之后单独引入，不经 Tailwind 编译：Tailwind 会给 color-mix() 加上不透明的回退值，
+ * 不支持 color-mix 的浏览器就会显示成实色。
+ * Tailwind 只扫描 ui/ 下的组件生成工具类：现有页面的类名（block、grow 等）和工具类同名，
+ * 扫描它们会生成同名的工具类，盖过 styles.css 里的规则。用 Tailwind 的新代码所在的目录要加到下面的 @source。
+ */
+@layer theme, base, legacy, components, utilities;
+
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "./ui";
+@import "./tokens.css";
