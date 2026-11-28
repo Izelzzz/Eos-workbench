@@ -11,7 +11,7 @@ export const focusRing = 'outline-hidden focus-visible:outline-2 focus-visible:o
 export const buttonVariants = cva(
   cn(
     'inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-transparent py-0 font-sans text-control font-medium whitespace-nowrap select-none',
-    'transition duration-150 motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    'transition duration-150 motion-reduce:transition-none disabled:pointer-events-none disabled:opacity-35 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0',
     focusRing,
   ),
   {
@@ -27,7 +27,7 @@ export const buttonVariants = cva(
         link: 'bg-transparent px-0 text-ink underline decoration-ink-3 underline-offset-4 hover:bg-transparent hover:decoration-ink',
       },
       size: {
-        default: 'h-9 px-3.5',
+        default: 'h-9 px-4',
         sm: 'h-8 gap-1 rounded-lg px-2.5',
         icon: 'size-8 rounded-lg p-0',
         'icon-sm': 'size-7 rounded-lg p-0',

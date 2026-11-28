@@ -8,7 +8,7 @@ const merge = extendTailwindMerge({
     theme: {
       text: ['code', 'md', 'control', 'lead', 'pane', 'title'],
       radius: ['control', 'box', 'chat', 'input', 'card'],
-      shadow: ['card', 'popover'],
+      shadow: ['card', 'popover', 'segment', 'selected'],
     },
   },
 })

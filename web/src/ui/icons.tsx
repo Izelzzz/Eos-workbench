@@ -1,8 +1,8 @@
 import type { ComponentProps } from 'react'
 
-// 组件内部用的几个图标。画法和 Lucide 一致（24 格、2px 描边、颜色跟随文字），不另装图标库
+// 组件用的几个图标。画法和 Lucide 一致（24 格、颜色跟随文字；设计稿的线宽是 1.8px），不另装图标库
 const Icon = ({ children, ...props }: ComponentProps<'svg'>) => (
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
     {children}
   </svg>
 )
@@ -17,6 +17,12 @@ export const XIcon = (props: ComponentProps<'svg'>) => (
 export const ChevronDownIcon = (props: ComponentProps<'svg'>) => (
   <Icon {...props}>
     <path d="m6 9 6 6 6-6" />
+  </Icon>
+)
+
+export const ChevronRightIcon = (props: ComponentProps<'svg'>) => (
+  <Icon {...props}>
+    <path d="m9 18 6-6-6-6" />
   </Icon>
 )
 

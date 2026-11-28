@@ -1,6 +1,7 @@
 // 基础组件的浏览器验证：构建 scripts/ui-gallery（样式和网页相同），在 Chromium 里按亮色、暗色和 1440、390 宽截图，并核对：
 // - 组件的样式真的生效（键盘聚焦有外框、主按钮是主色底、输入框有边框、表单控件用页面字体、现有页面的 button 规则没有盖过组件）；
 // - 390 宽不横向滚动；
+// - 选项、下拉菜单、分段切换的点击和键盘操作；任务行的高度和窄屏下隐藏进度；
 // - 对话框：点开后焦点在对话框里，Esc 关闭并把焦点还给触发按钮；点「删除」执行并关闭；
 // - 页面没有脚本错误。
 // 结果写到 <输出目录>/gallery-report.json（不叫 report.json：那是 scripts/e2e.ts 的报告格式，CI 的 pr-checklist 按它核对）。用法：node --import tsx scripts/web-ui-gallery.ts <输出目录>
@@ -74,7 +75,8 @@ for (const scheme of ['light', 'dark'] as const) {
       (await Promise.all(['#g-name', '#g-req', '#g-flow', '[data-slot=button]'].map(s => style(page.locator(s).first(), 'font-family')))).every(f => f === bodyFont),
     )
     // 键盘聚焦时画出 2px 墨色外框
-    await page.locator('#g-org').focus()
+    // 表单里最后一个输入框之后就是「稍后」按钮
+    await page.locator('#g-req').focus()
     await page.keyboard.press('Tab')
     // 按钮的颜色过渡 150ms（外框颜色也在里面），等它走完再读
     await page.waitForTimeout(300)
@@ -93,7 +95,43 @@ for (const scheme of ['light', 'dark'] as const) {
     check(`${tag}：不横向滚动`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     await page.screenshot({ path: join(out, `gallery-${scheme}-${width}.png`), fullPage: true })
 
+    const taskRow = page.locator('[data-slot=task-row] button').first()
+    check(`${tag}：任务行高 44px`, (await style(taskRow, 'height')) === '44px')
+    const progressShown = (await style(page.locator('[data-slot=task-row] button > span[aria-hidden]').first(), 'display')) !== 'none'
+    check(`${tag}：任务行的五段进度${width < 640 ? '在窄屏下隐藏' : '显示'}`, progressShown === width >= 640)
+
     if (scheme === 'light') {
+      // 选项：点击选中，选中的是墨色边框和实心的勾；键盘下键选下一个
+      const options = page.locator('[data-slot=option]')
+      await options.nth(1).click()
+      await page.waitForTimeout(300) // 边框颜色有 150ms 的过渡
+      const second = page.locator('input[name=scope]').nth(1)
+      check(`${tag}：点选项能选中`, await second.isChecked())
+      check(
+        `${tag}：选中的选项是墨色边框、勾是墨色实心`,
+        (await style(options.nth(1), 'border-top-color')) === toRgb(vars.ink) && (await style(options.nth(1).locator('span[aria-hidden]'), 'background-color')) === toRgb(vars.ink),
+      )
+      await second.focus()
+      await page.keyboard.press('ArrowDown')
+      check(`${tag}：键盘下键选中下一个选项`, await page.locator('input[name=scope]').nth(2).isChecked())
+
+      // 下拉菜单：点开有 4 项，Esc 关闭并把焦点还给触发按钮
+      const menuTrigger = page.getByRole('button', { name: /1 \/ 3/ })
+      await menuTrigger.click()
+      const menu = page.getByRole('menu')
+      await menu.waitFor()
+      check(`${tag}：下拉菜单打开，有 4 项`, (await menu.getByRole('menuitem').count()) === 4)
+      await page.keyboard.press('Escape')
+      await menu.waitFor({ state: 'hidden' })
+      check(`${tag}：Esc 关闭下拉菜单，焦点回到触发按钮`, await menuTrigger.evaluate((b: Element) => b === document.activeElement))
+
+      // 分段切换：点「改动」切过去，键盘左键切回「过程」
+      const diffTab = page.getByRole('tab', { name: '改动' })
+      await diffTab.click()
+      check(`${tag}：点「改动」切换过去`, (await diffTab.getAttribute('aria-selected')) === 'true' && (await page.locator('[data-slot=note]').isVisible()))
+      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('Enter')
+      check(`${tag}：键盘左键切回「过程」`, (await page.getByRole('tab', { name: '过程' }).getAttribute('aria-selected')) === 'true')
       const trigger = page.getByRole('button', { name: '删除凭据' })
       await trigger.click()
       const dialog = page.getByRole('dialog', { name: '删除 github.com 的令牌？' })
