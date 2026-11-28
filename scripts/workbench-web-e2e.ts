@@ -121,6 +121,8 @@ const active = (page: any) => page.locator('[aria-labelledby=wb-active]')
   const left = await pending(page).boundingBox()
   const right = await page.locator('aside').boundingBox()
   check('窄屏：上下排，进行中的任务在等你处理下面', right.y > left.y + left.height && right.width === 390)
+  // 左栏不拉满屏高：两块之间只有留白，没有大片空白
+  check('窄屏：两块之间没有大片空白（不超过 80px）', right.y - (left.y + left.height) <= 80)
   check('窄屏：不横向滚动', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
   await page.context().close()
 }
