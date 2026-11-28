@@ -28,3 +28,9 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: var(--text-bas
   .chat-enter { animation: none; }
   .chat-collapse { transition: none; }
 }
+
+/* 任务详情：阶段条横向滚动时不显示滚动条；展开的内容淡入 */
+.task-strip { scrollbar-width: none; }
+.task-strip::-webkit-scrollbar { display: none; }
+.task-enter { animation: chat-enter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) { .task-enter { animation: none; } }

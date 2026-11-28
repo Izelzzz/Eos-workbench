@@ -13,4 +13,5 @@
 @source "./ui";
 @source "./shell";
 @source "./chats";
+@source "./task";
 @import "./tokens.css";
