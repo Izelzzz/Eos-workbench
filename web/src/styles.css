@@ -4,17 +4,13 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font: var(--text-base)/var(--leading-body) var(--font-sans); }
 a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 2px; }
 a:hover { text-decoration-color: var(--ink); }
-/* 导航、按钮样式的链接、列表项不画下划线 */
-a.brand, a.button, .topnav a, .back, .conv-side li a { text-decoration: none; }
+/* 按钮样式的链接、返回链接、列表项不画下划线 */
+a.button, .back, .conv-side li a { text-decoration: none; }
 code, .mono { font-family: var(--font-mono); font-size: var(--text-code); }
 button { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 3px 10px; cursor: pointer; }
 button:hover { background: var(--fill); }
 .muted { color: var(--ink-2); }
 .error, .failure { color: var(--error); }
-
-.topbar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.brand { font-weight: var(--font-weight-bold); font-size: var(--text-lg); color: var(--ink); }
-main { padding: 16px 20px; }
 
 .tasks { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
 .tasks th, .tasks td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
@@ -102,11 +98,6 @@ a.button.primary { background: var(--ink); border-color: var(--ink); color: var(
 .new-task label > span { font-weight: var(--font-weight-semibold); }
 .new-task input, .new-task select, .new-task textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 7px 9px; }
 .new-task input { font-family: var(--font-mono); font-size: var(--text-sm); }
-
-/* 顶部导航 */
-.topnav { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-left: 12px; }
-.topnav a { color: var(--ink-2); padding-bottom: 2px; white-space: nowrap; }
-.topnav a.active { color: var(--ink); font-weight: var(--font-weight-semibold); border-bottom: 2px solid var(--ink); }
 
 /* 代码托管页 */
 .forge-app { margin-top: 20px; }
@@ -230,7 +221,6 @@ span.diff-add { color: var(--ok); } span.diff-del { color: var(--error); }
 .change-status.deleted { color: var(--error); }
 
 .credentials { max-width: 760px; display: flex; flex-direction: column; gap: 12px; }
-.credentials h1 { font-size: var(--text-xl); margin: 0; }
 .credentials p { margin: 0; overflow-wrap: anywhere; }
 .credentials .new-task h2 { font-size: var(--text-md); margin: 0; }
 .credential-list td, .credential-list th { white-space: nowrap; }

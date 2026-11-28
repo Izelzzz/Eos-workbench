@@ -75,7 +75,6 @@ export function Credentials() {
 
   return (
     <div className="credentials">
-      <h1>凭据</h1>
       <p className="muted">平台加密保存的模型 API key 和 Git 令牌，只由平台使用，agent 看不到。保存后不再显示值，只能替换或删除。</p>
       {data !== undefined && !data.usable && (
         <p className="error" role="alert">

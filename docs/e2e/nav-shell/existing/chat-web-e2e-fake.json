@@ -1,0 +1,234 @@
+{
+  "mode": "fake-model",
+  "commit": "0174f329ed3fbd15dbb5dca28c1396c6dce66c1c",
+  "uncommitted": [
+    "A  docs/design/nav.html",
+    " M tests/web-ui.test.ts",
+    " M tsconfig.json",
+    " M web/src/App.tsx",
+    " M web/src/Credentials.tsx",
+    " M web/src/ForgeApps.tsx",
+    " M web/src/index.css",
+    "AM web/src/shell/Nav.tsx",
+    "A  web/src/shell/icons.tsx",
+    " M web/src/styles.css",
+    "?? docs/e2e/nav-shell/existing/chat-web-e2e-fake.log",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e.log",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/1-filling.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/2-saved.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/3-deleted.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/4-390.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/5-no-master-key.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/6-no-master-key-390.png",
+    "?? docs/e2e/nav-shell/existing/credentials-web-e2e/report.json",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e.log",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/0-callback-error.png",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/1-before.png",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/2-registered.png",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/3-task.png",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/4-390.png",
+    "?? docs/e2e/nav-shell/existing/forge-app-register-e2e/report.json",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e.log",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/1-registered.png",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/2-authorized.png",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/3-task-pr.png",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/4-revoked.png",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/5-390.png",
+    "?? docs/e2e/nav-shell/existing/forge-user-auth-e2e/report.json",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e.log",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/1-list.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/10-correction.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/11-correction-390.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/2-list-filtered.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/3-gate-round1.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/4-gate-round2.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/5-list-390.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/6-gate-390.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/7-task-390.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/8-done.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/9-list-filter-after-accept.png",
+    "?? docs/e2e/nav-shell/existing/gate-web-e2e/gate-web-report.json",
+    "?? docs/e2e/nav-shell/nav/focus-light-1440.png",
+    "?? docs/e2e/nav-shell/nav/hover-light-1440.png",
+    "?? docs/e2e/nav-shell/nav/report.json",
+    "?? docs/e2e/nav-shell/nav/vs-design-settings-dark-1440.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-settings-dark-390.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-settings-light-1440.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-settings-light-390.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-tasks-dark-1440.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-tasks-dark-390.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-tasks-light-1440.png",
+    "?? docs/e2e/nav-shell/nav/vs-design-tasks-light-390.png",
+    "?? docs/e2e/nav-shell/pages/chat-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/chat-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/chat-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/chat-light-390.png",
+    "?? docs/e2e/nav-shell/pages/conventions-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/conventions-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/conventions-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/conventions-light-390.png",
+    "?? docs/e2e/nav-shell/pages/credentials-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/credentials-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/credentials-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/credentials-light-390.png",
+    "?? docs/e2e/nav-shell/pages/detail-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/detail-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/detail-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/detail-light-390.png",
+    "?? docs/e2e/nav-shell/pages/detail-tool-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/detail-tool-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/detail-tool-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/detail-tool-light-390.png",
+    "?? docs/e2e/nav-shell/pages/forges-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/forges-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/forges-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/forges-light-390.png",
+    "?? docs/e2e/nav-shell/pages/improve-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/improve-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/improve-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/improve-light-390.png",
+    "?? docs/e2e/nav-shell/pages/insights-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/insights-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/insights-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/insights-light-390.png",
+    "?? docs/e2e/nav-shell/pages/new-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/new-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/new-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/new-light-390.png",
+    "?? docs/e2e/nav-shell/pages/shots.json",
+    "?? docs/e2e/nav-shell/pages/tasks-dark-1440.png",
+    "?? docs/e2e/nav-shell/pages/tasks-dark-390.png",
+    "?? docs/e2e/nav-shell/pages/tasks-light-1440.png",
+    "?? docs/e2e/nav-shell/pages/tasks-light-390.png",
+    "?? scripts/nav-web-e2e.ts",
+    "?? tests/web-shell.test.ts",
+    "?? web/src/shell/Settings.tsx",
+    "?? web/src/shell/Shell.tsx"
+  ],
+  "chat": "cmx0im0d16ece1ad0",
+  "checks": [
+    {
+      "name": "导航里有「对话」，点进去是对话页",
+      "ok": true
+    },
+    {
+      "name": "回复完成之前，页面上已经显示 agent 读了什么（按步推送）",
+      "ok": true,
+      "detail": [
+        "读了约定：workflow / standard",
+        "提议"
+      ]
+    },
+    {
+      "name": "回复完成后跳到这个对话，回复上列出读了哪些数据",
+      "ok": true,
+      "detail": [
+        "读了约定：workflow / standard",
+        "提议"
+      ]
+    },
+    {
+      "name": "至少一条提议可以保存",
+      "ok": true,
+      "detail": [
+        {
+          "id": 1,
+          "kind": "workflow",
+          "name": "review-only"
+        }
+      ]
+    },
+    {
+      "name": "保存之前约定表一行都没变",
+      "ok": true
+    },
+    {
+      "name": "提议显示差异（新建显示全文）和醒目的权限警告",
+      "ok": true,
+      "detail": {
+        "head": "#1 工作流「review-only」新建待确认",
+        "diffLines": 57
+      }
+    },
+    {
+      "name": "没勾确认之前「保存」不可用",
+      "ok": true
+    },
+    {
+      "name": "勾上确认之后保存成第 1 版：操作人 web，备注写明对话、提议和确认了的权限，内容就是提议的内容",
+      "ok": true,
+      "detail": {
+        "version": 1,
+        "actor": "web",
+        "note": "来自对话 cmx0im0d16ece1ad0 的提议 #1（确认了权限改动：新建的工作流：其中角色的执行器、模型、写入范围、工具和 MCP，检查命令、评审和交付的顺序、卡点，都要确认）：E2E 网页确认"
+      }
+    },
+    {
+      "name": "保存后显示「已保存」、不再有保存按钮",
+      "ok": true
+    },
+    {
+      "name": "在对话里接着说，记录变成 4 条",
+      "ok": true
+    },
+    {
+      "name": "历史对话列表里有这个对话",
+      "ok": true
+    },
+    {
+      "name": "390 宽不横向滚动（待确认的提议、对话、列表）",
+      "ok": true,
+      "detail": {
+        "proposal": 390,
+        "list": 390,
+        "chat": 390
+      }
+    },
+    {
+      "name": "平台持有的模型 key 不在页面、对话记录和服务输出里",
+      "ok": true
+    },
+    {
+      "name": "页面没有脚本错误",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "log": [
+    {
+      "seq": 1,
+      "role": "user",
+      "text": "帮我设计一个新的工作流，名字叫 review-only：只有两个阶段，先由 spec-writer 模板写规格，再由 reviewer 模板评审规格，评审不通过最多来回 3 轮。参考平台上现有的 standard 工作流的写法。设计好了用提议工具提交。",
+      "call": null
+    },
+    {
+      "seq": 2,
+      "role": "assistant",
+      "text": "已经提议了工作流 review-only，等你确认后保存。",
+      "call": "{\"model\":\"deepseek-flash\",\"usage\":{\"input\":300,\"output\":30,\"cacheRead\":0,\"cacheWrite\":0},\"ms\":4643,\"reads\":[{\"tool\":\"get_convention\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\",\\\"name\\\":\\\"standard\\\"}\",\"isError\":false},{\"tool\":\"propose_convention\",\"args\":\"{\\\"kind\\\":\\\"workflow\\\",\\\"name\\\":\\\"review-only\\\",\\\"content\\\":\\\"name: review-only\\\\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\\\\ndocs: [研发约定]\\\\n\\\\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\\\\nroles:\\\\n  spec-writer: { template: spec-writer }\\\\n  developer: { template: developer }\\\\n  reviewer: { template: reviewer }\\\\n\\\\nnodes:\\\\n  - id: spec\\\\n    kind: agent\\\\n    role: spec-writer\\\\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\\\\n    deliverables:\\\\n      - \",\"isError\":false}]}"
+    },
+    {
+      "seq": 3,
+      "role": "user",
+      "text": "好的，先这样。",
+      "call": null
+    },
+    {
+      "seq": 4,
+      "role": "assistant",
+      "text": "好的，还有别的要改的吗？",
+      "call": "{\"model\":\"deepseek-flash\",\"usage\":{\"input\":100,\"output\":10,\"cacheRead\":0,\"cacheWrite\":0},\"ms\":1536,\"reads\":[]}"
+    }
+  ],
+  "proposals": [
+    {
+      "id": 1,
+      "kind": "workflow",
+      "name": "review-only",
+      "voided": null,
+      "saved_version": 1,
+      "saved_actor": "web",
+      "content": "name: review-only\ndescription: 标准交付：规格 → 开发 → 测试（失败退回开发）→ 评审（和开发对话）→ 交付（平台推送并开 PR）。每个阶段的交付物由平台检查。\ndocs: [研发约定]\n\n# 角色引用平台上的 Agent 模板（团队约定页 → Agent 模板）：提示词、可写路径、工具和技能都在模板里统一维护。\nroles:\n  spec-writer: { template: spec-writer }\n  developer: { template: developer }\n  reviewer: { template: reviewer }\n\nnodes:\n  - id: spec\n    kind: agent\n    role: spec-writer\n    task: 为下面的需求写规格，保存到 docs/spec.md。最终回复用几句话总结规格要点。\n    deliverables:\n      - { path: docs/spec.md, sections: [背景, 范围, 验收标准] }\n\n  - id: build\n    kind: agent\n    role: developer\n    inputs: [spec]\n    task: 按 docs/spec.md 实现需求，并把改动说明写到 docs/changes.md。\n    maxFixes: 2\n    deliverables:\n      - { path: docs/changes.md, sections: [改动, 验证] }\n\n  # 测试：平台跑测试命令，失败就把输出交回开发修改，再跑，最多 5 轮。按仓库把命令换成你们的测试命令。\n  - id: test\n    kind: dialog\n    with: build\n    task: 运行测试，失败时交回开发修复。\n    maxRounds: 5\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  - id: review\n    kind: dialog\n    role: reviewer\n    with: build\n    escalate: spec\n    maxRounds: 5\n    inputs: [spec]\n    task: 评审开发的改动是否满足 docs/spec.md 的验收标准。\n    checks:\n      - { run: [npm, test], timeoutSec: 600 }\n\n  # 交付：平台推送任务分支，并向任务的基线分支（远程仓库的默认分支）开 PR，任务页显示 PR 链接。\n  # 令牌只在平台进程里，agent 碰不到。本机仓库的任务没有远程，这一步跳过。推送或开 PR 失败时任务暂停，处理后重试。\n  - id: deliver\n    kind: dialog\n    with: build\n    task: 平台推送任务分支并开 PR。\n    maxRounds: 1\n    checks:\n      - { platform: pull-request }\n"
+    }
+  ]
+}

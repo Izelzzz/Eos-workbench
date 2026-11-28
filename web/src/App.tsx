@@ -7,13 +7,13 @@ import { Chat, parseChatRoute } from './Chat.tsx'
 import { Changes } from './Changes.tsx'
 import { Corrections } from './Corrections.tsx'
 import { Gate } from './Gate.tsx'
-import { Credentials } from './Credentials.tsx'
-import { ForgeApps } from './ForgeApps.tsx'
 import { conventionHref, Conventions, parseConventionRoute } from './Conventions.tsx'
 import { Detail } from './Detail.tsx'
 import { Improve, parseImproveRoute } from './Improve.tsx'
 import { Insights } from './Insights.tsx'
 import { NewTask } from './NewTask.tsx'
+import { Settings, parseSettingsRoute } from './shell/Settings.tsx'
+import { Shell } from './shell/Shell.tsx'
 import { Stages } from './Stages.tsx'
 import { ago, duration, STATUS, statusClass, tokens } from './format.ts'
 import { defaultOpen, TraceTree, visibleRows } from './Trace.tsx'
@@ -404,59 +404,27 @@ export function App() {
   const id = /^#\/tasks\/([\w-]+)/.exec(hash)?.[1]
   const conv = parseConventionRoute(hash)
   const improve = parseImproveRoute(hash)
-  const forges = hash === '#/forges' || hash.startsWith('#/forges?')
+  const settings = parseSettingsRoute(hash)
   const chat = parseChatRoute(hash)
   return (
-    <>
-      <header className="topbar">
-        <a href="#/" className="brand">
-          Eos Workbench
-        </a>
-        <nav className="topnav">
-          <a href="#/" className={conv === undefined && improve === undefined && chat === undefined && hash !== '#/insights' && hash !== '#/credentials' && !forges ? 'active' : ''}>
-            任务
-          </a>
-          <a href="#/chat" className={chat !== undefined ? 'active' : ''}>
-            对话
-          </a>
-          <a href="#/insights" className={hash === '#/insights' ? 'active' : ''}>
-            统计
-          </a>
-          <a href="#/improve" className={improve !== undefined ? 'active' : ''}>
-            改进
-          </a>
-          <a href="#/conventions" className={conv !== undefined ? 'active' : ''}>
-            团队约定
-          </a>
-          <a href="#/credentials" className={hash === '#/credentials' ? 'active' : ''}>
-            凭据
-          </a>
-          <a href="#/forges" className={forges ? 'active' : ''}>
-            代码托管
-          </a>
-        </nav>
-      </header>
-      <main className={conv === undefined ? '' : 'wide'}>
-        {conv !== undefined ? (
-          <Conventions route={conv} />
-        ) : chat !== undefined ? (
-          <Chat route={chat} />
-        ) : improve !== undefined ? (
-          <Improve route={improve} />
-        ) : hash === '#/insights' ? (
-          <Insights />
-        ) : hash === '#/credentials' ? (
-          <Credentials />
-        ) : forges ? (
-          <ForgeApps query={hash.slice('#/forges'.length + 1)} />
-        ) : hash === '#/new' ? (
-          <NewTask />
-        ) : id === undefined ? (
-          <TaskList />
-        ) : (
-          <TaskPage key={id} id={id} />
-        )}
-      </main>
-    </>
+    <Shell hash={hash}>
+      {conv !== undefined ? (
+        <Conventions route={conv} />
+      ) : chat !== undefined ? (
+        <Chat route={chat} />
+      ) : improve !== undefined ? (
+        <Improve route={improve} />
+      ) : hash === '#/insights' ? (
+        <Insights />
+      ) : settings !== undefined ? (
+        <Settings {...settings} />
+      ) : hash === '#/new' ? (
+        <NewTask />
+      ) : id === undefined ? (
+        <TaskList />
+      ) : (
+        <TaskPage key={id} id={id} />
+      )}
+    </Shell>
   )
 }

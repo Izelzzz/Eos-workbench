@@ -1,0 +1,21 @@
+{
+  "checks": {
+    "回调失败时页面写明原因和要去删 App": true,
+    "页面写明回调地址": true,
+    "刷新后不再显示这次注册的结果": true,
+    "浏览器把清单提交到了 GitHub 的注册页": true,
+    "显示结果后地址回到 #/forges（不留 code、state 和结果）": true,
+    "安装链接指向这个 App 的安装页": true,
+    "凭据存储里有 App 凭据（id、私钥、短名、页面地址，以及用户授权用的 client id、secret 和回调地址；不存 webhook secret）": true,
+    "建任务时换了 App 的安装令牌": true,
+    "任务建在 App 克隆的镜像上": true,
+    "390 宽没有横向滚动": true,
+    "接口响应里没有私钥": true,
+    "数据目录里没有私钥的明文": true,
+    "任务日志里没有私钥": true,
+    "页面没有报错": true
+  },
+  "passed": 14,
+  "total": 14,
+  "errors": []
+}
