@@ -1,14 +1,26 @@
-import type { ComponentProps, ReactNode } from 'react'
+import type { ChangeEvent, ComponentProps, ReactNode } from 'react'
 import { cn } from './cn.ts'
 import { CheckIcon } from './icons.tsx'
 
 /**
  * 一组单选项：一行一个，选中的是墨色边框加实心的勾，不用浏览器自带的单选圆点。
  * 用原生的 radio：键盘上下键切换、读屏软件按单选组读。同一组的 Option 传同一个 name。
+ * 选项和「其他」只能有一个答案：在「其他」里输入文字会取消已选的选项，选了选项会清空「其他」。
+ * 这里按非受控用法在页面上直接处理；用受控的 checked、value 时，调用方要在自己的状态里照样处理。
  */
-export function OptionGroup({ className, legend, children, ...props }: ComponentProps<'fieldset'> & { legend: ReactNode }) {
+export function OptionGroup({ className, legend, children, onChange, ...props }: ComponentProps<'fieldset'> & { legend: ReactNode }) {
+  const exclusive = (e: ChangeEvent<HTMLFieldSetElement>) => {
+    const target = e.target as unknown as HTMLInputElement
+    const group = e.currentTarget
+    if (target.type === 'radio' && target.checked) {
+      for (const other of group.querySelectorAll<HTMLInputElement>('[data-slot=option-other]')) other.value = ''
+    } else if (target.dataset.slot === 'option-other' && target.value.trim() !== '') {
+      for (const radio of group.querySelectorAll<HTMLInputElement>('input[type=radio]')) radio.checked = false
+    }
+    onChange?.(e)
+  }
   return (
-    <fieldset data-slot="option-group" className={cn('m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0', className)} {...props}>
+    <fieldset data-slot="option-group" className={cn('m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0', className)} onChange={exclusive} {...props}>
       <legend className="mb-2.5 p-0 text-md font-semibold text-ink">{legend}</legend>
       {children}
     </fieldset>
@@ -28,9 +40,9 @@ export function Option({ className, title, description, badge, ...props }: Optio
     <label
       data-slot="option"
       className={cn(
-        'relative flex cursor-pointer items-center gap-3 rounded-box border border-line px-3.5 py-2.75 transition duration-150 motion-reduce:transition-none hover:bg-fill',
+        'relative flex cursor-pointer items-center gap-3 rounded-box border border-line px-3.5 py-2.75 transition duration-150 motion-reduce:transition-none hover:bg-fill has-disabled:hover:bg-transparent',
         'has-checked:border-ink has-checked:bg-surface has-checked:shadow-selected has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink has-focus-visible:outline-solid',
-        'has-disabled:cursor-not-allowed has-disabled:opacity-50',
+        'has-disabled:cursor-not-allowed has-disabled:opacity-35',
         className,
       )}
     >

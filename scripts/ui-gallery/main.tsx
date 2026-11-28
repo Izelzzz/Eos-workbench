@@ -161,9 +161,9 @@ function Gallery() {
 
       <Section title="进行中的任务">
         <TaskList>
-          <TaskRow name="导出任务列表为 CSV" done={0} waiting state="规格 · 等你回答" />
+          <TaskRow name="导出任务列表为 CSV" done={0} waiting state="规格 · 等你回答" onSelect={() => {}} />
           <TaskRow name="任务列表支持按状态筛选" done={4} waiting state="评审通过 · 等你验收" />
-          <TaskRow name="统计页增加按仓库筛选" done={2} state="测试 · 第 2 轮" />
+          <TaskRow name="统计页增加按仓库筛选" done={2} state="测试 · 第 2 轮" onSelect={() => {}} />
           <TaskRow name="升级 vite 到最新的小版本" done={4} state="交付 · 正在推送" />
         </TaskList>
       </Section>

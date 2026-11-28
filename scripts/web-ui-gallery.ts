@@ -95,9 +95,9 @@ for (const scheme of ['light', 'dark'] as const) {
     check(`${tag}：不横向滚动`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     await page.screenshot({ path: join(out, `gallery-${scheme}-${width}.png`), fullPage: true })
 
-    const taskRow = page.locator('[data-slot=task-row] button').first()
+    const taskRow = page.locator('[data-slot=task-row] > *').first()
     check(`${tag}：任务行高 44px`, (await style(taskRow, 'height')) === '44px')
-    const progressShown = (await style(page.locator('[data-slot=task-row] button > span[aria-hidden]').first(), 'display')) !== 'none'
+    const progressShown = (await style(page.locator('[data-slot=task-row] > * > span[aria-hidden]').first(), 'display')) !== 'none'
     check(`${tag}：任务行的五段进度${width < 640 ? '在窄屏下隐藏' : '显示'}`, progressShown === width >= 640)
 
     if (scheme === 'light') {
@@ -114,6 +114,13 @@ for (const scheme of ['light', 'dark'] as const) {
       await second.focus()
       await page.keyboard.press('ArrowDown')
       check(`${tag}：键盘下键选中下一个选项`, await page.locator('input[name=scope]').nth(2).isChecked())
+
+      // 「其他」和选项只能有一个答案
+      const other = page.getByRole('textbox', { name: '其他' })
+      await other.fill('只导出最近 30 天')
+      check(`${tag}：在「其他」里输入后，已选的选项取消`, (await page.locator('input[name=scope]:checked').count()) === 0)
+      await options.nth(0).click()
+      check(`${tag}：再选一个选项，「其他」清空`, (await other.inputValue()) === '' && (await page.locator('input[name=scope]').nth(0).isChecked()))
 
       // 下拉菜单：点开有 4 项，Esc 关闭并把焦点还给触发按钮
       const menuTrigger = page.getByRole('button', { name: /1 \/ 3/ })

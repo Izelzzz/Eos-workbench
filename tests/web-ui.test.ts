@@ -179,21 +179,21 @@ test('Option：原生单选，同组同 name；标题、说明、标签都在 la
   assert.match(html, /<input type="text" data-slot="option-other"[^>]*border-dashed/)
 })
 
-test('Steps：当前步骤标 aria-current="step"，走过的有勾；不传 onSelect 时不能点', () => {
-  const html = renderToStaticMarkup(
-    h(Steps, {
-      steps: [
-        { key: 'scope', label: '范围', state: 'done' },
-        { key: 'enc', label: '编码', state: 'current' },
-        { key: 'sum', label: '汇总', state: 'todo' },
-      ],
-    }),
-  )
+test('Steps：当前步骤标 aria-current="step"，走过的有勾；不传 onSelect 时只是文字，传了是按钮', () => {
+  const steps = [
+    { key: 'scope', label: '范围', state: 'done' as const },
+    { key: 'enc', label: '编码', state: 'current' as const },
+    { key: 'sum', label: '汇总', state: 'todo' as const },
+  ]
+  const html = renderToStaticMarkup(h(Steps, { steps }))
   assert.match(html, /^<ol data-slot="steps"/)
   assert.equal((html.match(/<li/g) ?? []).length, 3)
-  assert.match(html, /<button type="button" disabled=""[^>]*><svg[^>]*>.*<\/svg>范围<\/button>/)
-  assert.match(html, /aria-current="step"[^>]*>编码</)
+  assert.doesNotMatch(html, /<button/)
+  assert.match(html, /<span class="[^"]*"><svg[^>]*>.*?<\/svg>范围<\/span>/)
+  assert.match(html, /<span aria-current="step"[^>]*>编码</)
   assert.equal((html.match(/aria-current/g) ?? []).length, 1)
+  const clickable = renderToStaticMarkup(h(Steps, { steps, onSelect: () => {} }))
+  assert.equal((clickable.match(/<button type="button"/g) ?? []).length, 3)
 })
 
 test('TaskRow：五小段进度，等人处理时有强调色圆点、当前段和状态用强调色', () => {
@@ -203,7 +203,14 @@ test('TaskRow：五小段进度，等人处理时有强调色圆点、当前段�
   assert.equal((waiting.match(/<i /g) ?? []).length, 5)
   assert.equal((waiting.match(/bg-accent"/g) ?? []).length, 2) // 圆点和当前那一段
   assert.match(waiting, /text-accent">规格 · 等你回答</)
-  const running = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '升级 vite', state: '交付 · 正在推送', done: 4 })))
+  const running = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: '升级 vite', state: '交付 · 正在推送', done: 4, onSelect: () => {} })))
+  assert.match(running, /<button type="button"/)
+  assert.doesNotMatch(waiting, /<button/) // 没传 onSelect：只是文字
+  // 超出范围的进度按边界算
+  const over = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: 7 })))
+  assert.equal((over.match(/bg-ink"/g) ?? []).length, 5)
+  const under = renderToStaticMarkup(h(TaskList, null, h(TaskRow, { name: 'x', state: 'y', done: -1 })))
+  assert.equal((under.match(/bg-ink-3"/g) ?? []).length, 1)
   assert.doesNotMatch(running, /waiting-dot|bg-accent|text-accent/)
   assert.equal((running.match(/bg-ink"/g) ?? []).length, 4)
   assert.equal((running.match(/bg-ink-3"/g) ?? []).length, 1)
