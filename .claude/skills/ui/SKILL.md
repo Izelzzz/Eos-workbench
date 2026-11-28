@@ -43,7 +43,7 @@ description: 写或改网页界面时使用：web/src 下的页面和组件、�
 | 次要操作、取消 | `Button variant="outline"` 或 `"ghost"` |
 | 删除、覆盖、放宽权限 | `Button variant="destructive"`，点了先开 `Dialog` 确认 |
 | 跳到别处 | 链接（`<a>`），不是按钮。`Button variant="link"` 是长得像链接的按钮，只用于不跳转的动作（例如「展开日志」） |
-| 任务、节点的状态 | `Badge`：`running` 进行中、`success` 完成、`warning` 等人处理、`destructive` 失败、`pending` 未开始；「等你处理」用 `accent`，普通小标签（例如「推荐」）用默认的 `neutral` |
+| 任务、节点的状态 | `Badge`：`running` 进行中、`success` 完成、`warning` 等验收这类等待中的状态、`destructive` 失败、`pending` 未开始。提醒当前用户「这件事等你处理」用 `accent`（只用于这个意思）；普通小标签（例如「推荐」）用默认的 `neutral` |
 | 操作结果、需要注意的限制、失败原因 | `Alert`：`success`、`warning`、`destructive` |
 | 表单 | `FieldGroup` 里放 `Field`，每个 `Field` 里是 `FieldLabel`、控件、需要时加 `FieldDescription` 或 `FieldError` |
 | 选项 2～5 个、要一眼看到全部 | 一组 `Button`；更多选项用 `Select` |

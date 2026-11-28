@@ -85,7 +85,7 @@ test('组件只经 index.ts 对外，页面不直接用 @base-ui/react', () => {
 
 test('cn：调用方的类覆盖组件默认的同类工具类，令牌字号不被当成颜色', () => {
   assert.equal(cn('p-2 text-sm', 'p-4'), 'text-sm p-4')
-  assert.equal(cn('text-code text-muted-foreground'), 'text-code text-muted-foreground')
+  assert.equal(cn('text-code text-ink-2'), 'text-code text-ink-2')
   assert.equal(cn('text-md', 'text-sm'), 'text-sm')
   assert.equal(cn('border-transparent', 'border-line'), 'border-line')
   // 令牌里另起了名字的字号、圆角、阴影：和颜色类不互相覆盖，和同类互相覆盖

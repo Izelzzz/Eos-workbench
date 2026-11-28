@@ -79,9 +79,11 @@ for (const scheme of ['light', 'dark'] as const) {
     const focused = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement
       const st = getComputedStyle(el)
-      return { text: el.textContent, style: st.outlineStyle, width: st.outlineWidth }
+      return { style: st.outlineStyle, width: st.outlineWidth, offset: st.outlineOffset, color: st.outlineColor, ink: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() }
     })
-    check(`${tag}：键盘聚焦的按钮有 2px 外框`, focused.style === 'solid' && focused.width === '2px')
+    check(`${tag}：键盘聚焦的按钮有 2px 墨色外框、离元素 2px`, focused.style === 'solid' && focused.width === '2px' && focused.offset === '2px' && focused.color === toRgb(focused.ink))
+    // 截图前移开焦点，免得截图里的按钮带着聚焦外框
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     for (const id of ['#bare-ghost', '#bare-link']) {
       check(`${tag}：页面底色上的 ${id.slice(1)} 按钮没有底色（现有 button 规则的底色没漏进来）`, (await style(page.locator(id), 'background-color')) === 'rgba(0, 0, 0, 0)')
     }
