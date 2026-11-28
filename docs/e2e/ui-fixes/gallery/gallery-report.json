@@ -1,12 +1,13 @@
 {
- "commit": "83169f0bb3fd619c0313b56e1b8c2786c3087c9b",
+ "commit": "5fc95e691fc5492ee91aa4b1d3313c65f6027e8d",
  "uncommitted": [
-  " M .claude/skills/ui/SKILL.md",
-  " M scripts/web-ui-gallery.ts",
-  " M tests/web-ui.test.ts",
-  " M web/src/ui/option.tsx",
-  " M web/src/ui/task-row.tsx",
-  "?? docs/e2e/ui-fixes/pages-compare.json"
+  " D docs/e2e/ui-fixes/gallery/dialog-1440.png",
+  " D docs/e2e/ui-fixes/gallery/dialog-390.png",
+  " D docs/e2e/ui-fixes/gallery/gallery-dark-1440.png",
+  " D docs/e2e/ui-fixes/gallery/gallery-dark-390.png",
+  " D docs/e2e/ui-fixes/gallery/gallery-light-1440.png",
+  " D docs/e2e/ui-fixes/gallery/gallery-light-390.png",
+  " D docs/e2e/ui-fixes/gallery/gallery-report.json"
  ],
  "checks": {
   "light 1440：主按钮的底色是令牌 --ink": true,
